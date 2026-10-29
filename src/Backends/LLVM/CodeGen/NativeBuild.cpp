@@ -77,7 +77,8 @@ Status addEntryPoint(llvm::Module &module) {
   auto *start = llvm::BasicBlock::Create(ctx, "start", entry);
   b.CreateCondBr(track, trackOn, start);
   b.SetInsertPoint(trackOn);
-  b.CreateCall(fn("Paykan_heap_set_tracking", voidTy, {i32}), {b.getInt32(1)});
+  b.CreateCall(fn(names::kPaykanHeapSetTracking, voidTy, {i32}),
+               {b.getInt32(1)});
   b.CreateCall(fn(names::kPaykanHeapReset, voidTy, {}));
   b.CreateBr(start);
   b.SetInsertPoint(start);
@@ -104,7 +105,7 @@ Status addEntryPoint(llvm::Module &module) {
   auto *exit = llvm::BasicBlock::Create(ctx, "exit", entry);
   b.CreateCondBr(track, dump, exit);
   b.SetInsertPoint(dump);
-  b.CreateCall(fn("Paykan_heap_dump", voidTy, {}));
+  b.CreateCall(fn(names::kPaykanHeapDump, voidTy, {}));
   b.CreateBr(exit);
   b.SetInsertPoint(exit);
   llvm::Type *retTy = paykanMain->getReturnType();

@@ -17,9 +17,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace paykan;
 
@@ -712,6 +716,85 @@ fn @main() -> i64 {
   ASSERT_TRUE(r.Ok) << r.Err;
   EXPECT_EQ(r.ExitCode, 31);
   EXPECT_EQ(r.Out, "kept\ndestroyed\n");
+}
+
+// A switch on an i64 with a case of INT64_MAX or INT64_MIN, the empty and
+// tombstone keys of the DenseSet that scf.index_switch keeps its cases in,
+// failed the pipeline ("'scf.index_switch' op has duplicate case value").
+// Each such case is now tested on its own, around the dispatch among the
+// others.  Every order of the two among the cases 0 and 7, and of fewer
+// cases, each in tail position with a default, returning from every case
+// without one, and storing in every case with a default and without one:
+// each function, given each case value and three of no case, gives what is
+// worked out here.  main returns the number of the first check that fails.
+TEST(PIRLLVM, SwitchCasesOfTheDenseSetKeys) {
+  constexpr int64_t kMax = std::numeric_limits<int64_t>::max();
+  constexpr int64_t kMin = std::numeric_limits<int64_t>::min();
+  std::vector<std::vector<int64_t>> orders;
+  std::vector<int64_t> four = {kMin, 0, 7, kMax};
+  do
+    orders.push_back(four);
+  while (std::next_permutation(four.begin(), four.end()));
+  for (const auto &few : std::vector<std::vector<int64_t>>{
+           {kMax, kMin}, {kMin, kMax}, {kMax}, {kMin}, {kMax, 7}, {7, kMin}})
+    orders.push_back(few);
+  const std::vector<int64_t> inputs = {kMax, kMin, 0, 7, 1, kMax - 1, kMin + 1};
+  enum class Form { Tail, Returns, Stores, StoresWithoutDefault };
+  struct Check {
+    std::string Fn;
+    int64_t In;
+    int64_t Want;
+  };
+  std::vector<Check> checks;
+  std::ostringstream text;
+  text << "module \"t\"\n";
+  for (const auto &order : orders)
+    for (Form form : {Form::Tail, Form::Returns, Form::Stores,
+                      Form::StoresWithoutDefault}) {
+      const std::string fn = "@f" + std::to_string(checks.size());
+      const bool stores =
+          form == Form::Stores || form == Form::StoresWithoutDefault;
+      const bool withDefault = form == Form::Tail || form == Form::Stores;
+      const char *set = stores ? "store %r.0, " : "ret ";
+      text << "fn " << fn << "(%x.1: i64) -> i64 {\n";
+      if (stores)
+        text << "  local %r.0: i64\n  store %r.0, 5\n";
+      text << "  switch %x.1 {\n";
+      for (size_t i = 0; i < order.size(); ++i)
+        text << "    case " << order[i] << " {\n      " << set << 10 * (i + 1)
+             << "\n    }\n";
+      if (withDefault)
+        text << "    default {\n      " << set << "99\n    }\n";
+      text << "  }\n";
+      if (stores)
+        text << "  %v.2 = load %r.0\n  ret %v.2\n";
+      if (form == Form::Returns)
+        text << "  ret 99\n";
+      text << "}\n";
+      for (int64_t in : inputs) {
+        int64_t want = form == Form::StoresWithoutDefault ? 5 : 99;
+        for (size_t i = 0; i < order.size(); ++i)
+          if (order[i] == in)
+            want = 10 * (static_cast<int64_t>(i) + 1);
+        checks.push_back({fn, in, want});
+      }
+    }
+  text << "fn @main() -> i64 {\n";
+  for (size_t i = 0; i < checks.size(); ++i)
+    text << "  %r." << 2 * i + 1 << " = call " << checks[i].Fn << "("
+         << checks[i].In << ")\n  %bad." << 2 * i + 2 << " = cmp ne %r."
+         << 2 * i + 1 << ", " << checks[i].Want << "\n  if %bad." << 2 * i + 2
+         << " {\n    ret " << i + 1 << "\n  }\n";
+  text << "  ret 0\n}\n";
+  auto r = runPIR(text.str());
+  ASSERT_TRUE(r.Ok) << r.Err;
+  ASSERT_GE(r.ExitCode, 0);
+  const auto failed = static_cast<size_t>(r.ExitCode);
+  ASSERT_LE(failed, checks.size());
+  if (failed > 0) {
+    const Check &c = checks[failed - 1];
+    ADD_FAILURE() << c.Fn << "(" << c.In << ") is not " << c.Want;
+  }
 }
 
 TEST(PIRLLVMDeathTest, AnInlineRetainAtTheLimitCallsTheRuntime) {

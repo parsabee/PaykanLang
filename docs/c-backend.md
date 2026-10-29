@@ -85,11 +85,41 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
 
 * **The unit.**  A comment naming the generator; `<math.h>`, `<stdbool.h>`,
   `<stdint.h>`, `<stdlib.h>`, `<string.h>` and `"Runtime.h"`; the optionals'
-  structs and the `pkicall_<n>` helpers; then each PIR module of the program
-  in turn, main module first: a declaration of every function it defines (a
-  body or a vtable may use one defined below it), `extern` declarations of
-  what it uses from other modules and of its native functions, its constants
-  and vtables, and its functions.  C's `main` ends the main module's part.
+  structs, the native functions' declarations and the `pkicall_<n>` helpers;
+  then each PIR module of the program in turn, main module first: a
+  declaration of every function it defines (a body or a vtable may use one
+  defined below it), `extern` declarations of what it uses from other
+  modules, its constants and vtables, and its functions.  C's `main` ends the
+  main module's part.
+* **Native functions.**  A native function is declared from its PIR
+  signature (`extern int64_t llabs(int64_t);`), which may not be what a
+  header says of the symbol: `native fn llabs(x: int) -> int = "llabs"`
+  against `<stdlib.h>`'s `long long llabs(long long)`, a native `exit`
+  taking an `int64_t`.  So each native function's symbol is renamed while
+  the headers are included, `#define llabs pk__hidden_llabs` before them and
+  `#undef llabs` after, and the header's declaration is of another name.
+  The rename covers everything the headers say, but `Runtime.h`'s `static
+  inline` functions call no C library function, and no runtime function a
+  native function can bind, so only declarations change.  The `#undef`
+  also drops a macro a header defines for the symbol (`isnan`
+  in `<math.h>`, or `memcpy` in macOS's `<string.h>` when it fortifies), so
+  the C calls the native function.  The native functions are declared once,
+  right after the includes, ahead of every module's part: a module that
+  binds none of them may still call one's symbol as a function of the
+  runtime (`fmod` for a float's `%`, `Paykan_panic_index` for an index
+  check, `Paykan_heap_dump` in C's `main`), and has no declaration of its
+  own for it.  The compilers know the C library's
+  functions and warn of a declaration of one with other types (GCC's
+  `-Wbuiltin-declaration-mismatch`, Clang's
+  `-Wincompatible-library-redeclaration`): a unit with native functions
+  turns that warning off after the includes.  They also know some of them
+  as pure (`floor`, `isnan`) and warn of a call that drops the result, so a
+  native function's result that nothing reads is kept and cast to void
+  (`double v14 = floor(v5); (void)v14;`).  A native function bound to a
+  function `Runtime.h` declares (the standard library's `Paykan_io_write`,
+  the Buffer functions of a `List`'s instance) is declared the same way; one
+  of the functions compiled code calls has their signature ([PIR](pir.md)
+  §3).
 * **Types** are spelled as `Runtime.h` spells them: an `i64` is `int64_t`, an
   `f64` `double`, a `bool` `bool` and a `char` `int8_t`; a box is
   `PaykanShared *`, an obj `PaykanObject *`, a weak reference `PaykanWeak *`

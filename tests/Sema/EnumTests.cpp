@@ -359,8 +359,8 @@ TEST(Enum, TaggedUnionIsNotNative) {
                      wrapMain("return 0;"));
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("parameter 'e' of type 'E' cannot cross into "
-                               "C (int, float, bool, char, an enum without "
-                               "fields,"),
+                               "C (int, float, bool, char, a sized numeric "
+                               "type, an enum without fields,"),
             std::string::npos)
       << r.Diagnostics;
 }

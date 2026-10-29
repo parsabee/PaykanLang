@@ -1180,3 +1180,63 @@ TEST(Class, EqualsWithMatchBoundArgument) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
 }
+
+// A field of a conditional `(if c then a else b)` of class type, the object
+// either branch gives: read (a `Str`, an `int`, a weak field, an element of a
+// tuple field, a tuple and a struct field whole), joined with `+`, assigned
+// (an `int`, a `Str`, a tuple, a struct, an optional), passed `inout` and
+// matched, on both branches, with a fresh object in one of them.  Before, a
+// read or an assignment dropped its statement (an `io::println` printed
+// nothing, a variable it declared failed an assertion) or failed the PIR
+// verifier, and an `inout` argument was an internal compiler error.
+TEST(Class, FieldsOfAConditionalReceiver) {
+  LeakGuard g;
+  auto r = compileAndRun(withFns(R"(
+    struct Point { x: int; y: int; }
+    class Node {
+      name: Str;
+      n: int;
+      t: (int, Str);
+      p: Point;
+      next: Node?;
+      weak back: Node?;
+    }
+    fn bump(x: inout int) { x = x + 1; }
+    fn shout(s: inout Str) { s = s + "!"; }
+  )",
+                                 R"(
+    a = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
+    b = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
+    b.back = a;
+    for k in 1..=2 {
+      x = (if k == 1 then a else b).name;
+      io::println(x + " " + (if k == 1 then a else b).name);
+      c = Node("c", 3, (30, "tc"), Point(5, 6), None, None);
+      io::println((if k == 1 then a else c).name + Str(k));
+      io::println((if k == 1 then a else b).t.1 + Str((if k == 1 then a else b).t.0));
+      t = (if k == 1 then a else b).t;
+      p = (if k == 1 then a else b).p;
+      io::println(t.1 + Str(p.y) + Str((if k == 1 then a else b).p.x));
+      io::println((if k == 1 then a else b).back == None);
+    }
+    (if a.n == 1 then a else b).n = 5;
+    (if a.n == 5 then b else a).name = "bb";
+    (if a.n == 5 then b else a).t = (21, "tbb");
+    (if a.n == 5 then b else a).p = Point(7, 8);
+    (if a.n == 5 then a else b).next = b;
+    io::println(Str(a.n) + " " + b.name + " " + b.t.1 + " " + Str(b.p.x));
+    bump((if a.n == 5 then b else a).n);
+    shout((if a.n == 5 then b else a).name);
+    io::println(Str(b.n) + " " + b.name);
+    match (if a.n == 5 then a else b).next {
+      nx: Node { io::println("next " + nx.name); }
+      _ { io::println("no next"); }
+    }
+    a.next = None;
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "a a\na1\nta10\nta21\nTrue\n"
+                      "b b\nc2\ntb20\ntb43\nFalse\n"
+                      "5 bb tbb 7\n3 bb!\nnext bb!\n");
+  g.expectNoLeaks("FieldsOfAConditionalReceiver");
+}

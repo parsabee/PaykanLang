@@ -193,7 +193,16 @@ not the runtime's, so backends declare it from the PIR signature (C:
 parameters, releases them and returns the result; a reference result is the
 C function's owned box.  The objects that define the
 `$c.` symbols are not part of PIR: the driver hands them to the backends
-(`backend::Input::Objects`, `--object`).
+(`backend::Input::Objects`, `--object`).  A C symbol names one C function,
+so every module-less extern of it in a program, a native one or the
+runtime's (`@$c.X` and `@$rt.X` name the C function `X`), has one
+signature (§9): Sema checks a module's native functions against one another
+and against the runtime's signatures (§8), computing a native function's
+from its Paykan signature as the lowering does (`sema::nativeSignature`,
+`include/NativeABI.h`), and the driver checks the modules of a program
+against one another once they are lowered (`lowering::checkNativeSymbols`).
+A module's CODE (docs/design/pkm.md) keeps the `$c.` externs its compiled
+code calls for that check.
 
 **Box parameters and the ownership mask.**  A function *lends* when it has
 a `box` parameter and is not a module-less extern: a definition, another
@@ -436,7 +445,7 @@ unless stated):
                                                ; the lowering guards 0 and INT64_MIN/-1
 %r = neg %a                                    ; i64 or f64
 %r = not %a                                    ; bool
-%r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; also on bool and char (signed);
+%r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; also on bool and char;
                                                ; eq/ne also on box/obj/ptr
 %r = select %c, %a, %b                         ; bool ? a : b (no side effects)
 %r = itof %a                                   ; i64 -> f64 (numeric)
@@ -463,6 +472,12 @@ an operation, and give `unsigned` (`u64`) its unsigned semantics:
 ```
 
 (`f16` rounding is the runtime call `@$rt.Paykan_round_f16(f64) -> f64`.)
+
+On two `char`s, `lt`, `le`, `gt` and `ge` order the bytes as signed, `-128`
+to `127`.  A Paykan `char` orders by its code, `0` to `255`
+(docs/language/04-strings-and-conversions.md): the lowering zero-extends both
+operands to `i64` (`cast ... to i64`, as `int<char>` does) and compares
+those, so it never orders two `char`s itself.
 
 On `f64`, `cmp` follows IEEE 754: `ne` is *unordered* (true when either
 operand is NaN; it is exactly `not (eq a, b)`), and `eq`, `lt`, `le`, `gt`,
@@ -1084,16 +1099,32 @@ extern vtable PaykanObject_vtable   extern vtable PaykanString_vtable
 ```
 
 An executable's entry code, not PIR, calls the two functions that make and
-drop the program's arguments (§4):
+drop the program's arguments (§4), and under `PAYKAN_TRACK_HEAP` the
+tracking allocator's; the C of `--emit-c` calls C library functions itself
+(C types):
 
 ```
 Paykan_args_new(int argc, char **argv, int64_t *count) -> PaykanShared **
 Paykan_args_free(PaykanShared **args, int64_t count) -> void
+getenv(const char *name) -> char *      ; "PAYKAN_TRACK_HEAP"
+Paykan_heap_set_tracking(int enable) -> void
+Paykan_heap_reset(void) -> void         Paykan_heap_dump(void) -> void
+; the C path: a `mem.copy`, a `mem.zero`, a `cast` between f64 and i64
+memmove(void *, const void *, size_t) -> void *
+memset(void *, int, size_t) -> void *
+memcpy(void *, const void *, size_t) -> void *
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
 list; the mlir backend's JIT symbol table must cover it, and an executable links
-`libpaykan_runtime.a`.
+`libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
+holds the signatures above in PIR types (a `size_t` an `i64`), the C path's
+`Paykan_retain_inline(box) -> void` and `Paykan_release_inline(box) ->
+void`, and C's `fmod(f64, f64) -> f64`, which a backend calls for an `f64`
+`rem`; none for the three that take a C `int`, which no PIR type is
+(`Paykan_args_new`, `Paykan_heap_set_tracking`, `memset`).  A native
+function bound to one of these symbols (`pir::isRuntimeSymbol`) must have
+its signature (§3), which for those three no native function has.
 
 Vtable slot layouts of runtime classes (slot index = position):
 
@@ -1146,7 +1177,9 @@ The verifier rejects a program when:
   is read or written with `load`/`store`/`field.load`/`field.store`; a `mem`
   slot's size is not a positive multiple of its alignment, or its alignment
   is not 1, 2, 4 or 8;
-* a runtime or native extern takes or returns an optional;
+* a runtime or native extern takes or returns an optional; a native extern
+  `$c.X` and the runtime extern `$rt.X` of the same C symbol have different
+  signatures;
 * `break`/`continue` appear outside a `while` or in its condition region,
   or a condition region ends the function; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,
@@ -1181,7 +1214,9 @@ module`, `extern class`) names a module that is not in the program, or a
 function or class that module does not define (in its PIR, or as a
 compiled declaration), or one whose signature or field layout differs from
 the definition, or is shared when the definition is not (or the other way
-round); the main module defines no `@main`.  A compiled declaration is the
+round); the main module defines no `@main`; two modules' module-less
+externs of one C symbol (`$c.X` or `$rt.X`, `pir::cSymbolClashes`) have
+different signatures.  A compiled declaration is the
 definition of its module's compiled code, which PIR does not hold, so it is
 not checked against one.
 

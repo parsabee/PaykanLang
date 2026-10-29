@@ -10,6 +10,7 @@
 
 #include "StringMap.h"
 #include "paykan/Status.h"
+#include "paykan/pir/PIR.h"
 #include "paykan/pkm/Interface.h"
 
 #include <deque>
@@ -1280,6 +1281,26 @@ private:
                             const std::vector<ast::Type *> &paramTypes);
   bool checkNativeParamModes(const ast::FuncDecl *node,
                              const std::vector<ast::Type *> &types);
+  /// Whether the C symbol native function @p node binds has one C
+  /// signature (nativeSignature): the one an earlier native function of the
+  /// module binds it with, and that of a function compiled code calls
+  /// itself (pir::isRuntimeSymbol, pir::runtimeSignature).  Records the
+  /// binding.
+  bool checkNativeSymbol(const ast::FuncDecl *node);
+
+  /// The native function that first binds each C symbol in this module,
+  /// and the C signature it binds it with (checkNativeSymbol).  Natives of
+  /// other modules are checked against these once the program is lowered
+  /// (lowering::checkNativeSymbols).
+  struct NativeBinding {
+    const ast::FuncDecl *Decl = nullptr;
+    pir::Signature Sig;
+    /// The source it is declared in (another module's, for an instance of
+    /// its generic native function), for a note that points at it.
+    std::string File;
+    const std::vector<std::string> *Lines = nullptr;
+  };
+  std::unordered_map<std::string, NativeBinding> NativeSymbols;
 
   /// Phase 4 for one class: resolve field types and method signatures into
   /// the pre-registered ClassType (superclass must already be populated).

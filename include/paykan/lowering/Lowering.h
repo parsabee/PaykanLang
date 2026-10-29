@@ -66,6 +66,14 @@ bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,
                   modules::ModuleResolver *resolver = nullptr,
                   Copies copies = Copies::Shared, World world = World::Open);
 
+/// Whether every C symbol the native functions of @p program's modules bind
+/// has one signature, the one any other module's native functions and the
+/// runtime give it (pir::cSymbolClashes).  Sema checks one module's (the
+/// natives it declares, the instantiations it makes); this checks the
+/// modules against one another, those loaded from a `.pkm` included, and
+/// reports each clash to @p errs, naming both modules.
+bool checkNativeSymbols(const pir::Program &program, std::ostream &errs);
+
 /// Keep one definition of each template instantiation in @p program: the
 /// first module (imports first, the main module last) that defines a class
 /// `Box<int>`, a function of one (`Box<int>.get`, a struct's `Pair<int>`)

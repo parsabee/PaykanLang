@@ -236,7 +236,10 @@ or an element (`'c' is a 'view' parameter; cannot assign to its field 'n'`), no 
 element passed to an `inout` parameter, and only a `view fn` can be called on it
 (`toString`, `equals`, `len`, or a method of its class declared `view fn`, see
 [Methods that don't change `self`](05-classes.md#methods-that-dont-change-self); `'c' is a
-'view' parameter; 'tick' is not a 'view fn'`).
+'view' parameter; 'tick' is not a 'view fn'`). A conditional's object is what one of its
+branches holds, so it cannot change where either branch's could not: with `d` a `Counter`
+that may change, `(if k == 0 then c else d).n = 2` and `(if k == 0 then c else d).tick()`
+are the same errors.
 
 ```pkn
 import ::io;
@@ -967,12 +970,33 @@ native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 The string is the C symbol.  The rest of the program calls the function like
 any other.
 
+A C symbol names one C function, with one C signature: the C types the
+table below gives the native function's parameters and result.  Native
+functions may bind a symbol again only with that signature (`int` and `u32`
+both cross as an `int64_t`, so they give the same one).  Two in one module
+that do not agree are an error (`native function 'g' binds C symbol 'llabs',
+which 'f' already binds with a different signature`), and so are two in
+different modules of a program, once it is put together, whether the other
+module is built from source or loaded from its `.pkm` (`native functions of
+modules 'main' and 'na' bind C symbol 'llabs' with different signatures`).
+A native function bound to a C function that compiled code calls itself
+must have that function's signature (`native function 'cat' binds C symbol
+'PaykanString_concat', a function of the runtime, with a different
+signature`): one of the runtime's (`PaykanString_concat`, `Paykan_malloc`,
+...), one an executable's entry code calls (`Paykan_heap_reset`,
+`Paykan_args_free`, ...) or one of the C library's (`fmod` for a float's
+`%`, and `memcpy`, `memmove` and `getenv`, which the C of `--emit-c`
+calls).  No native function has the signature of one that takes a C `int`
+(`Paykan_heap_set_tracking`, `Paykan_args_new`, `memset`), so none can
+bind it.
+
 Only `int`, `float`, `bool`, `char`, a sized numeric type and an enum
 without fields cross into C by value.  Any other parameter is a `view`,
 which C borrows for the call, or an `inout`, which C changes in place: a
 call never shares a reference with C, so it costs no reference counting
 (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float,
-bool, char and an enum without fields cross into C by value`).  Only these
+bool, char, a sized numeric type and an enum without fields cross into C by
+value`).  Only these
 types cross, with the runtime's own convention (an enum whose variants have
 fields, [a tagged union](07-enums.md#variants-with-fields), does not):
 
@@ -1083,6 +1107,14 @@ do what `Paykan_retain`, `Paykan_release` and `PaykanShared_get` do, and call
 them only at the count's limit or to destroy the object.  A
 `PaykanString`'s `data` and `len` may be read directly.  See
 `samples/imports/14_native`.
+
+A native function can also bind a C library function directly, with the C
+types the table above gives its signature: `native fn llabs(x: int) -> int =
+"llabs";` calls the C library's `llabs` on every path.  The C of `--emit-c`
+declares each native function from that signature, not from the C
+headers' declaration of the symbol (`long long llabs(long long)`, or a macro
+for it), so it compiles wherever `run` and `build` work ([The C
+backend](../c-backend.md)).
 
 ---
 

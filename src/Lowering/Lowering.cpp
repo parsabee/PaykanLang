@@ -8,6 +8,7 @@
 
 #include "LoweringInternal.h"
 #include "Names.h"
+#include "NativeABI.h"
 
 #include <cassert>
 #include <cmath>
@@ -19,78 +20,6 @@ namespace paykan::lowering {
 
 using namespace names;
 using pir::Type;
-
-// -- Runtime ABI table (docs/pir.md §8)
-
-namespace {
-
-struct RuntimeSig {
-  const char *Name;
-  pir::Signature Sig;
-};
-
-const Type kObj = Type::Obj;
-const Type kBox = Type::Box;
-const Type kI64 = Type::I64;
-const Type kF64 = Type::F64;
-const Type kChr = Type::Char;
-const Type kPtr = Type::Ptr;
-const Type kVoid = Type::Void;
-
-const RuntimeSig kRuntimeSigs[] = {
-    {kPaykanRetain, {{kBox}, kVoid}},
-    {kPaykanRelease, {{kBox}, kVoid}},
-    {kPaykanSharedNew, {{kObj}, kBox}},
-    {kPaykanSharedGet, {{kBox}, kObj}},
-    {kPaykanPanicDivByZero, {{}, kVoid}},
-    {kPaykanPanicDivOverflow, {{}, kVoid}},
-    {kPaykanPanicFloatToInt, {{kF64}, kVoid}},
-    {kPaykanPanicFloatToType, {{kF64, kPtr, kI64}, kVoid}},
-    {kPaykanRoundF16, {{kF64}, kF64}},
-    {kPaykanPanicIntToChar, {{kI64}, kVoid}},
-    {kPaykanPanicIndex, {{kI64, kI64}, kVoid}},
-    {kPaykanPanicForStep, {{}, kVoid}},
-    {kPaykanPanicPureVirtual, {{kPtr, kI64, kPtr, kI64}, kVoid}},
-    {kPaykanStringNew, {{kPtr, kI64}, kObj}},
-    {kPaykanStringDestroy, {{kObj}, kVoid}},
-    {kPaykanDispose, {{kObj}, kVoid}},
-    {kPaykanStringConcat, {{kObj, kObj}, kObj}},
-    {kPaykanStringCharAt, {{kObj, kI64}, kChr}},
-    {kPaykanStringFromInt, {{kI64}, kObj}},
-    {kPaykanStringFromUint, {{kI64}, kObj}},
-    {kPaykanStringParseUint, {{kObj, kPtr}, kI64}},
-    {kPaykanStringFromFloat, {{kF64}, kObj}},
-    {kPaykanStringFromBool, {{kI64}, kObj}},
-    {kPaykanStringFromChar, {{kChr}, kObj}},
-    {kPaykanStringParseInt, {{kObj, kPtr}, kI64}},
-    {kPaykanStringParseFloat, {{kObj, kPtr}, kI64}},
-    {kPaykanStringParseBool, {{kObj, kPtr}, kI64}},
-    // The vtable `equals`s spell out their slot's ownership mask
-    // (docs/pir.md §3, §8).
-    {kPaykanStringEquals, {{kObj, kBox, kI64}, kI64}},
-    {kPaykanStringToString, {{kObj}, kBox}},
-    {kPaykanStringLength, {{kObj}, kI64}},
-    {kPaykanIntHash, {{kI64}, kI64}},
-    {kPaykanStringHash, {{kObj}, kI64}},
-    {kPaykanTupleToString, {{kPtr, kPtr}, kObj}},
-    {kPaykanTupleEquals, {{kPtr, kPtr, kPtr}, kI64}},
-    {kPaykanStructToString, {{kPtr, kPtr}, kObj}},
-    {kPaykanStructEquals, {{kPtr, kPtr, kPtr}, kI64}},
-    {kPaykanEnumToString, {{kPtr, kPtr}, kObj}},
-    {kPaykanEnumEquals, {{kPtr, kPtr, kPtr}, kI64}},
-    {kPaykanObjectDestroy, {{kObj}, kVoid}},
-    {kPaykanObjectToString, {{kObj}, kBox}},
-    {kPaykanObjectEquals, {{kObj, kBox, kI64}, kI64}},
-};
-
-const RuntimeSig *findRuntimeSig(const std::string &name) {
-  for (const auto &rs : kRuntimeSigs)
-    if (name == rs.Name)
-      return &rs;
-  return nullptr;
-}
-
-} // namespace
 
 // -- Constructor
 
@@ -257,53 +186,7 @@ ModuleLowering::FunctionStateGuard::~FunctionStateGuard() {
 // -- Type helpers
 
 Type ModuleLowering::toPIRType(ast::Type *ty) {
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
-    // Every integer type is held sign- or zero-extended in an i64 and every
-    // floating-point type as the f64 it is (docs/design/sized-types.md).
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:
-    case ast::BuiltinType::I8:
-    case ast::BuiltinType::I16:
-    case ast::BuiltinType::I32:
-    case ast::BuiltinType::U8:
-    case ast::BuiltinType::U16:
-    case ast::BuiltinType::U32:
-    case ast::BuiltinType::U64:
-      return Type::I64;
-    case ast::BuiltinType::Float:
-    case ast::BuiltinType::F16:
-    case ast::BuiltinType::F32:
-      return Type::F64;
-    case ast::BuiltinType::Bool:
-      return Type::Bool;
-    case ast::BuiltinType::Char:
-      return Type::Char;
-    case ast::BuiltinType::Void:
-      return Type::Void;
-    }
-  }
-  // A parser ClassType stub may name an enum or a struct (resolved by
-  // Sema): an enum is an i64 value, not a box, and a tagged union or a
-  // struct is held in memory.
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    if (auto *et = ASTCtx.lookupEnumType(ct->getName()))
-      return toPIRType(et);
-    if (ASTCtx.lookupStructType(ct->getName()))
-      return Type::Mem;
-  }
-  if (ast::isa<ast::EnumType>(ty))
-    return ast::isPayloadEnum(ty) ? Type::Mem : Type::I64;
-  // An optional of a value type is a value too (#96): `int?` is opt_i64.
-  if (ast::isValueOptional(ty))
-    return pir::optionalOf(
-        toPIRType(ast::cast<ast::OptionalType>(ty)->getInnerType()));
-  if (ast::isRefType(ty))
-    return Type::Box;
-  // Never a value: a fixed-size array or a tuple is held in a `mem` slot
-  // (LoweringMem.cpp).
-  if (ast::isMemType(ty))
-    return Type::Mem;
-  return Type::Void;
+  return sema::pirType(ASTCtx, ty);
 }
 
 // static
@@ -441,12 +324,12 @@ const pir::Function &ModuleLowering::declareRuntime(const std::string &symbol) {
   // symbol (`fn PaykanString_new`) is never mistaken for it (#117).
   if (auto it = RuntimeFuncs.find(symbol); it != RuntimeFuncs.end())
     return *it->second;
-  const RuntimeSig *rs = findRuntimeSig(symbol);
-  assert(rs && "unknown runtime symbol");
+  const pir::Signature *sig = pir::runtimeSignature(symbol);
+  assert(sig && "unknown runtime symbol");
   Funcs.emplace_back();
   pir::Function &fn = Funcs.back();
   fn.Name = pir::runtimeName(symbol);
-  fn.Sig = rs->Sig;
+  fn.Sig = *sig;
   fn.IsExtern = true;
   RuntimeFuncs[symbol] = &fn;
   return fn;
@@ -637,9 +520,9 @@ Val ModuleLowering::wrapStringLiteral(const Val &rawStr, size_t len) {
 
 void ModuleLowering::bootstrapBuiltins() {
   auto reg = [&](const char *paykanName, const char *runtimeName) {
-    const RuntimeSig *rs = findRuntimeSig(runtimeName);
-    assert(rs);
-    FunctionTable[paykanName] = {runtimeName, rs->Sig};
+    const pir::Signature *sig = pir::runtimeSignature(runtimeName);
+    assert(sig);
+    FunctionTable[paykanName] = {runtimeName, *sig};
   };
   // Conversions with a runtime implementation, by the spelled callee Sema
   // rebinds them to (the numeric ones are inline, see emitConversion):
@@ -1598,16 +1481,13 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
   const Type ret = retTy ? toPIRType(retTy) : Type::Void;
   const bool memRet = ast::isMemType(retTy);
   const bool resultByAddress = node.resultByAddress() && ret != Type::Void;
-  pir::Signature csig;
+  const pir::Signature csig = sema::nativeSignature(ASTCtx, node);
   std::vector<Val> cargs;
-  for (ast::Type *arg : node.getTypeArgs()) {
-    csig.Params.push_back(Type::Ptr);
+  for (ast::Type *arg : node.getTypeArgs())
     cargs.push_back(emitTypeDescriptor(canonicalizeDeclType(arg)));
-  }
   std::optional<pir::LocalId> out;
   const bool viewResult = node.getResultMode() == ast::ParamMode::View;
   if (resultByAddress && !viewResult) {
-    csig.Params.push_back(Type::Ptr);
     if (memRet) {
       cargs.push_back(memResult);
     } else {
@@ -1628,20 +1508,32 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
     } else if (v.Ty == Type::Box) {
       v = emitSharedGet(v, pname + ".obj");
     }
-    csig.Params.push_back(v.Ty);
     cargs.push_back(v);
   }
-  csig.Ret = !resultByAddress                 ? ret
-             : out || (memRet && !viewResult) ? Type::Void
-                                              : Type::Ptr;
+  bool argsMatch = cargs.size() == csig.Params.size();
+  for (size_t i = 0; argsMatch && i < cargs.size(); ++i)
+    argsMatch = cargs[i].Ty == csig.Params[i];
+  if (!argsMatch) {
+    reportInternalError("the arguments of native function '" + node.getName() +
+                        "' do not match its C signature");
+    return Val();
+  }
   const std::string name = pir::nativeName(node.getNativeSymbol());
-  if (!FuncByName.count(name)) {
+  auto [it, fresh] = FuncByName.try_emplace(name, nullptr);
+  if (fresh) {
     Funcs.emplace_back();
     pir::Function &ext = Funcs.back();
     ext.Name = name;
     ext.Sig = csig;
     ext.IsExtern = true;
-    FuncByName[name] = &ext;
+    it->second = &ext;
+  } else if (it->second->Sig != csig) {
+    // Sema gives a C symbol one signature in a module (checkNativeSymbol).
+    reportInternalError("native function '" + node.getName() +
+                        "' binds C symbol '" + node.getNativeSymbol() +
+                        "', which this module declares with another "
+                        "signature");
+    return Val();
   }
   Val result = B.call(name, csig, cargs, "r");
   if (memRet) {

@@ -361,6 +361,132 @@ TEST(PIRMLIR, SwitchesAreIndexSwitches) {
   EXPECT_NE(c.find("switch ("), std::string::npos) << c;
 }
 
+// Cases of INT64_MAX and INT64_MIN, the empty and tombstone keys of the
+// DenseSet scf.index_switch keeps its cases in: one with another case and a
+// default in tail position, and one of only the two as a statement.
+const char *const kDenseSetKeySwitches = R"(module "main"
+fn @pick(%x.1: i64) -> i64 {
+  switch %x.1 {
+    case 9223372036854775807 {
+      ret 10
+    }
+    case 4 {
+      ret 20
+    }
+    case -9223372036854775808 {
+      ret 30
+    }
+    default {
+      ret 40
+    }
+  }
+}
+
+fn @keys(%x.1: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  switch %x.1 {
+    case -9223372036854775808 {
+      store %r.0, 1
+    }
+    case 9223372036854775807 {
+      store %r.0, 2
+    }
+  }
+  %v.2 = load %r.0
+  ret %v.2
+}
+
+fn @main() -> i64 {
+  %a.1 = call @pick(4)
+  %b.2 = call @keys(9223372036854775807)
+  %c.3 = add %a.1, %b.2
+  ret %c.3
+}
+)";
+
+// Such a case is an scf.if on the value's being it, around the dispatch among
+// the other cases: the scf.index_switch of @pick's case 4, and nothing but
+// @keys's default (none).  Both targets take it: the C spells INT64_MIN.
+TEST(PIRMLIR, DenseSetKeyCasesAreIfs) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string scf = scfText(kDenseSetKeySwitches, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  expectRoundTrip(scf, *ctx);
+  for (const char *text : {"arith.constant 9223372036854775807 : i64",
+                           "arith.constant -9223372036854775808 : i64",
+                           "arith.cmpi eq", "scf.if", "case 4 {"})
+    EXPECT_NE(scf.find(text), std::string::npos) << text << "\n" << scf;
+  size_t sw = scf.find("scf.index_switch");
+  ASSERT_NE(sw, std::string::npos) << scf;
+  EXPECT_EQ(scf.find("scf.index_switch", sw + 1), std::string::npos) << scf;
+  EXPECT_EQ(scf.find("case 9223372036854775807"), std::string::npos) << scf;
+  EXPECT_EQ(scf.find("case -9223372036854775808"), std::string::npos) << scf;
+
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string c = emitCText(kDenseSetKeySwitches, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  for (const char *text : {"INT64_MIN", "9223372036854775807", "switch ("})
+    EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+}
+
+// Native functions bound to C library functions a header declares with
+// other C types (finding 80): the C renames each one's symbol while it
+// includes the headers, and declares it from its PIR signature after them,
+// with the compilers' warning of a library function's other declaration off.
+// A native extern that shares a runtime extern's declaration is the
+// runtime's: Runtime.h declares it.
+const char *kLibcNatives = R"(module "main"
+extern fn @$rt.PaykanString_length(obj) -> i64
+extern fn @$c.PaykanString_length(obj) -> i64
+extern fn @$c.llabs(i64) -> i64
+extern fn @$c.exit(i64) -> void
+fn @main() -> i64 {
+  %a.1 = call @$c.llabs(-3)
+  call @$c.exit(%a.1)
+  ret 0
+}
+)";
+
+TEST(PIRMLIR, NativeSymbolsAreHiddenFromTheHeaders) {
+  std::unique_ptr<mlir::MLIRContext> ctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string err;
+  std::string c = emitCText(kLibcNatives, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  const size_t math = c.find("#include <math.h>");
+  const size_t runtime = c.find("#include \"Runtime.h\"");
+  ASSERT_NE(math, std::string::npos) << c;
+  ASSERT_NE(runtime, std::string::npos) << c;
+  for (const char *sym : {"exit", "llabs"}) {
+    const std::string define =
+        std::string("#define ") + sym + " pk__hidden_" + sym + "\n";
+    const std::string undef = std::string("#undef ") + sym + "\n";
+    EXPECT_LT(c.find(define), math) << sym << "\n" << c;
+    EXPECT_GT(c.find(undef), runtime) << sym << "\n" << c;
+    EXPECT_NE(c.find(undef), std::string::npos) << sym << "\n" << c;
+  }
+  for (const char *text :
+       {"extern int64_t llabs(int64_t);", "extern void exit(int64_t);",
+        "#pragma clang diagnostic ignored "
+        "\"-Wincompatible-library-redeclaration\"",
+        "#pragma GCC diagnostic ignored \"-Wbuiltin-declaration-mismatch\""})
+    EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+  EXPECT_EQ(c.find("PaykanString_length pk__hidden"), std::string::npos) << c;
+  EXPECT_EQ(c.find("PaykanString_length(PaykanObject"), std::string::npos) << c;
+
+  // A unit without native functions has neither.
+  std::unique_ptr<mlir::MLIRContext> plainCtx;
+  mlir::OwningOpRef<mlir::ModuleOp> plainMod;
+  std::string plain = emitCText(pir::test::kProgram, plainCtx, plainMod, err);
+  ASSERT_FALSE(plain.empty()) << err;
+  EXPECT_EQ(plain.find("pk__hidden_"), std::string::npos) << plain;
+  EXPECT_EQ(plain.find("#pragma"), std::string::npos) << plain;
+}
+
 TEST(PIRMLIR, LinkNamesAreCIdentifiers) {
   EXPECT_EQ(mlir_backend::linkName("main", "f"), "pk_main_Sf");
   EXPECT_EQ(mlir_backend::linkName("geometry::shapes", "Point.move"),

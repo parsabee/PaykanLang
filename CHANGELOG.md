@@ -851,6 +851,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C code of a generic native function is compiled against 0.3.0's `Runtime.h`.  A type
   that names no such word (`int`, `Str?`) costs no more on `at`, `get`, `copy` and
   `swap`: the buffer looks at `nunset` before it calls `PaykanType_isUnset`.
+- A field of a conditional `(if c then a else b)` of class type was compiled wrong, though
+  the program checked: `io::println((if k == 1 then a else b).name);` printed nothing, `x =
+  (if k == 1 then a else b).name;` left `x` undeclared (a later use of it failed an assertion
+  in the compiler), `(if k == 1 then a else b).n = 5;` did nothing, an element of a tuple
+  field (`(if k == 1 then a else b).t.1`) printed nothing, `(if k == 1 then a else
+  Node("b")).name + " "` failed the PIR verifier (`operand of box 0 has type i64, expected
+  obj`), and `bump((if k == 1 then a else b).n)` with `fn bump(x: inout int)` was an
+  internal compiler error.  The lowering took the class of a field's receiver only from a
+  variable, a field, a call or an element; it now takes the type Sema gave any receiver, so
+  each of these reads, writes or passes the field of the object the chosen branch gives (a
+  method call on a conditional already worked).  A receiver of no class, which Sema lets
+  through none of, is an internal compiler error instead of a statement left out.  As the
+  field of a call's object is (`bump(pick(k, a, b).n)`), the field of a conditional's object
+  is a place an `inout` parameter takes; a conditional's struct is a temporary, whose field
+  is not (`a field of a struct that is not a variable or a field (a temporary, which dies
+  with the statement) cannot be passed to 'inout' parameter 'n'`).
+  `samples/leak-check/31_conditional_receivers.pkn` reads, assigns, passes and matches such
+  fields on both branches.
+- What a `view` holds could change through a conditional of it: with `a: view Node` and
+  `b: Node`, `(if k == 0 then a else b).inc()` called a method that is not a `view fn` on
+  `a`'s object, and `(if k == 0 then a else b).child` could be stored, passed to a
+  parameter that is not `view` or returned.  Once a field of a conditional's object was
+  compiled (above), `(if k == 0 then a else b).n = 7`, `+=` and `bump((if k == 0 then a
+  else b).n)` wrote it too, and so did `(if k == 0 then self else o).n = 99` in a `view
+  fn`.  Sema's `view` checks looked only at a variable the place is in; a conditional's
+  object is now what either branch holds, and it gets the errors that branch would (`'a'
+  is a 'view' parameter; cannot assign to its field 'n'`, `'self' is read-only in 'view fn
+  peek'; ...`), nested conditionals and `view` locals included.  A method that changes
+  `self` through a conditional is no longer told it never changes `self` (`make it a
+  'view fn'`).
+- `<`, `<=`, `>` and `>=` on two `char`s compared their bytes as signed, so a byte of 128 to
+  255 ordered below every ASCII one, against the language's ordering by code, `0` to `255`
+  as `int(c)` reads it: `char(200) > char(100)` was `False`, and so was `"é"[0] > 'z'`, on
+  every path.  The lowering now zero-extends both chars to `int`s, as `int(c)` does, before
+  it orders them; `==` and `!=` are unchanged (docs/pir.md §6: PIR's `cmp` on two chars
+  still orders them signed, and the lowering no longer gives it two to order).
+  `samples/codegen/69_char_ordering.pkn` orders every pair of eleven codes on both sides of
+  128 under each operator, bytes of a UTF-8 string and a sort.
+- A value `match` with an arm of `9223372036854775807`, the largest `int`, and any other arm
+  failed to compile on every path (`the MLIR pipeline failed: 'scf.index_switch' op has
+  duplicate case value: 9223372036854775807`) unless that arm came first: `match n { 0 {
+  ... } 9223372036854775807 { ... } _ { ... } }`.  The switch such a match lowers to keeps
+  its cases in a set that takes `INT64_MAX` (and `INT64_MIN`) for its empty (and deleted)
+  key.  A case of either value is now a test of its own, around the switch of the other
+  cases (docs/design/mlir-backend.md, "The shared lowering"); the PIR such a match lowers to
+  was already valid.  `samples/codegen/70_match_int64_max.pkn` puts the arm first, second,
+  last and alone, with a default arm and without one.
+- The two native-function errors that list what crosses into C left out the sized numeric
+  types, which cross as `int` and `float` do: `native fn f(s: Str)` said `only int, float,
+  bool, char and an enum without fields cross into C by value`, and `native fn g(a: A?)`
+  said `cannot cross into C (int, float, bool, char, an enum without fields, Str and Obj
+  can, ...)`.  Both now name `a sized numeric type` after `char`
+  (docs/language/03-functions.md, "Native Functions").
+- Two native functions that bind one C symbol with different C signatures passed the checks:
+  in one module (`native fn f(x: int) -> int = "llabs"; native fn g(x: float) -> float =
+  "llabs";`, or `view Str` against `int`) the program then failed PIR verification
+  (`argument 0 of '@$c.llabs' %2 has type f64, expected i64`), and across two modules it ran
+  with a wrong result, calling `llabs` with a double.  A native function bound to a runtime
+  function that compiled code calls itself, with another signature (`native fn cat(a: int)
+  -> int = "PaykanString_concat"`), failed the MLIR pipeline once both were called
+  (`'func.call' op incorrect number of operands for callee`), and one bound to a function an
+  executable's entry code or the C of `--emit-c` calls (`native fn hr(x: int) -> int =
+  "Paykan_heap_reset"`, `memcpy`) gave C that did not compile (`too few arguments to
+  function 'Paykan_heap_reset'`, in C's `main()`).  A C symbol now has one signature in a
+  program (docs/language/03-functions.md, "Native Functions"): Sema rejects the later of two
+  natives of a module that disagree (`native function 'g' binds C symbol 'llabs', which 'f'
+  already binds with a different signature`, and a note where `f` is, which may be another
+  file: the program's own native function, against an instance of a generic native function
+  of the standard library) and a native bound to a runtime function with a signature other
+  than the runtime's (`native function 'cat' binds C symbol 'PaykanString_concat', a
+  function of the runtime, with a different signature`), the entry code's
+  (`Paykan_heap_reset`, `Paykan_args_free`, ...) and the C library's that compiled code
+  calls (`fmod`, `memcpy`, `memmove`, `getenv`) included; no native function has the
+  signature of one that takes a C `int` (`memset`, `Paykan_heap_set_tracking`,
+  `Paykan_args_new`).  The same signature twice stays fine, and so do the standard library's
+  bindings (`Paykan_io_write`, `fmod`, ...).  The driver checks the modules of a program
+  against one another once they are lowered (`native functions of modules 'main' and 'na'
+  bind C symbol 'llabs' with different signatures`), whether a module is built from source
+  or loaded from the module cache: a module's `.pkm` CODE now keeps the native C functions
+  its compiled code calls.  Sema computes a native's C signature with the helper the
+  lowering declares and calls the C function with (`sema::nativeSignature`), and the PIR
+  verifier rejects a native and a runtime extern of one C symbol, in a module or in two,
+  with different signatures (docs/pir.md §3, §9).
+- `--emit-c` gave C that did not compile for a native function bound straight to a C library
+  function, which `run` and `build` call fine: `native fn llabs(x: int) -> int = "llabs"`
+  failed with `conflicting types for 'llabs'; have 'int64_t(int64_t)'`, since `<stdlib.h>`
+  declares `long long llabs(long long)`, and `native fn quit(code: int) = "exit"` likewise.
+  The C now renames each native function's symbol while it includes the headers (`#define
+  llabs pk__hidden_llabs` before them, `#undef llabs` after, which also drops a macro a
+  header defines for the symbol, such as `isnan`), declares the native function from its own
+  signature after them, once, ahead of the C of every module (one that does not bind the
+  symbol may call it as the runtime's: `fmod` for a float's `%`, `Paykan_panic_index` for an
+  index check), and turns off the compilers' warning of a library function declared with
+  other types (docs/c-backend.md, "Native functions").  `Runtime.h`'s `static inline`
+  functions, which the rename covers too, call no C library function: `Paykan_vtable_of`
+  copies the vtable pointer a byte at a time, not with `memcpy`, which a native function may
+  bind.  A call that does not read such a function's result keeps it and casts it to void:
+  `floor(x);` was `statement with no effect` to GCC and `ignoring return value of function
+  declared with const attribute` to Clang, which know `floor` as pure.
+  `samples/codegen/71_native_libc.pkn` binds `llabs`, `labs`, `fabs`, `exit` and `floor`;
+  the CStrictC11 check compiles it with GCC and Clang.
+- The time and memory it took to compile a function grew with the square of how deeply its
+  blocks nest, and an `if` with a long `elif` chain nests one block per arm: the PIR
+  verifier, which checks every lowered program, copied the values visible in a block into
+  each block in it.  With a Debug build of the compiler, `--emit-pir` of a function of
+  4000 arms took 18 s and 703 MB (1.2 s and 64 MB for 1000), and `build` 24 s and 725 MB.
+  The verifier now keeps the visible values in a scope stack, so a block costs what it
+  defines: closing it takes its own definitions back out.  The 4000 arms take 1.2 s and 33
+  MB to `--emit-pir`, most of it spent printing 96 MB of indented PIR, and 7.8 s and 82 MB
+  to `build`, most of it in the MLIR and LLVM pipelines.  The verifier reports what it did
+  before, and the samples compile as fast as they did.
 
 ## [0.2.0] - 2026-10-20
 

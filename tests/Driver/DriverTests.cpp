@@ -1368,6 +1368,52 @@ TEST(Driver, ObjectListLinksEveryNativeObject) {
   std::filesystem::remove_all(dir);
 }
 
+// Two modules that bind one C symbol with different C signatures (finding
+// 39) each check on their own: the program is rejected once it is lowered,
+// naming both modules, whether the import is built from source or loaded
+// from the module cache, whose CODE keeps the C functions its compiled code
+// calls.  It used to run, calling llabs with a double (`-2.5`).
+TEST(Driver, ModulesBindACSymbolWithOneSignature) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_native_clash_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "na.pkn") << "native fn fa(x: int) -> int = \"llabs\";\n"
+                                   "fn ca(x: int) -> int { return fa(x); }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport na;\n"
+         "native fn fb(x: float) -> float = \"llabs\";\n"
+         "fn main() -> int { io::println(na::ca(-3)); io::println(fb(-2.5)); "
+         "return 0; }\n";
+  std::ofstream(dir / "ok.pkn")
+      << "import ::io;\nimport na;\n"
+         "native fn fc(x: int) -> int = \"llabs\";\n"
+         "fn main() -> int { io::println(na::ca(-3) + fc(-4)); return 0; }\n";
+  const std::string main = (dir / "main.pkn").string();
+  const std::string clash =
+      "error: native functions of modules 'main' and 'na' bind C symbol "
+      "'llabs' with different signatures\n";
+  auto fresh = run(paykanRun() + " --no-module-cache " + main + " 2>&1");
+  EXPECT_EQ(fresh.exitCode, 1) << fresh.out;
+  EXPECT_EQ(fresh.out, clash);
+  // ok.pkn binds llabs as na does: it runs, and na gets its cache entry.
+  auto ok = run(paykanRun() + " " + (dir / "ok.pkn").string() + " 2>&1");
+  EXPECT_EQ(ok.exitCode, 0) << ok.out;
+  EXPECT_EQ(ok.out, "7\n");
+  EXPECT_TRUE(std::filesystem::exists(dir / ".paykan_cache" / "na.pkm"));
+  for (const std::string &how :
+       {std::string(" "), std::string(" --emit-c "),
+        " build -o " + (dir / "main.out").string() + " "}) {
+    std::string cmd = paykanRun();
+    cmd.append(how).append(main).append(" 2>&1");
+    auto cached = run(cmd);
+    EXPECT_EQ(cached.exitCode, 1) << how << "\n" << cached.out;
+    EXPECT_EQ(cached.out, clash) << how;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 TEST(Driver, EmitCRejectsAnotherBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 0; }");
@@ -1567,19 +1613,21 @@ public:
     }
   }
 
-  // Builds @p src at @p opt into the executable @p exe; the emitted C is
-  // <exe>.c.  The output of the step that failed, or of the C compiler.
+  // Builds @p src at @p opt into the executable @p exe, giving paykan
+  // @p flags and the C compiler @p cflags; the emitted C is <exe>.c.  The
+  // output of the step that failed, or of the C compiler.
   CmdResult build(const std::string &src, const std::string &opt,
-                  const std::string &exe) const {
+                  const std::string &exe, const std::string &flags = "",
+                  const std::string &cflags = "") const {
     auto c = shellWord(exe + ".c");
-    auto emitted = run(std::string(kPaykan) + " " + opt + " --emit-c " +
-                       shellWord(src) + " > " + c + " 2>&1");
+    auto emitted = run(std::string(kPaykan) + " " + opt + " " + flags +
+                       " --emit-c " + shellWord(src) + " > " + c + " 2>&1");
     if (emitted.exitCode != 0)
       return emitted;
     std::string runtime = shellWord(PAYKAN_RUNTIME_SOURCE_DIR);
-    return run("cc -std=c11 " + opt + " -I " + runtime + " " + c + " " +
-               runtime + "/*.c" + Stdlib + " -lm -o " + shellWord(exe) +
-               " 2>&1");
+    return run("cc -std=c11 " + cflags + " " + opt + " -I " + runtime + " " +
+               c + " " + runtime + "/*.c" + Stdlib + " -lm -o " +
+               shellWord(exe) + " 2>&1");
   }
 
 private:
@@ -1834,6 +1882,113 @@ TEST(Driver, ABufferSlotNeverSetPanicsOnEveryPath) {
   };
   everyPath("-O0");
   everyPath("-O2");
+  std::filesystem::remove_all(dir);
+}
+
+// A native function of an import bound to a C function that compiled code
+// calls as one of the runtime's (fmod for a float's `%`, Paykan_panic_index
+// for an index check, Paykan_heap_dump in C's main()) is declared once,
+// ahead of every module's part of the C.  The main module's part, first in
+// the unit, used to call the symbol with no declaration in scope: the
+// header's was renamed for the native (`#define fmod pk__hidden_fmod`) and
+// the native's own came in the import's part, after it ("implicit
+// declaration of function 'fmod'").  The import is built from source
+// (--no-module-cache), so its C is in the unit; the C is compiled as
+// scripts/c_strict.py does, at -O0 and -O2.
+TEST(Driver, AnImportsNativeOfARuntimeFunctionIsDeclaredForEveryModule) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_native_rt_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "na.pkn")
+      << "native fn fmod(a: float, b: float) -> float = \"fmod\";\n"
+         "native fn boom(i: int, n: int) = \"Paykan_panic_index\";\n"
+         "native fn dump() = \"Paykan_heap_dump\";\n"
+         "fn wrap(a: float, b: float) -> float { return fmod(a, b); }\n"
+         "fn check(i: int, n: int) { if i >= n { boom(i, n); } }\n"
+         "fn report(on: bool) { if on { dump(); } }\n";
+  auto src = (dir / "main.pkn").string();
+  std::ofstream(src) << "import ::io;\nimport na;\n"
+                        "fn at(xs: view int[], i: int) -> int { return "
+                        "xs[i]; }\n"
+                        "fn main() -> int {\n"
+                        "  x: float = 7.5;\n"
+                        "  io::println(x % 2.0);\n"
+                        "  io::println(na::wrap(9.5, 4.0));\n"
+                        "  na::check(1, 3);\n"
+                        "  na::report(False);\n"
+                        "  io::println(at([10, 20, 30], 2));\n"
+                        "  return 0;\n"
+                        "}\n";
+  CPath cpath(dir);
+  for (const char *opt : {"-O0", "-O2"}) {
+    auto exe = (dir / (std::string("main") + opt)).string();
+    auto c = cpath.build(src, opt, exe, "--no-module-cache",
+                         "-pedantic-errors -Wall -Wextra -Werror");
+    ASSERT_EQ(c.exitCode, 0) << opt << ": " << c.out;
+    auto r = run("PAYKAN_TRACK_HEAP=1 " + shellWord(exe) + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << opt << ": " << r.out;
+    EXPECT_EQ(r.out.rfind("1.5\n1.5\n30\n", 0), 0U) << opt << ": " << r.out;
+    EXPECT_NE(r.out.find("live blocks       : 0"), std::string::npos)
+        << opt << ": " << r.out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// The C of --emit-c includes Runtime.h with each native function's C symbol
+// renamed (`#define memcpy pk__hidden_memcpy`), so the header's static
+// inline functions are compiled under the rename too, and one that called a
+// C library function a native function binds would call a function nothing
+// defines: Paykan_vtable_of called memcpy ("undefined reference to
+// `pk__hidden_memcpy'").  Each inline function, compiled and called under
+// the rename of the C library functions the C path itself calls, links and
+// works, at -O0 and -O2 (without _FORTIFY_SOURCE, whose inline memcpy would
+// define the renamed one).
+TEST(Driver, RuntimeHeaderInlinesCallNoRenamedFunction) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_rt_inline_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "inl.c").string();
+  std::ofstream(src) << R"(#undef _FORTIFY_SOURCE
+#define memcpy pk__hidden_memcpy
+#define memmove pk__hidden_memmove
+#define memset pk__hidden_memset
+#define getenv pk__hidden_getenv
+#include <stdlib.h>
+#include <string.h>
+#include "Runtime.h"
+#undef memcpy
+#undef memmove
+#undef memset
+#undef getenv
+int main(void) {
+  PaykanMethod table[1] = {0};
+  PaykanMethod *header[2] = {table, 0};
+  PaykanType *type = NULL;
+  Paykan_retain_inline(NULL);
+  Paykan_release_inline(NULL);
+  if (type)
+    return (int)(PaykanType_ref(type, 0) + PaykanType_unset(type, 0));
+  return Paykan_vtable_of(header) == table &&
+                 PaykanShared_get_inline(NULL) == NULL
+             ? 0
+             : 1;
+}
+)";
+  std::string runtime = shellWord(PAYKAN_RUNTIME_SOURCE_DIR);
+  for (const char *opt : {"-O0", "-O2"}) {
+    auto exe = (dir / (std::string("inl") + opt)).string();
+    std::string cmd = "cc -std=c11 -pedantic-errors -Wall -Wextra -Werror ";
+    cmd.append(opt).append(" -I ").append(runtime).append(" ");
+    cmd.append(shellWord(src)).append(" ").append(runtime);
+    cmd.append("/*.c -lm -o ").append(shellWord(exe)).append(" 2>&1");
+    auto cc = run(cmd);
+    ASSERT_EQ(cc.exitCode, 0) << opt << ": " << cc.out;
+    auto r = run(shellWord(exe) + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << opt << ": " << r.out;
+  }
   std::filesystem::remove_all(dir);
 }
 
