@@ -74,7 +74,7 @@
     ["include/paykan/pkm/*", ["pkm", "sema", "driver", "samples"]],
     ["src/Modules/*", ["sema", "lowering", "@e2e"]],
     ["include/paykan/modules/*", ["sema", "lowering", "@e2e"]],
-    ["src/ASTInterchange/*", ["ast-interchange", "driver", "plugin", "out-of-tree"]],
+    ["src/ASTInterchange/*", ["ast-interchange", "driver", "plugin", "out-of-tree", "docs"]],
     ["src/Runtime/*", ["runtime", "pir-llvm", "@e2e"]],
     ["src/Backends/LLVM/*", ["pir-llvm", "@e2e"]],
     ["src/Backends/MLIR/*", ["pir-mlir", "@e2e"]],
