@@ -1980,7 +1980,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`PAYKAN_STDLIB`), or a library one of them built, a program misread that code, and one
   using a `memory::Buffer` instantiation compiled before the `PaykanType` change below
   crashed.  Such a file is now an error naming both builds (`module 'lib' (lib.pkm) was
-  compiled by paykan 0.3.0-dev (...); build ID b7d975d89acc6d2b; this paykan is development
+  compiled by paykan 0.3.0 (...); build ID b7d975d89acc6d2b; this paykan is development
   build 91da536eca5b47fb and takes only files of its own build. Rebuild it from source.`).
   A cache entry of another build is rebuilt, as it was, and a release takes a prebuilt file
   of any build of a version it accepts (docs/language/15-modules.md, "Prebuilt modules";
@@ -2480,7 +2480,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A module file's frontend record named the frontend only: its version and its plugin were
   always empty (`frontend "recursive-descent" "" plugin ""`).  It now has the built-in
   frontend's version, the `paykan` version that wrote the file (`frontend
-  "recursive-descent" "0.3.0-dev" plugin ""` from a development build), or a plugin
+  "recursive-descent" "0.3.0" plugin ""` from paykan 0.3.0), or a plugin
   frontend's plugin, by its descriptor's name, and that plugin's version (docs/design/pkm.md
   §2.2).  The `ast-text` example frontend names the AST format versions it reads and is
   given (for example `ast-text reads AST format 0.3.0 only, not 0.2.0`), where it said
