@@ -538,7 +538,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   container, manifest and interface, the plugin API and the AST interchange format
   (`(paykan-ast 0.3.0 ...)`).  A prebuilt `.pkm` or a loadable plugin of 0.2.0 is
   rejected, and a cache entry that 0.2.0 or a development build wrote is rebuilt.  0.3.0
-  accepts plugins built with 0.3.0 only: PIR and the runtime ABI changed incompatibly
+  accepts plugins built with 0.3.0 only: the AST a frontend sees (a `for` statement, the
+  bitwise operators, pure virtual methods), PIR and the runtime ABI changed incompatibly
   since 0.2 (a function that takes a box takes the ownership mask, above).
 - No compatibility promise is made before 1.0 (docs/language/index.md, "Stability"): a
   release may change the language, and this file lists what each release changed.  The
