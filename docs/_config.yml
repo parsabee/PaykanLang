@@ -157,3 +157,5 @@ defaults:
     values: { title: "Design: the MLIR backend", parent: Implementation and plugins, nav_order: 14 }
   - scope: { path: design/bitwise.md }
     values: { title: "Design: bitwise operators", parent: Implementation and plugins, nav_order: 15 }
+  - scope: { path: design/concurrency.md }
+    values: { title: "Design: concurrency and ownership", parent: Implementation and plugins, nav_order: 16 }
