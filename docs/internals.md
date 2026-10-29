@@ -86,7 +86,7 @@ entry is used only when its source and its imports are unchanged and this very `
 wrote it: its manifest records the version and, for a development build, the build ID, a
 hash of every file under `src/` and `include/` (`cmake/BuildId.cmake`). An entry another
 build wrote is stale and rebuilt, and `--verbose` says so (`is stale (compiled by paykan
-0.3.0-dev (46766aa1e1eaf316); this is paykan 0.3.0-dev (b7d975d89acc6d2b))`). A bitcode
+0.3.0 (46766aa1e1eaf316); this is paykan 0.3.0 (b7d975d89acc6d2b))`). A bitcode
 entry's key holds the size and modification time of the `paykan` executable, so a rebuilt
 compiler translates those again. A release build has no build ID and trusts the entries of
 its own version, which the version bump of each release keeps apart from the last one's.

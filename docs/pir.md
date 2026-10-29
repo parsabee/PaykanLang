@@ -1433,7 +1433,7 @@ format is specified in [`design/pkm.md`](design/pkm.md) §5 (layout, type and
 opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 
 - **Layout.** Magic `PIRB`, codec version (the release version, like the
-  PIR version: `kVersionNumber`, 200 for 0.2.0), PIR version
+  PIR version: `kVersionNumber`, 300 for 0.3.0), PIR version
   (`pir::kPIRVersion`, `include/paykan/pir/Version.h`; the same number as
   `PAYKAN_PIR_TEXT_VERSION`), flags, a string table, the module name, then
   the item tables in the printer's order (extern globals, cstrs, datas,

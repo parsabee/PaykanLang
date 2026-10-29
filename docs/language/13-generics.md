@@ -1,8 +1,5 @@
 # Generics
 
-> **Stable** (issue #2): the syntax and semantics below are covered by the
-> compatibility promise for the 0.2 series (see [Stability](index.md#stability)).
-
 Generic classes and functions are written once for any type. A `Stack<T>` works as a
 `Stack<int>`, a `Stack<Str>` or a `Stack<Task>`, each fully type-checked. This chapter
 shows how to declare and use them, gives `tasks` an undo history built on a generic stack,

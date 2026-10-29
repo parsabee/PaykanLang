@@ -15,7 +15,7 @@ project(PaykanLang
 # Pre-release label appended to the dotted version as "-<label>" (a label
 # "rc1" makes 1.2.3 into "1.2.3-rc1"). Empty for a final release, whose
 # version is the plain dotted one.
-set(PAYKAN_VERSION_PRERELEASE "dev")
+set(PAYKAN_VERSION_PRERELEASE "")
 
 # -- Language standard --------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)

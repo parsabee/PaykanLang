@@ -63,7 +63,7 @@ sections:
 manifest:
   module geometry::shapes
   contents 0x41 (HAS_CODE,HAS_OBJECT)
-  core "0.3.0-dev" 0.3.0 prerelease "dev" build "..."
+  core "0.3.0" 0.3.0 prerelease "" build "..."
   format_versions iface 0.3.0 tmpl 0 pir 0.3.0 code_encoding 2 debug 0
   runtime_abi 0.3.0
   ...

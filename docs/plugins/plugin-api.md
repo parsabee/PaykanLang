@@ -11,7 +11,7 @@ is its reference; the header's comments say the same, closer to the code.
 
 Version: the PaykanLang release's, like every format
 (`PAYKAN_PLUGIN_API_VERSION`, the release version packed as
-major * 10000 + minor * 100 + patch: 200 for 0.2.0); paykan accepts exactly its own.
+major * 10000 + minor * 100 + patch: 300 for 0.3.0); paykan accepts exactly its own.
 
 ## Conventions
 

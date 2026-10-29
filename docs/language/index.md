@@ -93,10 +93,9 @@ diagnostic it prints. Shell commands are shown with a `$` prompt.
 
 ## Stability
 
-Tuples ([Tuples](10-tuples.md)), optional types ([Optionals](12-optionals.md), optional
-primitives and optional-mode `match` included) and generics ([Generics](13-generics.md))
-are **stable**: the syntax and semantics this reference documents for them are covered by
-the compatibility promise for the 0.2 series, so a program that follows the reference keeps
-its meaning in every 0.2.x release. The limitations each chapter lists stay limitations. An
-optional primitive is a value, not a box, and no optional converts to `Obj`
+Before 1.0, PaykanLang makes no compatibility promise: a release may change the language,
+what this reference documents included, and the
+[CHANGELOG](https://github.com/parsabee/PaykanLang/blob/develop/CHANGELOG.md) lists what
+each release changed. Each chapter lists its limitations. An optional primitive is a value,
+not a box, and no optional converts to `Obj`
 ([#96](https://github.com/parsabee/PaykanLang/issues/96); see [Optionals](12-optionals.md)).
