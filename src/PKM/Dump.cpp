@@ -200,6 +200,8 @@ void dumpIface(const File &f, std::ostream &os) {
          << ") -> " << result(m.Modes) << m.ReturnTypeName << " flags "
          << detail::hex(m.Flags) << "\n";
   }
+  for (const ImplRec &im : i.Impls)
+    os << "  impl " << im.Trait << " for " << im.TypeName << "\n";
   for (const FuncRec &fn : i.Functions)
     os << "  " << (fn.Native ? "native " : "") << "func " << fn.Name << "("
        << params(fn.ParamTypeNames, fn.Modes) << ") -> " << result(fn.Modes)

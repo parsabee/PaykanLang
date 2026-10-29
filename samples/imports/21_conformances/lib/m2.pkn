@@ -1,0 +1,13 @@
+// Module: lib/m2
+// Instantiates lib::keys' generic types for types neither keys nor the
+// importer instantiates them for: its interface describes the
+// instantiations, with their conformances.
+import lib::keys;
+
+fn mkBox() -> keys::GBox<bool> {
+  return keys::GBox<bool>(True);
+}
+
+fn mkKeyed() -> keys::Keyed<keys::Key> {
+  return keys::Keyed<keys::Key>(keys::Key(2, 3));
+}

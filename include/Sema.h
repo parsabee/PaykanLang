@@ -970,6 +970,19 @@ public:
       bool operator==(const EnumInfo &) const = default;
     };
     std::vector<EnumInfo> ExportedEnums;
+    /// The conformances of ExportedClasses and ExportedStructs to the
+    /// built-in traits an `impl ... for` block gives
+    /// (names::isImplBuiltinTrait), each recorded on its type itself (a
+    /// subclass has its superclass's): `impl Hashable for Key`.  Local or
+    /// reached, private or not, instantiations too: an importer reconstructs
+    /// the type from this interface alone and needs them for bounds.  Sorted
+    /// by (TypeName, Trait).
+    struct ImplInfo {
+      std::string TypeName;
+      std::string Trait;
+      bool operator==(const ImplInfo &) const = default;
+    };
+    std::vector<ImplInfo> ExportedImpls;
     /// The module's generic classes and functions; null when it has none.
     std::shared_ptr<const ModuleTemplates> Templates;
     bool operator==(const ModuleInfo &) const = default;
@@ -986,8 +999,10 @@ public:
     std::vector<ast::FuncDecl *> Functions;
     std::vector<ast::StructDecl *> Structs;
     std::vector<ast::EnumDecl *> Enums;
-    /// The `impl` blocks of each of Classes and Structs (not `impl Trait
-    /// for`, whose trait an importer cannot name).
+    /// The `impl` blocks of each of Classes and Structs, `impl Trait for`
+    /// blocks too: a built-in trait's gives an importer's instantiation the
+    /// trait, a block of the module's own trait only its methods (#147,
+    /// checkTraitImpl).
     std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>> Impls;
     /// The modules the bodies name, the module itself first: canonical
     /// name and the file ModuleCache knows it by.
@@ -1641,6 +1656,12 @@ private:
   std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
                                           ast::SourceLocation loc);
   static std::string traitRefName(const TraitRef &tr);
+  /// Whether the trait annotation @p ref names a built-in trait (`Show`,
+  /// `Hashable`, `ValueType`): the same trait in every module.
+  bool namesBuiltinTrait(const ast::Type *ref) const;
+  /// The trait name the annotation @p ref spells (`Named` of `Named<T>`);
+  /// "" for an annotation that names no trait.
+  static std::string traitAnnotationName(const ast::Type *ref);
   /// The type whose implementation of @p tr @p ty has (itself or, for a
   /// class, a superclass); nullptr if it does not implement it.
   const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
@@ -1675,17 +1696,17 @@ private:
   /// Record `impl Trait for A` (@p ty, a class or a struct) and check that
   /// A has every method the trait requires, with its signature.
   bool checkTraitImpl(ast::ImplDecl *im, ast::Type *ty);
+  /// Whether method @p m has the signature @p sig of requirement @p req.
+  static bool sameSignature(const ast::MethodDecl *m, const ast::FuncDecl *req,
+                            const RequiredSig &sig);
+  /// "" when @p ty has every method @p tr requires, with its signature;
+  /// otherwise why not: "it has no method 'view fn hash() -> int'", "its
+  /// 'view fn hash() -> Str' does not match 'view fn hash() -> int'".
+  std::string unmetRequirement(ast::Type *ty, const TraitRef &tr);
 
   // A type parameter's bounds are checked when its template is instantiated,
   // once the `impl ... for` blocks are recorded (TraitImplsKnown); until
   // then the check waits in PendingBoundChecks.
-  struct PendingBoundCheck {
-    const ast::Decl *Template;
-    std::string Name;
-    std::vector<ast::Type *> Args;
-    ast::SourceLocation Loc;
-  };
-  std::vector<PendingBoundCheck> PendingBoundChecks;
   bool TraitImplsKnown = false;
   /// Templates with a bound that names no trait (reported with them).
   std::set<const ast::Decl *> BadBounds;
@@ -1700,6 +1721,18 @@ private:
                    const std::vector<ast::Type *> &args,
                    ast::SourceLocation loc);
   bool checkPendingBounds();
+  /// Report that @p tmpl, another module's template, requires its type
+  /// parameter @p param to implement @p trait, a trait of that module,
+  /// @p module (#147).  At this module's own request of the instantiation
+  /// that led to @p loc, when one is on InstantiationStack; at @p loc
+  /// otherwise.  Once per place, template, type parameter and trait
+  /// (ReportedForeignBounds).
+  void reportForeignTraitBound(const std::string &tmpl,
+                               const std::string &param,
+                               const std::string &trait,
+                               const std::string &module,
+                               ast::SourceLocation loc);
+  StringSet ReportedForeignBounds;
 
   // -- Generics
   //
@@ -1777,6 +1810,19 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// A bound check waiting for TraitImplsKnown.
+  struct PendingBoundCheck {
+    const ast::Decl *Template;
+    const std::vector<const std::string *> *Params; // the template's own
+    const ast::TypeParamBounds *Bounds;             // the template's own
+    std::string Name;
+    std::vector<ast::Type *> Args;
+    ast::SourceLocation Loc;
+    /// Where it was asked for: the diagnostic's file and instantiation notes.
+    const ModuleTemplates *Origin;
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<PendingBoundCheck> PendingBoundChecks;
   /// Whether every struct's fields are known (populateStructs): until then
   /// a struct's size is not, and the checks of the optionals resolved so far
   /// (a class's fields and signatures) wait in DeferredOptionalChecks.
@@ -1853,6 +1899,10 @@ private:
   /// The module whose template is being checked (CurrentModule), or nullptr
   /// for this module's own code.
   const ModuleTemplates *CurrentOrigin = nullptr;
+  /// This module's own file (Sema::run): an InstantiationFrame in it is a
+  /// request this module's code made.
+  std::string OwnSourceName;
+  const std::vector<std::string> *OwnSourceLines = nullptr;
   /// While alive, the code checked is @p origin's module's (a template of
   /// another module, or this module's own code for a null origin), and
   /// diagnostics point into that module's file.

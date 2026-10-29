@@ -245,6 +245,19 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
   return tr;
 }
 
+std::string Sema::traitAnnotationName(const ast::Type *ref) {
+  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ref))
+    return ct->getName();
+  if (const auto *gt = ast::dyn_cast<ast::GenericType>(ref))
+    return gt->getName();
+  return "";
+}
+
+bool Sema::namesBuiltinTrait(const ast::Type *ref) const {
+  auto it = Traits.find(traitAnnotationName(ref));
+  return it != Traits.end() && it->second.IsBuiltin;
+}
+
 std::string Sema::traitRefName(const TraitRef &tr) {
   std::string s = tr.Trait->Decl->getName();
   if (tr.Args.empty())
@@ -383,6 +396,14 @@ std::string Sema::noTextReason(ast::Type *ty) {
 }
 
 bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
+  // A block of another module's template (CurrentOrigin: its instantiation
+  // is being checked) whose trait is not built in implements that module's
+  // own trait, which no importer can name or resolve (#147).  Its methods
+  // joined the instantiation (populateImplMethods); its conformance is not
+  // recorded here.  Resolving the name here would find this module's trait
+  // of the same name: another trait.
+  if (CurrentOrigin && !namesBuiltinTrait(im->getTrait()))
+    return true;
   auto tr = resolveTraitRef(im->getTrait(), {}, im->getLocation());
   if (!tr)
     return false;
@@ -453,14 +474,7 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
       ok = false;
       continue;
     }
-    bool same = m->isView() == req->isView() &&
-                typesEqual(m->getReturnType(), sig.Ret) &&
-                m->getParamTypes().size() == sig.Params.size() &&
-                m->getParamModes().Result == sig.Modes.Result;
-    for (size_t i = 0; same && i < sig.Params.size(); ++i)
-      same = typesEqual(m->getParamTypes()[i], sig.Params[i]) &&
-             m->getParamModes().mode(i) == sig.Modes.mode(i);
-    if (!same) {
+    if (!sameSignature(m, req, sig)) {
       std::string msg = "'";
       msg += fnSignature(m->isView(), m->getName(), m->getParamTypes(),
                          m->getParamModes(), m->getReturnType());
@@ -483,6 +497,42 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
       ok = false;
     }
   return ok;
+}
+
+bool Sema::sameSignature(const ast::MethodDecl *m, const ast::FuncDecl *req,
+                         const RequiredSig &sig) {
+  bool same = m->isView() == req->isView() &&
+              typesEqual(m->getReturnType(), sig.Ret) &&
+              m->getParamTypes().size() == sig.Params.size() &&
+              m->getParamModes().Result == sig.Modes.Result;
+  for (size_t i = 0; same && i < sig.Params.size(); ++i)
+    same = typesEqual(m->getParamTypes()[i], sig.Params[i]) &&
+           m->getParamModes().mode(i) == sig.Modes.mode(i);
+  return same;
+}
+
+std::string Sema::unmetRequirement(ast::Type *ty, const TraitRef &tr) {
+  Subst subst{{std::string(names::kSelfType), ty}};
+  const auto &params = tr.Trait->Decl->getTypeParams();
+  for (size_t i = 0; i < params.size() && i < tr.Args.size(); ++i)
+    subst[*params[i]] = tr.Args[i];
+  const std::string trait = traitRefName(tr);
+  for (auto *req : tr.Trait->Decl->getMethods()) {
+    RequiredSig sig;
+    if (!resolveRequirement(req, subst, trait, sig))
+      return "a requirement of '" + trait + "' does not resolve";
+    const std::string want = fnSignature(req->isView(), req->getName(),
+                                         sig.Params, sig.Modes, sig.Ret);
+    const ast::MethodDecl *m = methodOf(ty, req->getName());
+    if (!m)
+      return "it has no method '" + want + "'";
+    if (!sameSignature(m, req, sig))
+      return "its '" +
+             fnSignature(m->isView(), m->getName(), m->getParamTypes(),
+                         m->getParamModes(), m->getReturnType()) +
+             "' does not match '" + want + "'";
+  }
+  return "";
 }
 
 bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
@@ -518,8 +568,25 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
                        ast::SourceLocation loc) {
   if (bounds.empty())
     return true;
+  // A bound of another module's template that is not a built-in trait is
+  // that module's own trait (a module names no other module's traits):
+  // never resolved here, where a trait of that name is this module's own
+  // and another trait (#147).  Reported now: it waits for nothing.
+  if (const ModuleTemplates *from = foreignOrigin(tmpl)) {
+    bool ok = true;
+    for (size_t i = 0; i < bounds.size() && i < params.size(); ++i)
+      for (ast::Type *b : bounds[i])
+        if (!namesBuiltinTrait(b)) {
+          reportForeignTraitBound(name, *params[i], traitAnnotationName(b),
+                                  from->Module, loc);
+          ok = false;
+        }
+    if (!ok)
+      return false;
+  }
   if (!TraitImplsKnown) {
-    PendingBoundChecks.push_back({tmpl, name, args, loc});
+    PendingBoundChecks.push_back({tmpl, &params, &bounds, name, args, loc,
+                                  CurrentOrigin, InstantiationStack});
     return true;
   }
   if (BadBounds.count(tmpl)) {
@@ -557,25 +624,84 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
 bool Sema::checkPendingBounds() {
   TraitImplsKnown = true;
   bool ok = true;
-  for (const auto &pc : PendingBoundChecks) {
-    const std::vector<const std::string *> *params;
-    const ast::TypeParamBounds *bounds;
-    if (auto *cd = ast::dyn_cast<ast::ClassDecl>(pc.Template)) {
-      params = &cd->getTypeParams();
-      bounds = &cd->getTypeParamBounds();
-    } else if (auto *sd = ast::dyn_cast<ast::StructDecl>(pc.Template)) {
-      params = &sd->getTypeParams();
-      bounds = &sd->getTypeParamBounds();
-    } else {
-      auto *fn = ast::cast<ast::FuncDecl>(pc.Template);
-      params = &fn->getTypeParams();
-      bounds = &fn->getTypeParamBounds();
+  for (auto &pc : PendingBoundChecks) {
+    // Checked as where it was asked for: in that module's file, under the
+    // instantiations in progress there.
+    std::vector<InstantiationFrame> saved =
+        std::exchange(InstantiationStack, std::move(pc.Frames));
+    {
+      OriginSource inOrigin(*this, pc.Origin);
+      if (!checkBounds(pc.Template, pc.Name, *pc.Params, *pc.Bounds, pc.Args,
+                       pc.Loc))
+        ok = false;
     }
-    if (!checkBounds(pc.Template, pc.Name, *params, *bounds, pc.Args, pc.Loc))
-      ok = false;
+    InstantiationStack = std::move(saved);
   }
   PendingBoundChecks.clear();
   return ok;
+}
+
+void Sema::reportForeignTraitBound(const std::string &tmpl,
+                                   const std::string &param,
+                                   const std::string &trait,
+                                   const std::string &module,
+                                   ast::SourceLocation loc) {
+  const std::string shown = displayName(tmpl);
+  const std::string requirement =
+      "requires '" + param + "' to implement trait '" + trait +
+      "' of module '" + module +
+      "', and another module's traits are not supported yet (#147)";
+  // In another module's template: the innermost request this module's own
+  // code made, of the instantiation that led here.  The pointer comparison
+  // tells this file from a module's whose name is spelled the same.
+  const InstantiationFrame *own = nullptr;
+  if (CurrentOrigin)
+    for (auto it = InstantiationStack.rbegin();
+         it != InstantiationStack.rend() && !own; ++it)
+      if (it->Lines == OwnSourceLines && it->File == OwnSourceName)
+        own = &*it;
+  // Once per place and type parameter: a body that uses the template twice
+  // is one request.
+  const ast::SourceLocation at = own ? own->RequestLoc : loc;
+  const std::string key = (own ? own->File : Diags.getSourceName()) + '\0' +
+                          std::to_string(at.getLineStart()) + ':' +
+                          std::to_string(at.getColumnStart()) + '\0' + shown +
+                          '\0' + param + '\0' + trait;
+  if (!ReportedForeignBounds.insert(key).second) {
+    ++SuppressedFollowOns;
+    return;
+  }
+  const std::string file = Diags.getSourceName();
+  const std::vector<std::string> *lines = Diags.getSourceLines();
+  if (!own) {
+    // This module's own use, or one in a chain of the other module's
+    // templates too deep for its request to be on the stack.
+    error(loc, "'" + shown + "' " + requirement);
+  } else {
+    Diags.setSourceInfo(own->File, own->Lines);
+    Diags.error(own->RequestLoc,
+                "'" + displayName(own->Name) +
+                    "' cannot be instantiated here: it uses '" + shown +
+                    "', which " + requirement);
+    Diags.setSourceInfo(file, lines);
+    Diags.note(loc, "'" + shown + "' is used here");
+    for (auto it = InstantiationStack.rbegin(); it != InstantiationStack.rend();
+         ++it) {
+      if (&*it == own)
+        continue;
+      Diags.setSourceInfo(it->File, it->Lines);
+      Diags.note(it->RequestLoc, "in instantiation of '" +
+                                     displayName(it->Name) +
+                                     "' requested here");
+    }
+  }
+  // A trait of this module named the same never satisfies the bound.
+  if (auto t = Traits.find(trait); t != Traits.end() && !t->second.IsBuiltin) {
+    Diags.setSourceInfo(OwnSourceName, OwnSourceLines);
+    Diags.note(t->second.Decl->getLocation(),
+               "this module's trait '" + trait + "' is a different trait");
+  }
+  Diags.setSourceInfo(file, lines);
 }
 
 } // namespace sema

@@ -587,12 +587,15 @@ d = gen::Box<int>(1);     // the same class as c's
 - **Names in a body are the module's.** A template's body is resolved where
   it is declared: `_serial`, `Box` and `util::bracket` above are what
   `lib::gen` declares and imports, whatever the importer calls those names
-  (its own `_serial`, its own `util`). A template may use the module's
-  [private](15-modules.md#private-to-the-module) names: the importer runs that code,
-  it just cannot write the names.
+  (its own `_serial`, its own `util`). So are the traits its bounds name: an
+  importer's own trait of the same name never satisfies one. A template may
+  use the module's [private](15-modules.md#private-to-the-module) names: the
+  importer runs that code, it just cannot write the names.
 - **Checked per instantiation, as the module would check it.** An error in
   the body is reported in the template's file, with the instantiation note
-  at the request.
+  at the request. A bound by the module's own trait is the exception: the
+  importer cannot instantiate such a template yet, which is reported at the
+  request ([Traits](06-traits.md#not-supported-yet)).
 - **One class per instantiation per program.** Class names are global
   across imports, so `Box<int>` is one class whoever instantiates it: the
   template's module, the importer, or another importer. Values pass between
@@ -603,9 +606,16 @@ d = gen::Box<int>(1);     // the same class as c's
   that also imports `lib::gen`'s `Box<int>`, or instantiating both your
   `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
   the import graph.
-- A generic class's `impl` blocks go with it, except `impl Trait for` blocks:
-  an importer cannot name another module's traits yet
-  ([Traits](06-traits.md#not-supported-yet)).
+- A generic class's or struct's `impl` blocks go with it, `impl Trait for`
+  blocks too, and each instantiation checks their methods as the module
+  would check its own, whichever module makes it: an importer's
+  `gen::Box<float>` is an error when `Box<float>` is one in `lib::gen`, even
+  for a method the importer never calls. `impl Hashable for Box<T>` makes
+  every instantiation `Hashable`. A block of the module's own trait gives an
+  importer's instantiation its methods, not the trait: an importer cannot
+  name another module's traits yet
+  ([#147](https://github.com/parsabee/PaykanLang/issues/147),
+  [Traits](06-traits.md#not-supported-yet)).
 - A module's `.pkm` holds its templates: an importer instantiates them from
   a prebuilt or cached module as from its source (the standard library's
   `::collections` is one). Each module compiles its own copy of the

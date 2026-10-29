@@ -8,6 +8,7 @@
 #include "TestUtils.h"
 #include "paykan/pkm/Interface.h"
 
+#include <algorithm>
 #include <gtest/gtest.h>
 
 using paykan::sema::Sema;
@@ -41,7 +42,14 @@ Sema::ModuleInfo sampleInfo() {
   solid.Name = "Fill::Solid";
   solid.OriginModule = "geometry::shapes";
   solid.Fields = {{"rgb", "int"}};
-  info.ExportedStructs = {solid};
+  // `impl Hashable for Point`.
+  Sema::ModuleInfo::StructInfo point;
+  point.Name = "Point";
+  point.OriginModule = "geometry::shapes";
+  point.Fields = {{"x", "int"}};
+  point.Methods = {{"hash", "int", {}, 6, {}}};
+  info.ExportedStructs = {solid, point};
+  info.ExportedImpls = {{"Point", "Hashable"}, {"Shape", "Hashable"}};
   // `_width` a native function, `native fn _width(s: view Str) -> int`.
   const paykan::ast::ParamModes viewS{{ParamMode::View}, {"s"}};
   info.ExportedFunctions = {{"Shape", "Shape", {"int", "int"}, viewH, false},
@@ -65,7 +73,14 @@ TEST(InterfaceConversion, RoundTripIsExact) {
             (std::vector<std::string>{"Red", "Green"}));
   EXPECT_EQ(iface.Enums[1].PayloadVariants,
             (std::vector<std::string>{"Solid"}));
+  EXPECT_EQ(iface.Impls, (std::vector<paykan::pkm::ImplRec>{
+                             {"Point", "Hashable"}, {"Shape", "Hashable"}}));
   EXPECT_EQ(Sema::fromInterface(iface), info);
+  // The conformances come back sorted, whatever order an exporter
+  // collected them in (TraitImpls is keyed by pointer).
+  Sema::ModuleInfo reversed = info;
+  std::reverse(reversed.ExportedImpls.begin(), reversed.ExportedImpls.end());
+  EXPECT_EQ(Sema::fromInterface(Sema::toInterface(reversed)), info);
 }
 
 // Through the codec: the file sorts records by name, fromInterface restores

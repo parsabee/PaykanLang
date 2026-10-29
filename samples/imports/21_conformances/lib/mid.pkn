@@ -1,0 +1,30 @@
+// Module: lib/mid
+// Returns keys of lib::keys, and declares a subclass of one: its interface
+// describes them, with their conformances, again.
+import lib::keys;
+
+fn mk() -> keys::Key {
+  return keys::Key(1, 2);
+}
+
+fn mkc() -> keys::CK {
+  return keys::CK(4);
+}
+
+// Hashable through CK, with no conformance of its own in this interface.
+class MSub : keys::CK {
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: MSub { return p.v == self.v; }
+      _ { return False; }
+    }
+  }
+}
+
+impl MSub {
+  fn __init__(v: int) { __super__(v); }
+}
+
+fn mksub(v: int) -> MSub {
+  return MSub(v);
+}

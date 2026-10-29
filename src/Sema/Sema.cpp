@@ -3072,6 +3072,8 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
 SemaContext Sema::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
   AccumulatedImportContexts.clear();
+  OwnSourceName = Diags.getSourceName();
+  OwnSourceLines = Diags.getSourceLines();
 
   // Printing and files are the standard library's (stdlib/io.pkn).
 

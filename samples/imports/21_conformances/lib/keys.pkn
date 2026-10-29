@@ -1,0 +1,95 @@
+// Module: lib/keys
+// Keys of every kind: a struct, a class, a private struct its template
+// uses, and generic types, each `Hashable` through an `impl` block here.
+import ::collections;
+
+struct Key {
+  a: int;
+  b: int;
+}
+
+impl Hashable for Key {
+  view fn hash() -> int { return (self.a * 31 + self.b).hash(); }
+}
+
+class CK {
+  v: int;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: CK { return p.v == self.v; }
+      _ { return False; }
+    }
+  }
+}
+
+impl CK {
+  fn __init__(v: int) { self.v = v; }
+}
+
+impl Hashable for CK {
+  view fn hash() -> int { return self.v.hash(); }
+}
+
+struct _Priv {
+  n: int;
+}
+
+impl Hashable for _Priv {
+  view fn hash() -> int { return self.n.hash(); }
+}
+
+// How many distinct _Priv keys a set of three holds: the importer
+// instantiates this body, and with it a HashSet of a type it cannot name.
+fn distinct<T>(x: T) -> unsigned {
+  s = collections::HashSet<_Priv>();
+  s.add(_Priv(1));
+  s.add(_Priv(1));
+  s.add(_Priv(2));
+  return s.len();
+}
+
+trait Named {
+  view fn name() -> Str;
+}
+
+struct Keyed<K: Hashable> {
+  k: K;
+}
+
+impl Hashable for Keyed<K> {
+  view fn hash() -> int { return self.k.hash(); }
+}
+
+class GBox<T> {
+  v: T;
+}
+
+impl GBox<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+
+impl Hashable for GBox<T> {
+  view fn hash() -> int { return 3; }
+}
+
+// This module's own trait: an importer's GBox<Str> gets the method, not
+// the trait (another module's traits are not supported yet).
+impl Named for GBox<T> {
+  view fn name() -> Str { return "box"; }
+}
+
+// A key, or none: its bound is checked once the conformances are known, for
+// a class field's type too.
+enum Maybe<T: Hashable> {
+  Just(v: T),
+  Nothing
+}
+
+// Instantiations this module makes: their conformances are in its interface.
+fn mkKeyed() -> Keyed<int> {
+  return Keyed<int>(7);
+}
+
+fn mkBox() -> GBox<int> {
+  return GBox<int>(1);
+}

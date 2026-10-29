@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <set>
+#include <tuple>
 
 namespace paykan::pkm {
 
@@ -115,9 +117,9 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
   ByteWriter types;
   types.uleb(0);
 
-  // DECLS sorted by (tag, name): ENUM, CLASS, FUNC, STRUCT.
+  // DECLS sorted by (tag, name): ENUM, CLASS, IMPL, FUNC, STRUCT.
   ByteWriter decls;
-  decls.uleb(iface.Enums.size() + iface.Classes.size() +
+  decls.uleb(iface.Enums.size() + iface.Classes.size() + iface.Impls.size() +
              iface.Functions.size() + iface.Structs.size());
   // A class's or a struct's methods: each, then every method's modes when
   // one has any, then every method's result mode when one returns a
@@ -168,6 +170,23 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
         v.u8(f.Weak ? kFieldWeak : 0);
       }
       writeMethods(v, c->Methods);
+    });
+  // IMPL by (type, trait): `Str for; Str trait`.
+  std::vector<const ImplRec *> impls;
+  impls.reserve(iface.Impls.size());
+  for (const ImplRec &i : iface.Impls)
+    impls.push_back(&i);
+  // By name, never by address, so the order is deterministic.
+  // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
+  std::stable_sort(impls.begin(), impls.end(),
+                   [](const ImplRec *a, const ImplRec *b) {
+                     return std::tie(a->TypeName, a->Trait) <
+                            std::tie(b->TypeName, b->Trait);
+                   });
+  for (const ImplRec *i : impls)
+    record(decls, static_cast<uint64_t>(DeclTag::Impl), [&](ByteWriter &v) {
+      v.uleb(strs.intern(i->TypeName));
+      v.uleb(strs.intern(i->Trait));
     });
   for (const FuncRec *f : sortedByName(iface.Functions))
     record(decls, static_cast<uint64_t>(DeclTag::Func), [&](ByteWriter &v) {
@@ -240,6 +259,11 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
 // --- Reader -----------------------------------------------------------------
 
 namespace {
+
+/// How a message names an IMPL record: `impl Hashable for Key`.
+std::string implShown(const ImplRec &i) {
+  return "impl " + i.Trait + " for " + i.TypeName;
+}
 
 struct PartView {
   uint32_t Tag = 0, Flags = 0;
@@ -455,20 +479,23 @@ Status Reader::readMods(Interface &out) {
 }
 
 Status Reader::readDecls(Interface &out) {
-  // (tag, name) of the previous record, for the sort and uniqueness check.
+  // (tag, key) of the previous record, for the sort and uniqueness check:
+  // a record's @p key is its name (an IMPL's its type and trait), @p shown
+  // how the message names it.
   uint64_t lastTag = 0;
-  std::string lastName;
+  std::string lastKey;
   Status order = Status::ok();
-  auto ordered = [&](uint64_t tag, const std::string &name) {
+  auto ordered = [&](uint64_t tag, const std::string &key,
+                     const std::string &shown) {
     if (lastTag != 0 &&
-        (tag < lastTag || (tag == lastTag && !(lastName < name)))) {
+        (tag < lastTag || (tag == lastTag && !(lastKey < key)))) {
       order = fail("DECLS: records are not sorted by (tag, name) with unique "
                    "names ('" +
-                   name + "')");
+                   shown + "')");
       return false;
     }
     lastTag = tag;
-    lastName = name;
+    lastKey = key;
     return true;
   };
   // Whose method @p m is, for the error, when it cannot be pure virtual;
@@ -526,7 +553,7 @@ Status Reader::readDecls(Interface &out) {
           if (!str(v, e.Name) || !v.u8(flags) || !str(v, e.OriginModule) ||
               !strList(v, e.Variants) ||
               (v.remaining() > 0 && !strList(v, e.PayloadVariants)) ||
-              !ordered(tag, e.Name))
+              !ordered(tag, e.Name, e.Name))
             return true;
           e.IsLocal = flags & kDeclLocal;
           out.Enums.push_back(std::move(e));
@@ -549,8 +576,28 @@ Status Reader::readDecls(Interface &out) {
           }
           if (!readMethods(v, c.Methods, /*ofStruct=*/false))
             return true;
-          if (ordered(tag, c.Name))
+          if (ordered(tag, c.Name, c.Name))
             out.Classes.push_back(std::move(c));
+          return true;
+        }
+        case DeclTag::Impl: {
+          ImplRec i;
+          if (!str(v, i.TypeName) || !str(v, i.Trait))
+            return true;
+          if (i.TypeName.empty()) {
+            v.fail("an IMPL record names no type");
+            return true;
+          }
+          const std::string shown = implShown(i);
+          if (!names::isImplBuiltinTrait(i.Trait)) {
+            v.fail("'" + shown + "': '" + i.Trait +
+                   "' is not a built-in trait an 'impl' block implements");
+            return true;
+          }
+          // NUL is in no STRS string (validUtf8): the key orders as the
+          // pair.
+          if (ordered(tag, i.TypeName + '\0' + i.Trait, shown))
+            out.Impls.push_back(std::move(i));
           return true;
         }
         case DeclTag::Struct: {
@@ -567,7 +614,7 @@ Status Reader::readDecls(Interface &out) {
               return true;
           if (!readMethods(v, s.Methods, /*ofStruct=*/true))
             return true;
-          if (ordered(tag, s.Name))
+          if (ordered(tag, s.Name, s.Name))
             out.Structs.push_back(std::move(s));
           return true;
         }
@@ -580,7 +627,7 @@ Status Reader::readDecls(Interface &out) {
                 (v.remaining() == 0 ||
                  (result(v, f.Modes) &&
                   (v.remaining() == 0 || funcFlags(v, f)))))) &&
-              ordered(tag, f.Name))
+              ordered(tag, f.Name, f.Name))
             out.Functions.push_back(std::move(f));
           return true;
         }
@@ -589,7 +636,21 @@ Status Reader::readDecls(Interface &out) {
       });
   if (!s)
     return s;
-  return order;
+  if (!order)
+    return order;
+  // An IMPL names a type this blob describes; STRUCT (9) records follow
+  // the IMPL (4) records, so this is checked once all are read.
+  std::set<std::string> types;
+  for (const ClassRec &c : out.Classes)
+    types.insert(c.Name);
+  for (const StructRec &st : out.Structs)
+    types.insert(st.Name);
+  for (const ImplRec &i : out.Impls)
+    if (!types.count(i.TypeName))
+      return fail("DECLS: '" + implShown(i) +
+                  "': the interface describes no class or struct '" +
+                  i.TypeName + "'");
+  return Status::ok();
 }
 
 Status Reader::readDiag(Interface &out) {

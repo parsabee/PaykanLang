@@ -195,6 +195,70 @@ fn main() -> int {
       << r.Diagnostics;
 }
 
+// A bounded generic enum named before the `impl` blocks are known (a class
+// field's type) is checked once they are, as a generic class is: at the
+// field.
+TEST(Traits, BoundedGenericEnumDeferred) {
+  auto ok = semaCheck(R"(// A key, or none.
+enum Maybe<T: Hashable> { Nothing, Just(v: T) }
+class C { m: Maybe<int>; }
+impl C { fn __init__() { self.m = Maybe<int>::Nothing; } }
+fn main() -> int { c = C(); return 0; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  EXPECT_EQ(ok.ErrorCount, 0) << ok.Diagnostics;
+
+  auto r = semaCheck(R"(// A key, or none.
+enum Maybe<T: Hashable> { Nothing, Just(v: T) }
+class C { m: Maybe<float>; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+  expectAll(r, {":3:11: error: 'float' does not implement trait 'Hashable', "
+                "which 'Maybe' requires of 'T'"});
+}
+
+// A bound error found once the `impl` blocks are known, in a template this
+// module instantiates for a class field's type, has the instantiation note
+// at the field, as one found before has at its request: for a class, a
+// struct and an enum, and a trait of this module.
+TEST(Traits, DeferredBoundErrorHasTheInstantiationNote) {
+  struct Case {
+    const char *Source, *Error, *Note;
+  };
+  const Case cases[] = {
+      {"class Gen<T: Hashable> { v: T; }\nclass Holder<T> { g: Gen<float>; "
+       "}\nclass M { h: Holder<int>; }\nfn main() -> int { return 0; }\n",
+       ":2:19: error: 'float' does not implement trait 'Hashable', which "
+       "'Gen' requires of 'T'",
+       ":3:11: note: in instantiation of 'Holder<int>' requested here"},
+      {"trait Named { view fn name() -> Str; }\nclass Gen<T: Named> { v: T; "
+       "}\nclass Holder<T> { g: Gen<T>; }\nclass M { h: Holder<int>; }\nfn "
+       "main() -> int { return 0; }\n",
+       ":3:19: error: 'int' does not implement trait 'Named', which 'Gen' "
+       "requires of 'T'",
+       ":4:11: note: in instantiation of 'Holder<int>' requested here"},
+      {"struct S<T: Hashable> { v: T; }\nstruct W<T> { s: S<T>; }\nclass M { "
+       "w: W<float>; }\nfn main() -> int { return 0; }\n",
+       ":2:15: error: 'float' does not implement trait 'Hashable', which 'S' "
+       "requires of 'T'",
+       ":3:11: note: in instantiation of 'W<float>' requested here"},
+      {"enum Maybe<T: Hashable> { Just(v: T), Nothing }\nclass Holder<T> { m: "
+       "Maybe<T>; }\nclass M { h: Holder<float>; }\nfn main() -> int { "
+       "return 0; }\n",
+       ":2:19: error: 'float' does not implement trait 'Hashable', which "
+       "'Maybe' requires of 'T'",
+       ":3:11: note: in instantiation of 'Holder<float>' requested here"},
+  };
+  for (const Case &c : cases) {
+    auto r = semaCheck(c.Source);
+    EXPECT_FALSE(r.Ok) << c.Source;
+    EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+    expectAll(r, {c.Error, c.Note});
+  }
+}
+
 // int, float, bool and char implement `Show`: `n.toString()` is a `Str`.  So
 // does an enum: its variant's name.
 TEST(Traits, ScalarsImplementShow) {

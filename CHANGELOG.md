@@ -716,6 +716,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   driver writes, it is never the source file.  The file is written once all of it was
   printed, as a module file is, so a backend that fails leaves what `-o` names as it was.
   Without `-o` they print to standard output.
+- A class whose superclass is another module's `Hashable` class cannot repeat `impl
+  Hashable for` (`class 'Sub' already implements 'Hashable' (through 'CK')`), as in one
+  module.  It is `Hashable` through its superclass.
+- An importer's instantiation of another module's generic type checks the type's `impl
+  Trait for` blocks, which were left out before, as the module checks its own
+  instantiations: also the methods the importer never calls.  So `gb::Box<float>`, with
+  `impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }`, is now
+  `method call on non-class type 'float'` in gb's file, as `Box<float>` is in gb itself.
+  A block of gb's own trait is checked the same way (`impl Named for Box<T>`, whose
+  `name` returns `self.v.name()`, is that error for `gb::Box<int>`), and `impl Show for
+  SBox<T> {}` makes `gb::SBox<int>` the error `class 'SBox<int>' already implements 'Show'
+  (through 'Obj')`.
+- A bound of another module's template is never resolved against the importer's own
+  traits.  An importer that declared a `trait Named` of its own satisfied
+  `lib::greet<T: Named>` with it, whatever the trait's methods.  That is now the #147
+  error under Fixed, with a note at the importer's trait.
 
 ### Removed
 
@@ -1498,6 +1514,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the plugin compatibility list holds.  docs/writing-a-backend.md §7,
   docs/plugins/overview.md, docs/plugins/pir-for-backends.md and docs/design/pkm.md now say
   so, and docs/pir.md gives the binary PIR codec's version as the release's, not 1.0.
+- A type's conformance to `Hashable` crosses modules and `.pkm` files
+  (docs/language/06-traits.md, "Hashable").
+  - `impl Hashable for Key` in module `keys` makes `keys::Key` a key of `HashMap` and
+    `HashSet`, and an argument of any `T: Hashable` template, in every importer: from its
+    source, the module cache (or `--no-module-cache`) or a prebuilt `.pkm`, and through a
+    module that only returns one.
+  - The interface records the conformance (an `IMPL` record, docs/design/pkm.md §3.5;
+    `pkm dump` shows `impl Hashable for Key`).
+  - Generic types: `impl Trait for` blocks now go with the template.  An importer's
+    `lib::Box<Str>` has their methods and, for `Hashable`, the trait, checked when it is
+    instantiated as the module would check it.  An instantiation the module made carries
+    the conformance in the interface.
+  - The 0.2.0 entries saying a struct is a `HashMap` key across modules, that generic
+    structs' `impl Trait for` blocks work across modules, and that an `impl Named for
+    Box<T>` block works in an importer now hold.  A module's own trait does not cross yet
+    (#147).
+- A template of another module bounded by that module's own trait, directly or through a
+  template its body uses (an unbounded `fn wrap<T>` calling `fn greet<T: Named>`, a
+  generic class's method), is reported where the importer instantiates it:
+  `'lib::wrap<int>' cannot be instantiated here: it uses 'lib::greet', which requires 'T'
+  to implement trait 'Named' of module 'lib', and another module's traits are not
+  supported yet (#147)`, with a note at the use (docs/language/06-traits.md, "Not
+  Supported Yet").  Before, it was `unknown trait 'Named'`, for a use inside the module in
+  the very file that declares `Named`.  A use two templates deep or more (a generic
+  function of `lib` calling one that calls `greet`, or a template of a third module
+  calling `lib::wrap`) is still reported at the use in lib's file, with the note of the
+  nearest request only, as an instantiation waiting to be checked keeps only that one.
+- A bound error that waited for the `impl` blocks to be known (a class field's type that
+  instantiates another module's template, whose field instantiates a bounded one) showed
+  that template's line under the importer's file name, with no instantiation note:
+  `main.pkn:846:3` for a line of collections.pkn.  It now names the template's file, with
+  the instantiation notes.  In one module too, such an error in a template a field's
+  type instantiates (`h: Holder<int>`, with `class Holder<T> { g: Gen<float>; }` and
+  `class Gen<T: Hashable>`) now has the `in instantiation of 'Holder<int>' requested here`
+  note, as a bound error found earlier has.
+- A bounded generic enum used before the `impl` blocks were checked (a class field `m:
+  Maybe<int>` of `enum Maybe<T: Hashable>`) crashed the compiler.  It is now checked like
+  a generic class.
 
 ## [0.2.0] - 2026-10-20
 

@@ -224,6 +224,48 @@ The standard library's `HashMap<K, V>` and `HashSet<K>` require `K: Hashable` (s
 [Collections](../stdlib/collections.md)). Declaring a trait named `Hashable` is an
 error, as for `Show`.
 
+A conformance crosses modules with its type. A struct or a class of module `keys` with an
+`impl Hashable for` block is `Hashable` in every module that imports `keys`, and wherever
+the type is reached through another module (a function of `mid` that returns a
+`keys::Key`), whether `keys` is compiled from its source or loaded from a `.pkm` file
+([Prebuilt modules](15-modules.md#prebuilt-modules)):
+
+```pkn
+// file: keys.pkn
+struct Key { a: int; b: int; }
+
+impl Hashable for Key {
+  view fn hash() -> int { return (self.a * 31 + self.b).hash(); }
+}
+```
+
+```pkn
+import ::io;
+
+import ::collections;
+import keys;
+
+fn main() -> int {
+  counts = collections::HashMap<keys::Key, int>();
+  counts.put(keys::Key(1, 2), 5);
+  counts.put(keys::Key(1, 2), 6);
+  io::println(Str(counts.len()) + " " + Str(counts.get(keys::Key(1, 2))));
+  return 0;
+}
+```
+
+Output:
+
+```
+1 6
+```
+
+The `impl` block stays in the type's module: an importer can neither write `impl Hashable
+for keys::Key` nor repeat it for a subclass of an imported `Hashable` class, which is
+`Hashable` through its superclass. A generic type's `impl Hashable for Box<T>` block goes
+with its template, so every instantiation is `Hashable`, also one an importer makes
+([Generics](13-generics.md#modules)).
+
 ## ValueType
 
 `ValueType` is a built-in trait with no methods. It is implemented by the types whose
@@ -267,16 +309,62 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
-| Implemented twice | The class, or a superclass, already implements the trait (every class implements `Show`) |
+| Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by |
+| Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
 | Trait as a type | A trait is used where a type is expected |
 
 ## Not Supported Yet
 
-Traits of another module (an importer cannot name them, their `impl ... for` blocks
-are not in the module interface, and a template of that module bounded by one cannot be
-instantiated from the importer: `unknown trait 'Named'`), `impl ... for` a built-in type, an
-enum or a class of another module, default methods, `static fn` requirements, and trait
-objects.
+Traits of another module. An importer cannot name one, in a bound or in an `impl ... for`,
+and a type's conformance to one is not in the module interface. A template of that module
+bounded by one, directly or through a template it uses (an unbounded `fn wrap<T>` calling
+`greet<T: Named>`, or a method of a generic class that does), cannot be instantiated from
+the importer ([#147](https://github.com/parsabee/PaykanLang/issues/147)). The error is
+reported where the importer asks for the instantiation, with a note at the use:
+
+```pkn
+// file: lib.pkn
+trait Named { view fn name() -> Str; }
+
+class Dog { view fn name() -> Str { return "Rex"; } }
+
+impl Named for Dog {}
+
+fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
+
+fn wrap<T>(x: T) -> Str { return greet(Dog()); }
+```
+
+```pkn
+import ::io;
+
+import lib;
+
+fn main() -> int {
+  io::println(lib::wrap(1));
+  return 0;
+}
+```
+
+Error:
+
+```
+main.pkn:6:15: error: 'lib::wrap<int>' cannot be instantiated here: it uses 'lib::greet', which requires 'T' to implement trait 'Named' of module 'lib', and another module's traits are not supported yet (#147)
+lib.pkn:10:34: note: 'lib::greet' is used here
+```
+
+Calling `lib::greet` itself is reported at the call: `'lib::greet' requires 'T' to
+implement trait 'Named' of module 'lib', ...`. So is a use two templates deep or more (a
+generic function of `lib` calling one that calls `greet`, or a template of a third module
+calling `lib::wrap`), at the use in `lib`'s file, with the note of the nearest request
+only: the compiler keeps no request further out for an instantiation it checks later, so
+no line of the error may be in the importer's file. A trait the importer declares under
+the same name is another trait, and never satisfies such a bound, of a function, a class,
+a struct or an enum. An `impl Named for Box<T>` block of the module gives an importer's
+`lib::Box<Str>` its methods, not the trait.
+
+Also not supported yet: `impl ... for` a built-in type, an enum or a class of another
+module, default methods, `static fn` requirements, and trait objects.

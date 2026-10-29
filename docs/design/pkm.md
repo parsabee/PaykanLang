@@ -10,8 +10,8 @@ Status: **partly implemented.** What `paykan` ships today:
   as specified here, with the reserved fields and item tables written as
   zero or empty;
 - `IFACE` (§3) in a prototype form: the part table and the record framing
-  of §3.2, but `DECLS` holds only `ENUM`, `CLASS`, `FUNC` and `STRUCT`
-  records whose types are type-name strings
+  of §3.2, but `DECLS` holds only `ENUM`, `CLASS`, `IMPL`, `FUNC` and
+  `STRUCT` records whose types are type-name strings
   (`include/paykan/pkm/Interface.h`), `TYPES` and `INST` are empty, and no
   record carries `Vis`, `MFlags` or `Attrs` (a method's flags byte is the
   prototype's own, §3.2, its pure virtual bit `PURE`'s);
@@ -378,6 +378,21 @@ or a constructor; it is local when the enum is), written only when there
 are any, so an enum without fields has the record it had before.  The
 interface minor version is bumped for them at the next release.
 
+An `IMPL` record (tag 4), a type's conformance to a trait, is written in a
+prototype form, `Str for; Str trait`: `for` is a type the blob describes
+with a `CLASS` or `STRUCT` record, spelled as that record names it (`Key`,
+`GBox<int>`), and `trait` a built-in trait an `impl ... for` block
+implements, which is only `Hashable` (`names::isImplBuiltinTrait`: every
+class has `Show` through `Obj`, and `ValueType` follows from a type's
+structure).  A record is written for a conformance the type has itself,
+never for one a subclass has through its superclass, and lists no
+methods: they are in the type's record, with the `impl` bit.  The records
+are sorted by `(for, trait)` and unique, after the `CLASS` records and
+before the `FUNC` records, so a module without a conformance has the
+records it had before.  #147 appends `Str traitModule; uleb k; Str
+args[k]`; a record without them names a built-in trait with no arguments,
+so #147's record extends this one rather than replacing it.
+
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing
 payload bytes (a later minor may append fields) but never reads past `len`.
@@ -436,7 +451,7 @@ Records, sorted by `(tag, name)`:
 | 1 | `ENUM` | `Str name; Vis; Attrs; Ty self; uleb n; variants[n] { Str name; Attrs }` (variant value = index) |
 | 2 | `CLASS` | `Str name; Vis (0 or 3); Attrs; u8 cflags (bit0 FINAL class); Ty self; Ty super;` own fields in declaration order `fields[] { Str name; Vis; Ty; Attrs }`; the **complete vtable** in slot order, inherited slots included, `slots[] { Str name; Vis; MFlags; Sig; Ty owner }` (`owner` = the class whose method fills the slot); non-virtual own methods `direct[] { Str name; Vis; MFlags; Sig }` (private #19 and static #167); `u8 has_init; Sig init`; class statics `statics[] { Str name; Vis; u8 sflags(bit0 LET, bit1 MUT); Ty; Attrs; Const value }` (#170); `impls[] Decl` (#147). Abstractness is **not** stored: importers recompute it from `PURE` slots (#18) |
 | 3 | `TRAIT` | `Str name; Vis; Attrs; TypeParams; methods[] { Str name; MFlags; Sig; Tmpl body }` (#147; `body` valid iff `DEFAULT`, a template over the trait's parameters plus implicit `Self` = `T_PARAM n`) |
-| 4 | `IMPL` | `trait { Mod; Str; uleb k; Ty[k] }; Ty for; provided[] { Str name; Sig }` (#147; orphan rule enforced by the exporter) |
+| 4 | `IMPL` | `trait { Mod; Str; uleb k; Ty[k] }; Ty for; provided[] { Str name; Sig }` (#147; orphan rule enforced by the exporter). As implemented: the §3.2 prototype record, for built-in traits only; the orphan rule is the language's (an `impl ... for` lives in its type's module), so a conformance is written by its type's module and copied by every module that describes the type |
 | 5 | `FUNC` | `Str name; Vis; Attrs; Sig` — only functions declared by this module; imports are never re-exported |
 | 6 | `CONST` | `Str name; Vis; Attrs; Ty; Const value` (#170 module-level `let`; `value` tag 0 for object initialisers, reached through the module's accessor in `CODE`) |
 | 7 | `TEMPLATE_CLASS` | `Str name; Vis (0/3); Attrs; TypeParams; u8 tflags (bit0 ERASABLE, §4.5); Ty super (concrete); fields[] { Str name; Vis; Ty }; methods[] { Str name; Vis; MFlags; Sig }; u8 has_init; Sig init; Tmpl body` |
@@ -492,7 +507,11 @@ namespace rule (`Sema::checkDeclNameAvailable`), every index in range,
 with its superclass's prefix (the cross-module `reinheritVTable`),
 `OVERRIDE` only on an inherited slot, `FINAL`/`PURE` never together, a
 `PURE` slot not private, `STATIC` never on a slot, `IMPL.provided` names
-trait methods with equal signatures, `CONST.value` kind matches its type;
+trait methods with equal signatures (the §3.2 prototype `IMPL` record names
+the type of a `CLASS` or `STRUCT` record of the blob and a built-in trait
+an `impl` block implements, and the records are sorted by `(for, trait)`
+and unique; an importer also checks that the type has the trait's methods,
+with their signatures), `CONST.value` kind matches its type;
 `INST` records reference existing templates with matching arity, concrete
 arguments and a `form` consistent with `ERASABLE`; `flags.has_TMPL` agrees
 with the container. A failure is reported once at the import site
@@ -545,7 +564,8 @@ manifest's `HAS_TEMPLATES` bit.
 of the source imports of §4.8, already resolved by renaming, so they need no
 node codec of their own. The section frames the [AST interchange
 format](../plugins/ast-format.md) text of a unit holding the module's
-generic classes, structs, enums and functions and their `impl` blocks, as
+generic classes, structs, enums and functions and their `impl` blocks,
+`impl Trait for` blocks too (§4.8), as
 `Sema::exportTemplates` produced them (an enum has no `impl` block, and its
 instantiations no code: an importer's `Maybe<int>` is an `ENUM` record of
 its own `IFACE` like any enum):
@@ -688,6 +708,19 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   instantiation is `$<module>::f<int>`. Type names are unique across a
   program (Sema rejects two types of one name anywhere in its imports), so
   one name is one instantiation program-wide.
+- **`impl Trait for` blocks.** A generic class's or struct's trait blocks
+  go with its template, their trait names not renamed: a built-in trait is
+  the same in every module, and a module names no other module's traits.
+  An importer's instantiation checks a built-in trait's block (`impl
+  Hashable for Box<T>`) as the module would check it and records the
+  conformance; an instantiation the module made carries it in `IFACE`
+  instead (§3.5 row 4). A block of the module's own trait gives the
+  importer's instantiation its methods only: `Sema::checkTraitImpl` neither
+  resolves the trait there, where its name is another trait or none, nor
+  records the conformance (#147).  For the same reason a bound of another
+  module's template that is not a built-in trait is never resolved in the
+  importer: `Sema::checkBounds` reports it as the #147 error, at the
+  importer's request of the instantiation that led to it.
 - **Emission: one copy per module, one per program.** Every module lowers
   its own copy of each instantiation of another module's template its code
   uses (`ForeignClasses`, `ForeignFunctions`, `ForeignStructs`), as

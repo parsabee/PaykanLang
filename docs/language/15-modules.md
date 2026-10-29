@@ -175,7 +175,11 @@ declarations. There is no explicit `export` keyword: everything declared at the 
 level is importable under the chosen qualifier or alias, except the names that start with an
 underscore, which are [private to the module](#private-to-the-module). A module's **traits**
 are not exported yet: an importer cannot name `m::Trait` in a bound or an `impl ... for`
-(`unknown trait 'm::Trait'`; see [Traits](06-traits.md#not-supported-yet)).
+(`unknown trait 'm::Trait'`), and a template of `m` bounded by one, directly or through a
+template it uses, cannot be instantiated there (`... another module's traits are not
+supported yet (#147)`; see [Traits](06-traits.md#not-supported-yet)). A type's
+conformance to a built-in trait is exported with it: `impl Hashable for Key` in the module
+makes `m::Key` a `HashMap` key in its importers ([Traits](06-traits.md#hashable)).
 
 An imported enum is named like any other qualified type. Use `mod::Enum` (or `Alias::Enum`, or
 the full `path::to::mod::Enum`) wherever a type is expected, and `mod::Enum::Variant` to name a

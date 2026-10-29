@@ -9,6 +9,7 @@
 #include "paykan/support/Bytes.h"
 
 #include <algorithm>
+#include <tuple>
 
 using namespace pkmtest;
 using paykan::support::ByteReader;
@@ -16,10 +17,9 @@ using paykan::support::ByteWriter;
 
 namespace {
 
-/// The sample interface as the reader returns it: dependencies and records
-/// sorted by name.
-Interface sortedSample() {
-  Interface i = sampleInterface();
+/// @p i as the reader returns it: dependencies and records sorted by name,
+/// IMPL records by type, then trait.
+Interface sorted(Interface i) {
   auto byName = [](const auto &a, const auto &b) { return a.Name < b.Name; };
   std::sort(i.Mods.begin(), i.Mods.end(), [](const auto &a, const auto &b) {
     return a.Canonical < b.Canonical;
@@ -28,6 +28,33 @@ Interface sortedSample() {
   std::sort(i.Classes.begin(), i.Classes.end(), byName);
   std::sort(i.Enums.begin(), i.Enums.end(), byName);
   std::sort(i.Structs.begin(), i.Structs.end(), byName);
+  std::sort(i.Impls.begin(), i.Impls.end(), [](const auto &a, const auto &b) {
+    return std::tie(a.TypeName, a.Trait) < std::tie(b.TypeName, b.Trait);
+  });
+  return i;
+}
+
+Interface sortedSample() { return sorted(sampleInterface()); }
+
+/// The sample interface with a class and a struct that implement
+/// `Hashable` (docs/language/06-traits.md), and their IMPL records, given
+/// out of order.
+Interface implSample() {
+  Interface i = sampleInterface();
+  ClassRec ck;
+  ck.Name = "CK";
+  ck.OriginModule = i.Module;
+  ck.Fields = {{"id", "int", false}};
+  ck.Methods = {{"hash", "int", {}, kMethodView | kMethodImpl, {}}};
+  i.Classes.push_back(ck);
+  StructRec key;
+  key.Name = "Key";
+  key.OriginModule = i.Module;
+  key.Fields = {{"a", "int", false}, {"b", "int", false}};
+  key.Methods = {{"__init__", "void", {"int", "int"}, 0, {}},
+                 {"hash", "int", {}, kMethodView | kMethodImpl, {}}};
+  i.Structs.push_back(key);
+  i.Impls = {{"Key", "Hashable"}, {"CK", "Hashable"}};
   return i;
 }
 
@@ -94,6 +121,45 @@ std::vector<uint8_t> withPart(const std::vector<uint8_t> &b, uint32_t tag,
     if (p.Tag == tag)
       v = bytes;
   return rebuild(b, ps);
+}
+
+std::vector<uint8_t> declsOf(const std::vector<uint8_t> &b) {
+  for (auto &[p, v] : partsWithBytes(b))
+    if (p.Tag == static_cast<uint32_t>(PartTag::Decls))
+      return v;
+  return {};
+}
+
+/// A DECLS part's records, (tag, payload) each, and the part they make.
+using Records = std::vector<std::pair<uint64_t, std::vector<uint8_t>>>;
+Records declRecords(const std::vector<uint8_t> &decls) {
+  Records out;
+  ByteReader r(decls);
+  uint64_t n = 0;
+  EXPECT_TRUE(r.uleb(n));
+  for (uint64_t k = 0; k < n; ++k) {
+    uint64_t tag = 0, len = 0;
+    std::span<const uint8_t> payload;
+    EXPECT_TRUE(r.uleb(tag) && r.uleb(len) && r.bytes(size_t(len), payload));
+    out.emplace_back(tag, std::vector<uint8_t>(payload.begin(), payload.end()));
+  }
+  return out;
+}
+std::vector<uint8_t> declsPart(const Records &recs) {
+  ByteWriter w;
+  w.uleb(recs.size());
+  for (const auto &[tag, payload] : recs) {
+    w.uleb(tag);
+    w.uleb(payload.size());
+    w.bytes(payload);
+  }
+  return w.take();
+}
+std::vector<uint64_t> declTags(const std::vector<uint8_t> &b) {
+  std::vector<uint64_t> out;
+  for (const auto &rec : declRecords(declsOf(b)))
+    out.push_back(rec.first);
+  return out;
 }
 
 TEST(Interface, RoundTrip) {
@@ -244,12 +310,6 @@ TEST(Interface, ResultModes) {
 // record of any other function is the one it was.  A bit the format does
 // not know is rejected.
 TEST(Interface, NativeFunctions) {
-  auto declsOf = [](const std::vector<uint8_t> &b) {
-    for (auto &[p, v] : partsWithBytes(b))
-      if (p.Tag == static_cast<uint32_t>(PartTag::Decls))
-        return v;
-    return std::vector<uint8_t>();
-  };
   Interface i = sortedSample();
   ASSERT_EQ(i.Functions[2].Name, "area");
   ASSERT_TRUE(i.Functions[2].Modes.Modes.empty());
@@ -341,6 +401,120 @@ TEST(Interface, PureVirtualMethods) {
             std::string::npos);
 }
 
+// A type's conformance to a built-in trait an `impl` block implements is
+// an IMPL record (§3.2, §3.5), `Str for; Str trait`, after the CLASS
+// records and sorted by (type, trait), so the bytes do not depend on the
+// order the writer is given them.  An interface without one writes no IMPL
+// record and no string of one: the bytes it wrote before (Dump.Golden pins
+// the sample's).  A conformance is part of the interface, so of iface_hash.
+TEST(Interface, Impls) {
+  Interface i = implSample();
+  std::vector<uint8_t> b = writeInterface(i);
+  StatusOr<Interface> back = readInterface(b, "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, sorted(i));
+  EXPECT_EQ((*back).Impls,
+            (std::vector<ImplRec>{{"CK", "Hashable"}, {"Key", "Hashable"}}));
+  EXPECT_EQ(writeInterface(*back), b);
+  EXPECT_EQ(writeInterface(i), b);
+  Interface shuffled = i;
+  std::reverse(shuffled.Impls.begin(), shuffled.Impls.end());
+  std::reverse(shuffled.Classes.begin(), shuffled.Classes.end());
+  std::reverse(shuffled.Structs.begin(), shuffled.Structs.end());
+  EXPECT_EQ(writeInterface(shuffled), b);
+  // ENUM, CLASS, IMPL, FUNC, STRUCT.
+  EXPECT_EQ(declTags(b),
+            (std::vector<uint64_t>{1, 2, 2, 2, 4, 4, 5, 5, 5, 9, 9}));
+
+  Interface none = i;
+  none.Impls.clear();
+  std::vector<uint8_t> noneBytes = writeInterface(none);
+  EXPECT_EQ(declTags(noneBytes),
+            (std::vector<uint64_t>{1, 2, 2, 2, 5, 5, 5, 9, 9}));
+  EXPECT_EQ(declTags(writeInterface(sampleInterface())),
+            (std::vector<uint64_t>{1, 2, 2, 5, 5, 5, 9}));
+  std::vector<uint8_t> strs = partsWithBytes(noneBytes)[0].second;
+  EXPECT_EQ(std::string(strs.begin(), strs.end()).find("Hashable"),
+            std::string::npos);
+  back = readInterface(noneBytes, "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_TRUE((*back).Impls.empty());
+
+  Interface one = none;
+  one.Impls = {{"Key", "Hashable"}};
+  EXPECT_NE(writeInterface(one), noneBytes);
+  EXPECT_NE(writeInterface(one), b);
+}
+
+// The reader's IMPL checks (§3.7): a built-in trait an `impl` block
+// implements, a type the blob describes with a CLASS or STRUCT record, and
+// (type, trait) sorted and unique; a truncated record or a string index out
+// of range is the byte reader's error.  Bytes after the two strings are a
+// later field's (#147's trait module and arguments) and are ignored.
+TEST(Interface, ImplRecordsAreChecked) {
+  const Interface good = implSample();
+  auto rejects = [&](std::vector<ImplRec> impls) {
+    Interface bad = good;
+    bad.Impls = std::move(impls);
+    return readError(writeInterface(bad));
+  };
+  for (const char *trait : {"Named", "Show", "ValueType", ""})
+    EXPECT_EQ(rejects({{"Key", trait}}),
+              "DECLS: 'impl " + std::string(trait) + " for Key': '" + trait +
+                  "' is not a built-in trait an 'impl' block implements (at "
+                  "byte 2)")
+        << trait;
+  EXPECT_EQ(rejects({{"", "Hashable"}}),
+            "DECLS: an IMPL record names no type (at byte 2)");
+  // The type of no record, an ENUM record's and a builtin type's: no CLASS
+  // or STRUCT record of the blob.
+  for (const char *type : {"Ghost", "Color", "int"})
+    EXPECT_EQ(rejects({{type, "Hashable"}}),
+              "DECLS: 'impl Hashable for " + std::string(type) +
+                  "': the interface describes no class or struct '" + type +
+                  "'")
+        << type;
+  EXPECT_EQ(rejects({{"Key", "Hashable"}, {"Key", "Hashable"}}),
+            "DECLS: records are not sorted by (tag, name) with unique names "
+            "('impl Hashable for Key')");
+
+  // Hand-built: the records out of order, a record cut after its type, a
+  // type index out of range, and trailing bytes.
+  std::vector<uint8_t> b = writeInterface(good);
+  const Records recs = declRecords(declsOf(b));
+  std::vector<size_t> at;
+  for (size_t k = 0; k < recs.size(); ++k)
+    if (recs[k].first == static_cast<uint64_t>(DeclTag::Impl))
+      at.push_back(k);
+  ASSERT_EQ(at.size(), 2u);
+  auto withImpl = [&](const std::vector<uint8_t> &payload) {
+    Records r = recs;
+    r[at[1]].second = payload; // Key's
+    return withPart(b, static_cast<uint32_t>(PartTag::Decls), declsPart(r));
+  };
+  {
+    Records r = recs;
+    std::swap(r[at[0]], r[at[1]]);
+    EXPECT_EQ(readError(withPart(b, static_cast<uint32_t>(PartTag::Decls),
+                                 declsPart(r))),
+              "DECLS: records are not sorted by (tag, name) with unique "
+              "names ('impl Hashable for CK')");
+  }
+  const std::vector<uint8_t> &key = recs[at[1]].second;
+  ASSERT_EQ(key.size(), 2u); // two one-byte string indices
+  EXPECT_EQ(readError(withImpl({key[0]})),
+            "DECLS: unexpected end of data (at byte 1)");
+  ByteWriter far;
+  far.uleb(999);
+  far.u8(key[1]);
+  EXPECT_EQ(readError(withImpl(far.take())),
+            "DECLS: value out of range (at byte 0)");
+  StatusOr<Interface> r =
+      readInterface(withImpl({key[0], key[1], 0xAA, 0xBB}), good.Module);
+  ASSERT_TRUE(r) << r.status().message();
+  EXPECT_EQ(*r, sorted(good));
+}
+
 TEST(Interface, Deterministic) {
   EXPECT_EQ(writeInterface(sampleInterface()),
             writeInterface(sampleInterface()));
@@ -402,23 +576,26 @@ TEST(Interface, Framing) {
     putU32(b, 12, 1000);
     EXPECT_NE(readError(b).find("part count"), std::string::npos);
   }
-  // Truncation anywhere fails cleanly (the final alignment padding is the
-  // only part of the blob no part needs).
-  size_t lastEnd = 0;
-  for (const Part &p : parts(good))
-    lastEnd = std::max(lastEnd, size_t(p.Offset + p.Size));
-  for (size_t n = 0; n < good.size(); ++n) {
-    bool ok = bool(readInterface(std::span<const uint8_t>(good.data(), n),
-                                 "geometry::shapes"));
-    EXPECT_EQ(ok, n >= lastEnd) << n;
-  }
-  // Single-byte flips never crash; the string table and records are
-  // validated so most are rejected (some flips are benign: a renamed
-  // string, an ignored trailing byte).
-  for (size_t at = 0; at < good.size(); ++at) {
-    std::vector<uint8_t> b = good;
-    b[at] ^= 0xFF;
-    (void)readInterface(b, "geometry::shapes");
+  // Over the sample and over a blob with IMPL records: truncation anywhere
+  // fails cleanly (the final alignment padding is the only part of the
+  // blob no part needs), and single-byte flips never crash; the string
+  // table and records are validated so most are rejected (some flips are
+  // benign: a renamed string, an ignored trailing byte).
+  for (const std::vector<uint8_t> &blob :
+       {good, writeInterface(implSample())}) {
+    size_t lastEnd = 0;
+    for (const Part &p : parts(blob))
+      lastEnd = std::max(lastEnd, size_t(p.Offset + p.Size));
+    for (size_t n = 0; n < blob.size(); ++n) {
+      bool ok = bool(readInterface(std::span<const uint8_t>(blob.data(), n),
+                                   "geometry::shapes"));
+      EXPECT_EQ(ok, n >= lastEnd) << n;
+    }
+    for (size_t at = 0; at < blob.size(); ++at) {
+      std::vector<uint8_t> b = blob;
+      b[at] ^= 0xFF;
+      (void)readInterface(b, "geometry::shapes");
+    }
   }
 }
 
