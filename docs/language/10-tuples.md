@@ -1,8 +1,5 @@
 # Tuples
 
-> **Stable** (issue #4): the syntax and semantics below are covered by the
-> compatibility promise for the 0.2 series (see [Stability](index.md#stability)).
-
 A tuple is a fixed-size, ordered group of values that may have **different types**:
 `(1, "a")` is an `(int, Str)`. Tuples are the way to return more than one value from a
 function. This chapter shows how to build, read, return and take tuples apart; in it `tasks`

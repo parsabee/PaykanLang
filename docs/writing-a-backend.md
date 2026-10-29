@@ -30,12 +30,11 @@ The example in [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) is the smalle
 complete loadable backend, in plain C (it prints the PIR it receives); copy it
 to start your own.
 
-**Stability.** Unlike the parts of the language its reference calls
-stable (tuples, optionals and generics, in the 0.2 series: see
-[Stability](language/index.md#stability)), the
-plugin interfaces are not yet stable: `plugin_api.h` (versioned by
-`PAYKAN_PLUGIN_API_VERSION`), the PIR text (`PAYKAN_PIR_TEXT_VERSION`), and
-the C++ interfaces of the built-in plugins may change between 0.x releases.
+**Stability.** Neither the language nor the plugin interfaces have a
+compatibility promise yet (see [Stability](language/index.md#stability)):
+`plugin_api.h` (versioned by `PAYKAN_PLUGIN_API_VERSION`), the PIR text
+(`PAYKAN_PIR_TEXT_VERSION`), and the C++ interfaces of the built-in plugins
+may change between 0.x releases.
 Each release therefore says exactly which plugin builds it accepts; see
 [Plugin compatibility](#7-plugin-compatibility) below.
 

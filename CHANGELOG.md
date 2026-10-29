@@ -540,6 +540,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected, and a cache entry that 0.2.0 or a development build wrote is rebuilt.  0.3.0
   accepts plugins built with 0.3.0 only: PIR and the runtime ABI changed incompatibly
   since 0.2 (a function that takes a box takes the ownership mask, above).
+- No compatibility promise is made before 1.0 (docs/language/index.md, "Stability"): a
+  release may change the language, and this file lists what each release changed.  The
+  reference no longer calls tuples, optionals and generics stable, and the promise it made
+  for them in the 0.1 and 0.2 series is withdrawn.  The plugin interfaces have none either
+  (docs/writing-a-backend.md).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
   while the result is used (docs/language/03-functions.md, "Where an `inout` result can
   point"): into `self` (a field of a class's `self`, or a field of a struct held in it; a

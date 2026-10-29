@@ -1,9 +1,5 @@
 # Optionals
 
-> **Stable** (issue #5), optional primitives and optional-mode `match` included: the
-> syntax and semantics below are covered by the compatibility promise for the 0.2 series (see
-> [Stability](index.md#stability)).
-
 Sometimes a value may be missing: a search finds nothing, a string is not a number, a task
 has no deadline. PaykanLang expresses this with **optional types**. A `T?` holds either a
 value of type `T` or `None`, without giving up the static type: a `next: Node?` field is a
