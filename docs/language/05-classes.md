@@ -199,7 +199,7 @@ virtual: the call runs the version of the object's actual class, even through a 
 the base type.
 
 The derived constructor must call the base constructor with `__super__(...)` as its first
-statement:
+statement, and only there:
 
 ```pkn
 import ::io;
@@ -900,8 +900,15 @@ parameters can call it: `'value' never changes 'self': make it a 'view fn' so 'v
 parameters can call it`. A method counts as changing `self` when it does one of the
 things a `view fn` cannot (returning part of `self` for its caller to change is one), or
 calls on `self` a method that does; a method with an
-override that changes `self` gets no warning, and neither does its override. The warning
-is not given while the program has errors.
+override that changes `self` gets no warning, and neither does its override. A method of a
+generic class or struct is one declaration for all its instances, and gets the warning,
+once, only when it could be a `view fn` in each of them, whatever its type arguments: `fn
+get() -> T { return self.v; }` gets none, since in a `Box<Str>` a `view fn get` would have
+to return that `Str` as a `view`; nor does one that keeps part of `self` holding a type
+argument in a local, an array or a tuple (`let x = self.v;`, `[self.v]`, `(self.v, 1)`),
+which a `view fn` of a `Box<Str>` cannot store, nor a method that calls either on `self`.
+So it is in a module that makes only a `Box<int>`, whose importers may make a `Box<Str>`. The warning is
+not given while the program has errors.
 
 ### `impl` Blocks
 
@@ -954,7 +961,10 @@ fn main() -> int {
   default one of a class with no fields, and so are its superclasses', may `__super__()` be left
   out: it does nothing. A derived class without an `__init__` gets the default one, which
   calls `__super__` for it.
-- `__super__(…)` may only be called inside `__init__`.
+- `__super__(…)` may only be called inside `__init__`, and only once, as its first statement.
+  It assigns the base's fields, which only the first statement finds unassigned: a second
+  call, after the first or under an `if` or a loop, or one after another statement, is an
+  error (`'__super__' may be called only once, as the first statement of '__init__'`).
 - A method with the same name as a base method is an **override**. The override must have the
   same parameter and return types, and keep each parameter's mode (`view`, `inout`; see
   [Parameter modes](03-functions.md#parameter-modes-view-and-inout)) and the `view fn`
@@ -1159,7 +1169,8 @@ created for that argument list. See [Generics](13-generics.md).
 | `self` used before every field is assigned | A method called on `self`, `self` passed, stored, returned or captured in `__init__` before every field is assigned, or in `__super__(...)`'s arguments: `'self' is used before every field is assigned: 'start' is not assigned yet` |
 | `__init__` with a result type | `fn __init__() -> Str`: `'__init__' cannot have a result type: it sets up 'self' and returns nothing` |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |
-| `__super__(…)` not first | Derived `__init__` body does not begin with `__super__(…)` |
+| `__super__(…)` missing | A derived `__init__` whose base has one (other than the default one of a class with no fields) does not begin with `__super__(…)`: `'__init__' in class 'Dog' must call '__super__' as its first statement because its superclass 'Animal' has an '__init__'` |
+| `__super__(…)` twice or not first | A `__super__(…)` call that is not the first statement of `__init__`: a second one, after the first or under an `if` or a loop, or one after another statement: `'__super__' may be called only once, as the first statement of '__init__'`, at the call |
 | `__super__(…)` outside `__init__` | `__super__(…)` called in any method other than `__init__` |
 | Direct call to `destroy` | User code calls `obj.destroy()` explicitly |
 | `weak` field of the wrong type | `weak f: Node;` (not optional) or `weak f: int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
@@ -1175,6 +1186,7 @@ created for that argument list. See [Generics](13-generics.md).
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |
 | Multiple bases | More than one `:` clause |
+| Superclass that is not a class | `class A : S` with `S` a struct, an enum, a builtin type, a function, a generic struct, enum or function named without type arguments or a generic class's own type parameter: `superclass 'S' of class 'A' is a struct, not a class` (`is a generic struct, not a class`, and so on); a generic class named without type arguments: `superclass 'GC' of class 'H' is a generic class: a superclass cannot be generic`; a trait: `superclass 'T' of class 'C' is a trait, not a class: a class implements a trait with 'impl T for C { ... }'`; a name that is none of these: `superclass 'Nope' of class 'A' is not defined`. The class is still declared, without the superclass: where it, or a subclass of it, is given for another class, one that can have subclasses (`x: Animal = A()`, an argument, a return value, an array element), the mismatch is not reported again. One it could not have kept its superclass for still is: given for a type that is not a class or for a final one (`s: Str = A()`), the other way round (`a: A = Animal()`), or an `A?` given for a class. A superclass of a module whose import failed (`class P : m::Dog`) is a follow-on of the import's error, and so are those mismatches of `P` |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
 | Private member used outside its class | `c.__count`, `c.__bump()`, `self.__count` in a subclass, or in a free function: `'__count' is private to 'Counter': it is reachable only from its own methods` |
 | Module-private member used by an importer | `c._cache` or `m::Counter::_make()` outside the module that declares `Counter`: `'_cache' of 'Counter' is private to module 'm'` |

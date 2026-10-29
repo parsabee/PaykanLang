@@ -979,6 +979,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`look(c.p, reset(c))`) or a function value, a write before the borrow or after it has
     ended (`add(look(p, 0), bump(p))`), another field (`look(two.x, bump(two.y))`), a
     lambda's body, and the operands of `==`; a slice's copy is warned about (see Added).
+- **Stability sweep: classes, generics and names across modules.**
+  - `__super__(...)` may be called only once, as the first statement of `__init__`: a
+    second call, after the first or under an `if` or a loop (`__super__(1); if b {
+    __super__(2); }`), is an error at that call, `'__super__' may be called only once, as
+    the first statement of '__init__'`.  It was accepted, and its stores of the
+    superclass's fields leaked what the first call had stored (2 blocks, 35 bytes for one
+    `Str` field), on every path.  A call after another statement is the same error, at the
+    call, also when the superclass's `__init__` does nothing (which was accepted); where it
+    has one it was `'__super__' must be the first statement of '__init__' in class 'C'`, at
+    the method (docs/language/05-classes.md, "Inheritance" and "Semantic Checks").
+  - **Breaking:** a type parameter names no field, parameter or local of its declaration, as
+    a type's name names none anywhere (docs/language/13-generics.md, "Type Parameters Are
+    Types"; 02-basics.md, "Builtin Names Are Reserved").  A local named like one was already
+    an error (`fn h<T>(y: T) -> int { T = 3; return T; }` is `'T' is a type name and cannot
+    be used as a variable`), while a field and a parameter were accepted: `class D<T> { T:
+    int; v: T; }` and `fn g<T>(T: int, y: T) -> int { return T; }` ran.  The field is now
+    `'T' is a type name and cannot be used as a field name`, at the field, once (of a class,
+    a struct or an enum's variant, whether or not it is instantiated), and the parameter
+    `... as a parameter name` for each instantiation, a method's, an `impl` method's and a
+    `static fn`'s too.  An `impl` block's type parameters are the names it gives them: in
+    `impl R<U>`, `U` is the type parameter, in its methods' parameters and bodies, and `T`
+    an ordinary name (a body there was checked with the class's `T`, so `fn x(T: int) -> int
+    { T = T + 1; return T; }` was an error and `U = 1;` was not).  A template's declarations
+    are checked with its own type parameters, not those of a generic body that instantiates
+    it: `g<int>(3, 4)` inside `fn outer<T>`, with `fn g<U>(T: int, u: U)`, was `'T' is a
+    type name ...`.  `samples/codegen/89_type_parameter_names.pkn` runs the names these
+    leave free.
+  - An instantiation requested inside an instantiation of its own template, directly or
+    through other templates (a method's or a function's body included), that grows its
+    type arguments from that one's has a name of at most 4,096 characters as diagnostics
+    spell it, a new limit (docs/grammar.md section 9, docs/language/13-generics.md, "How
+    Errors Are Reported").  It grows them when one of its arguments holds one of that
+    instantiation's, nested more deeply, and coming back the same way would deepen it
+    again (`C<(T, T)>` in `C<T>`, `P<B, (A, A)>` in `P<A, B>`); what an argument holds is
+    followed through the type arguments written at each request on the way, and an
+    inferred one may hold any.  A template instantiating itself with an ever-growing
+    argument ran on until the depth limit (16):
+    `class C<T> { v: T; n: C<(T, T, T)>?; }` with `C<int>(1, None)` was still checking
+    after 5 minutes (28 minutes and more were seen), and `n: C<(T, T)>?` stopped after
+    1.5 s, its notes 900 KB of names.  The instantiation whose name passes the limit is now
+    the one error, `instantiating 'C<((((((int, int, int), (int, int, int), (int, int,
+    int)), (...' inside an instantiation of 'C' exceeds the maximum instantiation name
+    length (4096 characters; this one has 4374); a generic class may not instantiate itself
+    with an ever-growing type argument` (the name cut to its first 60 characters), reached
+    in 0.01 s; so it is for a struct, an enum, a function and two templates instantiating
+    each other.  Templates that instantiate one another without coming back to one are
+    held to the depth only, whatever their names: ten classes each holding the next with a
+    tuple of three of its argument (`class L0<T> { v: T; n: L1<(T, T, T)>?; }`, and so on)
+    are accepted, the last name 354,296 characters long.  So is a template instantiating
+    itself with arguments that do not grow, of thousands of characters: swapped or
+    repeated (`fn swap() -> Pair<B, A>` and `fn dup() -> Pair<A, A>` in `impl Pair<A, B>`,
+    or `g<B, A>` in `fn g<A, B>`), grown from one it keeps (`fn grow() -> Pair<A, (A,
+    A)>`, whose own is itself), or holding none of its own: `class X<T> { v: T; c:
+    L0<int>?; }` with the chain's eighth class holding an `X<T>`, which comes back to `X`
+    with a 13,122-character argument made from `L0<int>`, in a field or a method's body.
+    The ten classes took 1.3 s to check, eleven 10.8 s and twelve 118 s, as each type a
+    template is given (an argument put into it, a signature written back) was resolved
+    again, element by element, and each element's description, holding the whole
+    instantiation's name, built for its diagnostics.  A tuple, optional or function type
+    resolved once is now itself at once, and the descriptions are built only for an
+    error: 0.03 s, 0.07 s and 0.2 s.  The longest
+    instantiation name in the standard library is 26 characters, in the samples, the
+    stdlib tests and the documentation's examples 55.
 
 ### Removed
 
@@ -1385,6 +1448,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     self.k).n`, which `self.k.n` is too.  A conditional's struct or tuple is still a
     temporary, whose field or element no `inout` result is (docs/language/03-functions.md,
     "Borrowed results").
+- **Stability sweep: classes, generics and names across modules.**
+  - A superclass that names something other than a class says what it is: `class A : S`
+    with `S` a struct was `superclass 'S' of class 'A' is not defined`, and so were an
+    enum, a trait, a builtin type (`class D : int`), a function, a generic struct, enum,
+    class or function named without type arguments, a generic class's own type parameter
+    (`class K<U> : U`), and an imported struct or enum.  It is now `... is a struct, not a
+    class` (`an enum`, `a builtin type`, `a function`, `a generic struct`, `a type
+    parameter`, ...), for a generic class `... is a generic class: a superclass cannot be
+    generic`, and for a trait `superclass 'T' of class 'C' is a trait, not a class: a
+    class implements a trait with 'impl T for C { ... }'` (`impl T for Box<T>` for a
+    generic class); a name that is none of these is still `not defined`
+    (docs/language/05-classes.md, 06-traits.md, 11-structs.md and 13-generics.md,
+    "Semantic Checks").
+  - A superclass with type arguments, `class Full : Half<int>` or `class Full<T> :
+    Half<T>`, was a bare `unexpected '<'; expected '{' to open the class body`, and the
+    parse of the class stopped there, so its body's own syntax errors went unreported.
+    It is now `a superclass cannot be generic: a class, generic or not, extends a class
+    that has no type parameters`, at the `<`; the type arguments are read past and the
+    body is parsed.  The AST interchange reader gives the same error for a superclass
+    such as `"Half<int>"`, where it said the name was not an identifier
+    (docs/language/13-generics.md, docs/grammar.md, docs/plugins/ast-format.md).
+  - The warning that a method never changes `self` and should be a `view fn` was given for
+    a generic class's or struct's method when one instance could be one, though another
+    could not, so following it broke the program: with `impl Box<T> { fn get() -> T =>
+    self.v; }` used as `Box<int>` and `Box<Str>`, `Box<int>` gave `'get' never changes
+    'self': make it a 'view fn' ...`, and `view fn get` was then `'self' is read-only in
+    'view fn get', so part of it can only be returned as a 'view'` for `Box<Str>`.  The
+    method of a template is now one for all its instances, warned about once and only
+    when every instance could make it a `view fn`, whatever its type arguments: one that
+    returns part of `self` holding a type argument (`self.v` of a `T` field), or keeps it
+    in a local, an array or a tuple (`let x = self.v; return x;`, `[self.v, self.v]`,
+    `(self.v, 1)`, where a `view fn` is `'self' is read-only in 'view fn get'; it cannot be
+    stored ...` for `Box<Str>`), or calls such a method on `self`, gets no warning, also in
+    a module that makes only a `Box<int>`, where following the warning broke an
+    importer's `Box<Str>`
+    (docs/language/05-classes.md, "Methods that don't change self").
+  - A module of the program named like a library module could not be imported next to it,
+    even with both imports aliased: with a `math.pkn`, `import ::math as cmath; import math
+    as mine;` was `import of module 'math': qualifier 'math' already names module '::math'
+    (give one of them an alias with 'as')`, and every `mine::` use another error.  A system
+    import's full path binds `math` only when no other import of the file binds that name to
+    another module (OD-8): its full path is `::math`, which binds no qualifier code can write
+    (`::math::sqrt` does not parse) and so never clashes, so the two
+    imports go together, and `math::` names the program's module, as it does with `import
+    ::math as cmath; import math;`.  The path without the `::` still names the library's
+    module when nothing else claims it (`collections::List<int>()` after `import
+    ::collections as c;`), and an alias may now take that name from it (`import ::io as
+    math; import ::math as m;`).  A plain `import ::math;` binds `math` as its qualifier and
+    still clashes with a module `math`, and the uses of the clashing import's other
+    qualifiers are no longer reported again, as for an import that fails
+    (docs/language/15-modules.md, "Aliased Import", "System Imports" and "Semantic
+    Checks").
+  - After a type-name clash with an imported type, the uses of the name were taken for the
+    other module's type and reported again.  A declaration named like a type an import
+    reached (`enum ErrorCode { A, B }` next to `import ::io;`, which imports `::error`'s
+    `ErrorCode`) is now the one error: a use of the name in the file means that declaration
+    and is not reported (it gave `enum 'ErrorCode' has no variant 'A'` for each variant
+    used, and for a class, struct, function or tagged enum named `Error`, `operator '+' is
+    not defined for types 'ErrorCode' and 'int'` or `call to undeclared function 'Error'`,
+    `'Error::make'`, `'Error::A'`).  An import whose module declares a type another module
+    already gave the program reports each such type and then imports nothing of that
+    module, so its other types, its functions and its methods are follow-ons too: `e::mk()`
+    returning the module's `Error` was taken to return `::error`'s, so `e::mk().code + 1`
+    was `operator '+' is not defined for types 'ErrorCode' and 'int'` (docs/language/
+    15-modules.md, "Type names are global" and "Semantic Checks").
+  - A class whose superclass is in error (`class Puppy : Nope {}`, or `class Puppy : d::Dog
+    {}` with `lib::d` an import that failed for an error of its own) is declared without it,
+    and each place it then met another class added a type mismatch: `x: Animal = Puppy()`
+    was `initializer of type 'Puppy' does not match declared type 'Animal' for variable
+    'x'`, and an assignment, an argument (a method's too), a return value, an optional and
+    an array element gave their own.  Such a class, or a subclass of it, given for a class
+    that can have subclasses is now a follow-on of that error, which is the one reported
+    (the exit status is still 1).  A mismatch it could not have kept its superclass for is
+    still reported: given for a type that is not a class or for a final one (`s: Str =
+    Puppy()`), the other way round (`p: Puppy = Animal()`), or as an optional for a class;
+    so is the mismatch of a class in error whose superclass is intact (`class Puppy :
+    Animal { x: Nope; }` given for a `Cat`) (docs/language/05-classes.md, "Semantic
+    Checks").
+  - A clash between two templates' instantiations of one name (type names are global,
+    OD-9 b) was reported where the second was made, so a program's own `_Node<int>`,
+    instantiated before a `collections::Stack<int>`, gave three errors in the library's
+    collections.pkn, one for each use of `_Node<T>` in `LinkedList<int>`,
+    and in the other order one error with no word of the other template.  It is now one
+    error, at the program's own instantiation, `instantiation '_Node<int>' of '_Node'
+    conflicts with the instantiation '_Node<int>' of '::collections::_Node'`, with notes at
+    the other template's declaration and at its instantiation and the requests that led to
+    it, in either order; a later clash of the name is not reported again.  An instantiation
+    clashing with one an import gave the program (`Result<Str, err::Error>` next to
+    `import ::io;`) names its template and has a note at the import it came through, and
+    at the other template's declaration when the program sees it.  docs/stdlib/index.md
+    and docs/language/02-basics.md said a program may declare its own `Result`: they now
+    say that the program's instantiations of it are global too, and the first lists the
+    names `::collections` reserves,
+    `_Node`, `_Entry`, `_Table`, `_Heap` and `_Pieces` (docs/language/13-generics.md,
+    "Modules" and "Semantic Checks").
+  - A type argument that does not meet its parameter's bound where the bound can be
+    checked only once the program's `impl` blocks are known (a class's or a struct's field,
+    `class Holder { m: collections::HashMap<Foo, int>; }`) was reported, and then the
+    instantiation's bodies were checked anyway: `'Foo' does not implement trait 'Hashable',
+    which 'collections::HashMap' requires of 'K'` came with nine more errors in
+    collections.pkn (`no method 'hash' on type 'Foo'` seven times, and `_Table`'s bound
+    twice), and a `Box<int>` of `struct Box<T: Named>` with `method call on non-class type
+    'int'` from its method's body.  The bound error is now the one error, as it is when the
+    bound is checked at the request: the bodies of such an instantiation are not checked,
+    nor are those of an instantiation only it uses (`Inner<Foo>` for its field `i:
+    Inner<T>?`, which gave `no method 'h' on type 'Foo'`, in the library's file when the
+    template is another module's), and the bound of an instantiation made in one is a
+    follow-on.  An instantiation the program also uses itself, in a declaration or in any
+    body (a generic function's or a generic class's method included), is checked as before;
+    when only a body checked after it asks for it, its errors come after that body's.  The
+    order of the other diagnostics is unchanged (the bounds were already checked before
+    every body)
+    (docs/language/13-generics.md, "How generic code is checked"; 06-traits.md, "Semantic
+    Checks").
+  - Checking that a struct, or an enum's variant, does not hold itself in place looked into
+    an enum once for each path to it, so a graph of enums each with three variants holding
+    the one before (`enum E1 { A(x: E0), B(y: E0), C(z: E0) }`, and so on) took three
+    times as long for each enum more: 13 of them 0.45 s under `--check-only`, 15 4 s, 16
+    13.3 s, and 20 more than 2 minutes.  Each question looks into a type once now: 20 enums
+    take 0.01 s, and 400 take 0.14 s.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

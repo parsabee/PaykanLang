@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "ASTClone.h"
 #include "ASTContext.h"
 #include "ASTVisitor.h"
 #include "DiagEngine.h"
@@ -13,9 +14,11 @@
 #include "paykan/pir/PIR.h"
 #include "paykan/pkm/Interface.h"
 
+#include <array>
 #include <cassert>
 #include <deque>
 #include <filesystem>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <set>
@@ -24,6 +27,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -275,7 +279,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     std::string MethodName;  // method currently being checked (empty = none)
     bool ViewMethod = false; // it is a `view fn`: `self` is read-only
     bool SuperInitRequired = false; // __init__ must call __super__
-    bool SuperInitCalled = false;   // __super__ has been called
+    /// The `__super__(...)` that is `__init__`'s first statement: the one
+    /// call it may make (null when it does not begin with one).
+    const ast::CallExpr *FrontSuperCall = nullptr;
   };
 
   ClassContext *CurrentClassCtx = nullptr;
@@ -289,6 +295,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     bool ChangesSelf = false; // writes `self`, calls a changing method on
                               // something reached through it, or returns
                               // part of it for its caller to change
+    /// Returns or stores a copy of part of `self` that holds a type
+    /// argument (`self.v` of a `T` field): another instance's would share
+    /// it, which a `view fn` cannot, so whether the template's method could
+    /// be one depends on the instance.
+    bool CopiesTypeArgument = false;
     std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
   };
   std::deque<MethodUse> MethodUses; // stable addresses for CurrentMethodUse
@@ -441,7 +452,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   //     so the lowering materialises the `None` singleton for a null box;
   //   * a primitive flowing into an optional primitive slot (`int` ->
   //     `int?`) is marked with the optional so the lowering boxes it.
+  // A class that lost its superclass (or a subclass of one) against a class
+  // that can have subclasses is not checked: the error that lost it the
+  // superclass was reported, and the mismatch counts as a suppressed
+  // follow-on (lostSuperclassMismatch, SW-32).
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
+  /// Whether @p srcTy, which is not assignable to @p dst, might be had each
+  /// class on its class's superclass chain kept its superclass (one lost
+  /// it, SuperclassLost): @p dst is a class that can have subclasses, or an
+  /// optional of one, and @p srcTy a class, or an optional of one into an
+  /// optional.
+  bool lostSuperclassMismatch(ast::Type *dst, ast::Type *srcTy) const;
 
   // An array or tuple literal flowing into a slot whose element types it
   // must take: `[1, 2]` into `int?[]` and `(1, "a")` into `(int?, Str)` box
@@ -473,17 +494,56 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static ast::ClassType *findLowestCommonAncestor(ast::ClassType *a,
                                                   ast::ClassType *b);
 
+  /// What a type resolveType resolves is, the start of its diagnostics
+  /// ("field 'n' in class 'L1<int>'", and " element 2" for that type's
+  /// tuple element): its pieces are joined only when one is reported, as
+  /// an instantiation's name in them can be long (SW-04).  It lives for a
+  /// resolveType call: a nested type's points at its parent's, and a piece
+  /// views text that outlives the call.
+  class TypeContext {
+  public:
+    // A description whole; implicit, so a call site passes a string.
+    TypeContext(std::string text) : Text(std::move(text)) {}
+    TypeContext(const char *text) : Text(text) {}
+    /// @p pieces, joined.
+    TypeContext(std::initializer_list<std::string_view> pieces)
+        : TypeContext(nullptr, pieces) {}
+    /// @p parent's description, then @p pieces.
+    TypeContext(const TypeContext &parent,
+                std::initializer_list<std::string_view> pieces)
+        : TypeContext(&parent, pieces) {}
+    TypeContext(const TypeContext &) = delete;
+    TypeContext &operator=(const TypeContext &) = delete;
+    std::string str() const;
+
+  private:
+    TypeContext(const TypeContext *parent,
+                std::initializer_list<std::string_view> pieces);
+    static constexpr size_t kMaxPieces = 7;
+    const TypeContext *Parent = nullptr;
+    std::string Text;
+    std::array<std::string_view, kMaxPieces> Pieces{};
+    size_t NumPieces = 0;
+  };
   // Resolve a declared AST Type* to its canonical equivalent from
   // ASTContext (e.g. a BuiltinType(Int) node -> Ctx.getIntTy(), a
   // ClassType("Str") -> Ctx.getStrTy()).  Returns nullptr and
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
-                         const std::string &context);
+                         const TypeContext &context);
   // resolveType for what holds a value (a variable, a parameter, a field):
   // `void` has none, so it is reported (`<context> cannot have type
   // 'void'`) and nullptr returned.
   ast::Type *resolveValueType(ast::Type *ty, ast::SourceLocation loc,
-                              const std::string &context);
+                              const TypeContext &context);
+  /// The tuple, optional and function types resolveType has made, each
+  /// checked whole, whatever the context: given again (a type argument put
+  /// into a template, a signature written back), one is itself at once,
+  /// without walking its elements again; an argument nested N deep has
+  /// 3^N of them, and was walked once per level (SW-04).  One whose check
+  /// waits for the structs (DeferredOptionalChecks) is not, so that it is
+  /// checked again once they are known.
+  std::unordered_set<const ast::Type *> ResolvedTypes;
   // False (after reporting it) when @p ty, the type of the value a variable
   // @p name is declared with, is `void`: the expression produces none.
   bool checkNotVoidValue(ast::Type *ty, const std::string &name,
@@ -936,6 +996,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
   StringMap<ImportQualifier> ImportQualifiers;
 
+  /// The qualifiers this file's imports claim, before any is processed ->
+  /// the module each names: every import's alias or last path segment, and
+  /// the full path of an import from the source root.  A system import's
+  /// full path is its canonical name (`::math`), which no other import
+  /// spells, so it claims nothing: it binds the path without the `::`
+  /// (`math::sqrt` after `import ::math as m;`) only when no import claims
+  /// that name for another module (OD-8), as `import math as mine;` does.
+  StringMap<std::string> ClaimedImportQualifiers;
+
   /// Qualifiers (alias or last path segment, and the full module path) of the
   /// imports that failed -- a module that was not found, did not parse, had
   /// errors of its own or closes an import cycle.  The failure was reported
@@ -947,6 +1016,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// True (counting a suppressed follow-on) if @p name is a qualified name
   /// under a failed import's qualifier: its use must not be reported.
   bool isFailedImportUse(std::string_view name);
+
+  /// True (counting a suppressed follow-on) if @p name, or the type part of
+  /// `name::member`, is an imported type's name that a declaration of this
+  /// module took as well (SW-33): the declaration's error was reported, and
+  /// a use of the name here means that declaration, not the imported type.
+  bool isImportClashUse(std::string_view name);
 
   /// Errors reported inside imported modules, through their own DiagEngine
   /// (with their own file name and source lines) and so not counted by Diags.
@@ -1203,6 +1278,9 @@ private:
                     const std::string &fullModulePath,
                     const std::string &moduleName, ast::SourceLocation loc);
 
+  /// Record the qualifiers @p imports claim (ClaimedImportQualifiers).
+  void claimImportQualifiers(const std::vector<ast::ImportDecl *> &imports);
+
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);
 
@@ -1269,6 +1347,15 @@ private:
   /// @p e, of type @p ty, is being returned: not a `view` that shares what
   /// it holds, though part of `self` may be.
   bool checkViewNotReturned(const ast::Expr *e, const ast::Type *ty);
+  /// Whether the place @p e, part of `self` in a method of an instance of
+  /// a generic class or struct, holds a type argument: it is `self`, or
+  /// starts with a field whose type in the template names a type parameter.
+  bool holdsTypeArgument(const ast::Expr *e);
+  /// @p e, a value that shares nothing here, is copied (returned or
+  /// stored): in a method that is not a `view fn`, note when it is (or
+  /// either branch of a conditional is) part of `self` that holds a type
+  /// argument (MethodUse::CopiesTypeArgument).
+  void noteTypeArgumentCopy(const ast::Expr *e);
   /// While a `match` arm binds a name: whether the subject is a `view`, so
   /// that the name is one too.
   bool MatchSubjectIsView = false;
@@ -1483,6 +1570,10 @@ private:
 
   /// True if @p ct or one of its superclasses is in ErroneousClasses.
   bool isErroneousClass(const ast::ClassType *ct) const;
+  /// The classes registered on Obj because their superclass is undefined,
+  /// rejected, or closes a cycle: what they would be a subclass of is not
+  /// known.  A subset of ErroneousClasses.
+  StringSet SuperclassLost;
 
   /// Resolve a free function's signature (return + parameter types) and
   /// register it in the function table.  Run as a forward-declaration pass
@@ -1550,6 +1641,16 @@ private:
   /// a class with no fields, and so are its superclasses'.  An `__init__` of
   /// a subclass need not call it.
   bool doesNothing(const ast::ClassType *ct) const;
+
+  /// Report that @p cls's superclass @p super, which names no class, is not
+  /// defined, or what it is instead: a struct, a trait, a builtin type, a
+  /// type parameter of @p tmpl (the template @p cls is an instance of, or
+  /// null), ...  A private import's name, or a failed import's, is not
+  /// reported again.
+  void reportUndefinedSuperclass(const std::string &super,
+                                 const std::string &cls,
+                                 const ast::ClassDecl *tmpl,
+                                 ast::SourceLocation loc);
 
   /// `x: int, s: Str`: the parameters of @p fn, for a diagnostic.
   static std::string paramList(const ast::FuncDecl *fn);
@@ -1645,13 +1746,21 @@ private:
   /// Instantiate struct template @p name with canonical @p args, or return
   /// the cached instantiation.  Registers the struct (stub, fields, `impl`
   /// methods, constructor) immediately and queues its bodies.  Returns
-  /// nullptr after reporting an error.
+  /// nullptr after reporting an error.  @p written is the type application
+  /// whose written arguments @p args are (writtenArgParams), if any.
   ast::StructType *instantiateStruct(const std::string &name,
                                      const std::vector<ast::Type *> &args,
-                                     ast::SourceLocation loc);
+                                     ast::SourceLocation loc,
+                                     const ast::ASTNode *written = nullptr);
   /// Whether a value of @p ty holds a @p target in place: it is one, or a
   /// tuple or a struct holding one.
   static bool holdsStruct(const ast::Type *ty, const ast::StructType *target);
+  /// holdsStruct, but not looking into the aggregates in @p seen, which
+  /// hold no @p target, and adding those it looks into: one reached by
+  /// many paths (each variant of an enum holding the same enum) is looked
+  /// into once, where the paths to the innermost of n such enums are 3^n.
+  static bool holdsStruct(const ast::Type *ty, const ast::StructType *target,
+                          std::unordered_set<const ast::Type *> &seen);
   /// Instantiated structs in creation order (injectInstantiations).
   std::vector<ast::StructDecl *> InstantiatedStructDecls;
   std::vector<ast::StructDecl *> ForeignInstantiatedStructDecls;
@@ -1681,10 +1790,11 @@ private:
   /// Instantiate enum template @p name with canonical @p args, or return
   /// the cached instantiation.  Registers the enum and its variants' fields
   /// (the structs `Maybe<int>::Just`) immediately.  Returns nullptr after
-  /// reporting an error.
+  /// reporting an error.  @p written as for instantiateStruct.
   ast::EnumType *instantiateEnum(const std::string &name,
                                  const std::vector<ast::Type *> &args,
-                                 ast::SourceLocation loc);
+                                 ast::SourceLocation loc,
+                                 const ast::ASTNode *written = nullptr);
   /// The module's own instantiations, in creation order: they join the
   /// module's enums (injectInstantiations), which its interface exports.
   std::vector<ast::EnumDecl *> InstantiatedEnumDecls;
@@ -1716,7 +1826,7 @@ private:
   /// Report `inner?` (the @p context at @p loc) when @p inner, a tuple or a
   /// struct, is more than kOptionalValueLimit bytes.
   bool checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
-                              const std::string &context);
+                              const TypeContext &context);
   /// Split the canonical instantiation name @p name (`Tmpl<arg1, arg2>`)
   /// into the template's name and its arguments, resolved in this context;
   /// false when it is not one or an argument does not resolve.
@@ -1735,6 +1845,14 @@ private:
   /// template.
   std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>>
       TemplateImpls;
+  /// The type parameters of the `impl` block an instantiation's method or
+  /// `static fn` was copied from, by that block's own names (`impl Box<U>`):
+  /// its declaration and its body are checked with those.
+  std::unordered_map<const ast::FuncDecl *,
+                     const std::vector<const std::string *> *>
+      ImplMethodTypeParams;
+  /// Record the methods of @p copy, an instantiation's copy of @p im, there.
+  void noteImplTypeParams(const ast::ImplDecl *im, const ast::ImplDecl *copy);
   /// Set once checkImplDecls has run (see PendingTraitImpls).
   bool ImplsChecked = false;
 
@@ -1894,6 +2012,17 @@ private:
   /// other class.
   const InstantiationInfo *instantiationInfo(ast::ClassType *ct);
 
+  /// A template one of whose instantiations is in progress, and that
+  /// instantiation's name (interned, as its copy of the template has it).
+  struct InstantiatingTemplate {
+    const ast::Decl *Template;
+    const std::string *Name;
+    /// Which type parameters of the instantiation before it, the one it was
+    /// requested in, each of its type arguments names as written at the
+    /// request (writtenArgParams); null when that is not known: inferred,
+    /// or asked for from elsewhere.
+    const std::vector<uint64_t> *ArgParams;
+  };
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {
     ast::ClassDecl *Class = nullptr; // exactly one of Class / Func / Struct
@@ -1912,6 +2041,9 @@ private:
     /// The file RequestLoc is in (see InstantiationFrame).
     std::string RequestFile;
     const std::vector<std::string> *RequestLines = nullptr;
+    /// The templates its body is checked inside: InstantiatingTemplates
+    /// where it was requested, then its own.
+    std::vector<InstantiatingTemplate> Templates;
   };
   std::vector<PendingInstantiation> PendingInstantiations;
   /// Declare the `static fn`s of the `impl` blocks of the instantiation
@@ -1936,6 +2068,35 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// Where each class, struct and enum instantiation made here was first
+  /// requested, by instantiation name: its template, the request, and the
+  /// instantiations it was requested in (InstantiationStack then).  Type
+  /// names are global, so another template's instantiation of the name
+  /// clashes with it (OD-9), and the clash is shown at both (SW-28).
+  struct InstantiationSite {
+    const ast::Decl *Template = nullptr;
+    InstantiationFrame Request;
+    std::vector<InstantiationFrame> Frames;
+  };
+  StringMap<InstantiationSite> InstantiationSites;
+  /// Records @p request, of an instantiation of @p tmpl, in
+  /// InstantiationSites.
+  void recordInstantiationSite(const ast::Decl *tmpl,
+                               const InstantiationFrame &request);
+  /// The instantiation names whose clash was reported: once per name.
+  StringSet ReportedInstantiationClashes;
+  /// Reports that @p instName, the instantiation of @p tmpl requested at
+  /// @p loc, has the name of another template's instantiation or of an
+  /// imported type, once per name (a later clash of the name is a suppressed
+  /// follow-on).  The error is at the request this module's own code made
+  /// (the other instantiation's, when only it is one), with notes at the
+  /// other template's declaration and its instantiation's request; for an
+  /// imported type, at the import it came in through.
+  void reportInstantiationClash(const ast::Decl *tmpl,
+                                const std::string &instName,
+                                ast::SourceLocation loc);
+  /// The import of this module each imported type came in through, by name.
+  StringMap<ast::SourceLocation> ImportedTypeImports;
   /// A bound check waiting for TraitImplsKnown.
   struct PendingBoundCheck {
     const ast::Decl *Template;
@@ -1949,6 +2110,32 @@ private:
     std::vector<InstantiationFrame> Frames;
   };
   std::vector<PendingBoundCheck> PendingBoundChecks;
+  /// The instantiations whose deferred bound check failed (KF-6): made
+  /// before the check could run, they would not have been made after it,
+  /// so their bodies are not checked, and a bound check of an instantiation
+  /// made in one of them is a follow-on.  By instantiation name.
+  StringSet FailedBoundInstances;
+  /// Who asked for each instantiation before the bounds could be checked
+  /// (TraitImplsKnown false): the innermost instantiation in progress at
+  /// the request, or "" outside one.  By instantiation name.
+  StringMap<StringSet> EarlyRequesters;
+  /// The instantiations of EarlyRequesters asked for again afterwards
+  /// outside every instantiation made only for failed bounds.
+  StringSet LateRequested;
+  /// Note a request, here, of the instantiation @p instName.
+  void noteInstantiationRequest(const std::string &instName);
+  /// Whether the instantiation @p instName was made only for those whose
+  /// deferred bounds failed: each request of it was made inside one of
+  /// them, or inside one made only for them.  Its bodies are a follow-on.
+  bool madeOnlyForFailedBounds(const std::string &instName);
+  /// Whether @p instName was asked for outside each of those (the
+  /// instantiations in @p visiting, on the way, not counting).
+  bool requestedFreely(const std::string &instName, StringSet &visiting);
+  /// The name the instantiation of @p tmpl, named @p name where it was
+  /// requested, with @p args has: InstantiationFrame::Name and
+  /// PendingInstantiation::Name of it.
+  std::string instanceNameOf(const ast::Decl *tmpl, const std::string &name,
+                             const std::vector<ast::Type *> &args);
   /// Whether every struct's fields are known (populateStructs): until then
   /// a struct's size is not, and the checks of the optionals resolved so far
   /// (a class's fields and signatures) wait in DeferredOptionalChecks.
@@ -1982,10 +2169,74 @@ private:
   };
   std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
+  /// The longest name an instantiation made inside an instantiation of its
+  /// own template that would make it again with ever deeper type arguments
+  /// may have, as diagnostics spell it (OD-2): a longer one is the
+  /// ever-growing type argument the depth limit is for, stopped before the
+  /// names grow to 2^16 or 3^16 types (SW-04).
+  static constexpr size_t kMaxGrowingInstantiationName = 4096;
+  /// The templates of the instantiations in progress here, outermost
+  /// first: those being declared or populated, and, in an instantiation's
+  /// body, the ones it was requested inside (PendingInstantiation::Templates).
+  std::vector<InstantiatingTemplate> InstantiatingTemplates;
+  /// Which type parameters the type arguments written in the copies of
+  /// the instantiations name (ASTCloner::recordTypeArgs).
+  ast::WrittenTypeArgMap WrittenTypeArgs;
+  /// Which type parameters of the innermost instantiation in progress the
+  /// type arguments of @p written, the type application a request was
+  /// written as, name: null when not known (no type application, or one
+  /// of another copy's that names a type parameter).
+  const std::vector<uint64_t> *
+  writtenArgParams(const ast::ASTNode *written) const;
+  /// How deeply each type argument of the instantiation name @p name nests
+  /// its types: the most parentheses and angle brackets open at once in
+  /// it.  An argument built from another (`(T, T)` of `T`) nests it once
+  /// more.
+  static std::vector<size_t> argumentNestings(const std::string &name);
+  /// Whether the instantiation @p instName, of the template of
+  /// InstantiatingTemplates[@p anchor] and requested with @p argParams
+  /// (writtenArgParams) inside it, would make it ever again with deeper
+  /// type arguments: one of its arguments holds one of that instantiation's
+  /// nested more deeply, and, through the arguments the instantiations
+  /// between pass on, goes back to where it was taken from.  By the same
+  /// way from @p instName, it deepens again.
+  bool argumentsGrow(size_t anchor, const std::string &instName,
+                     const std::vector<uint64_t> *argParams) const;
+  /// False, after reporting it, when the instantiation @p instName of
+  /// @p tmpl, requested at @p loc with @p argParams inside an
+  /// instantiation of @p tmpl (InstantiatingTemplates, the innermost one),
+  /// grows its type arguments from that one's (argumentsGrow) and has a
+  /// name over kMaxGrowingInstantiationName characters.
+  bool checkGrowingInstantiation(const ast::Decl *tmpl,
+                                 const std::string &instName,
+                                 const std::vector<uint64_t> *argParams,
+                                 ast::SourceLocation loc);
 
-  /// Type parameter names of the instantiation whose body is being checked
-  /// (nullptr outside one).  Used to diagnose a type parameter used as a value.
+  /// Type parameter names of the instantiation whose body or declarations
+  /// are being checked (nullptr outside one).  Used to diagnose a type
+  /// parameter used as a value, or as the name of a field, a parameter or a
+  /// local (isTypeNameForVariable).
   const StringSet *CurrentTypeParams = nullptr;
+  /// While alive, CurrentTypeParams is @p params: a template's declarations
+  /// (its fields, its parameters, its methods' and `static fn`s') are
+  /// checked with its own type parameters, not those of the generic body
+  /// that instantiates it.
+  class TypeParamScope {
+    Sema &S;
+    const StringSet *Saved;
+    StringSet Params;
+
+  public:
+    TypeParamScope(Sema &s, const std::vector<const std::string *> &params);
+    ~TypeParamScope() { S.CurrentTypeParams = Saved; }
+    TypeParamScope(const TypeParamScope &) = delete;
+    TypeParamScope &operator=(const TypeParamScope &) = delete;
+  };
+  /// Open in @p scope a TypeParamScope of the names of the `impl` block
+  /// @p fn was copied from, when it is an instantiation's (see
+  /// ImplMethodTypeParams); otherwise leave it empty.
+  void implTypeParamScope(std::optional<TypeParamScope> &scope,
+                          const ast::FuncDecl *fn);
 
   /// Classes constructed inside each class's method bodies (by name).  Used to
   /// order instantiated classes for the lowering: a constructor must be
@@ -2097,17 +2348,19 @@ private:
   /// Instantiate class template @p name with canonical @p args, or return the
   /// cached instantiation.  Registers the class (stub, fields, methods,
   /// constructor) immediately and queues its bodies.  Returns nullptr after
-  /// reporting an error.
+  /// reporting an error.  @p written as for instantiateStruct.
   ast::ClassType *instantiateClass(const std::string &name,
                                    const std::vector<ast::Type *> &args,
-                                   ast::SourceLocation loc);
+                                   ast::SourceLocation loc,
+                                   const ast::ASTNode *written = nullptr);
 
   /// Instantiate function template @p name with canonical @p args, or return
   /// the cached instantiation.  Returns the instantiation's function name, or
-  /// "" after reporting an error.
+  /// "" after reporting an error.  @p written as for instantiateStruct.
   std::string instantiateFunction(const std::string &name,
                                   const std::vector<ast::Type *> &args,
-                                  ast::SourceLocation loc);
+                                  ast::SourceLocation loc,
+                                  const ast::ASTNode *written = nullptr);
 
   /// Names of the module's own concrete classes (set by
   /// registerGenericTemplates) and of every class whose fields and method
@@ -2204,6 +2457,10 @@ private:
 
   /// Check the bodies of every pending instantiation (transitively).
   bool checkPendingInstantiations();
+  /// Check the bodies of the pending instantiations, and of those they
+  /// queue in turn, and empty the list; move to @p held each one made only
+  /// for failed bounds so far (madeOnlyForFailedBounds).
+  bool checkPendingInstantiationBodies(std::vector<PendingInstantiation> &held);
 
   /// Append the instantiated declarations to the TranslationUnit.
   void injectInstantiations(ast::TranslationUnit *tu);

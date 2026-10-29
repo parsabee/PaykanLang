@@ -722,9 +722,23 @@ ClassDecl *Parser::parseClassDecl() {
   }
 
   std::string superName;
+  bool ok = true;
   if (accept(Tok::Colon)) {
     if (!parseModulePath(superName))
       return nullptr;
+    // `class Full : Half<int>`: an error at the `<`, and the type arguments
+    // are read past so that the body is still parsed.
+    if (at(Tok::Less)) {
+      error(consume().Loc, std::string(kGenericSuperclass));
+      ok = false;
+      if (!enterNesting())
+        return nullptr;
+      std::vector<Type *> args;
+      const bool argsOk = parseTypeArgList(args);
+      leaveNesting();
+      if (!argsOk || !expect(Tok::Greater, "to close the type argument list"))
+        return nullptr;
+    }
   }
 
   SourceLocation open = cur().Loc;
@@ -734,7 +748,6 @@ ClassDecl *Parser::parseClassDecl() {
     return nullptr;
 
   ClassBody body;
-  bool ok = true;
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {

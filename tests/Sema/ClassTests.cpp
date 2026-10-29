@@ -962,6 +962,60 @@ TEST(Class, SuperMustBeFirstStatement) {
       << r.Diagnostics;
 }
 
+// `__super__(...)` stores the superclass's fields, which only its first
+// statement finds unset: a second call, after the first or under a branch or
+// a loop, was accepted, and its stores leaked what the first had stored.  A
+// call that is not first is the one error, at the call, also when the
+// superclass's `__init__` does nothing (that one was accepted too).
+TEST(Class, SuperIsCalledOnceAsTheFirstStatement) {
+  const std::string classes = "class A { s: Str; }\n"
+                              "impl A { fn __init__(n: int) { self.s = "
+                              "\"v\" + Str(n); } }\n"
+                              "class E {}\n"
+                              "class C : A { n: int; }\n"
+                              "class F : E { n: int; }\n";
+  struct Case {
+    const char *Impl; // line 6
+    unsigned Column;  // of the rejected call
+  };
+  for (const Case &c : {
+           Case{"impl C { fn __init__() { __super__(1); __super__(2); "
+                "self.n = 0; } }",
+                40},
+           Case{"impl C { fn __init__(b: bool) { __super__(1); if b { "
+                "__super__(2); } self.n = 0; } }",
+                54},
+           Case{"impl C { fn __init__() { __super__(1); self.n = 0; "
+                "while self.n < 1 { __super__(2); self.n = 1; } } }",
+                71},
+           Case{"impl C { fn __init__() { self.n = 0; __super__(1); } }", 38},
+           Case{"impl F { fn __init__() { __super__(); __super__(); "
+                "self.n = 0; } }",
+                39},
+           Case{"impl F { fn __init__() { self.n = 0; __super__(); } }", 38},
+       }) {
+    auto r = semaCheck(classes + c.Impl + "\nfn main() -> int { return 0; }\n");
+    EXPECT_FALSE(r.Ok) << c.Impl;
+    EXPECT_EQ(r.ErrorCount, 1u) << c.Impl << "\n" << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find(":6:" + std::to_string(c.Column) +
+                                 ": error: '__super__' may be called only "
+                                 "once, as the first statement of '__init__'"),
+              std::string::npos)
+        << c.Impl << "\n"
+        << r.Diagnostics;
+  }
+
+  // The first statement, then the subclass's own stores, stays valid.
+  for (const char *impl :
+       {"impl C { fn __init__() { __super__(1); self.s = \"x\" + Str(3); "
+        "self.n = 0; } }",
+        "impl F { fn __init__() { __super__(); self.n = 0; } }",
+        "impl F { fn __init__() { self.n = 0; } }"}) {
+    auto r = semaCheck(classes + impl + "\nfn main() -> int { return 0; }\n");
+    EXPECT_TRUE(r.Ok) << impl << "\n" << r.Diagnostics;
+  }
+}
+
 TEST(Class, DerivedWithoutInitPassesTheBaseInitsArguments) {
   auto r = semaCheck(R"(
     class Base {
@@ -1714,6 +1768,66 @@ TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
             std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(errorCount(r.Diagnostics), 1u) << r.Diagnostics;
+}
+
+// A superclass that names something other than a class says what it is (it
+// was "not defined"), a trait with the `impl` block that takes it, a generic
+// class's own type parameter included.  One error each, at the class; the
+// class still counts as declared.
+TEST(ClassRecovery, ASuperclassThatIsNoClassSaysWhatItIs) {
+  auto r = semaCheck("struct S { x: int; }\n"
+                     "enum E { X }\n"
+                     "trait T { view fn f() -> int; }\n"
+                     "struct GS<U> { x: U; }\n"
+                     "enum GE<U> { X(v: U) }\n"
+                     "class GC<U> { v: U; }\n"
+                     "fn fun() -> int { return 1; }\n"
+                     "fn gfun<U>(u: U) -> U { return u; }\n"
+                     "class A : S {}\n"           // 9
+                     "class B : E {}\n"           // 10
+                     "class C : T {}\n"           // 11
+                     "class D : int {}\n"         // 12
+                     "class F : GS {}\n"          // 13
+                     "class G : GE {}\n"          // 14
+                     "class H : GC {}\n"          // 15
+                     "class I : fun {}\n"         // 16
+                     "class J : gfun {}\n"        // 17
+                     "class K<U> : U { v: U; }\n" // 18
+                     "class L<U> : T { v: U; }\n" // 19
+                     "class M<U> : S { v: U; }\n" // 20
+                     "class N : Nope {}\n"        // 21
+                     "fn main() -> int {\n"
+                     "  k = K<int>(1); l = L<int>(1); m = M<int>(1);\n"
+                     "  a = A(); return 0;\n"
+                     "}\n");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {":9:1: error: superclass 'S' of class 'A' is a struct, not a class",
+        ":10:1: error: superclass 'E' of class 'B' is an enum, not a class",
+        ":11:1: error: superclass 'T' of class 'C' is a trait, not a class: a "
+        "class implements a trait with 'impl T for C { ... }'",
+        ":12:1: error: superclass 'int' of class 'D' is a builtin type, not a "
+        "class",
+        ":13:1: error: superclass 'GS' of class 'F' is a generic struct, not a "
+        "class",
+        ":14:1: error: superclass 'GE' of class 'G' is a generic enum, not a "
+        "class",
+        ":15:1: error: superclass 'GC' of class 'H' is a generic class: a "
+        "superclass cannot be generic",
+        ":16:1: error: superclass 'fun' of class 'I' is a function, not a "
+        "class",
+        ":17:1: error: superclass 'gfun' of class 'J' is a generic function, "
+        "not a class",
+        ":18:1: error: superclass 'U' of class 'K<int>' is a type parameter, "
+        "not a class",
+        ":19:1: error: superclass 'T' of class 'L<int>' is a trait, not a "
+        "class: a class implements a trait with 'impl T for L<U> { ... }'",
+        ":20:1: error: superclass 'S' of class 'M<int>' is a struct, not a "
+        "class",
+        ":21:1: error: superclass 'Nope' of class 'N' is not defined"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 13u) << r.Diagnostics;
 }
 
 TEST(ClassRecovery, BadMemberTypeIsReportedOnce) {

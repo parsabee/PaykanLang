@@ -1019,6 +1019,13 @@ private:
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name = f.name("the class's name");
+    // `class Full : Half<int>`, which the grammar does not have: the
+    // recursive-descent frontend's error.
+    if (const SExpr *at = name && !f.atEnd() ? f.peekList() : nullptr;
+        at && From == Origin::Frontend && at->K == SExpr::String &&
+        at->Text.find('<') != std::string::npos &&
+        isPath(std::string_view(at->Text).substr(0, at->Text.find('<'))))
+      return fail(*at, std::string(frontend::kGenericSuperclass)), nullptr;
     const std::string *super =
         name ? f.optionalName("the superclass", NameKind::Path) : nullptr;
     std::vector<const std::string *> params;

@@ -214,7 +214,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
   StringSet fieldNames;
   bool selfHeld = false; // a field holding the struct was reported
   for (auto *field : sd->getFields()) {
-    const std::string context = "field '" + field->getName() + "' in " + what;
+    const TypeContext context({"field '", field->getName(), "' in ", what});
     if (!fieldNames.insert(field->getName()).second) {
       error(field->getLocation(),
             "duplicate field '" + field->getName() + "' in " + what);
@@ -246,7 +246,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     }
     if (holdsFixedArray(fty)) {
       error(field->getLocation(),
-            context + " has type '" + typeName(fty) +
+            context.str() + " has type '" + typeName(fty) +
                 (st->getVariantEnum()
                      ? "': a variant's field cannot be a fixed-size array yet"
                      : "': a struct field cannot be a fixed-size array yet"));
@@ -337,6 +337,8 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st) {
         ok = false;
         continue;
       }
+      std::optional<TypeParamScope> params;
+      implTypeParamScope(params, fn);
       if (auto *md =
               declareMethod(fn, st, nullptr,
                             name == names::kMethodInit ? ast::MethodDecl::None
@@ -399,36 +401,49 @@ void Sema::declareConstructor(ast::StructDecl *sd, ast::StructType *st) {
 
 // static
 bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target) {
+  std::unordered_set<const ast::Type *> seen;
+  return holdsStruct(ty, target, seen);
+}
+
+// static
+bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target,
+                       std::unordered_set<const ast::Type *> &seen) {
   if (ty == target)
     return true;
   if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    if (!seen.insert(tt).second)
+      return false; // looked into by another path
     for (const ast::Type *e : tt->getElementTypes())
-      if (holdsStruct(e, target))
+      if (holdsStruct(e, target, seen))
         return true;
     return false;
   }
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
-    return holdsStruct(ft->getElementType(), target);
+    return holdsStruct(ft->getElementType(), target, seen);
   // An optional struct or tuple holds its value in place.
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
-    return holdsStruct(ot->getInnerType(), target);
+    return holdsStruct(ot->getInnerType(), target, seen);
   // An enum holds its variants' fields (those resolved so far: an
   // instantiation of a generic enum is populated as it is made).
-  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty))
+  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    if (!seen.insert(et).second)
+      return false; // looked into by another path
     for (size_t i = 0; i < et->getNumVariants(); ++i)
       if (const ast::StructType *p = et->getPayload(i)) {
         if (p == target)
           return true;
         for (const ast::Type *f : p->getElementTypes())
-          if (holdsStruct(f, target))
+          if (holdsStruct(f, target, seen))
             return true;
       }
+  }
   return false;
 }
 
 ast::StructType *Sema::instantiateStruct(const std::string &name,
                                          const std::vector<ast::Type *> &args,
-                                         ast::SourceLocation loc) {
+                                         ast::SourceLocation loc,
+                                         const ast::ASTNode *written) {
   auto tIt = StructTemplates.find(name);
   if (tIt == StructTemplates.end()) {
     // Only resolveType and resolveGenericCall come here, with a template.
@@ -453,15 +468,14 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   // instantiation is named by its template's own name.
   const ModuleTemplates *origin = foreignOrigin(tmpl);
   const std::string instName = instantiationName(tmpl->getName(), args);
+  noteInstantiationRequest(instName);
   if (auto cIt = StructInstantiations.find(instName);
       cIt != StructInstantiations.end()) {
     auto info = cIt->second ? StructInstantiationInfos.find(cIt->second)
                             : StructInstantiationInfos.end();
     if (info == StructInstantiationInfos.end() || info->second.Template == tmpl)
       return cIt->second;
-    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
-                   "' conflicts with another template's instantiation of the "
-                   "same name (type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     return nullptr;
   }
 
@@ -486,16 +500,12 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
       copyImportedInstance(existing, loc);
       return existing;
     }
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported struct of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
   if (Ctx.lookupType(instName)) {
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported type of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -508,6 +518,11 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
+    StructInstantiations[instName] = nullptr;
+    return nullptr;
+  }
 
   // Clone the template with the type parameters substituted, and its
   // `impl` blocks, each by its own names for the type parameters.
@@ -515,6 +530,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::StructDecl *clone = cloner.cloneStructDecl(tmpl, instName);
   std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
   if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
@@ -523,11 +539,16 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
       for (size_t i = 0; i < args.size(); ++i)
         s[*im->getTypeParams()[i]] = args[i];
       ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
       impls.push_back(c.cloneImplDecl(im, instName));
+      noteImplTypeParams(im, impls.back());
     }
 
   const InstantiationFrame request = frameAt(instName, loc);
+  recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
+  const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
+  InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
 
   ast::StructType *st = Ctx.registerStructType(instName, loc);
@@ -538,9 +559,13 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;
 
-  bool ok = populateStructType(clone, st);
-  if (ok)
-    declareConstructor(clone, st);
+  bool ok;
+  {
+    TypeParamScope params(*this, tmpl->getTypeParams());
+    ok = populateStructType(clone, st);
+    if (ok)
+      declareConstructor(clone, st);
+  }
   for (auto *im : impls) {
     if (!ok || !im->getTrait())
       continue;
@@ -549,6 +574,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     else if (!checkTraitImpl(im, st))
       ok = false;
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -567,6 +593,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
@@ -578,7 +606,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
 
 ast::EnumType *Sema::instantiateEnum(const std::string &name,
                                      const std::vector<ast::Type *> &args,
-                                     ast::SourceLocation loc) {
+                                     ast::SourceLocation loc,
+                                     const ast::ASTNode *written) {
   auto tIt = EnumTemplates.find(name);
   if (tIt == EnumTemplates.end()) {
     // Only resolveType and a variant of a template come here, with one.
@@ -602,15 +631,14 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   // Named by its template's own name, as a struct's instantiation is.
   const ModuleTemplates *origin = foreignOrigin(tmpl);
   const std::string instName = instantiationName(tmpl->getName(), args);
+  noteInstantiationRequest(instName);
   if (auto cIt = EnumInstantiations.find(instName);
       cIt != EnumInstantiations.end()) {
     auto info = cIt->second ? EnumInstantiationInfos.find(cIt->second)
                             : EnumInstantiationInfos.end();
     if (info == EnumInstantiationInfos.end() || info->second.Template == tmpl)
       return cIt->second;
-    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
-                   "' conflicts with another template's instantiation of the "
-                   "same name (type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     return nullptr;
   }
 
@@ -623,16 +651,12 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
       EnumInstantiationInfos[existing] = EnumInstantiationInfo{tmpl, args};
       return EnumInstantiations[instName] = existing;
     }
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported enum of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
   if (Ctx.lookupType(instName)) {
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported type of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -645,14 +669,23 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
+    EnumInstantiations[instName] = nullptr;
+    return nullptr;
+  }
 
   Subst subst;
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::EnumDecl *clone = cloner.cloneEnumDecl(tmpl, instName);
 
-  InstantiationStack.push_back(frameAt(instName, loc));
+  const InstantiationFrame request = frameAt(instName, loc);
+  recordInstantiationSite(tmpl, request);
+  InstantiationStack.push_back(request);
+  InstantiatingTemplates.push_back({tmpl, &clone->getName(), argParams});
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very
@@ -690,11 +723,15 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
     payloads.emplace_back(sd, st);
   }
   bool ok = true;
-  for (auto [sd, st] : payloads)
-    if (!populateStructType(sd, st)) {
-      ErroneousClasses.insert(sd->getName());
-      ok = false;
-    }
+  {
+    TypeParamScope params(*this, tmpl->getTypeParams());
+    for (auto [sd, st] : payloads)
+      if (!populateStructType(sd, st)) {
+        ErroneousClasses.insert(sd->getName());
+        ok = false;
+      }
+  }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -732,6 +769,8 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
   for (auto *method : node->getMethods()) {
     ctx.MethodName = method->getName();
     ctx.ViewMethod = method->isView();
+    std::optional<TypeParamScope> params;
+    implTypeParamScope(params, method);
 
     // The signature was resolved when the method joined the struct
     // (populateImplMethods); resolveType is idempotent.
@@ -872,7 +911,7 @@ ValueLayout valueLayout(const ast::Type *ty) {
 int64_t Sema::valueSize(const ast::Type *ty) { return valueLayout(ty).Size; }
 
 bool Sema::checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
-                                  const std::string &context) {
+                                  const TypeContext &context) {
   const int64_t size = valueSize(inner);
   if (size <= kOptionalValueLimit)
     return true;
@@ -881,7 +920,7 @@ bool Sema::checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
     ++SuppressedFollowOns; // reported at its first use
     return false;
   }
-  error(loc, context + " has type '" + name +
+  error(loc, context.str() + " has type '" + name +
                  "?': an optional holds a value of up to " +
                  std::to_string(kOptionalValueLimit) +
                  " bytes in place, and '" + name + "' is " +

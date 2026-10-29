@@ -2114,6 +2114,31 @@ TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
       << error;
 }
 
+// A class's superclass with type arguments, which the grammar does not
+// have, gets the recursive-descent frontend's error, where it was "expected
+// an identifier or a qualified name (a::b)".
+TEST(Interchange, ASuperclassIsNotGeneric) {
+  for (const char *super : {"Half<int>", "m::Half<Half<int>, Str>"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    const std::string text = std::string("(paykan-ast 1 (unit (class \"A\" "
+                                         "\"") +
+                             super + "\" (type-params) (fields) (methods))))";
+    EXPECT_EQ(read(text, ctx, error), nullptr) << text;
+    EXPECT_NE(error.find(paykan::frontend::kGenericSuperclass),
+              std::string::npos)
+        << text << "\n"
+        << error;
+  }
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read("(paykan-ast 1 (unit (class \"A\" \"m::Base\" "
+                 "(type-params \"T\") (fields) (methods))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}
+
 // An `(int ...)` value spans 64 bits (docs/plugins/ast-format.md): an int64,
 // or one without a sign up to 18446744073709551615, a literal above
 // INT64_MAX that the writer writes back as it reads it.  The other integer

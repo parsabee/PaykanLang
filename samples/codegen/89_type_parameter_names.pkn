@@ -1,0 +1,60 @@
+// 89 — names a template's own type parameters leave free
+// Exercises: a template's declarations and bodies checked with its own type
+//            parameters (docs/language/13-generics.md, "Type Parameters Are
+//            Types").  An `impl` block's names are its own: in `impl R<U>`
+//            the class's `T` is an ordinary name, a method's parameter, which
+//            its body assigns, and a parameter of a `static fn`; a struct's
+//            too.  A template instantiated in another generic body keeps a
+//            field and a parameter named like that body's type parameter.
+//            `impl R<U>` was checked with the class's `T` (`'T' is a type name
+//            and cannot be used as a variable`), and `g<int>` inside
+//            `outer<T>` was the same error for its parameter.
+// expect-stdout: 3 2 4
+// expect-stdout: 11 R(7)
+// expect-stdout: 6 1
+
+import ::io;
+
+class R<T> {
+  v: T;
+}
+
+impl R<U> {
+  fn __init__(v: U)              { self.v = v; }
+  view fn bump(T: int) -> int    { T = T + 1; return T; }
+  static fn twice(T: int) -> int { return 2 * T; }
+  view fn show() -> Str          { return "R(" + Str(self.v) + ")"; }
+}
+
+struct Q<T> {
+  v: T;
+}
+
+impl Q<U> {
+  view fn plus(T: int) -> int { return T + 1; }
+}
+
+class Holder<U> {
+  T: int;
+  v: U;
+}
+
+fn g<U>(T: int, u: U) -> int {
+  return T;
+}
+
+fn outer<T>(x: T) -> (int, int) {
+  let h = Holder<T>(1, x);
+  return (g<T>(5, x) + h.T, h.T);
+}
+
+fn main() -> int {
+  let r = R<int>(7);
+  let q = Q<Str>("q");
+  io::println(Str(r.bump(2)) + " " + Str(R<int>::twice(1)) + " "
+      + Str(q.plus(3)));
+  io::println(Str(r.bump(10)) + " " + r.show());
+  let p = outer("s");
+  io::println(Str(p.0) + " " + Str(p.1));
+  return 0;
+}

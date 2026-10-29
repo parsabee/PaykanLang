@@ -7,12 +7,26 @@
 #include "AST.h"
 #include "ASTContext.h"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace paykan {
 namespace ast {
+
+/// Which of the type parameters an instantiation's copy substitutes each
+/// type argument written in the copy names (ASTCloner::recordTypeArgs): in
+/// the copy of `L7<T>`, `X<T>` names `T`, and `L0<int>` none.
+struct WrittenTypeArgs {
+  /// The copy's name (interned): the parameters are its instantiation's.
+  const std::string *Copy = nullptr;
+  /// Per argument, bit i for the i-th type parameter.
+  std::vector<uint64_t> Params;
+};
+/// By type application of a copy: a GenericType, or the CallExpr or
+/// EnumValueExpr whose written type arguments they are.
+using WrittenTypeArgMap = std::unordered_map<const ASTNode *, WrittenTypeArgs>;
 
 // Clones a generic declaration into a concrete one.
 //
@@ -67,17 +81,35 @@ private:
   std::unordered_map<std::string, Type *> Subst;
   const Renamer *Names;
   bool Foreign;
+  /// Where recordTypeArgs records (null: nowhere), the parameters its
+  /// substitution replaces, in order, and the copy's name.
+  WrittenTypeArgMap *Written = nullptr;
+  std::vector<const std::string *> WrittenParams;
+  const std::string *WrittenCopy = nullptr;
 
   /// @p s interned in this context (a no-op for a name already there).
   const std::string &in(const std::string &s) { return Ctx.intern(s); }
   /// A class or enum annotation named @p name: shared, or a stub by its
   /// (renamed) name.
   Type *named(Type *ty, const std::string &name);
+  /// The bits of the WrittenParams the type annotation @p ty names.
+  uint64_t paramsNamed(const Type *ty) const;
+  /// Record the written type arguments @p args of @p node, a type
+  /// application of the copy.
+  void noteTypeArgs(const ASTNode *node, const std::vector<Type *> &args);
 
 public:
   ASTCloner(ASTContext &ctx, std::unordered_map<std::string, Type *> subst,
             const Renamer *names = nullptr, bool foreign = false)
       : Ctx(ctx), Subst(std::move(subst)), Names(names), Foreign(foreign) {}
+
+  /// Record in @p out, for each type application of the copies made from
+  /// now on, which of @p params, the type parameters the substitution
+  /// replaces, in order, each of its written type arguments names, for the
+  /// copy named @p copy.  Nothing is recorded for more than 64 parameters.
+  void recordTypeArgs(WrittenTypeArgMap &out,
+                      const std::vector<const std::string *> &params,
+                      const std::string &copy);
 
   /// Substitute type parameters inside @p ty.  Returns @p ty itself when
   /// nothing inside it changes.

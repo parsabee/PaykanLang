@@ -1413,16 +1413,22 @@ global across an import graph, though ([Modules](15-modules.md)), so a program t
 or `ErrorCode` (`class 'File' conflicts with an imported type of the same name`, `enum
 'ErrorCode' ...`). A generic type of a module, such as `Result` or `List`, is named through
 its module (`res::Result<int, Str>`) and leaves its name free: a program may declare its
-own `Result`.
+own `Result`. The names of instantiations are global too, though: `::io` brings in
+`Result<Str, Error>`, so a program's own `Result<Str, err::Error>` is an error
+(`instantiation 'Result<Str, Error>' of 'Result' conflicts with an imported enum of the
+same name`), and so is its own `List<int>` next to `collections::List<int>` ([the standard
+library](../stdlib/index.md#quick-summary)).
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot
 reuse an enum's name. A builtin class or type name, or the name of a type the program
 declares or imports, cannot name a field (a class's, a struct's or a variant's, whether or
 not its type writes `__init__`, and a generic type's once, at its declaration, whether or
-not it is instantiated), a parameter or a local variable either. It is reported at the
-field, the parameter or the variable, as what it would name: `'Str' is a type name and
-cannot be used as a variable` (`... as a parameter name`, `... as a field name`). Nor can a
+not it is instantiated), a parameter or a local variable either, and neither can a type
+parameter in the declaration it belongs to ([Generics](13-generics.md#type-parameters-are-types)).
+It is reported at the field, the parameter or the variable, as what it would name: `'Str'
+is a type name and cannot be used as a variable` (`... as a parameter name`, `... as a field
+name`). Nor can a
 function of the module name a parameter or a local variable
 ([Scoping Rules](#scoping-rules)).
 

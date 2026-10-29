@@ -999,23 +999,44 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   // once, by canonical name, so that it keeps a single identity however many
   // import paths reach it).  Binding a name to a type declared by a
   // DIFFERENT module would silently merge two unrelated types; reject it.
-  auto checkOrigin = [&](const char *kind, const std::string &name,
-                         const std::string &originModule) -> bool {
+  auto clashes = [&](const char *kind, const std::string &name,
+                     const std::string &originModule) -> bool {
     if (originModule.empty())
-      return true; // compiler builtin — identical in every context
+      return false; // compiler builtin — identical in every context
     auto it = ImportedTypeOrigins.find(name);
-    if (it == ImportedTypeOrigins.end()) {
-      ImportedTypeOrigins[name] = originModule;
-      return true;
-    }
-    if (it->second == originModule)
-      return true;
+    if (it == ImportedTypeOrigins.end() || it->second == originModule)
+      return false;
     error(loc, diagPrefix + kind + " '" + name +
                    "' conflicts with a type of the same name declared by "
                    "module '" +
                    it->second + "' (type names are global across imports)");
-    return false;
+    return true;
   };
+  auto recordOrigin = [&](const std::string &name,
+                          const std::string &originModule) {
+    if (originModule.empty())
+      return;
+    ImportedTypeOrigins.try_emplace(name, originModule);
+    // An import of this module's own file (not a template's request).
+    if (Diags.getSourceLines() == OwnSourceLines)
+      ImportedTypeImports.try_emplace(name, loc);
+  };
+  // A module with such a type injects nothing (SW-33): its functions', its
+  // methods' and its fields' types, and its aliases, would name the other
+  // module's type.  The import fails, so a use of its qualifier is a
+  // follow-on.
+  bool clash = false;
+  for (const auto &ei : info.ExportedEnums)
+    if (clashes("enum", ei.Name, ei.OriginModule))
+      clash = true;
+  for (const auto &si : info.ExportedStructs)
+    if (clashes("struct", si.Name, si.OriginModule))
+      clash = true;
+  for (const auto &ci : info.ExportedClasses)
+    if (clashes("class", ci.Name, ci.OriginModule))
+      clash = true;
+  if (clash)
+    return false;
 
   auto addClassAliases = [&](ast::ClassType *ct, const std::string &name) {
     if (!hiddenInject && names::isModulePrivateName(name))
@@ -1076,10 +1097,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
 
     // Enums first: class fields and method signatures may be enum-typed.
     for (auto &ei : info.ExportedEnums) {
-      if (!checkOrigin("enum", ei.Name, ei.OriginModule)) {
-        ok = false;
-        continue;
-      }
+      recordOrigin(ei.Name, ei.OriginModule);
       auto *et = Ctx.lookupEnumType(ei.Name);
       if (!et) {
         if (Ctx.lookupClassType(ei.Name)) {
@@ -1102,10 +1120,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     // field is resolved.  Their fields and methods come after the classes.
     std::vector<const ModuleInfo::StructInfo *> createdStructs;
     for (auto &si : info.ExportedStructs) {
-      if (!checkOrigin("struct", si.Name, si.OriginModule)) {
-        ok = false;
-        continue;
-      }
+      recordOrigin(si.Name, si.OriginModule);
       auto *st = Ctx.lookupStructType(si.Name);
       if (!st) {
         if (Ctx.lookupClassType(si.Name) || Ctx.lookupEnumType(si.Name)) {
@@ -1154,10 +1169,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     // the same two-phase scheme checkClassDecls uses for a single file.
     std::vector<const ModuleInfo::ClassInfo *> pending, created;
     for (auto &ci : info.ExportedClasses) {
-      if (!checkOrigin("class", ci.Name, ci.OriginModule)) {
-        ok = false;
-        continue;
-      }
+      recordOrigin(ci.Name, ci.OriginModule);
       if (auto *ct = Ctx.lookupClassType(ci.Name)) {
         // Already present — pointer identity preserved.
         if (ci.IsLocal)
@@ -1801,11 +1813,16 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   const size_t cloned = methods.size();
   const InstantiationFrame request = frameAt(name, loc);
   InstantiationStack.push_back(request);
+  const InstantiatingTemplate self{
+      tmpl, structTmpl ? &pending.Struct->getName() : &pending.Class->getName(),
+      nullptr};
+  InstantiatingTemplates.push_back(self);
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
     ok = copiedMethods(tmpl, args, type, methods);
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
   if (!ok)
     return;
@@ -1827,6 +1844,8 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   pending.RequestLines = request.Lines;
   for (const std::string *p : params)
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(self);
   PendingInstantiations.push_back(std::move(pending));
   // What letting go of one lets go of is read from what its fields hold.
   if (st)
@@ -1919,19 +1938,40 @@ bool Sema::copiedMethods(const ast::Decl *tmpl,
 
 // -- processImport
 
+void Sema::claimImportQualifiers(
+    const std::vector<ast::ImportDecl *> &imports) {
+  for (const ast::ImportDecl *imp : imports)
+    for (const auto &m : imp->getModules()) {
+      const std::string path = imp->modulePath(m);
+      const std::string canonical =
+          module_name::canonicalImportName(path, imp->isSystem());
+      ClaimedImportQualifiers.try_emplace(m.qualifier(), canonical);
+      if (!imp->isSystem())
+        ClaimedImportQualifiers.try_emplace(path, canonical);
+    }
+}
+
 bool Sema::processImport(ast::ImportDecl *node) {
   const bool isSystem = node->isSystem();
   bool ok = true;
   for (auto &m : node->getModules()) {
-    std::string fullPath = node->modulePath(m);
+    const std::string fullPath = node->modulePath(m);
     const std::string &qualifier = m.qualifier();
     const std::string canonical =
         module_name::canonicalImportName(fullPath, isSystem);
+    // The full path qualifies the module too, but a system import's yields
+    // to an import that claims it for another module (OD-8): with
+    // `import ::math as cmath;`, `import math as mine;` binds `math`.
+    auto claim = ClaimedImportQualifiers.find(fullPath);
+    const bool pathYields = isSystem &&
+                            claim != ClaimedImportQualifiers.end() &&
+                            claim->second != canonical;
+    const std::string &pathQualifier = pathYields ? qualifier : fullPath;
     // The names a failed import binds are poisoned: their uses were reported
     // with the import (#119).
     // (A name that already names another module keeps it.)
     auto poison = [&] {
-      for (const std::string *name : {&qualifier, &std::as_const(fullPath)}) {
+      for (const std::string *name : {&qualifier, &pathQualifier}) {
         auto it = ImportQualifiers.find(*name);
         if (it == ImportQualifiers.end() || it->second.Module == canonical)
           FailedImportQualifiers.insert(*name);
@@ -1967,8 +2007,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     ModulePaths[canonical] = located.Path;
     // The names this import binds must not already name another module.
     bool clash = false;
-    for (const std::string *name :
-         {&qualifier, static_cast<const std::string *>(&fullPath)}) {
+    for (const std::string *name : {&qualifier, &pathQualifier}) {
       auto [it, fresh] =
           ImportQualifiers.try_emplace(*name, ImportQualifier{canonical});
       if (fresh || it->second.Module == canonical)
@@ -1982,12 +2021,12 @@ bool Sema::processImport(ast::ImportDecl *node) {
       break;
     }
     if (clash) {
-      ok = false;
+      poison();
       continue;
     }
     const ModuleInfo *info =
         loadModule(canonical, located, node->getLocation());
-    if (!info || !injectModule(*info, qualifier, fullPath, canonical,
+    if (!info || !injectModule(*info, qualifier, pathQualifier, canonical,
                                node->getLocation()))
       poison();
   }

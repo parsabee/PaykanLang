@@ -230,7 +230,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     lambdaCtx.MethodName.clear();
     lambdaCtx.ViewMethod = false;
     lambdaCtx.SuperInitRequired = false;
-    lambdaCtx.SuperInitCalled = false;
+    lambdaCtx.FrontSuperCall = nullptr;
   }
   CurrentClassCtx = savedClassCtx ? &lambdaCtx : nullptr;
   CurrentReturnType = retTy;

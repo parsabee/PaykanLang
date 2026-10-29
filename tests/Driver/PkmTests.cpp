@@ -35,6 +35,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -3281,11 +3282,17 @@ TEST(Pkm, StructAndClassInstantiationsOfOneNameConflict) {
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
-  for (const char *file : {"main.pkn", "main2.pkn"}) {
+  for (const auto &[file, later, earlier] :
+       {std::tuple{"main.pkn", "b", "a"}, std::tuple{"main2.pkn", "a", "b"}}) {
     auto r = paykan(file);
     EXPECT_NE(r.exitCode, 0) << file << "\n" << r.out;
-    EXPECT_TRUE(contains(r.out, "instantiation 'Pair<int, int>' conflicts "
-                                "with an imported type of the same name"))
+    EXPECT_TRUE(contains(r.out, std::string(file) +
+                                    ":5:7: error: instantiation 'Pair<int, "
+                                    "int>' of '" +
+                                    later +
+                                    "::Pair' conflicts with the instantiation "
+                                    "'Pair<int, int>' of '" +
+                                    earlier + "::Pair'"))
         << file << "\n"
         << r.out;
   }

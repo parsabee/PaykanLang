@@ -419,3 +419,29 @@ TEST(Class, MethodsAreNotGeneric) {
                        "fn main() -> int { return 0; }\n");
   EXPECT_TRUE(ok);
 }
+
+// A superclass with type arguments is an error at the `<`, said as such: it
+// was `unexpected '<'; expected '{' to open the class body`.  No class
+// extends an instantiation of a generic class; a generic class extends a
+// plain one.
+TEST(Class, ASuperclassIsNotGeneric) {
+  auto r = parseWithDiags("class Half<T> { v: T; }\n"
+                          "class Full : Half<int> {}\n"
+                          "class Wrap<T> : Half<T> { w: T; }\n"
+                          "class Deep : m::Half<Half<int>, Str> {}\n"
+                          "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  ASSERT_EQ(r.Diags.size(), 3u) << r.Text;
+  for (const auto &d : r.Diags)
+    EXPECT_EQ(d.Message, paykan::frontend::kGenericSuperclass) << r.Text;
+  EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 18u);
+  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u);
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 21u);
+  EXPECT_EQ(r.Diags[2].Loc.getLineStart(), 4u);
+  EXPECT_EQ(r.Diags[2].Loc.getColumnStart(), 21u);
+  auto [ok, _] = parse("class Base {}\n"
+                       "class Wrap<T> : Base { w: T; }\n"
+                       "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(ok);
+}

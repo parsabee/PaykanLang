@@ -316,6 +316,131 @@ TEST(Poison, ColliderDoesNotSilenceTheOriginal) {
       << r.Diagnostics;
 }
 
+// A declaration named like a type an import reached is rejected, and a use
+// of its name here means it, so the uses are follow-ons of that error
+// (SW-33).  Each was taken for the imported type of the name (`::error`'s,
+// which `::io` imports) and reported again: "enum 'ErrorCode' has no
+// variant 'A'", "operator '+' is not defined for types 'ErrorCode' and
+// 'int'", "call to undeclared function 'Error::A'".  The imported type is
+// still named through its module.
+TEST(Poison, UsesOfADeclarationNamedLikeAnImportedTypeAreSilent) {
+  struct Case {
+    const char *Decl, *Uses, *Declared;
+  };
+  for (const Case &c :
+       {Case{"enum ErrorCode { A, B }\n",
+             "fn f(e: ErrorCode) -> int {\n"
+             "  match e { A { return 1; } B { return 2; } }\n"
+             "}\n"
+             "fn main() -> int {\n"
+             "  io::println(Str(ErrorCode::A == ErrorCode::B));\n"
+             "  y: ErrorCode = ErrorCode::A;\n"
+             "  return f(y);\n"
+             "}\n",
+             "enum 'ErrorCode'"},
+        Case{"class Error { code: int; }\n",
+             "class Sub : Error {}\n"
+             "fn f(e: Error) -> int { return e.code + 1; }\n"
+             "fn main() -> int { x = Error(3); return f(x) + x.code; }\n",
+             "class 'Error'"},
+        Case{"struct Error { code: int; }\n",
+             "impl Error {\n"
+             "  static fn make() -> Error => Error(1);\n"
+             "  fn twice() -> int => 2 * self.code;\n"
+             "}\n"
+             "fn main() -> int {\n"
+             "  x = Error::make();\n"
+             "  return x.twice() + Error(2).code;\n"
+             "}\n",
+             "struct 'Error'"},
+        Case{"fn Error(x: int) -> int { return x; }\n",
+             "fn main() -> int { return Error(3) + 1; }\n", "function 'Error'"},
+        Case{"enum Error { A(x: int), B }\n",
+             "fn main() -> int {\n"
+             "  e = Error::A(3);\n"
+             "  match e { a: A { return a.x; } B { return 0; } }\n"
+             "}\n",
+             "enum 'Error'"}})
+    expectOnly(std::string("import ::io;\n") + c.Decl + c.Uses,
+               std::string("2:1: error: ") + c.Declared +
+                   " conflicts with an imported type of the same name");
+  auto r = semaCheck("import ::error as err;\n"
+                     "class Error { code: int; }\n"
+                     "fn f(e: err::Error) -> err::ErrorCode => e.code;\n"
+                     "fn main() -> int { x = f(err::none()); return 0; }\n");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
+// A class whose superclass is in error is registered on Obj, so it matches
+// no class it would have: its mismatch with a class that can have
+// subclasses is a follow-on of that error (SW-32).  An initializer, an
+// assignment, an argument (a method's too), a return value and an array
+// element were each "... of type 'Puppy' does not match ... 'Animal'".  A
+// mismatch it could not have kept its superclass for is still reported:
+// with a type that is not a class or is final (`Str`), the other way round
+// (an `Animal` or a `Cat` is never a `Puppy`), an optional into a class,
+// and a class in error whose superclass is intact (a `Kit` with a wrong
+// override is an `Animal`, never a `Cat`).
+TEST(Poison, AClassThatLostItsSuperclassMismatchesNoClass) {
+  const std::string decls =
+      "import ::collections;\n"
+      "class Animal { view fn sound() -> Str { return \"?\"; } }\n"
+      "class Puppy : Nope {}\n"
+      "fn adopt(a: Animal) -> int { return 1; }\n";
+  expectOnly(decls + "fn make() -> Animal { return Puppy(); }\n"
+                     "fn main() -> int {\n"
+                     "  x: Animal = Puppy();\n"
+                     "  y: Animal? = Puppy();\n"
+                     "  x = Puppy();\n"
+                     "  n = adopt(Puppy());\n"
+                     "  a: Animal[2] = [Puppy(), Animal()];\n"
+                     "  l = collections::List<Animal>();\n"
+                     "  l.push(Puppy());\n"
+                     "  return n;\n"
+                     "}\n",
+             "3:1: error: superclass 'Nope' of class 'Puppy' is not defined");
+  auto r = semaCheck(decls + "class Cat { view fn sound() -> Str { return "
+                             "\"meow\"; } }\n"
+                             "class Kit : Animal { view fn sound() -> int { "
+                             "return 1; } }\n"
+                             "fn feed(c: Cat) -> int { return 1; }\n"
+                             "fn main() -> int {\n"
+                             "  n: int = Puppy();\n"
+                             "  w: Animal = 3;\n"
+                             "  s: Str = Puppy();\n"
+                             "  p: Puppy = Cat();\n"
+                             "  q: Puppy = Animal();\n"
+                             "  o: Puppy? = \"str\";\n"
+                             "  m: Puppy? = None;\n"
+                             "  z: Animal = m;\n"
+                             "  c: Cat = Kit();\n"
+                             "  return n + feed(Kit());\n"
+                             "}\n");
+  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  for (const char *d :
+       {"6:22: error: override of 'Animal.sound() -> Str' has incompatible "
+        "signature 'Kit.sound() -> int'",
+        "9:3: error: initializer of type 'Puppy' does not match declared type "
+        "'int' for variable 'n'",
+        "10:3: error: initializer of type 'int' does not match declared type "
+        "'Animal' for variable 'w'",
+        "11:3: error: initializer of type 'Puppy' does not match declared type "
+        "'Str' for variable 's'",
+        "12:3: error: initializer of type 'Cat' does not match declared type "
+        "'Puppy' for variable 'p'",
+        "13:3: error: initializer of type 'Animal' does not match declared "
+        "type 'Puppy' for variable 'q'",
+        "14:3: error: initializer of type 'Str' does not match declared type "
+        "'Puppy?' for variable 'o'",
+        "16:3: error: initializer of type 'Puppy?' does not match declared "
+        "type 'Animal' for variable 'z'",
+        "17:3: error: initializer of type 'Kit' does not match declared type "
+        "'Cat' for variable 'c'",
+        "18:19: error: argument 1 of 'feed' has type 'Kit', expected 'Cat'"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+}
+
 // Reserved binder names (#126): every binder rejects a type name (a builtin
 // one, `Str`, or the program's) with one error, through the same guard.
 
@@ -426,7 +551,9 @@ TEST(BinderName, FieldsRejectReservedNames) {
 // once: one never instantiated (a library's export compiled cleanly), one
 // instantiated twice (reported per instantiation), one instantiated by a
 // field declared before it; of a struct, a class and an enum.  A field
-// named like the template's own type parameter is not a type's name.
+// named like the template's own type parameter is one too, a type
+// parameter being a type name throughout its template (it was accepted);
+// one named like another template's is not.
 TEST(BinderName, ATemplatesFieldsAreCheckedAtTheTemplate) {
   const std::string field = "is a type name and cannot be used as a field name";
   auto r = semaCheck("struct Box<T> { u8: T; }\nclass G<T> { Str: T; }\n"
@@ -454,9 +581,13 @@ TEST(BinderName, ATemplatesFieldsAreCheckedAtTheTemplate) {
              wrapMain("h = H(Box<int>(1));"),
          "2:17: error: 'u8' "}})
     expectOneBinderError(src, at + field);
-  auto own = semaCheck("struct Box<T> { T: int; v: T; }\n" +
-                       wrapMain("b = Box<int>(1, 2); io::println(b.T);"));
-  EXPECT_TRUE(own.Ok) << own.Diagnostics;
+  expectOneBinderError("struct Box<T> { T: int; v: T; }\n" +
+                           wrapMain("b = Box<int>(1, 2); io::println(b.T);"),
+                       "1:17: error: 'T' " + field);
+  auto other = semaCheck("struct Box<T> { U: int; v: T; }\n"
+                         "fn f<U>(u: U) -> U { return u; }\n" +
+                         wrapMain("b = Box<int>(1, 2); io::println(b.U);"));
+  EXPECT_TRUE(other.Ok) << other.Diagnostics;
 }
 
 TEST(BinderName, MatchBindingsRejectReservedNames) {

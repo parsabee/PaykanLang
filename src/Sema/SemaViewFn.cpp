@@ -9,6 +9,7 @@
 #include "Names.h"
 #include "Sema.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -98,10 +99,36 @@ void Sema::warnMissingViewFns() {
     if (introducedHere && !changes && intro && !intro->isView())
       could.insert(family);
   }
+  // A generic type's instances share their template's declarations: its
+  // method is one for all of them, warned about only when it could be a
+  // `view fn` in every instance, and then once.  So it is not when it
+  // returns or stores part of `self` holding a type argument: `Box<int>`'s
+  // `get` could, but `Box<Str>`'s returns a reference its caller may change
+  // (or keeps one in a local, an array or a tuple), and an importer of the
+  // module may make a `Box<Str>` the module never sees.
+  auto templateOf = [&](ast::Type *t) -> const void * {
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(t))
+      if (const InstantiationInfo *info = instantiationInfo(ct))
+        return info->Template;
+    if (auto *st = ast::dyn_cast<ast::StructType>(t))
+      if (const StructInstantiationInfo *info = structInstantiationInfo(st))
+        return info->Template;
+    return t; // not an instance: its own
+  };
+  using Declared = std::pair<const void *, std::string>;
+  std::set<Declared> cannot;
+  for (const auto &[family, members] : families)
+    if (!could.count(family) ||
+        std::any_of(members.begin(), members.end(),
+                    [](const MethodUse *m) { return m->CopiesTypeArgument; }))
+      cannot.insert({templateOf(family.first), family.second});
+  // A family stays one only while its declaration does, and each `self.m()`
+  // its members make calls one that stays.
   for (bool changed = true; changed;) {
     changed = false;
     for (auto it = could.begin(); it != could.end();) {
-      bool stays = true;
+      const Declared declared{templateOf(it->first), it->second};
+      bool stays = !cannot.count(declared);
       for (const MethodUse *m : families[*it])
         for (const std::string &callee : m->SelfCalls)
           if (!could.count(familyOf(*m, callee)))
@@ -109,13 +136,12 @@ void Sema::warnMissingViewFns() {
       if (stays) {
         ++it;
       } else {
+        cannot.insert(declared);
         it = could.erase(it);
         changed = true;
       }
     }
   }
-  // A generic class's instances share their template's locations: one
-  // warning each.
   std::set<std::pair<size_t, size_t>> warned;
   for (const Family &family : could) {
     for (const MethodUse *m : families[family]) {

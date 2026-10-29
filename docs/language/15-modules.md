@@ -107,7 +107,9 @@ import's last path segment, or a full module path) names exactly one module, so
 `import a::util; import b::util;` is an error (`import of module 'b::util': qualifier
 'util' already names module 'a::util' (give one of them an alias with 'as')`, each module
 by its canonical name, `::io` for a system module); write `import b::util as bu;` instead.
-Importing the same module under a second qualifier is fine.
+Importing the same module under a second qualifier is fine. A system import's full path is
+its canonical name, `::math`, which binds no qualifier code can write (`::math::sqrt` is a
+syntax error), so it clashes with no other import (see [System Imports](#system-imports)).
 
 ### Selective Import
 
@@ -159,6 +161,22 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 `<prefix>/bin/`) when it exists, and `<source-root>/stdlib`. A system module is otherwise an
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
+
+Its full path is the module's canonical name `::math`, which binds no qualifier code can
+write (`::math::sqrt(16.0)` does not parse), so it never clashes with a module of the source
+root. The path without the `::` qualifies the module (`math::sqrt` after
+`import ::math as m;`), unless another import of the file binds that name: then it names
+that module. So a program with a module `math.pkn` of its own imports both when the system
+import has an alias, and `math::` is its own module:
+
+```text
+import ::math as cmath;   // cmath::sqrt(16.0)
+import math as mine;      // mine::square(3), and math::square(3)
+```
+
+A plain `import ::math;` binds `math` as its qualifier, which `import math;` (or `import
+math as mine;`, whose full path is `math`) cannot share: `import of module 'math':
+qualifier 'math' already names module '::math' (give one of them an alias with 'as')`.
 
 The standard library ships with the compiler (see [the standard library](../stdlib/index.md)):
 `::io` prints, reads and writes files; `::error` holds the errors that library functions
@@ -262,10 +280,13 @@ What `C` cannot do without importing `A` is *spell* the type: `t = w.get()` is f
 **Type names are global.** Because each type is rebuilt once per importing file, keyed by its
 declared name, type names are global across the import graph (the main file and everything
 it imports, directly or not): if two modules reachable from one file both declare a class
-(or struct, or enum) called `Node`, importing them is an error naming both modules. A file
+(or struct, or enum) called `Node`, importing them is an error naming both modules, once for
+each such type, and nothing of the second module is imported: its uses (`tree::Node()`,
+`tree::depth(t)`) are not reported again. A file
 also cannot declare a class, struct, enum, trait or function with the same name as a type
 reached through any of its imports (`enum 'Node' conflicts with an imported type of the same
-name`). A generic type is not reached by its name: its instantiations are
+name`); the name then means that declaration, whose uses in the file (`n: Node`,
+`Node::Leaf`) are not reported again either. A generic type is not reached by its name: its instantiations are
 (`Box<int>`), spelled through its module (`m::Box<int>`), so a file may declare its own `Box`.
 
 ```pkn
@@ -629,8 +650,8 @@ differently.
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
 | Imports nested too deep | A chain of imports more than 256 modules deep: `imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep` |
-| Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
-| Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name, or a file declares a type named like an imported one |
+| Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules; a system import's path without its `::` gives way to another import's (`import ::math as cmath; import math;`) |
+| Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name (the import of the second binds none of its names), or a file declares a type named like an imported one (the file's uses of the name are that declaration's) |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
 | Private name imported | `Mod::_name` for a function, class, struct, enum or trait whose name starts with `_`: `'Mod::_name' is private to module 'Mod'` |
 | Module-private member imported | `x._f`, `x._m()` or `Mod::T::_s()` on a type of another module: `'_f' of 'T' is private to module 'Mod'` |

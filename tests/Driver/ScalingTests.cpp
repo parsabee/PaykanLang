@@ -377,3 +377,67 @@ TEST(Scaling, AModulesCacheKeyIsMadeFromItsOwnCode) {
   ASSERT_EQ(t.ExitCode, 0) << t.Out;
   EXPECT_LT(t.Seconds, 5 * slowdown());
 }
+
+// Templates that instantiate each other with a tuple of three of their
+// argument, eleven deep, end with an argument of 3^11 ints.  Each level
+// resolved the arguments it was given again, element by element, building
+// for each element a description that holds the whole instantiation's
+// name, so the chain took 10.8 s of processor time to check, and one level
+// more 115 s (SW-04).  A type resolved once is itself at once now, and the
+// chain takes 0.07 s.
+TEST(Scaling, AnInstantiationChainResolvesEachArgumentOnce) {
+  ScratchDir dir("chain");
+  std::string src = "import ::io;\n";
+  for (int k = 0; k < 11; ++k)
+    src += "class L" + std::to_string(k) + "<T> { v: T; n: L" +
+           std::to_string(k + 1) + "<(T, T, T)>?; }\n";
+  src += "class L11<T> { v: T; }\n"
+         "fn main() -> int { let c = L0<int>(1, None); io::println(c.v); "
+         "return 0; }\n";
+  const std::string path = dir.write("chain.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 2 * slowdown());
+}
+
+// A template that instantiates itself with a tuple of two or three of its
+// argument stops once the name passes 4,096 characters (SW-04).  The depth
+// limit (16) stopped the first after 1.5 s, with 900 KB of names in its
+// notes, and the second ran for more than 5 minutes; each takes 0.01 s now.
+// The second runs only once the first has stopped at the name limit, in
+// time: a compiler without the limit would run on.
+TEST(Scaling, PolymorphicRecursionStopsAtTheNameLimit) {
+  ScratchDir dir("polymorphic");
+  for (const std::string tuple : {"(T, T)", "(T, T, T)"}) {
+    const std::string path =
+        dir.write("c.pkn", "class C<T> { v: T; n: C<" + tuple +
+                               ">?; }\nfn main() -> int { let s = "
+                               "C<int>(1, None); return 0; }\n");
+    Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
+    ASSERT_EQ(t.ExitCode, 1) << tuple;
+    ASSERT_NE(t.Out.find("exceeds the maximum instantiation name length"),
+              std::string::npos)
+        << t.Out.substr(0, 2000);
+    ASSERT_LT(t.Seconds, 0.5 * slowdown()) << tuple;
+  }
+}
+
+// Each enum here has three variants holding the one before it, so the
+// innermost of 20 is reached by 3^20 paths.  Whether a field holds its
+// struct in place was asked along each, which took 4 s at 15 enums and
+// three times as long for each more; each enum is looked into once per
+// question now, and the 20 take 0.01 s.
+TEST(Scaling, AnEnumReachedByManyPathsIsLookedIntoOnce) {
+  ScratchDir dir("enums");
+  std::string src =
+      "import ::io;\nenum E0 { A(x: int), B(y: int), C(z: int) }\n";
+  for (int k = 1; k <= 20; ++k)
+    src += numbered("enum E# { ", k) + numbered("A(x: E#), ", k - 1) +
+           numbered("B(y: E#), ", k - 1) + numbered("C(z: E#) }\n", k - 1);
+  src += "fn f(e: E20) -> Str {\n  return \"\";\n}\n"
+         "fn main() -> int { return 0; }\n";
+  const std::string path = dir.write("enums.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 1 * slowdown());
+}

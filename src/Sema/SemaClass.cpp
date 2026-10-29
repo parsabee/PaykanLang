@@ -10,7 +10,9 @@
 
 #include "StringMap.h"
 
+#include <algorithm>
 #include <functional>
+#include <iterator>
 #include <unordered_map>
 
 namespace {
@@ -34,14 +36,13 @@ namespace sema {
 
 namespace {
 
-/// Returns true if `stmt` is a bare call to __super__(...) in statement
-/// position (i.e. `__super__(args);`).
-bool isSuperInitCall(ast::Stmt *stmt) {
-  auto *es = ast::dyn_cast<ast::ExprStmt>(stmt);
+/// The `__super__(args);` that is the first of @p stmts, or null.
+const ast::CallExpr *frontSuperCall(const std::vector<ast::Stmt *> &stmts) {
+  auto *es = stmts.empty() ? nullptr : ast::dyn_cast<ast::ExprStmt>(stmts[0]);
   if (!es)
-    return false;
+    return nullptr;
   auto *call = ast::dyn_cast<ast::CallExpr>(es->getExpr());
-  return call && call->getCalleeName() == names::kMethodSuper;
+  return call && call->getCalleeName() == names::kMethodSuper ? call : nullptr;
 }
 
 } // namespace
@@ -400,9 +401,7 @@ bool Sema::checkInitFieldsAssigned(
       entry[i] = true;
   // `__super__(...)` runs first: in its arguments nothing is assigned.
   std::vector<ast::Stmt *> stmts = body->getStatements();
-  if (!stmts.empty() && isSuperInitCall(stmts.front())) {
-    const auto *call = ast::cast<ast::CallExpr>(
-        ast::cast<ast::ExprStmt>(stmts.front())->getExpr());
+  if (const ast::CallExpr *call = frontSuperCall(stmts)) {
     for (const ast::Expr *arg : call->getArguments())
       checkUses(arg, entry, true);
     stmts.erase(stmts.begin());
@@ -459,7 +458,6 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   //          registered on Obj in phase 3) and is marked erroneous.
   std::vector<ast::ClassDecl *> sorted;
   StringMap<uint8_t> color; // 0=white 1=gray(in-progress) 2=black(done)
-  StringSet noSuper;
 
   std::function<void(ast::ClassDecl *)> topoVisit = [&](ast::ClassDecl *cd) {
     if (color[cd->getName()] != 0)
@@ -484,17 +482,14 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
         // Not declared in this module: the name must resolve through the
         // ASTContext registry — a built-in class type (Obj, Str) or an
         // imported class referenced by a registered alias (e.g.
-        // "tmp_import::helper::Adder").  A class of a failed import was
-        // reported with the import.
-        if (!reportPrivateImport(superName, cd->getLocation()) &&
-            !isFailedImportUse(superName))
-          error(cd->getLocation(), "superclass '" + superName + "' of class '" +
-                                       cd->getName() + "' is not defined");
+        // "tmp_import::helper::Adder").
+        reportUndefinedSuperclass(superName, cd->getName(), nullptr,
+                                  cd->getLocation());
         broken = true;
       }
       if (broken) {
         ok = false;
-        noSuper.insert(cd->getName());
+        SuperclassLost.insert(cd->getName());
         ErroneousClasses.insert(cd->getName());
       }
     }
@@ -509,7 +504,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   //          within this module resolve correctly.
   for (auto *cd : sorted) {
     ast::ClassType *superClass = nullptr;
-    if (cd->hasSuperClass() && !noSuper.count(cd->getName())) {
+    if (cd->hasSuperClass() && !SuperclassLost.count(cd->getName())) {
       superClass = Ctx.lookupClassType(cd->getSuperClassName());
       // Non-inheritable (final) classes cannot be subclassed.
       // Currently this covers built-in types like Str; it will also apply
@@ -597,9 +592,10 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
     FixedArrayAllowed = true; // a field may be a fixed-size array
-    auto *fty = resolveValueType(field->getType(), field->getLocation(),
-                                 "field '" + field->getName() + "' in class '" +
-                                     cd->getName() + "'");
+    auto *fty =
+        resolveValueType(field->getType(), field->getLocation(),
+                         TypeContext({"field '", field->getName(),
+                                      "' in class '", cd->getName(), "'"}));
     if (!fty) {
       ok = false;
       continue;
@@ -699,6 +695,56 @@ bool Sema::doesNothing(const ast::ClassType *ct) const {
   return true;
 }
 
+void Sema::reportUndefinedSuperclass(const std::string &super,
+                                     const std::string &cls,
+                                     const ast::ClassDecl *tmpl,
+                                     ast::SourceLocation loc) {
+  if (reportPrivateImport(super, loc) || isFailedImportUse(super))
+    return;
+  const std::string head = "superclass '" + super + "' of class '" + cls + "' ";
+  if (Traits.count(super)) {
+    // How a class takes a trait: `impl T for A`, `impl T for Box<T>`.
+    std::string target = cls;
+    if (tmpl) {
+      target = tmpl->getName() + "<";
+      for (size_t i = 0; i < tmpl->getTypeParams().size(); ++i)
+        target += (i ? ", " : "") + *tmpl->getTypeParams()[i];
+      target += ">";
+    }
+    error(loc, head +
+                   "is a trait, not a class: a class implements a trait "
+                   "with 'impl " +
+                   super + " for " + target + " { ... }'");
+    return;
+  }
+  if (ClassTemplates.count(super)) {
+    error(loc, head + "is a generic class: a superclass cannot be generic");
+    return;
+  }
+  const char *what = nullptr;
+  if (ast::BuiltinType::Kind builtin; ast::builtinKindOfName(super, builtin))
+    what = "a builtin type";
+  else if (tmpl &&
+           std::any_of(tmpl->getTypeParams().begin(),
+                       tmpl->getTypeParams().end(),
+                       [&](const std::string *p) { return *p == super; }))
+    what = "a type parameter";
+  else if (Ctx.lookupStructType(super))
+    what = "a struct";
+  else if (Ctx.lookupEnumType(super))
+    what = "an enum";
+  else if (StructTemplates.count(super))
+    what = "a generic struct";
+  else if (EnumTemplates.count(super))
+    what = "a generic enum";
+  else if (FuncTemplates.count(super))
+    what = "a generic function";
+  else if (ModuleFunctionNames.count(super) || lookupFunction(super))
+    what = "a function"; // the module's are not declared yet
+  error(loc, head + (what ? "is " + std::string(what) + ", not a class"
+                          : std::string("is not defined")));
+}
+
 ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
   StringSet used;
   for (auto &[name, _] : ct->getFields())
@@ -795,9 +841,9 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   ast::Type *retTy = Ctx.getVoidTy();
   if (method->getReturnType()) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
-    retTy = resolveType(method->getReturnType(), method->getLocation(),
-                        "method '" + method->getName() + "' in '" + className +
-                            "'");
+    retTy = resolveType(
+        method->getReturnType(), method->getLocation(),
+        TypeContext({"method '", method->getName(), "' in '", className, "'"}));
     if (!retTy || !checkFixedResult(retTy, method->getResultMode(),
                                     method->getLocation()))
       return nullptr;
@@ -823,10 +869,10 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *pty =
-        resolveValueType(p.ParamType, p.Loc,
-                         "parameter '" + p.getName() + "' of method '" +
-                             method->getName() + "' in '" + className + "'");
+    auto *pty = resolveValueType(
+        p.ParamType, p.Loc,
+        TypeContext({"parameter '", p.getName(), "' of method '",
+                     method->getName(), "' in '", className, "'"}));
     if (!pty)
       return nullptr;
     p.ParamType = pty;
@@ -971,6 +1017,8 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
         ok = false;
         continue;
       }
+      std::optional<TypeParamScope> params;
+      implTypeParamScope(params, fn);
       if (auto *md = declareMethod(
               fn, ct, nullptr,
               init ? ast::MethodDecl::None : ast::MethodDecl::Impl, ok)) {
@@ -999,25 +1047,25 @@ bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
 void Sema::checkTemplateFieldNames(const ast::Decl *tmpl) {
   if (!TemplateFieldsChecked.insert(tmpl).second)
     return;
-  // Not under an instantiation (its notes would name one of many) nor a
-  // generic body's type parameters: the template's fields are checked as a
-  // struct's are.
+  // Not under an instantiation (its notes would name one of many): the
+  // template's fields are checked as a struct's are, its own type
+  // parameters being type names there (not a generic body's that uses it).
   std::vector<InstantiationFrame> frames =
       std::exchange(InstantiationStack, {});
-  const StringSet *typeParams = std::exchange(CurrentTypeParams, nullptr);
-  auto check = [&](const std::vector<ast::VarDecl *> &fields) {
+  auto check = [&](const std::vector<const std::string *> &typeParams,
+                   const std::vector<ast::VarDecl *> &fields) {
+    TypeParamScope params(*this, typeParams);
     for (const ast::VarDecl *field : fields)
       checkBinderName(field->getName(), field->getLocation(),
                       /*binds=*/false, "a field name");
   };
   if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
-    check(cd->getFields());
+    check(cd->getTypeParams(), cd->getFields());
   else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
-    check(sd->getFields());
+    check(sd->getTypeParams(), sd->getFields());
   else if (const auto *ed = ast::dyn_cast<ast::EnumDecl>(tmpl))
     for (size_t v = 0; v < ed->getNumVariants(); ++v)
-      check(ed->getPayload(v));
-  CurrentTypeParams = typeParams;
+      check(ed->getTypeParams(), ed->getPayload(v));
   InstantiationStack = std::move(frames);
 }
 
@@ -1171,6 +1219,8 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
     classCtx.ViewMethod = method->isView();
+    std::optional<TypeParamScope> params;
+    implTypeParamScope(params, method);
 
     if (rejectReservedDestroy(method, ct)) {
       ok = false;
@@ -1186,7 +1236,10 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     // superclass (other than the implicit Obj root) declares an __init__ at
     // all — even a zero-parameter one — so the base initializer always runs.
     classCtx.SuperInitRequired = false;
-    classCtx.SuperInitCalled = false;
+    classCtx.FrontSuperCall =
+        method->getName() == names::kMethodInit
+            ? frontSuperCall(method->getBody()->getStatements())
+            : nullptr;
     if (method->getName() == names::kMethodInit && ct->getSuperClass() &&
         ct->getSuperClass() != Ctx.getObjTy()) {
       auto *superInit = ct->getSuperClass()->findMethod(names::kMethodInit);
@@ -1242,39 +1295,27 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
                                            "' does not always return a value");
           ok = false;
         }
-        if (classCtx.SuperInitRequired) {
-          const auto &stmts = method->getBody()->getStatements();
-          bool firstIsSuper = !stmts.empty() && isSuperInitCall(stmts.front());
-          if (!firstIsSuper) {
-            // Distinguish "never called" from "called but not first" so the
-            // diagnostic points the programmer at the actual fix.
-            if (classCtx.SuperInitCalled)
-              error(method->getLocation(),
-                    std::string("'") + names::kMethodSuper +
-                        "' must be the first statement of '" +
-                        names::kMethodInit + "' in class '" + node->getName() +
-                        "'");
-            else {
-              const std::string &super = ct->getSuperClass()->getName();
-              std::string msg = "'";
-              msg += names::kMethodInit;
-              msg += "' in class '" + node->getName() + "' must call '";
-              msg += names::kMethodSuper;
-              msg += "' as its first statement because its superclass '";
-              msg += super + "' ";
-              if (auto d = DefaultInits.find(super); d != DefaultInits.end()) {
-                msg += "has fields to initialize (its default '";
-                msg += names::kMethodInit;
-                msg += "' takes " + paramList(d->second) + ")";
-              } else {
-                msg += "has an '";
-                msg += names::kMethodInit;
-                msg += "'";
-              }
-              error(method->getLocation(), msg);
-            }
-            ok = false;
+        // A `__super__(...)` anywhere but first was reported at the call, so
+        // a body that checked calls it first or not at all.
+        if (classCtx.SuperInitRequired && !classCtx.FrontSuperCall) {
+          const std::string &super = ct->getSuperClass()->getName();
+          std::string msg = "'";
+          msg += names::kMethodInit;
+          msg += "' in class '" + node->getName() + "' must call '";
+          msg += names::kMethodSuper;
+          msg += "' as its first statement because its superclass '";
+          msg += super + "' ";
+          if (auto d = DefaultInits.find(super); d != DefaultInits.end()) {
+            msg += "has fields to initialize (its default '";
+            msg += names::kMethodInit;
+            msg += "' takes " + paramList(d->second) + ")";
+          } else {
+            msg += "has an '";
+            msg += names::kMethodInit;
+            msg += "'";
           }
+          error(method->getLocation(), msg);
+          ok = false;
         }
 
         // Definite-assignment: every own field must be set on every path out
@@ -1547,6 +1588,26 @@ void Sema::noteForeignSource(const ast::Decl *d,
                                     origin.Module};
 }
 
+Sema::TypeParamScope::TypeParamScope(
+    Sema &s, const std::vector<const std::string *> &params)
+    : S(s), Saved(s.CurrentTypeParams) {
+  for (const std::string *p : params)
+    Params.insert(*p);
+  S.CurrentTypeParams = &Params;
+}
+
+void Sema::noteImplTypeParams(const ast::ImplDecl *im,
+                              const ast::ImplDecl *copy) {
+  for (const ast::FuncDecl *fn : copy->getMethods())
+    ImplMethodTypeParams[fn] = &im->getTypeParams();
+}
+
+void Sema::implTypeParamScope(std::optional<TypeParamScope> &scope,
+                              const ast::FuncDecl *fn) {
+  if (auto it = ImplMethodTypeParams.find(fn); it != ImplMethodTypeParams.end())
+    scope.emplace(*this, *it->second);
+}
+
 Sema::OriginSource::OriginSource(Sema &s, const ModuleTemplates *origin)
     : S(s), SavedOrigin(s.CurrentOrigin), SavedName(s.Diags.getSourceName()),
       SavedLines(s.Diags.getSourceLines()), Active(origin != nullptr) {
@@ -1566,9 +1627,299 @@ Sema::InstantiationFrame Sema::frameAt(const std::string &name,
   return {name, loc, Diags.getSourceName(), Diags.getSourceLines()};
 }
 
+void Sema::recordInstantiationSite(const ast::Decl *tmpl,
+                                   const InstantiationFrame &request) {
+  InstantiationSites.try_emplace(
+      request.Name, InstantiationSite{tmpl, request, InstantiationStack});
+}
+
+/// The name template @p tmpl, a generic class, struct or enum, declares.
+static const std::string &templateDeclName(const ast::Decl *tmpl) {
+  if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+    return cd->getName();
+  if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+    return sd->getName();
+  return ast::cast<ast::EnumDecl>(tmpl)->getName();
+}
+
+std::string Sema::instanceNameOf(const ast::Decl *tmpl, const std::string &name,
+                                 const std::vector<ast::Type *> &args) {
+  const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl);
+  if (!fn)
+    return instantiationName(templateDeclName(tmpl), args);
+  // As instantiateFunction names it: per module.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  return origin ? hiddenQualifier(origin->Module) + names::kQualSep +
+                      instantiationName(fn->getName(), args)
+                : instantiationName(name, args);
+}
+
+/// How many type parameters template @p tmpl declares.
+static size_t typeParamCount(const ast::Decl *tmpl) {
+  if (const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl))
+    return fn->getTypeParams().size();
+  if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+    return cd->getTypeParams().size();
+  if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+    return sd->getTypeParams().size();
+  return ast::cast<ast::EnumDecl>(tmpl)->getTypeParams().size();
+}
+
+const std::vector<uint64_t> *
+Sema::writtenArgParams(const ast::ASTNode *written) const {
+  auto it = written ? WrittenTypeArgs.find(written) : WrittenTypeArgs.end();
+  if (it == WrittenTypeArgs.end())
+    return nullptr;
+  const ast::WrittenTypeArgs &w = it->second;
+  // Written with no type parameter (`L0<int>`), it names the same types
+  // wherever it is; with one, the parameters are its copy's, which must be
+  // the instantiation it is requested in.
+  if (std::all_of(w.Params.begin(), w.Params.end(),
+                  [](uint64_t p) { return p == 0; }) ||
+      (!InstantiatingTemplates.empty() &&
+       InstantiatingTemplates.back().Name == w.Copy))
+    return &w.Params;
+  return nullptr;
+}
+
+// static
+std::vector<size_t> Sema::argumentNestings(const std::string &name) {
+  std::vector<size_t> nestings;
+  const size_t args = name.find('<');
+  if (args == std::string::npos)
+    return nestings;
+  size_t open = 0;
+  size_t most = 0;
+  // Up to the `>` that closes the arguments, the name's last character.
+  for (size_t i = args + 1; i + 1 < name.size(); ++i) {
+    const char c = name[i];
+    if (c == '(' || c == '<') {
+      most = std::max(most, ++open);
+    } else if (c == ')' || (c == '>' && name[i - 1] != '-')) {
+      --open; // a function type's `->` closes nothing
+    } else if (c == ',' && open == 0) {
+      nestings.push_back(most);
+      most = 0;
+    }
+  }
+  nestings.push_back(most);
+  return nestings;
+}
+
+bool Sema::argumentsGrow(size_t anchor, const std::string &instName,
+                         const std::vector<uint64_t> *argParams) const {
+  const std::vector<size_t> was =
+      argumentNestings(*InstantiatingTemplates[anchor].Name);
+  const std::vector<size_t> now = argumentNestings(instName);
+  const size_t n = now.size();
+  const size_t deepest =
+      was.empty() ? 0 : *std::max_element(was.begin(), was.end());
+  if (was.size() != n || n > 64)
+    return std::any_of(now.begin(), now.end(),
+                       [&](size_t d) { return d > deepest; });
+  // Which of the anchor's arguments each argument of the instantiations
+  // after it, and then of this one, holds: Known, through arguments
+  // written with the type parameters of the one before; Unknown, through
+  // one that was not (inferred, say), which may hold any of them.
+  struct Held {
+    uint64_t Known;
+    uint64_t Unknown;
+  };
+  const uint64_t all = n == 64 ? ~uint64_t{0} : (uint64_t{1} << n) - 1;
+  std::vector<Held> held(n);
+  for (size_t p = 0; p < n; ++p)
+    held[p] = {uint64_t{1} << p, 0};
+  auto pass = [&](const std::vector<uint64_t> *params, size_t count) {
+    std::vector<Held> next(count, Held{0, all});
+    if (params && params->size() == count)
+      for (size_t i = 0; i < count; ++i) {
+        next[i] = {0, 0};
+        for (size_t p = 0; p < held.size() && p < 64; ++p)
+          if ((*params)[i] >> p & 1) {
+            next[i].Known |= held[p].Known;
+            next[i].Unknown |= held[p].Unknown;
+          }
+      }
+    held = std::move(next);
+  };
+  for (size_t k = anchor + 1; k < InstantiatingTemplates.size(); ++k)
+    pass(InstantiatingTemplates[k].ArgParams,
+         typeParamCount(InstantiatingTemplates[k].Template));
+  pass(argParams, n);
+  // Argument p of the anchor goes into argument i of this one, and grew on
+  // the way when i is nested more deeply: than p, when i holds p as
+  // written, which puts p inside it; than every argument, when it may.
+  std::vector<uint64_t> into(n, 0);
+  std::vector<uint64_t> grew(n, 0);
+  for (size_t i = 0; i < n; ++i)
+    for (size_t p = 0; p < n; ++p) {
+      const bool known = held[i].Known >> p & 1;
+      const bool unknown = held[i].Unknown >> p & 1;
+      if (!known && !unknown)
+        continue;
+      into[p] |= uint64_t{1} << i;
+      if ((known && now[i] > was[p]) || (unknown && now[i] > deepest))
+        grew[p] |= uint64_t{1} << i;
+    }
+  // It grows ever when what grew goes back to where it came from: `C<(T,
+  // T)>` in `C<T>`, or `P<B, (A, A)>` in `P<A, B>`, but not `P<A, (A, A)>`,
+  // whose own is itself.  reach[i]: the arguments i goes into, at once or
+  // through others.
+  std::vector<uint64_t> reach = into;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (size_t i = 0; i < n; ++i) {
+      uint64_t r = reach[i];
+      for (size_t j = 0; j < n; ++j)
+        if (reach[i] >> j & 1)
+          r |= reach[j];
+      changed |= r != reach[i];
+      reach[i] = r;
+    }
+  }
+  for (size_t p = 0; p < n; ++p)
+    for (size_t i = 0; i < n; ++i)
+      if ((grew[p] >> i & 1) && (i == p || (reach[i] >> p & 1)))
+        return true;
+  return false;
+}
+
+bool Sema::checkGrowingInstantiation(const ast::Decl *tmpl,
+                                     const std::string &instName,
+                                     const std::vector<uint64_t> *argParams,
+                                     ast::SourceLocation loc) {
+  if (instName.size() <= kMaxGrowingInstantiationName)
+    return true;
+  auto inner = std::find_if(
+      InstantiatingTemplates.rbegin(), InstantiatingTemplates.rend(),
+      [&](const InstantiatingTemplate &t) { return t.Template == tmpl; });
+  // Not inside one of its own, or not growing from it: its arguments
+  // rearranged (`Pair<B, A>` inside `Pair<A, B>`, whose own `Pair<B, A>`
+  // is the first again), or made of none of its (an `X<…>` reached from
+  // `X<int>` through `L0<int>`).
+  if (inner == InstantiatingTemplates.rend() ||
+      !argumentsGrow(InstantiatingTemplates.rend() - inner - 1, instName,
+                     argParams))
+    return true;
+  const std::string shown = displayName(instName);
+  if (shown.size() <= kMaxGrowingInstantiationName)
+    return true; // only its hidden qualifier is long
+  // Shown cut short, at a character's first byte.
+  size_t cut = 60;
+  while ((static_cast<unsigned char>(shown[cut]) & 0xC0) == 0x80)
+    --cut;
+  const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl);
+  const char *kind = fn                                ? "function"
+                     : ast::isa<ast::ClassDecl>(tmpl)  ? "class"
+                     : ast::isa<ast::StructDecl>(tmpl) ? "struct"
+                                                       : "enum";
+  error(loc, "instantiating '" + shown.substr(0, cut) +
+                 "...' inside an instantiation of '" +
+                 (fn ? fn->getName() : templateDeclName(tmpl)) +
+                 "' exceeds the maximum instantiation name length (" +
+                 std::to_string(kMaxGrowingInstantiationName) +
+                 " characters; this one has " + std::to_string(shown.size()) +
+                 "); a generic " + kind +
+                 " may not instantiate itself with an ever-growing type "
+                 "argument");
+  return false;
+}
+
+void Sema::reportInstantiationClash(const ast::Decl *tmpl,
+                                    const std::string &instName,
+                                    ast::SourceLocation loc) {
+  if (!ReportedInstantiationClashes.insert(instName).second) {
+    ++SuppressedFollowOns;
+    return;
+  }
+  // A template by its module's name, and the file its declaration is in.
+  auto shown = [&](const ast::Decl *t) {
+    const ModuleTemplates *origin = foreignOrigin(t);
+    return origin ? origin->Module + names::kQualSep + templateDeclName(t)
+                  : templateDeclName(t);
+  };
+  const std::string file = Diags.getSourceName();
+  const std::vector<std::string> *lines = Diags.getSourceLines();
+  auto noteDecl = [&](const ast::Decl *t) {
+    const ModuleTemplates *origin = foreignOrigin(t);
+    Diags.setSourceInfo(origin ? origin->File : OwnSourceName,
+                        origin ? origin->Lines : OwnSourceLines);
+    Diags.note(t->getLocation(), "'" + shown(t) + "' is declared here");
+  };
+  auto site = InstantiationSites.find(instName);
+  if (site == InstantiationSites.end() || site->second.Template == tmpl) {
+    // A type an import gave the program, an instantiation of a template of
+    // another module (::io's `Result<Str, Error>`, of ::result's).
+    const char *kind = Ctx.lookupClassType(instName)    ? "class"
+                       : Ctx.lookupStructType(instName) ? "struct"
+                       : Ctx.lookupEnumType(instName)   ? "enum"
+                                                        : "type";
+    error(loc, "instantiation '" + instName + "' of '" + shown(tmpl) +
+                   "' conflicts with an imported " + kind +
+                   " of the same name (type names are global across imports)");
+    auto origin = ImportedTypeOrigins.find(instName);
+    if (origin == ImportedTypeOrigins.end())
+      return;
+    const std::string base = instName.substr(0, instName.find('<'));
+    const std::string hidden =
+        hiddenQualifier(origin->second) + names::kQualSep + base;
+    const ast::Decl *other = nullptr;
+    if (auto c = ClassTemplates.find(hidden); c != ClassTemplates.end())
+      other = c->second;
+    else if (auto s = StructTemplates.find(hidden); s != StructTemplates.end())
+      other = s->second;
+    else if (auto e = EnumTemplates.find(hidden); e != EnumTemplates.end())
+      other = e->second;
+    if (other)
+      noteDecl(other);
+    if (auto at = ImportedTypeImports.find(instName);
+        at != ImportedTypeImports.end()) {
+      Diags.setSourceInfo(OwnSourceName, OwnSourceLines);
+      Diags.note(at->second, std::string("the ") + kind + " '" + instName +
+                                 "' of module '" + origin->second +
+                                 "' comes in through this import");
+    }
+    Diags.setSourceInfo(file, lines);
+    return;
+  }
+  // Another template's instantiation: the error is at a request this
+  // module's own code made, of its own template when it is one, and the
+  // notes at the other template's.
+  auto rank = [&](const InstantiationSite &s) {
+    const bool own =
+        s.Request.Lines == OwnSourceLines && s.Request.File == OwnSourceName;
+    return (own ? 2 : 0) + (foreignOrigin(s.Template) ? 0 : 1);
+  };
+  const InstantiationSite here{tmpl, frameAt(instName, loc),
+                               InstantiationStack};
+  const bool atOther = rank(site->second) > rank(here);
+  const InstantiationSite &subject = atOther ? site->second : here;
+  const InstantiationSite &rival = atOther ? here : site->second;
+  std::vector<InstantiationFrame> frames =
+      std::exchange(InstantiationStack, subject.Frames);
+  Diags.setSourceInfo(subject.Request.File, subject.Request.Lines);
+  error(subject.Request.RequestLoc,
+        "instantiation '" + instName + "' of '" + shown(subject.Template) +
+            "' conflicts with the instantiation '" + instName + "' of '" +
+            shown(rival.Template) + "' (type names are global across imports)");
+  InstantiationStack = std::move(frames);
+  noteDecl(rival.Template);
+  Diags.setSourceInfo(rival.Request.File, rival.Request.Lines);
+  Diags.note(rival.Request.RequestLoc, "'" + shown(rival.Template) +
+                                           "' is instantiated as '" + instName +
+                                           "' here");
+  for (auto it = rival.Frames.rbegin(); it != rival.Frames.rend(); ++it) {
+    Diags.setSourceInfo(it->File, it->Lines);
+    Diags.note(it->RequestLoc, "in instantiation of '" + displayName(it->Name) +
+                                   "' requested here");
+  }
+  Diags.setSourceInfo(file, lines);
+}
+
 ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        const std::vector<ast::Type *> &args,
-                                       ast::SourceLocation loc) {
+                                       ast::SourceLocation loc,
+                                       const ast::ASTNode *written) {
   auto tIt = ClassTemplates.find(name);
   if (tIt == ClassTemplates.end()) {
     if (ErroneousNames.count(name) || isFailedImportUse(name))
@@ -1610,6 +1961,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   // its template's own name, however it was spelled here.
   const ModuleTemplates *origin = foreignOrigin(tmpl);
   const std::string instName = instantiationName(tmpl->getName(), args);
+  noteInstantiationRequest(instName);
   if (auto cIt = ClassInstantiations.find(instName);
       cIt != ClassInstantiations.end()) {
     // Cached (nullptr records an earlier failure) -- unless it is another
@@ -1618,9 +1970,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                             : ClassInstantiationInfo.end();
     if (info == ClassInstantiationInfo.end() || info->second.Template == tmpl)
       return cIt->second;
-    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
-                   "' conflicts with another template's instantiation of the "
-                   "same name (type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     return nullptr;
   }
 
@@ -1647,18 +1997,14 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
       copyImportedInstance(existing, loc);
       return existing;
     }
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported class of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
   if (Ctx.lookupType(instName)) {
     // A struct (or another type) of that name, from a template of another
     // module or declared outright: the same rule as for a struct template.
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported type of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -1671,12 +2017,18 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
+    ClassInstantiations[instName] = nullptr;
+    return nullptr;
+  }
 
   // Clone the template with the type parameters substituted.
   std::unordered_map<std::string, ast::Type *> subst;
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::ClassDecl *clone = cloner.cloneClassDecl(tmpl, instName);
   // And its `impl` blocks, each by its own names for the type parameters.
   std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
@@ -1686,11 +2038,16 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
       for (size_t i = 0; i < args.size(); ++i)
         s[*im->getTypeParams()[i]] = args[i];
       ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
       impls.push_back(c.cloneImplDecl(im, instName));
+      noteImplTypeParams(im, impls.back());
     }
 
   const InstantiationFrame request = frameAt(instName, loc);
+  recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
+  const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
+  InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
   bool ok = true;
 
@@ -1700,10 +2057,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     const auto &superName = clone->getSuperClassName();
     superClass = Ctx.lookupClassType(superName);
     if (!superClass) {
-      if (!isFailedImportUse(superName))
-        error(clone->getLocation(), "superclass '" + superName +
-                                        "' of class '" + instName +
-                                        "' is not defined");
+      reportUndefinedSuperclass(superName, instName, tmpl,
+                                clone->getLocation());
       ok = false;
     } else if (superClass->isFinal()) {
       error(clone->getLocation(),
@@ -1734,10 +2089,13 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;
 
-  if (!populateClassType(clone, ct))
-    ok = false;
-  if (ok)
-    declareConstructor(clone, ct);
+  {
+    TypeParamScope params(*this, tmpl->getTypeParams());
+    if (!populateClassType(clone, ct))
+      ok = false;
+    if (ok)
+      declareConstructor(clone, ct);
+  }
   for (auto *im : ImplsByClass[instName]) {
     if (!ok || !im->getTrait())
       continue;
@@ -1746,6 +2104,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     else if (!checkTraitImpl(im, ct))
       ok = false;
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -1763,6 +2122,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
       .push_back(clone);
@@ -1781,6 +2142,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
   // Declared in the template's module, as the bodies are checked.
   InstantiationStack.push_back(
       {base.Name, base.RequestLoc, base.RequestFile, base.RequestLines});
+  std::vector<InstantiatingTemplate> savedTemplates =
+      std::exchange(InstantiatingTemplates, base.Templates);
   OriginSource inOrigin(*this, base.Origin);
   for (auto *im : it->second) {
     if (im->getTrait())
@@ -1801,6 +2164,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
         continue;
       }
       fn->setName(Ctx.intern(name));
+      std::optional<TypeParamScope> params;
+      implTypeParamScope(params, fn);
       if (!declareFunctionSignature(fn))
         continue; // ErroneousNames has it
       // Another module's template's: the instantiation's, not this
@@ -1811,6 +2176,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
       p.Class = nullptr;
       p.Struct = nullptr;
       p.Func = fn;
+      if (params)
+        p.TypeParams = *CurrentTypeParams; // its body sees the block's names
       queueInstantiation(std::move(p));
       (base.Origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
           .push_back(fn);
@@ -1818,12 +2185,14 @@ void Sema::declareInstantiationStatics(const std::string &instName,
         noteForeignSource(fn, *base.Origin);
     }
   }
+  InstantiatingTemplates = std::move(savedTemplates);
   InstantiationStack.pop_back();
 }
 
 std::string Sema::instantiateFunction(const std::string &name,
                                       const std::vector<ast::Type *> &args,
-                                      ast::SourceLocation loc) {
+                                      ast::SourceLocation loc,
+                                      const ast::ASTNode *written) {
   auto tIt = FuncTemplates.find(name);
   if (tIt == FuncTemplates.end()) {
     if (ErroneousNames.count(name) || isFailedImportUse(name))
@@ -1856,6 +2225,7 @@ std::string Sema::instantiateFunction(const std::string &name,
                                       names::kQualSep +
                                       instantiationName(tmpl->getName(), args)
                                 : instantiationName(name, args);
+  noteInstantiationRequest(instName);
   if (auto fIt = FuncInstantiations.find(instName);
       fIt != FuncInstantiations.end())
     return fIt->second ? instName : "";
@@ -1883,11 +2253,17 @@ std::string Sema::instantiateFunction(const std::string &name,
     FuncInstantiations[instName] = false;
     return "";
   }
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
+    FuncInstantiations[instName] = false;
+    return "";
+  }
 
   std::unordered_map<std::string, ast::Type *> subst;
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::FuncDecl *clone = cloner.cloneFuncDecl(tmpl, instName);
   clone->setTypeArgs(args);
   if (tmpl->isNative()) {
@@ -1907,11 +2283,15 @@ std::string Sema::instantiateFunction(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
+  const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
+  InstantiatingTemplates.push_back(self);
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
+    TypeParamScope params(*this, tmpl->getTypeParams());
     ok = declareFunctionSignature(clone);
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
   FuncInstantiations[instName] = ok;
   if (!ok)
@@ -1927,6 +2307,8 @@ std::string Sema::instantiateFunction(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(self);
   queueInstantiation(std::move(pending));
   (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
       .push_back(clone);
@@ -2145,6 +2527,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   const ast::SourceLocation loc = node->getLocation();
 
   // Explicit type arguments (`first<int>(xs)`) resolve like any annotation.
+  const ast::ASTNode *written = node->hasTypeArgs() ? node : nullptr;
   std::vector<ast::Type *> typeArgs;
   for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
     auto *t = resolveType(node->getTypeArgs()[i], loc,
@@ -2200,7 +2583,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }
-    auto *ct = instantiateClass(callee, typeArgs, loc);
+    auto *ct = instantiateClass(callee, typeArgs, loc, written);
     if (!ct)
       return false;
     node->setCalleeName(ct->getName()); // interned by the ASTContext
@@ -2233,7 +2616,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }
-    auto *st = instantiateStruct(callee, typeArgs, loc);
+    auto *st = instantiateStruct(callee, typeArgs, loc, written);
     if (!st)
       return false;
     node->setCalleeName(st->getName()); // interned by the ASTContext
@@ -2252,7 +2635,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
                          result ? here(tmpl, result) : nullptr, expected))
         return false;
     }
-    std::string inst = instantiateFunction(callee, typeArgs, loc);
+    std::string inst = instantiateFunction(callee, typeArgs, loc, written);
     if (inst.empty())
       return false;
     node->setCalleeName(Ctx.intern(inst));
@@ -2276,12 +2659,12 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     }
     std::string instName;
     if (isClass) {
-      auto *ct = instantiateClass(owner, typeArgs, loc);
+      auto *ct = instantiateClass(owner, typeArgs, loc, node);
       if (!ct)
         return false;
       instName = ct->getName();
     } else {
-      auto *st = instantiateStruct(owner, typeArgs, loc);
+      auto *st = instantiateStruct(owner, typeArgs, loc, node);
       if (!st)
         return false;
       instName = st->getName();
@@ -2332,22 +2715,57 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
 
 bool Sema::checkPendingInstantiations() {
   bool ok = true;
+  // Made only for those whose bounds failed: a check made at the request
+  // would not have made it either (KF-6).  Held until every body has been
+  // checked, as one may still ask for it (`Inner<Foo>` in the body of a
+  // `use<int>` queued after it), and then checked with them.
+  std::vector<PendingInstantiation> held;
+  for (;;) {
+    if (!checkPendingInstantiationBodies(held))
+      ok = false;
+    auto freed = std::stable_partition(held.begin(), held.end(),
+                                       [&](const PendingInstantiation &p) {
+                                         return madeOnlyForFailedBounds(p.Name);
+                                       });
+    if (freed == held.end())
+      break;
+    PendingInstantiations.assign(std::make_move_iterator(freed),
+                                 std::make_move_iterator(held.end()));
+    held.erase(freed, held.end());
+  }
+  SuppressedFollowOns += held.size();
+  return ok;
+}
+
+bool Sema::checkPendingInstantiationBodies(
+    std::vector<PendingInstantiation> &held) {
+  bool ok = true;
   // A body may request further instantiations, which append to the list, so
   // index (not iterate) and copy the entry (the vector may reallocate).
   for (size_t i = 0; i < PendingInstantiations.size(); ++i) {
     PendingInstantiation p = PendingInstantiations[i];
+    // Its bounds failed (reported): its bodies would only repeat that.
+    if (FailedBoundInstances.count(p.Name))
+      continue;
+    if (madeOnlyForFailedBounds(p.Name)) {
+      held.push_back(std::move(p));
+      continue;
+    }
     InstantiationStack.push_back(
         {p.Name, p.RequestLoc, p.RequestFile, p.RequestLines});
     const StringSet *savedParams = CurrentTypeParams;
     CurrentTypeParams = &p.TypeParams;
     const size_t savedDepth = CurrentInstantiationDepth;
     CurrentInstantiationDepth = p.Depth;
+    std::vector<InstantiatingTemplate> savedTemplates =
+        std::exchange(InstantiatingTemplates, p.Templates);
     bool r;
     if (p.Func && p.Func->hasInferredResult()) {
       // Checked where it was first used (inferResultOf), or now.
       InstantiationStack.pop_back();
       CurrentInstantiationDepth = savedDepth;
       CurrentTypeParams = savedParams;
+      InstantiatingTemplates = std::move(savedTemplates);
       if (!inferResultOf(p.Func->getName(), p.RequestLoc) ||
           InferredFunctions[p.Func->getName()].State != Inference::Done)
         ok = false;
@@ -2361,6 +2779,7 @@ bool Sema::checkPendingInstantiations() {
     }
     CurrentInstantiationDepth = savedDepth;
     CurrentTypeParams = savedParams;
+    InstantiatingTemplates = std::move(savedTemplates);
     InstantiationStack.pop_back();
     if (!r)
       ok = false;

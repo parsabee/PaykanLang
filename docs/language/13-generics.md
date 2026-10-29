@@ -112,7 +112,12 @@ A type parameter can name the traits its type argument must implement, as a **bo
 declared just so. A trait such as `Show` or `Hashable` is built in, and a program declares
 its own with `trait` (see [Traits](06-traits.md)). A call with a type that lacks the trait
 is an error at the call (`'Task' does not implement trait 'Named', which 'f' requires of
-'T'`).
+'T'`). That error is the only one: the instantiation's body is not checked, nor are the
+bounds of the templates it uses or the bodies of the instantiations only it uses, also when
+it is named before the program's `impl` blocks are known (a field's type, `m:
+collections::HashMap<Foo, int>`), where the bound is checked once they are. An
+instantiation the program uses elsewhere too, in a declaration or in any body (a generic
+function's or a generic class's method included), is checked as ever.
 
 Bounds or not, the body of a generic class or function is type-checked again for each set
 of type arguments it is used with. If an operation does not work for one of them, the error
@@ -312,7 +317,8 @@ impl Pair<K, V> {
 - A parameter may not be repeated (`class P<T, T>`) and may not reuse the name
   of a type in scope (`class Bar<Foo>` when `Foo` is a class, `fn f<Str>`).
 - A generic class may extend a **concrete** class: `class Wrap<T> : Base { … }`.
-  The superclass itself cannot be generic.
+  The superclass itself cannot be generic: `class Full : Half<int>` and
+  `class Full<T> : Half<T>` are syntax errors at the `<`.
 - A generic class may mention its own instantiation in signatures
   (`fn link(n: Node<T>)`).
 
@@ -459,7 +465,13 @@ default `__init__` ([The default `__init__`](05-classes.md#the-default-__init__)
 Inside a generic declaration `T` stands for the type argument and nothing
 else. It can be used in annotations, `T[3]`, `view T[]`, `Box<T>`, tuple types
 `(T, int)`, optional types `T?`, and `match` arms, but `y = T;` and `T()` are
-errors ("type parameter 'T' cannot be used as a value").
+errors ("type parameter 'T' cannot be used as a value"). Like any type's name,
+it names no field, parameter or local of the declaration: `class D<T> { T: int;
+v: T; }` is `'T' is a type name and cannot be used as a field name`, at the field
+(once, whether or not `D` is instantiated), and `fn g<T>(T: int, y: T)` is `... as a
+parameter name` (`T = 3;` in a body `... as a variable`), for each instantiation. An
+`impl` block's type parameters are the names it gives them: in `impl Box<U> { … }`,
+`U` is the type and `T` an ordinary name.
 
 Tuples and optionals work inside templates and as type arguments:
 
@@ -548,7 +560,31 @@ points at `self.v + self.v`, and a note points at `Doubler<bool>(True)`.
 A generic declaration that is never instantiated is only parsed, not checked.
 Nested instantiation is bounded: a class that instantiates itself with an
 ever-growing argument (`inner: Bad<Bad<T>>`) stops with "exceeds the maximum
-instantiation depth (16)".
+instantiation depth (16)". An argument that grows faster, as a tuple of two or
+three of the last one (`n: C<(T, T, T)>?`), stops sooner: an instantiation
+requested inside an instantiation of its own template, directly or through
+other templates, a method's body or a function's included, that grows its
+type arguments from that one's has a name of at most 4,096 characters, and the
+one that passes it is "exceeds the maximum instantiation name length (4096
+characters; this one has 4374)", the name cut to its first 60 characters
+([the limits](../grammar.md#9-diagnostics-and-recovery)). It grows them when
+one of its arguments holds one of that instantiation's, nested more deeply,
+and coming back the same way would deepen it again: `C<(T, T)>` in `C<T>`,
+`P<B, (A, A)>` in `P<A, B>`. What an argument holds is followed through the
+type arguments written at each request on the way (`X<T>` holds `T`,
+`L0<int>` nothing); an inferred one (`Box(x)`, `f(x)`) may hold any, so a
+finite program that comes back through an inferred call still stops there.
+Templates that instantiate one another without returning to one are held to
+the depth only: ten classes each holding the next with a tuple of three of
+their argument (`class L0<T> { v: T; n: L1<(T, T, T)>?; }`, and so on) are
+accepted, the last name 354,296 characters long. So is a template that
+instantiates itself with arguments that do not grow, however long they are:
+`fn swap() -> Pair<B, A>` and `fn dup() -> Pair<A, A>` in `impl Pair<A, B>`
+nest them no deeper (the `Pair<B, A>` of a `Pair<B, A>` is the first one
+again), the `Pair<A, (A, A)>` of `fn grow() -> Pair<A, (A, A)>` is itself, and
+`class X<T> { c: L0<int>?; }`, with the chain's last class holding an `X<T>`,
+comes back to `X` with an argument that holds none of `X<int>`'s, whose own
+`L0<int>` is the first one.
 
 A type parameter used as a `match` arm (`T { … }`) is substituted first and then
 follows the ordinary arm rules, so in an instantiation with `T = int` the arm is
@@ -605,7 +641,13 @@ d = gen::Box<int>(1);     // the same class as c's
 - Declaring your own `class Box<T>` and instantiating `Box<int>` in a module
   that also imports `lib::gen`'s `Box<int>`, or instantiating both your
   `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
-  the import graph.
+  the import graph. It is one error, at your module's own instantiation
+  (`instantiation 'Box<Str>' of 'Box' conflicts with the instantiation
+  'Box<Str>' of 'lib::gen::Box'`), also when the other is made inside
+  another module's template, with notes at the other template's declaration
+  and at where it is instantiated; for an instantiation an import brings in,
+  at that import. This holds for a library's private templates too
+  ([the standard library](../stdlib/index.md)).
 - A generic class's or struct's `impl` blocks go with it, `impl Trait for`
   blocks too, and each instantiation checks their methods as the module
   would check its own, whichever module makes it: an importer's
@@ -643,14 +685,17 @@ d = gen::Box<int>(1);     // the same class as c's
 | Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` in a type position (`t: Str<int>`) — as an expression, `Str<int>(n)` is a conversion constructor ([Conversions](04-strings-and-conversions.md#conversions)) |
 | Missing type arguments | `b: Box = …` for a generic `Box` |
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
+| Type parameter as a name | A field, a parameter (of a function, a method, a `static fn` or a lambda), a local or a `for` variable named like a type parameter of its declaration: `class D<T> { T: int; … }`, `fn g<T>(T: int, y: T)`, `T = 3;`: `'T' is a type name and cannot be used as a field name` (`... as a parameter name`, `... as a variable`) |
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
 | `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
+| Generic superclass | `class Full : Half<int> { … }`, `class Full<T> : Half<T> { … }` (a syntax error, at the `<`; the class body is still parsed): `a superclass cannot be generic: a class, generic or not, extends a class that has no type parameters`; the generic class named without type arguments, `class H : GC { … }`: `superclass 'GC' of class 'H' is a generic class: a superclass cannot be generic` |
 | Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` in a class body or an `impl` block (a syntax error): `a method cannot have type parameters of its own: only a free function is generic ...`, `a 'static fn' cannot have type parameters of its own: ...` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see [Inference](#inference) |
-| Instantiation depth exceeded | self-instantiation with a growing argument |
-| Instantiation name clash | this module's `Box<Str>` and an imported template's, or an imported class `Box<int>` |
+| Instantiation depth exceeded | self-instantiation with a growing argument, 17 deep: `instantiating 'Bad<…>' exceeds the maximum instantiation depth (16); a generic class may not instantiate itself with an ever-growing type argument` |
+| Instantiation name too long | an instantiation inside one of its own template's that grows its type arguments from that one's, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
+| Instantiation name clash | this module's `Box<Str>` and an imported template's (also one a library's private template makes, `::collections`' `_Node<int>`), or an imported class `Box<int>`: one error, at this module's own instantiation, with notes at the other template's declaration and instantiation, or at the import |
 
 ## Not Supported Yet
 

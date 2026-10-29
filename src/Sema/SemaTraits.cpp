@@ -15,6 +15,8 @@
 #include "Names.h"
 #include "Sema.h"
 
+#include <algorithm>
+
 namespace paykan {
 namespace sema {
 
@@ -625,6 +627,18 @@ bool Sema::checkPendingBounds() {
   TraitImplsKnown = true;
   bool ok = true;
   for (auto &pc : PendingBoundChecks) {
+    const std::string instName = instanceNameOf(pc.Template, pc.Name, pc.Args);
+    // Asked for in an instantiation whose bounds failed: one a check made
+    // at the request would not have made (KF-6).
+    if (std::any_of(pc.Frames.begin(), pc.Frames.end(),
+                    [&](const InstantiationFrame &f) {
+                      return FailedBoundInstances.count(f.Name) != 0;
+                    })) {
+      FailedBoundInstances.insert(instName);
+      ++SuppressedFollowOns;
+      ok = false;
+      continue;
+    }
     // Checked as where it was asked for: in that module's file, under the
     // instantiations in progress there.
     std::vector<InstantiationFrame> saved =
@@ -632,13 +646,51 @@ bool Sema::checkPendingBounds() {
     {
       OriginSource inOrigin(*this, pc.Origin);
       if (!checkBounds(pc.Template, pc.Name, *pc.Params, *pc.Bounds, pc.Args,
-                       pc.Loc))
+                       pc.Loc)) {
+        FailedBoundInstances.insert(instName);
         ok = false;
+      }
     }
     InstantiationStack = std::move(saved);
   }
   PendingBoundChecks.clear();
   return ok;
+}
+
+void Sema::noteInstantiationRequest(const std::string &instName) {
+  static const std::string kNone;
+  const std::string &by =
+      InstantiationStack.empty() ? kNone : InstantiationStack.back().Name;
+  if (!TraitImplsKnown) {
+    EarlyRequesters[instName].insert(by);
+    return;
+  }
+  if (FailedBoundInstances.empty() || !EarlyRequesters.count(instName) ||
+      LateRequested.count(instName))
+    return;
+  if (by.empty() ||
+      (!FailedBoundInstances.count(by) && !madeOnlyForFailedBounds(by)))
+    LateRequested.insert(instName);
+}
+
+bool Sema::madeOnlyForFailedBounds(const std::string &instName) {
+  if (FailedBoundInstances.empty())
+    return false;
+  StringSet visiting;
+  return !requestedFreely(instName, visiting);
+}
+
+bool Sema::requestedFreely(const std::string &instName, StringSet &visiting) {
+  auto it = EarlyRequesters.find(instName);
+  if (it == EarlyRequesters.end() || LateRequested.count(instName))
+    return true;
+  if (!visiting.insert(instName).second)
+    return false; // asked for by itself, on the way
+  return std::any_of(it->second.begin(), it->second.end(),
+                     [&](const std::string &by) {
+                       return by.empty() || (!FailedBoundInstances.count(by) &&
+                                             requestedFreely(by, visiting));
+                     });
 }
 
 void Sema::reportForeignTraitBound(const std::string &tmpl,

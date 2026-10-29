@@ -4425,3 +4425,78 @@ TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// A second `__super__(...)` is Sema's error on every path: each of them ran
+// the program, and the second call's stores leaked what the first had stored
+// (`--track-heap`: 2 blocks, 35 bytes).
+TEST(Driver, ASecondSuperCallIsASemaError) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("second_super");
+  const auto src = (dir / "prog.pkn").string();
+  std::ofstream(src)
+      << "class A { s: Str; }\n"
+         "impl A { fn __init__() { self.s = \"v\" + Str(1); } }\n"
+         "class C : A {}\n"
+         "impl C { fn __init__() { __super__(); __super__(); } }\n"
+         "fn main() -> int { let c = C(); return 0; }\n";
+  const std::string exe = (dir / "prog").string();
+  for (const std::string &mode :
+       {std::string(" --check-only "), std::string(" --track-heap "),
+        std::string(" --emit-c "), " build -o " + shellWord(exe) + " "}) {
+    auto r = run(paykanRun() + mode + shellWord(src) + " 2>&1 >/dev/null");
+    EXPECT_EQ(r.exitCode, 1) << mode << r.out;
+    EXPECT_EQ(countErrors(r.out), 1u) << mode << r.out;
+    EXPECT_NE(r.out.find("prog.pkn:4:39: error: '__super__' may be called "
+                         "only once, as the first statement of '__init__'"),
+              std::string::npos)
+        << mode << r.out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(exe));
+  std::filesystem::remove_all(dir);
+}
+
+// A module of the program named like a library module is imported next to it
+// when the system import has an alias (SW-22, OD-8): the system import's full
+// path is `::math`, and its path without the `::` gives way to the program's
+// module, which `math::` names.  Base rejected it with "qualifier 'math'
+// already names module '::math' (give one of them an alias with 'as')",
+// though both imports had one.  It runs on every path, at -O0 and -O2.
+TEST(Driver, AProgramsModuleMayShareALibraryModulesName) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("system_and_local_math");
+  std::ofstream(dir / "math.pkn")
+      << "fn square(x: int) -> int { return x * x; }\n";
+  const auto src = (dir / "main.pkn").string();
+  std::ofstream(src) << "import ::io;\n"
+                        "import ::math as cmath;\n"
+                        "import math as mine;\n"
+                        "fn main() -> int {\n"
+                        "  io::println(Str(mine::square(3)) + \" \" +\n"
+                        "              Str(math::square(2)) + \" \" +\n"
+                        "              Str(cmath::sqrt(16.0)));\n"
+                        "  return 0;\n"
+                        "}\n";
+  const std::string expected = "9 4 4\n";
+  CPath c(dir);
+  for (const std::string opt : {"-O0", "-O2"}) {
+    auto ran = run(paykanRun() + " " + opt + " " + shellWord(src) + " 2>&1");
+    EXPECT_EQ(ran.exitCode, 0) << opt << ": " << ran.out;
+    EXPECT_EQ(ran.out, expected) << opt;
+    const auto exe = (dir / ("main" + opt)).string();
+    auto built = run(paykanRun() + " " + opt + " -o " + shellWord(exe) +
+                     " build " + shellWord(src) + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    auto exeRan = run(shellWord(exe) + " 2>&1");
+    EXPECT_EQ(exeRan.exitCode, 0) << opt;
+    EXPECT_EQ(exeRan.out, expected) << opt;
+    // The program's module is in the C, which links the library's code.
+    const auto cexe = (dir / ("main-c" + opt)).string();
+    auto cBuilt = c.build(src, opt, cexe, "--no-module-cache",
+                          "-pedantic-errors -Wall -Wextra -Werror");
+    ASSERT_EQ(cBuilt.exitCode, 0) << opt << ": " << cBuilt.out;
+    auto cRan = run(shellWord(cexe) + " 2>&1");
+    EXPECT_EQ(cRan.exitCode, 0) << opt;
+    EXPECT_EQ(cRan.out, expected) << opt;
+  }
+  std::filesystem::remove_all(dir);
+}

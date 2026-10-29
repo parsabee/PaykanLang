@@ -394,6 +394,98 @@ TEST(Generics, TypeParamUsedAsValue) {
       << r2.Diagnostics;
 }
 
+// A type parameter is a type name throughout its declaration, as a class's
+// name is everywhere: a field, a parameter and a local named like it are
+// each an error.  A local was one already, while a field and a parameter
+// were accepted (`class D<T> { T: int; v: T; }`, `fn g<T>(T: int, y: T)`
+// ran).  The field is reported once, at the template, the others for each
+// instantiation; an `impl` block's names are its own (`impl R<U>`).
+TEST(Generics, ATypeParameterNamesNoFieldParameterOrLocal) {
+  auto expectErrors = [](const std::string &src,
+                         std::initializer_list<const char *> errors) {
+    auto r = semaCheck(src);
+    EXPECT_FALSE(r.Ok) << src;
+    EXPECT_EQ(r.ErrorCount, errors.size()) << src << "\n" << r.Diagnostics;
+    for (const char *e : errors)
+      EXPECT_TRUE(has(r.Diagnostics, e)) << e << "\n" << r.Diagnostics;
+  };
+  // The finding's program: the field once, the parameter at `g<Str>`, and
+  // `D<Str>(...).T` is a follow-on of the field's error.
+  expectErrors(
+      "class D<T> { T: int; v: T; }\n"
+      "fn g<T>(T: int, y: T) -> int { return T; }\n"
+      "fn main() -> int { return D<Str>(4, \"s\").T + g(3, \"x\"); }\n",
+      {":1:14: error: 'T' is a type name and cannot be used as a "
+       "field name",
+       ":2:9: error: 'T' is a type name and cannot be used as a "
+       "parameter name"});
+  expectErrors("struct S<T> { T: int; v: T; }\n"
+               "enum E<T> { A(T: int, v: T), B }\n"
+               "fn main() -> int { return 0; }\n",
+               {":1:15: error: 'T' is a type name and cannot be used as a "
+                "field name",
+                ":2:15: error: 'T' is a type name and cannot be used as a "
+                "field name"});
+  // A method's, an `impl` method's and a `static fn`'s parameter, each in
+  // its own class; a lambda's parameter and a `for` variable, as before.
+  expectErrors(
+      "class P<T> { v: T; fn q(T: int) -> int { return T; } }\n"
+      "class Q<T> { v: T; }\nimpl Q<T> { fn r(T: int) -> int { return T; } }\n"
+      "class W<T> { v: T; }\n"
+      "impl W<T> { static fn s(T: int) -> int { return T; } }\n"
+      "fn lam<T>(y: T) -> int { f = fn(T: int) -> int => T; return f(1); }\n"
+      "fn each<T>(y: T) -> int { for T in 0..2 { } return 0; }\n"
+      "fn main() -> int {\n"
+      "  p = P<int>(1); q = Q<int>(1); n = W<int>::s(1);\n"
+      "  return lam(1) + each(1);\n"
+      "}\n",
+      {":1:25: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":3:18: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":5:25: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":6:33: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":7:31: error: 'T' is a type name and cannot be used as a variable"});
+  // An `impl` block's own names are the type parameters there, in its
+  // methods' parameters and bodies: `U` is a type, `T` is not.  The body of
+  // `impl R<U>` was checked with the class's `T`.
+  expectErrors("class R<T> { v: T; }\n"
+               "impl R<U> { fn w() -> int { U = 1; return 0; } }\n"
+               "struct Q<T> { v: T; }\n"
+               "impl Q<U> { fn x(U: int) -> int { return 0; } }\n"
+               "fn main() -> int { r = R<int>(1); q = Q<int>(2); return 0; }\n",
+               {":2:29: error: 'U' is a type name and cannot be used as a "
+                "variable",
+                ":4:18: error: 'U' is a type name and cannot be used as a "
+                "parameter name"});
+  auto renamed = semaCheck(
+      "class R<T> { v: T; }\n"
+      "impl R<U> {\n"
+      "  fn x(T: int) -> int { T = T + 1; return T; }\n"
+      "  static fn s(T: int) -> int { return T; }\n"
+      "}\n"
+      "struct Q<T> { v: T; }\nimpl Q<U> { fn x(T: int) -> int { return T; } }\n"
+      "fn main() -> int {\n"
+      "  r = R<int>(1); q = Q<int>(2);\n"
+      "  return r.x(1) + R<int>::s(2) + q.x(3);\n"
+      "}\n");
+  EXPECT_TRUE(renamed.Ok) << renamed.Diagnostics;
+  // A template's declarations are checked with its own type parameters,
+  // not those of the generic body instantiating it: `g<int>` and
+  // `Holder<int>` in `outer<T>` have a parameter and a field `T`, which
+  // their own `U` leaves a name (`g<int>`'s parameter was an error there).
+  auto inner = semaCheck("class Holder<U> { T: int; v: U; }\n"
+                         "fn g<U>(T: int, u: U) -> int { return T; }\n"
+                         "fn outer<T>(x: T) -> int {\n"
+                         "  h = Holder<int>(1, 2);\n"
+                         "  return g<int>(3, 4) + h.T;\n"
+                         "}\n"
+                         "fn main() -> int { return outer(1); }\n");
+  EXPECT_TRUE(inner.Ok) << inner.Diagnostics;
+}
+
 TEST(Generics, DuplicateTypeParam) {
   auto r =
       semaCheck(withMain("class P<T, T> { a: T; }\n"
@@ -451,6 +543,197 @@ TEST(Generics, InstantiationDepthGuard) {
   EXPECT_FALSE(r.Ok);
   EXPECT_TRUE(has(r.Diagnostics, "exceeds the maximum instantiation depth"))
       << r.Diagnostics;
+}
+
+// Ten templates each instantiating the next with a tuple of three of its
+// argument end with an argument of 3^10 ints: each level resolved the
+// arguments it was given again, element by element, and built each
+// element's diagnostic context, and the chain took 1.3 s, eleven 10.8 s
+// and twelve 118 s (SW-04).  No template instantiates itself there, so it
+// is accepted, however long the names.  A template that does, with an
+// ever-growing argument, stops once the name passes 4,096 characters: at
+// arity 3 that ran for more than 5 minutes, at arity 2 the depth limit
+// came first, with 900 KB of names in its notes.  One that instantiates
+// itself with its arguments swapped or repeated grows nothing, nor does one
+// whose deeper arguments it does not take back, or does not hold: a finite
+// program that comes back to `X` through `L0<int>` was the name error.
+TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
+  std::string chain;
+  for (int k = 0; k < 10; ++k)
+    chain += "class L" + std::to_string(k) + "<T> { v: T; n: L" +
+             std::to_string(k + 1) + "<(T, T, T)>?; }\n";
+  auto r = semaCheck(
+      chain + "class L10<T> { v: T; }\n"
+              "fn main() -> int { let c = L0<int>(1, None); return c.v; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  // Instantiating itself with the same long argument is no growth.
+  std::string ints = "int";
+  for (int i = 0; i < 1100; ++i)
+    ints += ", int";
+  r = semaCheck("class Node<T> { v: T; next: Node<T>?; }\n"
+                "fn main() -> int { let n: Node<(" +
+                ints + ")>? = None; return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  // Nor with its arguments swapped or repeated, however long: the
+  // `Pair<B, A>` of a `Pair<B, A>` is the first one again.  Those names
+  // are 11,000 characters long.
+  std::string bools = "bool";
+  for (int i = 0; i < 1100; ++i)
+    bools += ", bool";
+  const std::string pair =
+      "class Pair<A, B> { a: A; b: B; }\n"
+      "impl Pair<A, B> {\n"
+      "  fn swap() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }\n"
+      "  fn dup() -> Pair<A, A> { return Pair<A, A>(self.a, self.a); }\n"
+      "}\n";
+  const std::vector<std::string> pairArgs = {"(" + ints + "), (" + bools + ")",
+                                             "(" + ints + "), bool"};
+  for (const std::string &args : pairArgs) {
+    std::string src = pair;
+    src += "fn main() -> int { let p: Pair<";
+    src += args;
+    src += ">? = None; return 0; }\n";
+    r = semaCheck(src);
+    EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  }
+  r = semaCheck("struct P<A, B> { a: A; b: B; }\n"
+                "impl P<A, B> { fn swap() -> P<B, A> "
+                "{ return P<B, A>(self.b, self.a); } }\n"
+                "fn take(p: P<(" +
+                ints + "), (" + bools +
+                ")>) -> int { return 0; }\n"
+                "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  r = semaCheck("fn g<A, B>(n: int) -> int {\n"
+                "  if n > 0 {\n    return g<B, A>(n - 1);\n  }\n"
+                "  return n;\n}\n"
+                "fn main() -> int { return g<(" +
+                ints + "), (" + bools + ")>(3); }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // The chain's eighth class holding a `Pair` of its argument (13,130
+  // characters) whose `swap` is the other way round.
+  std::string chain8;
+  for (int k = 0; k < 7; ++k)
+    chain8 += "class L" + std::to_string(k) + "<T> { v: T; n: L" +
+              std::to_string(k + 1) + "<(T, T, T)>?; }\n";
+  r = semaCheck(pair + chain8 +
+                "class L7<T> { v: T; p: Pair<T, int>?; }\n"
+                "fn main() -> int { let c = L0<int>(1, None); return c.v; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // Back in its own template through a request that holds none of its
+  // type arguments, `L0<int>` in a field or a method's body: the `X<…>`
+  // the chain asks for (13,122 characters) asks for the same `L0<int>`.
+  const std::string toX = chain8 + "class L7<T> { v: T; x: X<T>?; }\n";
+  const std::string xs[] = {
+      "class X<T> { v: T; c: L0<int>?; }\n"
+      "fn main() -> int { let a = X<int>(1, None); return a.v; }\n",
+      "class X<T> { v: T; }\n"
+      "impl X<T> {\n"
+      "  view fn probe() -> int { let c = L0<int>(1, None); return c.v; }\n"
+      "}\n"
+      "fn main() -> int { let a = X<int>(1); return a.probe(); }\n"};
+  for (const std::string &x : xs) {
+    r = semaCheck(x + toX);
+    EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  }
+  // Nor through one that holds only the arguments it passes on as they
+  // are: `Y<A, B>` takes its `T` back, and its `U` from `M0<T, int>`.
+  std::string pairs;
+  for (int k = 0; k < 7; ++k)
+    pairs += "class M" + std::to_string(k) + "<A, B> { v: A; n: M" +
+             std::to_string(k + 1) + "<A, (B, B, B)>?; }\n";
+  r = semaCheck(pairs + "class Y<T, U> { v: T; c: M0<T, int>?; }\n"
+                        "class M7<A, B> { v: A; y: Y<A, B>?; }\n"
+                        "fn main() -> int { let y = Y<int, int>(1, None); "
+                        "return y.v; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // Nor with an argument grown from one it keeps: the `Q<A, (A, A)>` of a
+  // `Q<A, (A, A)>` is itself.
+  r = semaCheck("class Q<A, B> { a: A; b: B; }\n"
+                "impl Q<A, B> { fn grow() -> Q<A, (A, A)> "
+                "{ return Q<A, (A, A)>(self.a, (self.a, self.a)); } }\n"
+                "fn main() -> int { let q: Q<(" +
+                ints + "), bool>? = None; return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  const std::string limit =
+      "' exceeds the maximum instantiation name length (4096 characters; "
+      "this one has ";
+  struct Case {
+    std::string Src;
+    std::string Error;
+  };
+  const std::vector<Case> cases = {
+      {"class C<T> { v: T; n: C<(T, T)>?; }\n"
+       "fn main() -> int { let s = C<int>(1, None); return 0; }\n",
+       "1:20: error: instantiating 'C<((((((((((int, int), (int, int)), ((int, "
+       "int), (int, int))...' inside an instantiation of 'C" +
+           limit +
+           "7167); a generic class may not instantiate itself with an "
+           "ever-growing type argument"},
+      {"class C<T> { v: T; n: C<(T, T, T)>?; }\n"
+       "fn main() -> int { let s = C<int>(1, None); return 0; }\n",
+       "1:20: error: instantiating 'C<((((((int, int, int), (int, int, int), "
+       "(int, int, int)), (...' inside an instantiation of 'C" +
+           limit + "4374); a generic class"},
+      // Through another template, and through a method body.
+      {"class A<T> { v: T; n: B<(T, T, T)>?; }\n"
+       "class B<T> { v: T; n: A<(T, T, T)>?; }\n"
+       "fn main() -> int { let a = A<int>(1, None); return 0; }\n",
+       "2:20: error: instantiating 'A<((((((int, int, int), (int, int, int), "
+       "(int, int, int)), (...' inside an instantiation of 'A" +
+           limit + "4374); a generic class"},
+      {"class C<T> {\n  v: T;\n  fn grow() -> int {\n"
+       "    let d = C<(T, T, T)>((self.v, self.v, self.v));\n"
+       "    return d.grow();\n  }\n}\n"
+       "fn main() -> int { let c = C<int>(1); return c.grow(); }\n",
+       "4:13: error: instantiating 'C<((((((int, int, int), (int, int, int), "
+       "(int, int, int)), (...' inside an instantiation of 'C" +
+           limit + "4374); a generic class"},
+      {"import ::memory as mem;\n"
+       "struct S<T> { v: T; n: mem::Box<S<(T, T, T)>>?; }\n"
+       "fn main() -> int { let s = S<int>(1, None); return 0; }\n",
+       "' inside an instantiation of 'S" + limit +
+           "4374); a generic struct may not"},
+      {"import ::memory as mem;\n"
+       "enum E<T> { Leaf(v: T), Node(n: mem::Box<E<(T, T, T)>>) }\n"
+       "fn main() -> int { let e = E<int>::Leaf(1); return 0; }\n",
+       "' inside an instantiation of 'E" + limit +
+           "4374); a generic enum may not"},
+      // Grown in one argument and taken back into the other.
+      {"class P<A, B> { a: A; b: B; }\n"
+       "impl P<A, B> { fn grow() -> P<B, (A, A, A)> "
+       "{ return P<B, (A, A, A)>(self.b, (self.a, self.a, self.a)); } }\n"
+       "fn main() -> int { let p: P<int, bool>? = None; return 0; }\n",
+       "2:16: error: instantiating 'P<(((((bool, bool, bool), (bool, bool, "
+       "bool), (bool, bool, b...' inside an instantiation of 'P" +
+           limit + "6074); a generic class"},
+      // A function type's arrow closes nothing.
+      {"class C<T> { v: T; n: C<(T) -> T>?; }\n"
+       "fn main() -> int { let s = C<int>(1, None); return 0; }\n",
+       "1:20: error: instantiating 'C<(((((((((int) -> int) -> (int) -> int) "
+       "-> ((int) -> int) -...' inside an instantiation of 'C" +
+           limit + "4605); a generic class"},
+      {"fn grow<T>(x: T, n: int) -> int {\n"
+       "  if n == 0 {\n    return 0;\n  }\n"
+       "  return grow((x, x, x), n - 1);\n}\n"
+       "fn main() -> int { return grow(1, 3); }\n",
+       "5:10: error: instantiating 'grow<((((((int, int, int), (int, int, "
+       "int), (int, int, int))...' inside an instantiation of 'grow" +
+           limit + "4377); a generic function may not"},
+  };
+  for (const Case &c : cases) {
+    r = semaCheck(c.Src);
+    EXPECT_FALSE(r.Ok) << c.Src;
+    EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+    EXPECT_TRUE(has(r.Diagnostics, c.Error)) << r.Diagnostics;
+    EXPECT_FALSE(has(r.Diagnostics, "maximum instantiation depth"))
+        << r.Diagnostics;
+    // The notes name the instantiations on the way, each under the limit.
+    EXPECT_LT(r.Diagnostics.size(), 20000u) << r.Diagnostics;
+  }
 }
 
 TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
@@ -801,8 +1084,9 @@ fn main() -> int { b = Box<int>(1); return 0; }
 )");
   auto r2 = semaCheckFile(p2);
   EXPECT_FALSE(r2.Ok);
-  EXPECT_TRUE(has(r2.Diagnostics, "instantiation 'Box<int>' conflicts with an "
-                                  "imported class of the same name"))
+  EXPECT_TRUE(has(r2.Diagnostics, "instantiation 'Box<int>' of 'Box' "
+                                  "conflicts with an imported class of the "
+                                  "same name"))
       << r2.Diagnostics;
 
   // So would its own `Box<Str>` and the imported template's, either way
@@ -818,10 +1102,137 @@ fn main() -> int { b = Box<int>(1); return 0; }
             body + " return 0; }\n"));
     EXPECT_FALSE(r3.Ok) << body;
     EXPECT_EQ(r3.ErrorCount, 1u) << r3.Diagnostics;
-    EXPECT_TRUE(has(r3.Diagnostics, "conflicts with another template's "
-                                    "instantiation of the same name"))
+    EXPECT_TRUE(has(r3.Diagnostics,
+                    "instantiation 'Box<Str>' of 'Box' conflicts with the "
+                    "instantiation 'Box<Str>' of 'lib::gen::Box'"))
         << r3.Diagnostics;
   }
+  std::filesystem::remove_all(dir);
+}
+
+// Instantiation names are global (OD-9 b): a program's own `_Node<int>`
+// clashes with the one `::collections` makes of its private `_Node<T>`, and
+// its own `Result<Str, Error>` with the one `::io` brings in.  The clash is
+// one error, in the program's file, at its own instantiation, with notes at
+// the other template's declaration and at its instantiation and the
+// requests that led there (SW-28).  Base reported it in collections.pkn,
+// the library's file, once per use of `_Node<T>` in LinkedList<int>, when
+// the program's instantiation came first, and with no note at all.
+TEST(Generics, AnInstantiationNamedLikeAnotherTemplatesIsOneError) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_inst_clash";
+  std::filesystem::remove_all(dir);
+  auto check = [&](const std::string &src) {
+    return semaCheckFile(writeProjectFile(dir, "input.pkn", src));
+  };
+  // The errors and notes of @p diags, each with its file's last component.
+  auto summary = [](const std::string &diags) {
+    std::istringstream in(diags);
+    std::string out;
+    for (std::string line; std::getline(in, line);) {
+      size_t kind = line.find(": error: ");
+      if (kind == std::string::npos)
+        kind = line.find(": note: ");
+      if (kind == std::string::npos)
+        continue;
+      const size_t slash = line.rfind('/', kind);
+      out +=
+          (slash == std::string::npos ? line : line.substr(slash + 1)) + "\n";
+    }
+    return out;
+  };
+  // The library's files' line numbers are left out.
+  auto lineless = [](std::string s) {
+    for (std::string_view file : {"collections.pkn", "result.pkn"})
+      for (size_t at = 0;
+           (at = s.find(std::string(file) + ":", at)) != std::string::npos;) {
+        at += file.size();
+        s.erase(at, s.find(": ", at) - at);
+      }
+    return s;
+  };
+  const std::string node = "import ::io;\n"
+                           "import ::collections;\n"
+                           "class _Node<T> { value: T; }\n"
+                           "fn main() -> int {\n";
+  const std::string notes =
+      "collections.pkn: note: '::collections::_Node' is declared here\n"
+      "collections.pkn: note: '::collections::_Node' is instantiated as "
+      "'_Node<int>' here\n"
+      "collections.pkn: note: in instantiation of 'LinkedList<int>' requested "
+      "here\n";
+  const std::string clash =
+      ": error: instantiation '_Node<int>' of '_Node' conflicts with the "
+      "instantiation '_Node<int>' of '::collections::_Node' (type names are "
+      "global across imports)\n";
+  // Either order: the error at the program's `_Node<int>`, the request of
+  // the Stack<int> that led to the library's last.
+  struct Order {
+    const char *Body, *Error, *Stack;
+  };
+  for (const Order &o : {Order{"  let n = _Node<int>(1);\n"
+                               "  s = collections::Stack<int>();\n",
+                               "input.pkn:5:11", "input.pkn:6:7"},
+                         Order{"  s = collections::Stack<int>();\n"
+                               "  let n = _Node<int>(1);\n",
+                               "input.pkn:6:11", "input.pkn:5:7"}}) {
+    std::string expected = o.Error;
+    expected += clash;
+    expected += notes;
+    expected += o.Stack;
+    expected += ": note: in instantiation of 'Stack<int>' requested here\n";
+    auto r = check(node + o.Body +
+                   "  s.push(n.value);\n"
+                   "  io::println(s.peek());\n"
+                   "  return 0;\n"
+                   "}\n");
+    EXPECT_FALSE(r.Ok);
+    EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+    EXPECT_EQ(lineless(summary(r.Diagnostics)), expected) << r.Diagnostics;
+  }
+  // A struct template's instantiation against a class template's.
+  auto entry = check("import ::collections;\n"
+                     "struct _Entry<K, V> { k: K; v: V; }\n"
+                     "fn main() -> int {\n"
+                     "  m = collections::HashMap<int, int>();\n"
+                     "  m.put(1, 2);\n"
+                     "  let e = _Entry<int, int>(1, 2);\n"
+                     "  return e.k;\n"
+                     "}\n");
+  EXPECT_EQ(entry.ErrorCount, 1u) << entry.Diagnostics;
+  EXPECT_TRUE(has(summary(entry.Diagnostics),
+                  "input.pkn:6:11: error: instantiation '_Entry<int, int>' of "
+                  "'_Entry' conflicts with the instantiation '_Entry<int, "
+                  "int>' of '::collections::_Entry'"))
+      << entry.Diagnostics;
+  // An instantiation an import gives the program: the note is at the
+  // import, and at the template when the program sees it.
+  const std::string result =
+      "enum Result<T, E> { Ok(value: T), Err(error: E) }\n"
+      "fn main() -> int {\n"
+      "  let r = Result<Str, err::Error>::Ok(\"x\");\n"
+      "  match r { v: Ok { io::println(v.value); } e: Err { } }\n"
+      "  return 0;\n"
+      "}\n";
+  const std::string imported =
+      ": error: instantiation 'Result<Str, Error>' of 'Result' conflicts with "
+      "an imported enum of the same name (type names are global across "
+      "imports)\n";
+  const std::string through =
+      "input.pkn:1:1: note: the enum 'Result<Str, Error>' of module "
+      "'::result' comes in through this import\n";
+  auto r = check("import ::io;\nimport ::error as err;\n" + result);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(summary(r.Diagnostics), "input.pkn:5:11" + imported + through)
+      << r.Diagnostics;
+  r = check("import ::io;\nimport ::error as err;\n"
+            "import ::result as res;\n" +
+            result);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(lineless(summary(r.Diagnostics)),
+            "input.pkn:6:11" + imported +
+                "result.pkn: note: '::result::Result' is declared here\n" +
+                through)
+      << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }
 

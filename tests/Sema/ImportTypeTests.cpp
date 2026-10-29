@@ -424,6 +424,84 @@ fn main() -> int { k = K(); f = Fine(); return 0; }
   std::filesystem::remove_all(tmp);
 }
 
+// ─── ERR: an imported module's type clashing with another's (SW-33) ─────────
+//
+// The import fails at its first clash, each clashing type reported, and the
+// module injects nothing: its functions, methods and aliases would name the
+// other module's type (`e::mk().code + 1` was "operator '+' is not defined
+// for types 'ErrorCode' and 'int'", `::error`'s `Error` field), so every
+// `e::` use is a follow-on of the import's errors.
+
+TEST(Module, AnImportWhoseTypeClashesInjectsNothing) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_clash_inject").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/e.pkn",
+            "class Error { code: int; }\n"
+            "enum ErrorCode { X }\n"
+            "class Fine { n: int; }\n"
+            "fn mk() -> Error { return Error(3); }\n"
+            "fn fine() -> Fine { return Fine(1); }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
+import lib::e;
+fn main() -> int {
+  x: int = e::mk().code + 1;
+  y = e::Error(4);
+  io::println(Str(y.code) + Str(e::fine().n + e::Fine(2).n));
+  z: e::ErrorCode = e::ErrorCode::X;
+  return x;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:2:1: error: import of module 'lib::e': enum 'ErrorCode' "
+            "conflicts with a type of the same name declared by module "
+            "'::error' (type names are global across imports)\n"
+            "main.pkn:2:1: error: import of module 'lib::e': class 'Error' "
+            "conflicts with a type of the same name declared by module "
+            "'::error' (type names are global across imports)\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── An importer's subclass of a failed module's class (SW-32) ──────────────
+//
+// `lib::d` has an error of its own, so the import fails and `Puppy : d::Dog`
+// loses its superclass; that `Puppy` is then no `a::Animal` is a follow-on.
+// Base added "initializer of type 'Puppy' does not match declared type
+// 'Animal' for variable 'x'".
+
+TEST(Module, ASubclassOfAFailedModulesClassMismatchesNoClass) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_failed_super").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/a.pkn",
+            "class Animal { view fn sound() -> Str { return \"?\"; } }\n");
+  writeFile(tmp, "lib/d.pkn",
+            "import lib::a;\n"
+            "class Dog : a::Animal { view fn sound() -> Str { return "
+            "\"woof\"; } }\n"
+            "fn broken() -> int { return \"x\"; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::a;
+import lib::d;
+class Puppy : d::Dog {}
+fn pet(x: a::Animal) -> Str => x.sound();
+fn main() -> int {
+  x: a::Animal = Puppy();
+  y: a::Animal = d::Dog();
+  s = pet(Puppy());
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "d.pkn:3:22: error: return value of type 'Str' does not match "
+            "function return type 'int'\n"
+            "main.pkn:2:1: note: in module 'lib::d' imported here\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 // ─── A module-private initializer is constructed by its module only ─────────
 //
 // `___init__` (docs/language/15-modules.md): an importer cannot construct the
@@ -649,6 +727,29 @@ fn main() -> int { return 0; }
                                "implements 'Hashable' (through 'CK')"),
             std::string::npos)
       << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// An imported struct or enum named as a superclass says what it is, as a
+// local one does; it was "not defined".  An imported class is a superclass.
+TEST(Module, ImportedStructAsSuperclassErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_struct_super").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/m.pkn",
+            "struct S { x: int; }\nenum E { X }\nclass K {}\n");
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::m;
+class A : m::S {}
+class B : m::E {}
+class D : m::K {}
+fn main() -> int { d = D(); return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:2:1: error: superclass 'm::S' of class 'A' is a struct, "
+            "not a class\n"
+            "main.pkn:3:1: error: superclass 'm::E' of class 'B' is an enum, "
+            "not a class\n");
   std::filesystem::remove_all(tmp);
 }
 
@@ -1047,6 +1148,52 @@ class Holder<T> {
           << viaStd.Diagnostics;
     }
   }
+  std::filesystem::remove_all(tmp);
+}
+
+// The importer's field `t::Outer<Foo>`, whose bound fails once the `impl`
+// blocks are known, is the one error: the library's `Inner<Foo>`, which
+// only it uses, has no body checked, where base also reported "no method
+// 'hash' on type 'Foo'" in lib/t.pkn (KF-6).
+TEST(Module, AFailedDeferredBoundChecksNoBodyOfTheLibrarys) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_deferred_bound_body";
+  std::filesystem::remove_all(tmp);
+  const std::string dir = tmp.string();
+  writeFile(dir, "lib/t.pkn",
+            "class Inner<T> { v: T; }\n"
+            "impl Inner<T> { view fn get() -> int { return self.v.hash(); } }\n"
+            "class Outer<T: Hashable> { i: Inner<T>?; }\n");
+  auto r = semaCheckFile(writeFile(dir, "main.pkn",
+                                   "import lib::t;\n"
+                                   "class Foo { x: int; }\n"
+                                   "class Holder { o: t::Outer<Foo>?; }\n"
+                                   "fn main() -> int { return 0; }\n"),
+                         dir);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:3:16: error: 'Foo' does not implement trait 'Hashable', "
+            "which 't::Outer' requires of 'T'\n")
+      << r.Diagnostics;
+  // Used by the importer too, in a body checked after it: the library's
+  // body is checked for it.
+  r = semaCheckFile(writeFile(dir, "main2.pkn",
+                              "import lib::t;\n"
+                              "class Foo { x: int; }\n"
+                              "class Holder { o: t::Outer<Foo>?; }\n"
+                              "fn use<U>(u: U) -> int {\n"
+                              "  let i = t::Inner<Foo>(Foo(1));\n"
+                              "  return i.get();\n"
+                              "}\n"
+                              "fn main() -> int { return use<int>(1); }\n"),
+                    dir);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main2.pkn:3:16: error: 'Foo' does not implement trait 'Hashable', "
+            "which 't::Outer' requires of 'T'\n"
+            "t.pkn:2:47: error: no method 'hash' on type 'Foo'\n"
+            "t.pkn:3:28: note: in instantiation of 'Inner<Foo>' requested "
+            "here\n")
+      << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
 

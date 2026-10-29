@@ -79,6 +79,13 @@ inline constexpr std::string_view kGenericStaticFn =
     "function is generic (the static fns of a generic class or struct use "
     "its type parameters)";
 
+/// The diagnostic every frontend reports for a superclass with type
+/// arguments, `class Full : Half<int>` (docs/language/13-generics.md): no
+/// class extends an instantiation of a generic class.
+inline constexpr std::string_view kGenericSuperclass =
+    "a superclass cannot be generic: a class, generic or not, extends a "
+    "class that has no type parameters";
+
 /// Per-parse options.  A frontend ignores the ones it does not support.
 struct Options {
   /// Debug traces of the parser / scanner (--trace-parser,
