@@ -9,6 +9,7 @@
 #include "Names.h"
 #include "Sema.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 
