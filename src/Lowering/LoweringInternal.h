@@ -11,6 +11,7 @@
 #include "ASTContext.h"
 #include "ASTVisitor.h"
 #include "Sema.h"
+#include "paykan/lowering/Lowering.h"
 #include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Builder.h"
 #include "paykan/pir/PIR.h"
@@ -80,6 +81,8 @@ struct ProgramLowering {
   /// Every SemaContext reachable from Top, keyed by canonical module name.
   std::unordered_map<std::string, const sema::SemaContext *> Contexts;
   bool Indexed = false;
+  /// What the main module's code may know of the program (lowerProgram).
+  World MainWorld = World::Open;
 
   ProgramLowering(const sema::SemaContext &top, std::string projectRoot,
                   std::ostream &errs, modules::ModuleResolver *resolver)
@@ -151,6 +154,12 @@ private:
   /// of other modules' instantiations (which another module may have
   /// defined first: ProgramLowering::ClassOrigins).
   std::unordered_set<std::string> OwnTypes;
+  /// In the main module of a closed world (World::Closed), the classes
+  /// derived from each class it defines: all of them are its own
+  /// (indexSubclasses, isClosedClass).
+  std::unordered_map<const ast::ClassType *, std::vector<ast::ClassType *>>
+      Subclasses;
+  void indexSubclasses(const std::vector<ast::ClassDecl *> &classes);
 
   pir::Module Mod;
   /// Functions in declaration order with stable addresses (the module vector
@@ -197,6 +206,9 @@ private:
     /// `inout` parameters declared in this scope: their local holds the
     /// address of the caller's storage, of this type.
     std::unordered_map<std::string, pir::Type> InoutVars;
+    /// The function's names for storage it never hands on: a method's
+    /// `self`, its `inout`, `view` and slice parameters (markStable).
+    std::unordered_set<std::string> StableVars;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
     /// A `match` arm's `n: inout T` (bindInoutArm): after n's last use in
@@ -245,6 +257,12 @@ private:
     /// The type an `inout` parameter @p name points to; Void for any other
     /// variable.
     pir::Type inoutType(const std::string &name) const;
+    /// Mark @p name, declared in this scope, as storage the function never
+    /// hands on: what it names outlives the function's own variables, which
+    /// it may hand on at their last use (docs/pir.md §12).
+    void markStable(const std::string &name) { StableVars.insert(name); }
+    /// Whether the variable @p name is such storage (markStable).
+    bool isStable(const std::string &name) const;
     Scope *findOwner(const std::string &name);
   };
 
@@ -255,6 +273,8 @@ private:
 
   /// ClassType of the method being emitted (nullptr otherwise).
   ast::ClassType *CurrentMethodClassType = nullptr;
+  /// The method being emitted is that class's `__init__`.
+  bool EmittingInit = false;
 
   struct LoopContext {
     Scope *EnclosingScope;
@@ -389,6 +409,13 @@ private:
   /// The reads noteHeldReads and noteBorrowedReads found, which take a
   /// reference of their own.
   std::unordered_set<const ast::Expr *> HeldReads;
+  /// The box reads of storage the function never hands on that
+  /// noteBorrowedReads found in use where a call that may let go of
+  /// references is made, though of none of their slot's class: read in
+  /// place, the slot keeps their reference while they are used, and their
+  /// load says so (`stable`, docs/pir.md §6), unless another call holds
+  /// them (isStableRead).
+  std::unordered_set<const ast::Expr *> StableReads;
   /// Note the reads among statement @p s's own expressions (not those of
   /// the statements in it) that a later part of the statement may replace
   /// while their value is in use: of a variable that holds a reference, in
@@ -408,24 +435,122 @@ private:
   void noteBorrowedReads(ast::Stmt *s);
   struct BorrowedReads;
   bool isHeldRead(const ast::Expr *e) const { return HeldReads.count(e) > 0; }
+  bool isStableRead(const ast::Expr *e) const {
+    return StableReads.count(e) > 0 && !isHeldRead(e);
+  }
   /// Whether a value of type @p ty may reach an object (any class but Str,
   /// a function value, or what holds one): given it, a call can change
   /// whatever the object reaches.
   static bool reachesObject(const ast::Type *ty);
   /// This module's functions and the methods of the classes and structs it
-  /// defines, by PIR name (`f`, `C.m`, `S.m`): the bodies mayRelease reads.
+  /// defines, by PIR name (`f`, `C.m`, `S.m`): the bodies effectOf reads.
   std::unordered_map<std::string, const ast::FuncDecl *> Bodies;
+  /// The class or struct whose method each body of Bodies is.
+  std::unordered_map<const ast::FuncDecl *, ast::Type *> BodyOwners;
   /// The function or method named @p name in Bodies, or null.
   const ast::FuncDecl *bodyOf(const std::string &name) const;
-  /// Whether running @p fn may release a reference that storage it does not
-  /// own holds, or replace such a reference (LoweringHolds.cpp): true
-  /// unless its body is in Bodies and stores no reference outside its own
-  /// variables and makes no call that may.  A call of a function that
-  /// cannot replaces nothing, whatever it is given.
-  bool mayRelease(const ast::FuncDecl *fn);
-  struct ReleaseScan;
-  /// mayRelease's answers; true for a function being read (a recursion).
-  std::unordered_map<const ast::FuncDecl *, bool> MayRelease;
+
+  /// What running some code may do to references held by storage it does
+  /// not own (LoweringHolds.cpp, docs/pir.md §7): the classes whose
+  /// references it may let go of, or not known.
+  struct Effect {
+    /// What it does is not known: it may let go of any reference.
+    bool Unknown = false;
+    /// It may let go of a reference at all: it stores one where its caller
+    /// may hold one, or makes a call that may (the rule without the types,
+    /// which a read rooted in the function's own variables keeps).
+    bool Releases = false;
+    /// The classes of the slots whose references it may let go of: the
+    /// ones it may store into, and every one an object or a value it lets
+    /// go of may hold (whose dying may let them go).
+    std::unordered_set<const ast::Type *> Types;
+
+    static Effect unknown() { return {true, true, {}}; }
+    void add(const Effect &other);
+  };
+  /// What a call of @p fn does: Unknown for null or a function without a
+  /// body (one another module compiles, a pure virtual method).
+  const Effect &effectOf(const ast::FuncDecl *fn);
+  struct EffectScan;
+  /// effectOf's answers; Unknown for a function being read (a recursion).
+  std::unordered_map<const ast::FuncDecl *, Effect> Effects;
+  /// The classes letting go of a value of type @p ty may let go of: its
+  /// own, and those of what it holds, and what dying objects of exact
+  /// classes hold (isExactClass), or of closed classes and the classes
+  /// derived from them (isClosedClass); Unknown for an object of another
+  /// class, whose subclass may hold anything, and for a function value.
+  const Effect &dropEffect(ast::Type *ty);
+  std::unordered_map<const ast::Type *, Effect> DropEffects;
+  /// A class no class derives from: Str, or an instance of a generic class
+  /// (a superclass is never generic).
+  static bool isExactClass(const ast::ClassType *ct);
+  /// A class of the main module of a closed world (World::Closed): every
+  /// class derived from it is one this module defines (Subclasses).
+  bool isClosedClass(const ast::ClassType *ct) const;
+  /// The canonical type of a slot holding @p ty: optionals stripped (a
+  /// `T?` slot holds a T or None).
+  ast::Type *slotType(ast::Type *ty);
+  /// What the method @p name, run on an object of class @p ct, does: the
+  /// one an `impl` block or, for an exact class, its vtable names, or for
+  /// a closed class, that one or an override of a class derived from it;
+  /// Unknown when another module compiles one of those or a subclass this
+  /// module does not know may override it.
+  Effect methodEffect(ast::ClassType *ct, const std::string &name);
+  /// What the runtime's `toString` or `==` (@p method) of a value of type
+  /// @p ty does: each object's in it.
+  Effect valueMethodEffect(ast::Type *ty, const std::string &method);
+  /// What the native function @p native does, given @p args: a Buffer
+  /// function of the runtime's what kPaykanBufferFunctions says, any other
+  /// nothing but through an `inout` argument, which makes it Unknown.
+  Effect nativeEffect(const ast::FuncDecl &native,
+                      const std::vector<ast::Expr *> &args);
+  /// What constructing the class or struct @p name does (its `__init__`'s),
+  /// or null when @p name is no class or struct.
+  std::optional<Effect> constructorEffect(const std::string &name);
+  /// What a call of the function or constructor @p name does.
+  Effect calleeEffect(const std::string &name);
+  /// The type of the values the private `Obj` field @p field of the struct
+  /// @p st holds when that field is a runtime buffer: every store to it in
+  /// the struct's methods is a new buffer of that type (PaykanBuffer_new)
+  /// and every other use an argument of a Buffer function.  Null
+  /// otherwise.
+  ast::Type *bufferElementOf(ast::StructType *st, const std::string &field);
+  struct BufferUses;
+  /// bufferElementOf's answers, by `<struct>.<field>`.
+  std::unordered_map<std::string, ast::Type *> BufferElements;
+  /// The fields of classes that this module's code stores into once their
+  /// objects are made (scanFieldStores, LoweringHolds.cpp).
+  struct FieldStores {
+    /// The code read does something the scan does not recognize: it may
+    /// store into any field.
+    bool Unknown = false;
+    /// The fields stored into, as `<class>.<field>` of the class declaring
+    /// each.
+    std::unordered_set<std::string> Fields;
+    /// The names of the fields a template stores into, whose types are not
+    /// resolved in its body.
+    std::unordered_set<std::string> Names;
+  };
+  FieldStores StoredFields;
+  struct FieldStoreScan;
+  /// The classes this module declares (its own and the instances of its
+  /// templates), the fields of which isFixedField may know of.
+  std::unordered_set<std::string> DeclaredClasses;
+  /// Read the stores into class fields of every body of @p tu's module
+  /// (Bodies) and, outside a program's main module, of its templates.
+  void scanFieldStores(ast::TranslationUnit *tu);
+  /// Whether the field @p field of class @p ct holds, for as long as its
+  /// object lives, the reference its object's `__init__` gave it: a box
+  /// field (not a weak one) of a class this module declares, which no code
+  /// that may name it stores into but as `self.f = v` in an `__init__`'s
+  /// own body.  Outside a program's main module, where an importer may
+  /// name the class, only a private field's stores are all known.
+  bool isFixedField(ast::ClassType *ct, const std::string &field);
+  /// Whether the box read @p read is `self.f`, `self.f.g`, ... of fixed
+  /// fields (isFixedField) in a class's method other than its `__init__`:
+  /// the caller keeps `self` alive for the call, so no call it makes can
+  /// let go of what the read finds.
+  bool isFixedRead(const ast::Expr *read);
   /// The element @p elem of @p node, read in place from storage whose
   /// temporaries and holds MemTemps has past @p mark, which are released
   /// now: a box retained first when @p node is a +1 one
@@ -847,8 +972,9 @@ private:
   /// the result.
   Val emitMemResultSlot(ast::Type *ty);
   /// The scalar or box element of type @p ty at @p addr, read in place: a
-  /// box borrowed from its slot.
-  Val emitElementLoad(const Val &addr, ast::Type *ty);
+  /// box borrowed from its slot, by a `stable` load when @p stable
+  /// (isStableRead).
+  Val emitElementLoad(const Val &addr, ast::Type *ty, bool stable = false);
   /// The layout of the tuple type @p tt the runtime reads (Runtime.h,
   /// "Tuples"), as constant data; a struct's holds its name and its fields'
   /// ("Structs").
@@ -927,8 +1053,10 @@ private:
   /// variable's own slot, or the caller's slot an `inout` reference
   /// parameter points to.
   bool holdsBox(const std::string &name) const;
-  /// The box in variable @p name's storage, borrowed (holdsBox).
-  Val loadVarBox(const std::string &name);
+  /// The box in variable @p name's storage, borrowed (holdsBox); an
+  /// `inout` parameter's slot is read by a `stable` load when @p stable
+  /// (isStableRead).
+  Val loadVarBox(const std::string &name, bool stable = false);
   /// Put the +1 box @p newBox in variable @p name's storage (holdsBox),
   /// releasing the box it held.
   void storeVarBox(const std::string &name, const Val &newBox);

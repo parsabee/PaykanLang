@@ -222,6 +222,73 @@ fn main() -> int { b = Box(); return b.total(); }
   std::filesystem::remove_all(tmpDir);
 }
 
+// Another module's method may run the program's code: `sum()` compares the
+// Point's peer with itself, and the `Watcher`'s `equals` replaces the
+// `Box.origin` that `total()` runs `sum()` on.  The field is stored outside
+// construction, so its read keeps a reference of its own across the call
+// (docs/pir.md §7), and `sum()` reads the Point it was called on, which dies
+// when it returns.
+TEST(Module, AReadAnotherModulesMethodMayReplaceIsHeld) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_qt_replaced";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "geo/point.pkn", R"(
+class Point {
+  x: int;
+  y: int;
+  peer: Obj?;
+  view fn sum() -> int {
+    match self.peer {
+      o: Obj { same = o.equals(o); }
+      None { }
+    }
+    return self.x + self.y;
+  }
+}
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(import ::io;
+import geo::point;
+class Box {
+  origin: point::Point;
+  view fn total() -> int { return self.origin.sum(); }
+}
+class Watcher {
+  weak box: Box?;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      w: Watcher {
+        match w.box {
+          b: Box { b.origin = point::Point(100, 200, None); }
+          None { }
+        }
+      }
+      _ { }
+    }
+    return False;
+  }
+}
+fn main() -> int {
+  w = Watcher(None);
+  b = Box(point::Point(15, 27, w));
+  w.box = b;
+  io::println(Str(b.total()));
+  io::println(Str(b.total()));
+  return 0;
+}
+)");
+
+  LeakGuard g;
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "42\n300\n");
+  g.expectNoLeaks("AReadAnotherModulesMethodMayReplaceIsHeld");
+
+  std::filesystem::remove_all(tmpDir);
+}
+
 // End-to-end: an imported enum used as a qualified type, a variant, an argument
 // to an imported function, and an imported function's return value.
 TEST(Module, ImportEnum) {

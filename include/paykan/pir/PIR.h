@@ -326,6 +326,10 @@ struct Instr {
   uint32_t Slot = 0;          // VCall; Wrap / Mask: the bit width
   Signature Sig;              // VCall: the slot's; ICall: the callee's
   LocalId Local = 0;          // Load / Store / LocalAddr
+  /// FieldLoad / PtrLoad of a box: the slot read keeps its reference for
+  /// as long as the statement uses the value (docs/pir.md §6, §7), so the
+  /// value is no borrowed reference to MoveAtLastUse.
+  bool Stable = false;
 };
 
 // -- Structured statements

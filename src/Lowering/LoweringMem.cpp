@@ -388,9 +388,11 @@ Val ModuleLowering::emitTupleElementAddress(ast::Expr *tuple, size_t index) {
   return off == 0 ? base : B.ptrAdd(base, Val::i64(off), "elem.addr");
 }
 
-Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty) {
-  return B.ptrLoad(addr, ast::isRefType(ty) ? Type::Box : toPIRType(ty),
-                   "elem");
+Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty,
+                                    bool stable) {
+  const bool ref = ast::isRefType(ty);
+  return B.ptrLoad(addr, ref ? Type::Box : toPIRType(ty), "elem",
+                   ref && stable);
 }
 
 Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
@@ -538,6 +540,7 @@ void ModuleLowering::declareMemParam(const std::string &name,
     B.markView(local);
   B.store(local, addr);
   CurrentScope->declareInout(name, local, Type::Mem, ty);
+  CurrentScope->markStable(name);
 }
 
 bool ModuleLowering::isSliceArg(const ast::Expr *arg) {

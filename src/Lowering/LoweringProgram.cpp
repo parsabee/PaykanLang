@@ -287,10 +287,12 @@ void shareInstantiations(pir::Program &program) {
 bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,
                   const std::string &mainName, const std::string &projectRoot,
                   pir::Program &out, std::ostream &errs,
-                  modules::ModuleResolver *resolver, Copies copies) {
+                  modules::ModuleResolver *resolver, Copies copies,
+                  World world) {
   if (!resolver)
     resolver = ctx.Resolver.get(); // the one Sema made
   ProgramLowering pl(ctx, projectRoot, errs, resolver);
+  pl.MainWorld = world;
   // The main module is lowered last (its imports first) but listed first.
   ModuleLowering ml(pl, ctx, pl.claimName(mainName));
   bool ok = ml.run(tu);

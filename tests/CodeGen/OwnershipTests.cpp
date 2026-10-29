@@ -1344,6 +1344,397 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
   g.expectNoLeaks("AReleaseInACalleesCalleeStillHoldsTheRead");
 }
 
+// The counterexamples of the analysis that lets a call keep reads it cannot
+// replace in place (docs/pir.md §7): a call that replaces a field through a
+// narrowed `inout` arm (`d: inout Derived<int>` on a `Base` field) frees
+// the object a read of the field holds, though the object's class is exact
+// and holds no `Base`; one given only a Wrap replaces the field an `inout`
+// parameter names (its slot is of the parameter's superclass); a call
+// given a parameter the function may hand on replaces a field of its
+// object.  Each method runs on, and each string is the one of, the object
+// that was there.
+TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Base {
+      n: int;
+      view fn m(x: int) -> int { return self.n + x; }
+    }
+    impl Base { fn __init__(n: int) { self.n = n; } }
+    class Derived<X> : Base { v: X; }
+    impl Derived<X> {
+      fn __init__(n: int, v: X) { __super__(n); self.v = v; }
+    }
+    class Plain : Base {
+      tag: Str;
+      view fn m(x: int) -> int { return self.n + x + self.tag.len(); }
+    }
+    impl Plain {
+      fn __init__(n: int, t: Str) { __super__(n); self.tag = t; }
+    }
+    class Holder { b: Base; weak w: Base?; }
+    impl Holder {
+      fn __init__() { self.b = Derived<int>(100, 9); self.w = self.b; }
+      fn run() -> int { return self.b.m(reset(self)); }
+      fn state() -> Str {
+        match self.w {
+          Base { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    fn reset(h: Holder) -> int {
+      match h.b {
+        d: inout Derived<int> { d = Derived<int>(1, 9); }
+        _ { }
+      }
+      return 7;
+    }
+    class Wrap { h: Holder; }
+    fn clobber(w: Wrap) -> int {
+      w.h.b = Base(100);
+      return 5;
+    }
+    fn use(x: inout Plain, w: Wrap) -> int { return x.m(clobber(w)); }
+    class Node { name: Str; }
+    class Pair { node: Node; }
+    fn replace(p: Pair) -> Str {
+      p.node = Node("o" + Str(2));
+      return "!";
+    }
+    fn local(p: Pair) -> Str { return p.node.name + replace(p); }
+    fn main() -> int {
+      h = Holder();
+      r = h.run();
+      io::println("arm: " + Str(r) + " " + h.state());
+      h2 = Holder();
+      h2.b = Plain(1, "abc");
+      w = Wrap(h2);
+      match h2.b {
+        s: inout Plain {
+          s = Plain(2, "fresh");
+          io::println("inout: " + Str(use(s, w)));
+        }
+        _ { }
+      }
+      io::println(local(Pair(Node("n" + Str(1)))));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "arm: 107 freed\ninout: 12\nn1!\n");
+  g.expectNoLeaks("AReadACallReplacesThroughANarrowedPlaceLivesThroughIt");
+}
+
+// The standard library's containers read their state in place across the
+// calls that let go only of their elements and nodes: growing a map past
+// its rehash, replacing and removing keys, clearing it, and stacks, queues
+// and heaps of strings run as before, with every value released.
+TEST(Ownership, AContainersStateNeedsNoHoldAcrossItsOwnMethods) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::collections as c;
+    fn main() -> int {
+      m = c::HashMap<Str, int>();
+      i = 0;
+      while i < 40 {
+        m.put("k" + Str(i), i);
+        i = i + 1;
+      }
+      m.put("k3", 300);
+      m.remove("k4");
+      io::println(Str(m.get("k3")) + " " + Str(m.len()) + " " +
+                  Str(m.keys().len()));
+      m.clear();
+      s = c::Stack<Str>();
+      q = c::Queue<Str>();
+      p = c::MinPriorityQueue<Str>();
+      for j in 0..5 {
+        s.push("s" + Str(j));
+        q.enqueue("q" + Str(j));
+        p.push("p" + Str(j), 5 - j);
+      }
+      io::println(s.pop() + q.dequeue() + p.pop() + " " + Str(m.len()) +
+                  Str(s.len()) + Str(q.len()) + Str(p.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "300 39 39\ns4q0p4 0444\n");
+  g.expectNoLeaks("AContainersStateNeedsNoHoldAcrossItsOwnMethods");
+}
+
+// A read of `self`'s storage a call cannot let go of is read by a stable
+// load, which keeps the hand-off its hold made: with the moves at last use
+// made, `v` is handed on to `offer`, and the Pet dies when `offer` returns,
+// before `push` asks, as it did while `self.sink` was held across the call
+// (docs/pir.md §7, §12).
+TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
+  LeakGuard g;
+  auto r = compileMoveAndRun(R"(import ::io;
+    class Pet<X> { name: Str; }
+    class Probe { weak p: Pet<int>?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.p {
+          Pet<int> { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    class Sink<T> { last: Str; }
+    impl Sink<T> {
+      fn offer(v: T) { self.last = "seen"; }
+    }
+    struct Pile { sink: Sink<Pet<int>>; }
+    impl Pile {
+      fn push(v: Pet<int>, probe: Probe) -> Str {
+        self.sink.offer(v);
+        return probe.state();
+      }
+    }
+    fn main() -> int {
+      p = Pile(Sink<Pet<int>>("none"));
+      x = Pet<int>("rex");
+      probe = Probe(x);
+      io::println(p.push(x, probe) + " " + probe.state());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "freed freed\n");
+  g.expectNoLeaks("AStableReadKeepsTheHandOffsTiming");
+}
+
+// The main module of a program knows every override of its classes'
+// methods (docs/pir.md §7): `self.item.name` needs no hold across a call
+// whose overrides let go of nothing (`Hush.run`, the pure `Shape.area`'s
+// `Square` one), and keeps one across `Shout.run`, which replaces the Item
+// it is in: the string read is the one of the Item that was there, which
+// dies when the call replaces it.  A map of Dogs, whose death lets go of a
+// string only, reads its table in place across put and remove, and every
+// replaced Dog dies when it is let go of.
+TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::collections as c;
+    class Item { name: Str; }
+    class Probe { weak it: Item?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.it {
+          Item { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    class Quiet { fn run(h: Holder) -> int { return 1; } }
+    class Hush : Quiet { fn run(h: Holder) -> int { return 2; } }
+    class Loud { fn run(h: Holder) -> int; }
+    class Shout : Loud {
+      fn run(h: Holder) -> int {
+        h.item = Item("new" + Str(1));
+        return 3;
+      }
+    }
+    class Holder {
+      item: Item;
+      quiet: Quiet;
+      loud: Loud;
+      fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
+      fn viaLoud() -> Str { return self.item.name + Str(self.loud.run(self)); }
+    }
+    class Shape { view fn area() -> int; }
+    class Square : Shape {
+      s: int;
+      view fn area() -> int { return self.s * self.s; }
+    }
+    fn total(shapes: view Shape[]) -> int {
+      t = 0;
+      for i in 0..shapes.len() { t += shapes[i].area(); }
+      return t;
+    }
+    class Dog { name: Str; }
+    class Watch { weak d: Dog?; }
+    impl Watch {
+      view fn state() -> Str {
+        match self.d {
+          Dog { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    fn main() -> int {
+      h = Holder(Item("old" + Str(0)), Hush(), Shout());
+      p = Probe(h.item);
+      io::println(h.viaQuiet() + " " + p.state());
+      io::println(h.viaLoud() + " " + p.state() + " " + h.item.name);
+      shapes: Shape[2] = [Square(2), Square(3)];
+      io::println(Str(total(shapes)));
+      m = c::HashMap<Str, Dog>();
+      rex = Dog("rex" + Str(1));
+      w = Watch(rex);
+      m.put("d", rex);
+      rex = Dog("max");
+      io::println(w.state());
+      m.put("d", rex);
+      io::println(w.state() + " " + m.get("d").name);
+      m.remove("d");
+      io::println(Str(m.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut,
+            "old02 alive\nold03 freed new1\n13\nalive\nfreed max\n0\n");
+  g.expectNoLeaks("AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo");
+}
+
+// A read of `self`'s storage across a virtual call of a program's class
+// whose overrides let go of nothing of its class is read by a stable load,
+// which keeps the hand-off its hold made: `v` is handed on to `offer`, and
+// the Pet dies when `offer` returns, before `push` asks (docs/pir.md §7,
+// §12).
+TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
+  LeakGuard g;
+  auto r = compileMoveAndRun(R"(import ::io;
+    class Pet { name: Str; }
+    class Probe { weak p: Pet?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.p {
+          Pet { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    class Sink { last: Str; fn offer(v: Pet) { self.last = "seen"; } }
+    class Loud : Sink { fn offer(v: Pet) { self.last = v.name; } }
+    struct Pile { sink: Sink; }
+    impl Pile {
+      fn push(v: Pet, probe: Probe) -> Str {
+        self.sink.offer(v);
+        return probe.state();
+      }
+    }
+    fn main() -> int {
+      p = Pile(Loud("none"));
+      x = Pet("rex" + Str(1));
+      probe = Probe(x);
+      io::println(p.push(x, probe) + " " + probe.state() + " " + p.sink.last);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "freed freed rex1\n");
+  g.expectNoLeaks("AProgramsStableReadKeepsTheHandOffsTiming");
+}
+
+// A field no code stores into once its object is made keeps the reference
+// its object's `__init__` gave it (docs/pir.md §7): `self.fixed.name` is
+// read in place across a closure that replaces `moving` and, through an
+// `inout` argument, `byArg`.  Their reads keep a reference of their own:
+// each is the string of the Item that was there, which dies once the
+// statement has used it.
+TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Item { name: Str; }
+    class Probe { weak it: Item?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.it {
+          Item { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    fn bump(s: inout Item) { s = Item("arg" + Str(3)); }
+    class Holder {
+      fixed: Item;
+      moving: Item;
+      byArg: Item;
+      view fn viaFixed(f: () -> int) -> Str { return self.fixed.name + Str(f()); }
+      view fn viaMoving(f: () -> int) -> Str { return self.moving.name + Str(f()); }
+      view fn viaArg(f: () -> int) -> Str { return self.byArg.name + Str(f()); }
+    }
+    impl Holder {
+      fn __init__() {
+        self.fixed = Item("fix" + Str(0));
+        self.moving = Item("old" + Str(1));
+        self.byArg = Item("arg" + Str(2));
+      }
+    }
+    fn main() -> int {
+      h = Holder();
+      fixed = Probe(h.fixed);
+      moving = Probe(h.moving);
+      f = fn() -> int {
+        h.moving = Item("new" + Str(4));
+        bump(h.byArg);
+        return 7;
+      };
+      io::println(h.viaFixed(f) + " " + fixed.state() + " " + moving.state());
+      moving = Probe(h.moving);
+      io::println(h.viaMoving(f) + " " + moving.state() + " " + h.moving.name);
+      arg = Probe(h.byArg);
+      io::println(h.viaArg(f) + " " + arg.state() + " " + h.byArg.name);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut,
+            "fix07 alive freed\nnew47 freed new4\narg37 freed arg3\n");
+  g.expectNoLeaks("AFieldStoredOnlyAtConstructionIsReadInPlace");
+}
+
+// An `__init__`'s store into another object of its class is no
+// construction: `self.f` keeps a reference of its own across `remake`,
+// whose `__init__` replaces the `f` of the object it is given, and `tag`
+// runs on the Item that was there, which dies once the statement has used
+// it.  (A binding cannot be named `self` there: Sema rejects it.)
+TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Item { s: Str; }
+    impl Item {
+      fn __init__(s: Str) { self.s = s; }
+      view fn tag(x: int) -> Str { return self.s + Str(x); }
+    }
+    class A { f: Item; }
+    impl A {
+      fn __init__(other: A?) {
+        self.f = Item("original" + Str(100));
+        match other {
+          o: A { o.f = Item("replaced" + Str(2)); }
+          None { }
+        }
+      }
+      fn run() -> Str { return self.f.tag(remake(self)); }
+    }
+    fn remake(a: A) -> int {
+      b = A(a);
+      return 1;
+    }
+    fn main() -> int {
+      a = A(None);
+      io::println(a.run());
+      io::println(a.f.s);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "original1001\nreplaced2\n");
+  g.expectNoLeaks("AnInitsStoreIntoAnotherObjectIsNoConstruction");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

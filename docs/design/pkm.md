@@ -764,8 +764,13 @@ printer uses and these codes, with a test that every enumerator has both.
 
 ```
 Operand := u8 kind ; payload     0 value (uleb id ≥ 1) | 1 i64 sleb | 2 f64 | 3 bool u8 | 4 char u8 | 5 null box | 6 null obj | 7 symbol str
-InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str result name] ; per-opcode fields ; uleb nArgs ; Operand[nArgs]
+InstrRec := [u8 53] ; u8 opcode ; uleb result id (0 = none) ; [type result type ; str result name] ; per-opcode fields ; uleb nArgs ; Operand[nArgs]
 ```
+
+A `stable` `field.load` or `ptr.load` (docs/pir.md §6) is written with
+the code 53 before its opcode, which no opcode has; a load without it is
+not stable, so a record written before the mark existed reads the same.
+A reader rejects the mark before any other opcode.
 
 | op | PIR | per-opcode fields | args |
 |---|---|---|---|
@@ -802,6 +807,7 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 50 | `fn.addr` (docs/design/function-types.md) | `str` callee | 0 |
 | 51 | `icall` | `sig` | n (the callee first) |
 | 52 | `vtable.store` (docs/pir.md §5) | `str` class | 1 |
+| 53 | `stable`: marks the `field.load` or `ptr.load` whose opcode follows as stable (docs/pir.md §6); only there | | |
 | 53–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults

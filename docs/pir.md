@@ -445,11 +445,23 @@ weak.release %w      ; weak -> void             Paykan_weak_release (null-safe)
 %o = new Point       ; allocate + header init + zeroed fields (Paykan_malloc)
 free %o              ; Paykan_free of the object struct (an object never boxed)
 %v = field.load %o, Point.x
+%b = field.load %o, Node.next stable           ; a box its slot keeps while it is used
 field.store %o, Point.x, %v                    ; plain store: ARC is explicit around it
 %p = vtable.load %o                            ; the object's vtable pointer (ptr)
 %p = vtable.addr Point   |   vtable.addr @$rt.PaykanString_vtable
 vtable.store %o, Point                         ; %o's vtable becomes Point's (an __init__'s, §5)
 ```
+
+A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
+it reads keeps its reference for as long as the statement it is part of
+uses the value, because the storage is the caller's and no call made
+while the value is in use can let go of a reference of the slot's class,
+or because no code stores into the slot, a field of an object the caller
+keeps, once the object is made (§7, "Reads a call may replace").  The
+load does what it does without the mark, and backends ignore it; the
+moves-at-last-use pass counts the value as held by the slot rather than
+borrowed (§12).  A load with no mark promises nothing, so a module
+written before the mark existed reads as before.
 
 **Locals**
 
@@ -473,6 +485,7 @@ store %x, %v
 %p = local.addr %x                             ; the address of local %x (ptr)
 %p = field.addr %o, Point.x                    ; the address of a field of %o (ptr)
 %v = ptr.load i64, %p                          ; the i64 at %p
+%b = ptr.load box, %p stable                   ; a box its slot keeps while it is used
 ptr.store %p, %v                               ; store %v at %p
 %q = ptr.add %p, %off                          ; %p plus %off (i64) bytes (ptr)
 mem.copy %dst, %src, %n                        ; copy %n (i64) bytes; the two may overlap
@@ -658,21 +671,143 @@ CodeGen enforced, now in one place.
   struct's method that may change `self`.  A call given only values that
   reach no object (numbers, strings, and arrays, tuples and structs of
   them) cannot, nor can a native function but through its `inout`
-  arguments.  Nor can, whatever it is given, a call that runs a function
-  whose body the module lowers (its own, a struct's method, a class's
-  `impl` method, an instantiation it emits) when that body stores no
-  reference outside its own variables (into a field, an element, an
-  `inout` parameter or local, a struct method's `self`) and makes no call
-  that may release one: none of a function that may, or whose body the
-  call does not choose (a method a subclass may override, a function
-  value), of a native function given storage to change, or of `equals`
-  (an `==` of values that reach objects).  What else such a function
-  releases is its own: a variable's or a temporary's reference to an
-  object its caller's storage still holds, or to one it made, and with no
-  variables at module level it reaches nothing else.  So `h.b.len()` and
-  a map's lookup of a string key need no hold; a recursion is read as the
-  rest of its function.  The lowering follows the order in which a statement
-  evaluates its parts, and a read in use where such a call is made takes
+  arguments: a native function keeps nothing it is lent past the call
+  (docs/language/03-functions.md, "Native Functions"), so it holds no
+  Paykan value between calls to let go of or to call back into the
+  program's code with.
+
+  What a call given more may let go of is read from the code it runs, when
+  the module lowers it (its own functions, a struct's method, a class's
+  `impl` method, a virtual method of an exact class or, in the main module
+  of a program, of one of its classes, an instantiation it emits): the
+  classes of the slots whose references it may let go of, or "not known".  A slot loses its reference only when it is stored into, or
+  when what holds it dies, so the classes are those of the slots the code
+  stores into outside its own variables (a field, an element, an `inout`
+  parameter or local, a `match` arm's `n: inout T`, a struct method's
+  `self`), with what letting go of their values may let go of in turn: a
+  value's parts, and the fields of a dying object of an *exact* class,
+  one no class derives from (`Str`, an instance of a generic class, as a
+  superclass is never generic).  An object of any other class may be a
+  subclass's holding anything, and a function value's closure anything,
+  so letting go of one is "not known".  A weak field's store lets go of
+  no object; a store through an `inout` name may replace a slot of any of
+  its type's superclasses, which a `match` arm narrows, so it counts those
+  too (and an arm the class of the subject's slot).  A call the code makes
+  adds what it does: a constructor its `__init__`'s, with the
+  superclass's through `__super__`; the runtime's `==` and `toString` of
+  a tuple, a struct, an enum or an optional its objects' `equals` and
+  `toString`; a Buffer function of the runtime what `kPaykanBufferFunctions`
+  (`Names.h`, checked against `src/Runtime/Buffer.c`) says, which lets go
+  of the values it overwrites or shrinks away, never of the buffer; and a
+  private `Obj` field of a struct whose code stores only new buffers into
+  it and passes it only to Buffer functions (`memory::Buffer<T>.__data`)
+  holds a buffer, whose death lets go of its values.  Anything else is
+  "not known": a function another module compiles (its code is not read
+  here), a method a subclass the module does not know may override, a
+  call through a function value, any other native function given storage
+  to change, a recursion through another function (one calling itself is
+  read as the rest of its body), and any construct the reading does not
+  recognize.  What else such code releases is its own: a variable's or a
+  temporary's reference to an object its caller's storage still holds, or
+  to one it made, and with no variables at module level it reaches
+  nothing else.
+
+  The main module of a program to run or build (`run`, `build`,
+  `--emit-pir`, `--emit-c`; not a module `--emit-pkm` writes, which a
+  module may import) knows more about its own classes (lowering's
+  `World::Closed`): no module imports it, as that would close an import
+  cycle, and no other module's template can name its classes, so every
+  class derived from one of them is a class it lowers.  A virtual call on
+  an object of one runs the implementation the class's vtable names or an
+  override of a class derived from it (an object has its own class's
+  vtable, or, while a superclass's `__init__` runs, the superclass's, seen
+  only through a reference of the superclass's type), and does what one
+  of those does; a pure method's trap stops the program.  An object of
+  one that dies may be of a class derived from it, and lets go of what
+  the fields of its class or of that one hold.  So a program's
+  `HashMap<Str, Dog>`, whose `Dog` holds a string, reads its table in
+  place across `put` and `remove`, and `shapes[i].area()` reads the
+  `Shape` in place when no override of `area` lets go of a `Shape`; a
+  `Shape` slot is held across a call to an override that may.  A class of
+  another module stays what it is everywhere, as an importer of that
+  module may derive from it, and so does a method a class of the main
+  module inherits from one (another module compiles it).  Nothing the
+  main module knows so reaches a cache entry: the main module is never
+  cached, and its copies of other modules' instantiations serve only the
+  program, whose imports keep their own.
+
+  A read of storage the function never hands on (its `self`, an `inout`,
+  `view` or slice parameter's) is replaced by such a call only when the
+  call may let go of a reference of the read slot's class, or for an
+  `inout` name's of one of its superclasses: so `self.__list` of a
+  `Stack<int>` needs no hold across `pushFront`, which lets go only of
+  nodes and ints, nor a map's table across `put` of string keys and int
+  values, but does across a `put` of closures, and of `Dog`s outside a
+  program's main module.  A read rooted in a variable or a value
+  parameter, which the function may hand on at its last use (§12), keeps
+  a reference of its own across any call that may let go of one at all,
+  whatever its class, and a virtual call always counts as one: without it
+  the read is borrowed across the call, MoveAtLastUse keeps the hand-off
+  of another variable a copy, and an object would die later.  So
+  `h.b.len()` and a map's lookup of a string key need no hold either way.
+
+  A class's field that no code stores into once its object is made keeps
+  the reference its object's `__init__` gave it for as long as the object
+  lives, so no call replaces a read of it from an object the function
+  keeps alive, whatever the call does.  Before it lowers any body, the
+  lowering reads the module's code for every store into a class field: an
+  assignment (a compound one too), an `inout` argument or local, a `match`
+  with an arm's `n: inout T` (whose copy is written back to the subject),
+  and what an `-> inout` function returns (either branch of a
+  conditional), which its caller may write through, in a lambda's body as
+  anywhere else.  Only `self.f = v` in the body of an `__init__`, of the
+  field's class or of a class derived from it, is the object's
+  construction (`self` names the object in all of the body, as nothing in
+  a method's body may bind the name: docs/language/05-classes.md,
+  "Declaration"; `o.f = v` of another object is a store): an `__init__`
+  runs once, on an object nothing else holds yet, and nothing but its
+  constructor and a derived class's `__init__` calls it, so none of its
+  stores is made while a call made by code reading the object runs.  A
+  native function stores into nothing but its `inout` arguments, and
+  keeps nothing it is lent past the call (docs/language/03-functions.md,
+  "Native Functions"), and destroying an object runs no code of the
+  program, so nothing else stores into a field.  Which code may store
+  into one depends on what may name it.  In the main module of
+  a program, no other module names the classes it declares or the
+  instances of its templates, and every function run on them is one it
+  lowers (its copies of other modules' templates too, which may name a
+  type argument's fields), so all their fields are known; its copies of
+  other modules' instantiations are not its own declarations.  An
+  importer may name any other module's classes, so there only a private
+  field (`__f`, `_f`) of a class the module declares is known: no
+  importer's code names it, and the module's templates, which may run in
+  an importer's copy, are read for the stores they make by the field's
+  name.  The function keeps the object alive when it is a class method's
+  `self`, which the caller keeps for the call, or what such a field of it
+  holds, at any depth: `self.origin.sum()` in a program whose code sets
+  `Box.origin` only in `Box`'s `__init__` needs no hold, though `sum` is
+  another module's (`samples/imports/07_qualified_type`), and one whose
+  code stores into `b.origin` anywhere else keeps it, as `sum` may run
+  that code through an `equals` override.  A read in an `__init__`, a
+  read rooted in a variable or a value parameter (kept as above) and a
+  struct's part held in an object, which a copy of the whole struct
+  replaces, are never such reads.
+
+  A read of storage the function never hands on that is in use where a
+  call that may let go of references is made, though of none of the read
+  slot's class (or one of a field stored only at construction, above), is
+  read by a `stable` `field.load` or `ptr.load` (§6):
+  MoveAtLastUse then counts its value as held by the slot, not borrowed,
+  and keeps the hand-offs its hold made (`push(v)` of a `Stack<Str>` hands
+  `v` on to `pushFront` with no retain at all), so objects die when they
+  did with the hold.  A read in use at no call that may let go of a
+  reference is read in place and borrowed, as before; a read rooted in a
+  variable or a value parameter is never stable, since the variable may be
+  what keeps its object alive.  The mark is the lowering's promise for the
+  statement only, not a reference of the load's own.
+
+  The lowering follows the order in which a statement evaluates its
+  parts, and a read in use where a call that may replace it is made takes
   a reference of its own: a method's receiver until the method returns
   (the method is such a call, given its receiver), the left operand of
   `+` or `==` until the operator, a string while the index of the
@@ -860,7 +995,8 @@ The verifier rejects a program when:
   function the module does not declare;
 * `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr`/
   `vtable.store` name an unknown class or field; a field store has the
-  wrong type; `vtable.store` takes anything but an `obj`;
+  wrong type; `vtable.store` takes anything but an `obj`; an instruction
+  other than a `field.load` or a `ptr.load` of a `box` is `stable`;
 * a class extends an unknown class or declares a field twice, a field has
   a type that is not a field type (§5), a defined class's vtable slot 0 is
   not `destroy`, or an `extern class` names no module;
@@ -963,7 +1099,9 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 - **Codes.** Types and opcodes are written as the fixed codes of
   `include/paykan/pir/Codes.h`, the one table that also holds the mnemonics
   of §10, never as the C++ enumerator's value; a reader rejects a code it
-  does not know.
+  does not know.  Two codes mark what follows them: 18 a `view` local's
+  slot type (§3), 53 a `stable` load's opcode (§6); a module written
+  before either mark existed reads the same, unmarked.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
   (`index`, `encodeSymbolIndex`) lists every record with its offset, length
@@ -1098,10 +1236,12 @@ borrowed: a box loaded from a box local, or what a `mem` local holds (it
 owns its references, §7), which the local keeps until a store into it, a
 statement that is over by then, or a call given its address, whose
 statement's other reads of it have a reference of their own (§7, "Reads a
-call may replace"); a call's box; and a value retained before anything else
-uses it.  Nor is an `__init__`'s `self`: its constructor, the only caller
-one can have, holds the object (or, for a struct, the storage) until the
-call returns.  So `x = h.node; take(x); s = h.node.name + label(n)` keeps
+call may replace"); a call's box; a value retained before anything else
+uses it; and a `stable` load's box, which its slot keeps while the
+statement uses it (§6), so `self.__list.pushFront(v)` of a `Stack<Str>`
+hands `v` on.  Nor is an `__init__`'s `self`: its constructor, the only
+caller one can have, holds the object (or, for a struct, the storage)
+until the call returns.  So `x = h.node; take(x); s = h.node.name + label(n)` keeps
 the copy into `take`, though `label`, given a number, can let go of
 nothing; with `replace(h)` in its place, which may assign `h.node`, the
 name read has a reference of its own (§7), and the hand-off moves.  Whether

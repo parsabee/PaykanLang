@@ -129,7 +129,8 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   // An `inout` parameter: read the caller's storage (a box: borrowed, and
   // unwrapped like an owned variable's).
   if (Type t = L.CurrentScope->inoutType(node->getName()); t != Type::Void) {
-    Val v = L.B.ptrLoad(val, t, node->getName());
+    Val v = L.B.ptrLoad(val, t, node->getName(),
+                        t == Type::Box && L.isStableRead(node));
     if (t == Type::Box && L.isHeldRead(node))
       return held(v);
     return t == Type::Box ? L.emitSharedGet(v, node->getName() + ".obj") : v;
@@ -172,7 +173,9 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     // A temporary's element, or a held one, is a +1 box
     // (exprProducesFreshBox).
     return L.ownElementRead(
-        node, L.emitElementLoad(addr, node->getResolvedType()), mark);
+        node,
+        L.emitElementLoad(addr, node->getResolvedType(), L.isStableRead(node)),
+        mark);
   }
   // A string's character: the string is read first, then the index is
   // computed (a read a call there may replace holds a reference of its own).
@@ -1255,7 +1258,9 @@ Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
   // A temporary's element, or a held one, is a +1 box
   // (exprProducesFreshBox).
   return L.ownElementRead(
-      node, L.emitElementLoad(addr, node->getResolvedType()), mark);
+      node,
+      L.emitElementLoad(addr, node->getResolvedType(), L.isStableRead(node)),
+      mark);
 }
 
 Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {

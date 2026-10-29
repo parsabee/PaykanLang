@@ -257,6 +257,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
       fn->Params[0].Name = kSelf;
       nameParams(*fn, 1, funcDecl->getParams());
       Bodies[fn->Name] = funcDecl;
+      BodyOwners[funcDecl] = ct;
     }
   }
   pir::Function *dtor = getOrCreateFunction(
@@ -348,15 +349,19 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
       B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
       CurrentScope->declareUnowned(kSelf, selfLocal, ct);
+      CurrentScope->markStable(kSelf);
       size_t at = 1;
       for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
         at +=
             declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
                          md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
-      if (funcDecl->getName() == kMethodInit)
+      if (funcDecl->getName() == kMethodInit) {
+        EmittingInit = true;
         emitInitBody(funcDecl->getBody(), ct, selfLocal);
-      else
+        EmittingInit = false;
+      } else {
         emitBody(funcDecl->getBody());
+      }
     }
     emitImplicitReturn(fn->Sig);
   }
@@ -555,7 +560,8 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
     fieldTy = Type::Box;
 
   Val fieldVal = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
-                             fieldTy, node->getFieldName());
+                             fieldTy, node->getFieldName(),
+                             fieldTy == Type::Box && isStableRead(node));
   // A `weak` field reads as a fresh +1 box, or null once the object is
   // gone (exprProducesFreshBox).
   if (weak)

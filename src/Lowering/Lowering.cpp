@@ -202,6 +202,12 @@ void ModuleLowering::Scope::declareUnowned(const std::string &name,
     ASTTypeMap[name] = astTy;
 }
 
+bool ModuleLowering::Scope::isStable(const std::string &name) const {
+  if (Locals.count(name))
+    return StableVars.count(name) > 0;
+  return Parent ? Parent->isStable(name) : false;
+}
+
 ModuleLowering::Scope *
 ModuleLowering::Scope::findOwner(const std::string &name) {
   if (Locals.count(name))
@@ -664,13 +670,15 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // Declare every free function, every struct (methods, constructor) and
   // every class (struct layout, vtable, methods, destructor, constructor)
   // before emitting any body, so calls and `__super__` resolve regardless
-  // of source order.
+  // of source order, and read where the bodies store into class fields
+  // before any is emitted (scanFieldStores).
   std::vector<ast::FuncDecl *> funcs = node->getFuncDecls();
   funcs.insert(funcs.end(), ForeignFuncs.begin(), ForeignFuncs.end());
   std::vector<ast::ClassDecl *> classes = node->getClassDecls();
   classes.insert(classes.end(), ForeignClasses.begin(), ForeignClasses.end());
   std::vector<ast::StructDecl *> structs = node->getStructDecls();
   structs.insert(structs.end(), ForeignStructs.begin(), ForeignStructs.end());
+  indexSubclasses(classes);
   for (auto *fn : funcs) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
@@ -682,6 +690,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
     declareStruct(sd);
   for (auto *cls : classes)
     declareClass(cls);
+  scanFieldStores(node);
   for (auto *sd : structs)
     visitStructDecl(sd);
   for (auto *cls : classes)
@@ -1935,7 +1944,7 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
     auto *id = ast::dyn_cast<ast::Identifier>(arg);
     if (id && CurrentScope->hasLocal(id->getName()) &&
         holdsBox(id->getName()) && !isHeldRead(id))
-      return loadVarBox(id->getName());
+      return loadVarBox(id->getName(), isStableRead(id));
     auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg);
     if (ma && ast::isa<ast::Identifier>(ma->getReceiver())) {
       Val v = emitExpr(arg);

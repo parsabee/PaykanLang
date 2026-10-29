@@ -962,6 +962,49 @@ fn @f(%a: box, %h: box) -> void {
   EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
 }
 
+TEST(MoveAtLastUse, AStableReceiverReadIsNoReasonForACopy) {
+  // `self.list.push(x)` in a class's method and in a struct's: the lowering
+  // marks the read `stable` when the call cannot let go of the slot's
+  // reference (docs/pir.md §7), so the slot keeps the receiver alive
+  // whatever x's destination does, and x is handed on.  Unmarked, the
+  // receiver is borrowed across the call and x stays a copy.
+  auto method = [](const std::string &self, const std::string &read) {
+    return R"(
+fn @m2(%self: obj, %p: box) -> void {
+  release %p
+  ret
+}
+
+fn @f(%self: )" +
+           self + R"(, %a: box) -> void {
+  local %s: )" +
+           self + R"(
+  local %x: box
+  store %s, %self
+  store %x, %a
+  %o = load %s
+  %r = )" + read +
+           R"(
+  %ro = unbox %r
+  %v = load %x
+  retain %v
+  call @m2(%ro, %v)
+  %w = load %x
+  release %w
+  ret
+}
+)";
+  };
+  for (const auto &[self, read] :
+       {std::pair<std::string, std::string>{"obj", "field.load %o, Node.next"},
+        {"ptr", "ptr.load box, %o"}}) {
+    Moved m = ::move(method(self, read + " stable"));
+    EXPECT_EQ(m.Counts.Transfers, 1u) << f(m);
+    EXPECT_NE(f(m).find(" stable\n"), std::string::npos) << f(m);
+    EXPECT_EQ(::move(method(self, read)).Counts.Transfers, 0u) << read;
+  }
+}
+
 TEST(MoveAtLastUse, SelfUsedAfterACallKeepsAParametersCopy) {
   // The caller may have no reference of its own to `self` (a receiver read
   // from a field), and the parameter may be what keeps it alive.  An

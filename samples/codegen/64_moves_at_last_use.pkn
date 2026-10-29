@@ -110,7 +110,8 @@ fn pass(n: Node) -> Str {
 }
 
 /// `replace` lets the old node go while its name, read first, is still to
-/// be used: the hand-off of `x`, which also holds that node, stays a copy.
+/// be used: the read takes a reference of its own, so `x`, which also holds
+/// that node, need not keep it alive and is handed on to `name`.
 fn fieldRead() -> Str {
   sl = Slot(Node("first" + Str(1)));
   x = sl.node;

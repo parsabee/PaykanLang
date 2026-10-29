@@ -241,6 +241,9 @@ private:
   }
 
   void instr(const Instr &in) {
+    // A stable load's opcode follows its mark (§5.5).
+    if (in.Stable)
+      W.u8(kStableLoadCode);
     W.u8(opcodeEntry(in.Op).Code);
     W.uleb(in.Result.Id);
     if (in.Result.Id != kNoValue) {
@@ -690,8 +693,15 @@ private:
     uint8_t code;
     if (!R.u8(code))
       return false;
+    // A stable load's opcode follows its mark (§5.5).
+    in.Stable = code == kStableLoadCode;
+    if (in.Stable && !R.u8(code))
+      return false;
     if (!opcodeFromCode(code, in.Op))
       return R.fail("reserved opcode", R.offset() - 1);
+    if (in.Stable && in.Op != Opcode::FieldLoad && in.Op != Opcode::PtrLoad)
+      return R.fail("a stable mark before an instruction that is no load",
+                    R.offset() - 1);
     if (!R.uleb32(in.Result.Id))
       return false;
     if (in.Result.Id != kNoValue &&

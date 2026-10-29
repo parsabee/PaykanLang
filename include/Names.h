@@ -175,6 +175,24 @@ inline constexpr const char *kPaykanBufferIsSet = "PaykanBuffer_isSet";
 inline constexpr const char *kPaykanBufferTryGrow = "PaykanBuffer_tryGrow";
 inline constexpr const char *kPaykanBufferTryReserve =
     "PaykanBuffer_tryReserve";
+/// What each Buffer function may do to the values a buffer holds: drop some
+/// of them, of its type argument's type (the one it overwrites, the ones it
+/// shrinks away), or none.  None of them replaces the buffer an `inout Obj`
+/// handle names, keeps a value, or runs program code.  The lowering reads a
+/// call of one by it (src/Lowering/LoweringHolds.cpp, nativeEffect), and
+/// tests/Runtime/BufferTests.cpp checks it against src/Runtime/Buffer.c.
+struct BufferFunction {
+  const char *Symbol;
+  bool Drops;
+};
+inline constexpr BufferFunction kPaykanBufferFunctions[] = {
+    {kPaykanBufferNew, false},        {kPaykanBufferLen, false},
+    {kPaykanBufferGet, false},        {kPaykanBufferCopy, false},
+    {kPaykanBufferSet, true},         {kPaykanBufferReserve, false},
+    {kPaykanBufferGrow, false},       {kPaykanBufferShrink, true},
+    {kPaykanBufferIsSet, false},      {kPaykanBufferTryGrow, false},
+    {kPaykanBufferTryReserve, false},
+};
 
 // The standard library's ::io (stdlib/io.pkn): reached only through its
 // `native fn`s

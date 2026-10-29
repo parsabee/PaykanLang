@@ -691,6 +691,97 @@ fn @main() -> i64 {
   EXPECT_EQ(errs.find("%c = weak.new"), std::string::npos) << errs;
 }
 
+// `stable` after a `field.load` or a `ptr.load` of a box: the slot keeps
+// its reference while the value is used (docs/pir.md §6).  It prints,
+// parses and verifies; without it the load is borrowed as before.
+TEST(PIR, StableLoadsRoundTripAndVerify) {
+  const char *src = R"(module "m"
+class Node {
+  field next: box
+  field n: i64
+  vtable {
+    destroy = @Node.destroy : (obj) -> void
+  }
+}
+fn @Node.destroy(%self: obj) -> void {
+  %n = field.load %self, Node.next
+  release %n
+  free %self
+  ret
+}
+fn @Node.peek(%self: obj, %p: ptr) -> void {
+  %a = field.load %self, Node.next stable
+  %b = ptr.load box, %p stable
+  %c = field.load %self, Node.next
+  %d = ptr.load box, %p
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)";
+  EXPECT_EQ(verifyText(src), "");
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  std::string printed = toString(*p);
+  for (const char *piece :
+       {" = field.load %self.1, Node.next stable\n",
+        " = ptr.load box, %p.2 stable\n", " = field.load %self.1, Node.next\n",
+        " = ptr.load box, %p.2\n"})
+    EXPECT_NE(printed.find(piece), std::string::npos) << piece << "\n"
+                                                      << printed;
+  auto again = parseProgram(printed, err);
+  ASSERT_TRUE(again.has_value()) << err.str();
+  EXPECT_EQ(toString(*again), printed);
+}
+
+TEST(PIRVerifier, OnlyABoxLoadIsStable) {
+  std::string errs = verifyText(R"(module "m"
+class Node {
+  field n: i64
+  vtable {
+    destroy = @Node.destroy : (obj) -> void
+  }
+}
+fn @Node.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+fn @Node.peek(%self: obj, %p: ptr) -> void {
+  %a = field.load %self, Node.n stable
+  %b = ptr.load i64, %p stable
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  for (const char *e :
+       {"a stable 'field.load' (only a field.load or a ptr.load of a box is "
+        "stable)",
+        "a stable 'ptr.load' (only a field.load or a ptr.load of a box is "
+        "stable)"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  // Nor is any other instruction, which the text cannot mark.
+  ParseError err;
+  auto p = parseProgram(R"(module "m"
+fn @main() -> i64 {
+  %a = add 1, 2
+  ret %a
+}
+)",
+                        err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  std::get<Instr>(p->Modules[0].Functions[0].Body.Stmts[0]).Stable = true;
+  EXPECT_NE(formatErrors(verify(*p)).find("a stable 'add'"), std::string::npos)
+      << formatErrors(verify(*p));
+}
+
 TEST(PIRVerifier, ChecksOptionals) {
   std::string errs = verifyText(R"(module "m"
 extern fn @$rt.Paykan_take(opt_i64) -> void

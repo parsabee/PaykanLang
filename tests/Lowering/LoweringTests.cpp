@@ -35,9 +35,10 @@ struct Lowered {
 
 /// Parse, check, lower, verify and print @p source (@p projectRoot for
 /// imports), the instantiations of other modules' templates as @p copies
-/// says.
+/// says, the main module knowing what @p world says.
 Lowered lower(const std::string &source, const std::string &projectRoot = "",
-              lowering::Copies copies = lowering::Copies::Shared) {
+              lowering::Copies copies = lowering::Copies::Shared,
+              lowering::World world = lowering::World::Open) {
   Lowered l;
   auto [parseOk, driver] = parse(source);
   if (!parseOk) {
@@ -55,7 +56,7 @@ Lowered lower(const std::string &source, const std::string &projectRoot = "",
   }
   std::ostringstream errs;
   if (!lowering::lowerProgram(ctx, driver->getRoot(), "main", projectRoot,
-                              l.Program, errs, nullptr, copies)) {
+                              l.Program, errs, nullptr, copies, world)) {
     l.Error = "lowering failed: " + errs.str();
     return l;
   }
@@ -99,6 +100,16 @@ std::string defined(const std::string &f, const std::string &what) {
   const size_t line = f.find_first_not_of(' ', f.rfind('\n', at) + 1);
   const size_t eq = f.find(" = ", line);
   return eq < at ? f.substr(line, eq - line) : "";
+}
+
+/// Whether the first instruction of @p f containing @p what is a `stable`
+/// load (docs/pir.md §6).
+bool stableLoad(const std::string &f, const std::string &what) {
+  const size_t at = f.find(what);
+  if (at == std::string::npos)
+    return false;
+  const std::string line = f.substr(at, f.find('\n', at) - at);
+  return line.ends_with(" stable");
 }
 
 /// Whether the box @p value is retained before the first @p call of @p f and
@@ -524,7 +535,9 @@ TEST(Lowering, AReadThroughAnObjectACallMayReplaceIsHeld) {
 // a reference (into a field, through an `inout` parameter, into a struct's
 // `self`), calls a function that may (also through a recursion), or runs a
 // method a subclass may override (an `Obj`'s too) still holds it
-// (docs/pir.md §7, "Reads a call may replace").
+// (docs/pir.md §7, "Reads a call may replace").  The reads here are rooted
+// in a parameter the function may hand on, which keeps the rule without the
+// types: `h.b` is held across `B.reset`, which lets go of a `Str` only.
 TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
   auto l = lower(R"(
     class B {
@@ -624,6 +637,529 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
   std::string f = function(l.Text, "operand");
   EXPECT_FALSE(heldAcross(f, defined(f, ", B.s"), "call @peek(")) << f;
   EXPECT_EQ(count(f, "retain "), 1u) << f; // peek's argument
+}
+
+// A read of storage the function never hands on (a class method's `self`,
+// a struct method's, an `inout`, `view` or slice parameter) is held across
+// a call only when the call may let go of a reference of the read slot's
+// class: one it stores into (a `Str` field), what dying objects of an exact
+// class it lets go of hold (a `Cell<int>`'s `Str`), whatever it is when it
+// lets go of an object of a class a subclass of which may hold anything (a
+// `B?`) or calls a function value.  A weak store lets go of nothing, and a
+// store of a number neither.  A constructor does what its `__init__` does,
+// with the superclass's through `__super__`; the runtime's `==` of a tuple
+// what its objects' `equals` do.  A read rooted in a parameter it may hand
+// on keeps the rule without the types (docs/pir.md §7).  A read a call that
+// may let go of references does not hold is read by a `stable` load; one
+// in use at no such call (`self.s` across `setN`, which lets go of nothing)
+// is read as before.
+TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
+  auto l = lower(R"(
+    class Box<T> { v: T; view fn at(k: int) -> T { return self.v; } }
+    class Cell<T> { v: T; name: Str; }
+    class Par { name: Str; }
+    impl Par { fn __init__(n: Str) { self.name = n; } }
+    class Kid<T> : Par { v: T; }
+    impl Kid<T> { fn __init__(v: T) { __super__("p"); self.v = v; } }
+    class Tag<T> {
+      v: T;
+      s: Str;
+      view fn equals(o: Obj) -> bool {
+        match o {
+          t: Tag<T> { t.s = "seen"; }
+          _ { }
+        }
+        return True;
+      }
+    }
+    class B {
+      s: Str;
+      n: int;
+      weak w: B?;
+      g: Box<int>;
+      c: Cell<int>;
+      o: B?;
+    }
+    impl B {
+      fn setS() -> int {
+        self.s = "r";
+        return 0;
+      }
+      fn setN() -> int {
+        self.n = 1;
+        return 0;
+      }
+      fn link(x: B) -> int {
+        self.w = x;
+        return 0;
+      }
+      fn setG() -> int {
+        self.g = Box<int>(1);
+        return 0;
+      }
+      fn setC() -> int {
+        self.c = Cell<int>(1, "c");
+        return 0;
+      }
+      fn setO() -> int {
+        self.o = None;
+        return 0;
+      }
+      view fn take(k: Kid<Box<int>>) -> int { return k.v.v; }
+      view fn apply(f: () -> int) -> int { return f(); }
+      view fn count(b: bool) -> int { return self.n; }
+      view fn note(k: H) -> int {
+        k.s = "n";
+        return 0;
+      }
+    }
+    class H {
+      b: B;
+      s: Str;
+      g: Box<int>;
+      fn receiver() -> int { return self.b.setS(); }
+      fn string() -> Str { return self.s + Str(self.b.setS()); }
+      fn number() -> Str { return self.s + Str(self.b.setN()); }
+      fn weakStore() -> int { return self.b.link(self.b); }
+      fn sameClass() -> int { return self.g.at(self.b.setG()); }
+      fn otherClass() -> Str { return self.b.s + Str(self.b.setG()); }
+      fn destroyed() -> Str { return self.s + Str(self.b.setC()); }
+      fn anything() -> Str { return self.s + Str(self.b.setO()); }
+      fn built() -> int { return self.b.take(Kid<Box<int>>(self.g)); }
+      fn superInit() -> Str {
+        return self.s + Str(Kid<Box<int>>(self.g).v.v);
+      }
+      fn closure(f: () -> int) -> int { return self.b.apply(f); }
+      fn compared(a: (Tag<int>, int), x: (Tag<int>, int)) -> Str {
+        return self.s + Str(a == x);
+      }
+      fn comparedB(a: (Tag<int>, int), x: (Tag<int>, int)) -> int {
+        return self.b.count(a == x);
+      }
+    }
+    struct S { b: B; }
+    impl S { fn receiver() -> int { return self.b.setS(); } }
+    fn byInout(x: inout B) -> int { return x.setS(); }
+    fn byView(h: view H, k: H) -> int { return h.b.note(k); }
+    fn bySlice(xs: inout B[]) -> int { return xs[0].setS(); }
+    fn byLocal(h: H) -> int { return h.b.setS(); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  struct Case {
+    const char *Fn, *Read, *Call;
+    bool Held, Stable;
+  };
+  for (const Case &c : {
+           Case{"H.receiver", ", H.b", "call @B.setS(", false, true},
+           Case{"H.string", ", H.s", "call @B.setS(", true, false},
+           Case{"H.number", ", H.s", "call @B.setN(", false, false},
+           Case{"H.weakStore", ", H.b", "call @B.link(", false, true},
+           Case{"H.sameClass", ", H.g", "call @B.setG(", true, false},
+           Case{"H.otherClass", ", B.s", "call @B.setG(", false, true},
+           Case{"H.destroyed", ", H.s", "call @B.setC(", true, false},
+           Case{"H.anything", ", H.s", "call @B.setO(", true, false},
+           Case{"H.built", ", H.b", "call @Kid<Box<int>>(", false, true},
+           Case{"H.superInit", ", H.s", "call @Kid<Box<int>>(", true, false},
+           Case{"H.closure", ", H.b", "call @B.apply(", true, false},
+           Case{"H.compared", ", H.s", "PaykanTuple_equals(", true, false},
+           Case{"H.comparedB", ", H.b", "PaykanTuple_equals(", false, true},
+           Case{"S.receiver", "ptr.load box", "call @B.setS(", false, true},
+           Case{"byInout", "ptr.load box", "call @B.setS(", false, true},
+           Case{"byView", ", H.b", "call @B.note(", false, true},
+           Case{"bySlice", "ptr.load box", "call @B.setS(", false, true},
+           Case{"byLocal", ", H.b", "call @B.setS(", true, false},
+       }) {
+    std::string f = function(l.Text, c.Fn);
+    EXPECT_EQ(heldAcross(f, defined(f, c.Read), c.Call), c.Held) << c.Fn << "\n"
+                                                                 << f;
+    EXPECT_EQ(stableLoad(f, c.Read), c.Stable) << c.Fn << "\n" << f;
+  }
+}
+
+// A call that replaces a slot through a narrowed `inout` arm (`d: inout
+// Derived<int>` on a `Base` field) lets go of a reference of the field's
+// class, not of the arm's: a read of the field is held across it, though
+// what dies is an object of an exact class that holds no `Base`.  So is the
+// read of an `inout` parameter, whose slot may be a field of a superclass
+// of its type, across a call that replaces that field; and a read of a
+// parameter the function may hand on across any call that may let go of a
+// reference (the counterexamples of the analysis of these holds).  So they
+// are in the main module of a program, which knows that a `Base` that dies
+// may be a `Plain` or a `Derived<int>`.
+TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
+  const std::string source = R"(
+    class Base { n: int; }
+    impl Base {
+      fn __init__(n: int) { self.n = n; }
+      view fn m(x: int) -> int { return self.n + x; }
+    }
+    class Derived<X> : Base { v: X; }
+    impl Derived<X> {
+      fn __init__(n: int, v: X) { __super__(n); self.v = v; }
+    }
+    class Plain : Base { tag: Str; }
+    impl Plain {
+      fn __init__(n: int, t: Str) { __super__(n); self.tag = t; }
+    }
+    class Holder { b: Base; }
+    impl Holder {
+      fn run() -> int { return self.b.m(reset(self)); }
+      fn runPlain() -> int { return self.b.m(resetPlain(self)); }
+    }
+    fn reset(h: Holder) -> int {
+      match h.b {
+        d: inout Derived<int> { d = Derived<int>(1, 9); }
+        _ { }
+      }
+      return 7;
+    }
+    fn resetPlain(h: Holder) -> int {
+      match h.b {
+        d: inout Plain { d = Plain(1, "new"); }
+        _ { }
+      }
+      return 7;
+    }
+    class Wrap { h: Holder; }
+    fn clobber(w: Wrap) -> int {
+      w.h.b = Base(100);
+      return 5;
+    }
+    fn use(x: inout Derived<int>, w: Wrap) -> int { return x.m(clobber(w)); }
+    class Node { name: Str; }
+    class Pair { node: Node; other: Node; }
+    fn touchOther(p: Pair) -> Str {
+      p.other = Node("o2");
+      return "!";
+    }
+    fn local(p: Pair) -> Str { return p.node.name + touchOther(p); }
+    fn main() -> int { return 0; }
+  )";
+  struct Case {
+    const char *Fn, *Read, *Call;
+  };
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    auto l = lower(source, "", lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    for (const Case &c : {
+             Case{"Holder.run", ", Holder.b", "call @reset("},
+             Case{"Holder.runPlain", ", Holder.b", "call @resetPlain("},
+             Case{"use", "ptr.load box", "call @clobber("},
+             Case{"local", ", Node.name", "call @touchOther("},
+         }) {
+      std::string f = function(l.Text, c.Fn);
+      EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n"
+                                                             << f;
+      EXPECT_FALSE(stableLoad(f, c.Read)) << c.Fn << "\n" << f;
+    }
+  }
+}
+
+// The standard library's containers keep their state in a private object,
+// read through `self` of a struct method: a call that lets go only of the
+// elements' and the nodes' references (a LinkedList's pushFront, a map's
+// put and clear over buffers of entries, a heap's pop) holds no read of it;
+// one over elements a subclass may make hold anything (a class key's map,
+// a stack of closures) holds it.
+TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
+  auto l = lower(R"(import ::collections as c;
+    class Dog { name: Str; }
+    fn main() -> int {
+      s = c::Stack<int>();
+      s.push(1);
+      m = c::HashMap<Str, int>();
+      m.put("a", 1);
+      m.clear();
+      d = c::HashMap<Str, Dog>();
+      d.put("d", Dog("rex"));
+      q = c::MinPriorityQueue<Str>();
+      q.push("x", 1);
+      f = c::Stack<() -> int>();
+      f.push(fn() => 2);
+      return s.pop() + int(m.len()) + int(d.len()) + q.pop().len() +
+             f.pop()();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  struct Case {
+    const char *Fn, *Call;
+    bool Held;
+  };
+  for (const Case &c : {
+           Case{"Stack<int>.push", "call @LinkedList<int>.pushFront(", false},
+           Case{"\"HashMap<Str, int>.put\"", "call @\"_Table<Str, int>.put\"(",
+                false},
+           Case{"\"HashMap<Str, int>.clear\"",
+                "call @\"_Table<Str, int>.clear\"(", false},
+           Case{"MinPriorityQueue<Str>.pop", "call @_Heap<Str>.pop(", false},
+           Case{"\"HashMap<Str, Dog>.put\"", "call @\"_Table<Str, Dog>.put\"(",
+                true},
+           Case{"\"Stack<() -> int>.push\"",
+                "call @\"LinkedList<() -> int>.pushFront\"(", true},
+       }) {
+    std::string f = function(l.Text, c.Fn);
+    ASSERT_FALSE(f.empty()) << c.Fn << "\n" << l.Text;
+    EXPECT_EQ(heldAcross(f, defined(f, "ptr.load box, %self.addr"), c.Call),
+              c.Held)
+        << c.Fn << "\n"
+        << f;
+    // What is not held is read by a stable load (docs/pir.md §6).
+    EXPECT_EQ(stableLoad(f, "ptr.load box, %self.addr"), !c.Held)
+        << c.Fn << "\n"
+        << f;
+  }
+}
+
+// The main module of a program (World::Closed) knows every class derived
+// from its classes: a virtual call on one runs the implementation its
+// vtable names or an override of a class derived from it (a pure one's
+// trap stops the program), and an object of one that dies holds the fields
+// of its class or of one of those.  So `Quiet.run`, overridden by `Hush`,
+// and the pure `Shape.area` lets go of nothing a read is of; `Loud.run`
+// may, through `Shout`'s override, which replaces `Holder.item`; and a
+// `Dog` that dies holds a string, but a `Cat` may be a `Lion` holding the
+// map's table.  A main module that may be imported (World::Open, as
+// --emit-pkm lowers it) knows none of it, and holds every such read.
+TEST(Lowering, TheMainModuleOfAProgramKnowsItsClassesOverrides) {
+  const std::string source = R"(import ::collections as c;
+    class Item { name: Str; }
+    class Quiet { fn run(h: Holder) -> int { return 1; } }
+    class Hush : Quiet { fn run(h: Holder) -> int { return 2; } }
+    class Loud { fn run(h: Holder) -> int; }
+    class Shout : Loud {
+      fn run(h: Holder) -> int {
+        h.item = Item("new");
+        return 2;
+      }
+    }
+    class Holder {
+      item: Item;
+      quiet: Quiet;
+      loud: Loud;
+      fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
+      fn viaLoud() -> Str { return self.item.name + Str(self.loud.run(self)); }
+    }
+    class Shape { view fn area() -> int; }
+    class Square : Shape {
+      s: int;
+      view fn area() -> int { return self.s * self.s; }
+    }
+    fn total(shapes: view Shape[]) -> int {
+      t = 0;
+      for i in 0..shapes.len() { t = t + shapes[i].area(); }
+      return t;
+    }
+    class Dog { name: Str; }
+    class Cat { name: Str; }
+    class Lion : Cat { pride: c::HashMap<Str, Cat>; }
+    fn main() -> int {
+      d = c::HashMap<Str, Dog>();
+      d.put("d", Dog("rex"));
+      k = c::HashMap<Str, Cat>();
+      k.put("k", Cat("tom"));
+      return int(d.len() + k.len());
+    }
+  )";
+  struct Case {
+    const char *Fn, *Read, *Call;
+    bool Held;
+  };
+  const Case cases[] = {
+      {"Holder.viaQuiet", ", Item.name", "vcall ", false},
+      {"Holder.viaLoud", ", Item.name", "vcall ", true},
+      {"total", "ptr.load box", "vcall ", false},
+      {"\"HashMap<Str, Dog>.put\"", "ptr.load box, %self.addr",
+       "call @\"_Table<Str, Dog>.put\"(", false},
+      {"\"HashMap<Str, Cat>.put\"", "ptr.load box, %self.addr",
+       "call @\"_Table<Str, Cat>.put\"(", true},
+  };
+  auto closed =
+      lower(source, "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(closed.Ok) << closed.Error;
+  auto open = lower(source);
+  ASSERT_TRUE(open.Ok) << open.Error;
+  for (const Case &c : cases) {
+    std::string f = function(closed.Text, c.Fn);
+    ASSERT_FALSE(f.empty()) << c.Fn << "\n" << closed.Text;
+    EXPECT_EQ(heldAcross(f, defined(f, c.Read), c.Call), c.Held) << c.Fn << "\n"
+                                                                 << f;
+    // What is not held is read by a stable load (docs/pir.md §6).
+    EXPECT_EQ(stableLoad(f, c.Read), !c.Held) << c.Fn << "\n" << f;
+    std::string g = function(open.Text, c.Fn);
+    EXPECT_TRUE(heldAcross(g, defined(g, c.Read), c.Call)) << c.Fn << "\n" << g;
+  }
+}
+
+// A field no code stores into once its object is made keeps the reference
+// its object's `__init__` gave it (docs/pir.md §7): `self.fixed.name` needs
+// no hold across a call through a function value, which may do anything,
+// nor does a field a derived class's `__init__` stores.  Every other way to
+// store into a field keeps its read held: an assignment, a compound one, an
+// `inout` argument or local, a `match` arm's `n: inout T` (whose copy is
+// written back), an `-> inout` result (either branch of one), a lambda's
+// body (one an `__init__` makes too), a derived class's method, a copy of
+// a generic function, which names its type argument's fields, and an
+// `__init__`'s store into another object of the class.  So is a
+// struct's part in an object (a copy of the struct replaces it), a read in
+// an `__init__`, and one rooted in a parameter the function may hand on.
+// Outside a program's main module, where an importer may name `Holder`,
+// only a private field's stores are all known: one no template of the
+// module stores into either, as `spoil`, which an importer's copy may run,
+// does `_spoiled`.
+TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
+  const std::string source = R"(
+    class Item { name: Str; }
+    class Special : Item { }
+    impl Special { fn __init__(n: Str) { __super__(n); } }
+    struct P { name: Str; }
+    fn bump(s: inout Str) { s = s + "!"; }
+    fn setTag<T>(x: T) { x.generic = "g"; }
+    class Holder {
+      fixed: Item;
+      assigned: Str;
+      compound: Str;
+      byArg: Str;
+      byLocal: Str;
+      byArm: Item;
+      byResult: Str;
+      byTernary: Str;
+      byLambda: Str;
+      inherited: Str;
+      generic: Str;
+      childInit: Str;
+      pos: P;
+      fn slot(first: bool) -> inout Str {
+        return if first then self.byResult else self.byTernary;
+      }
+      fn grow() { self.compound += "x"; }
+      view fn fixedRead(f: () -> int) -> Str { return self.fixed.name + Str(f()); }
+      view fn assignedRead(f: () -> int) -> Str { return self.assigned + Str(f()); }
+      view fn compoundRead(f: () -> int) -> Str { return self.compound + Str(f()); }
+      view fn byArgRead(f: () -> int) -> Str { return self.byArg + Str(f()); }
+      view fn byLocalRead(f: () -> int) -> Str { return self.byLocal + Str(f()); }
+      view fn byArmRead(f: () -> int) -> Str { return self.byArm.name + Str(f()); }
+      view fn byResultRead(f: () -> int) -> Str { return self.byResult + Str(f()); }
+      view fn byTernaryRead(f: () -> int) -> Str { return self.byTernary + Str(f()); }
+      view fn byLambdaRead(f: () -> int) -> Str { return self.byLambda + Str(f()); }
+      view fn inheritedRead(f: () -> int) -> Str { return self.inherited + Str(f()); }
+      view fn genericRead(f: () -> int) -> Str { return self.generic + Str(f()); }
+      view fn childInitRead(f: () -> int) -> Str { return self.childInit + Str(f()); }
+      view fn posRead(f: () -> int) -> Str { return self.pos.name + Str(f()); }
+    }
+    impl Holder {
+      fn __init__(f: () -> int) {
+        self.fixed = Item("f");
+        self.assigned = "a";
+        self.compound = "c";
+        self.byArg = "b";
+        self.byLocal = "l";
+        self.byArm = Item("m");
+        self.byResult = "r";
+        self.byTernary = "t";
+        self.byLambda = "z";
+        self.inherited = "i";
+        self.generic = "g";
+        self.childInit = "c";
+        self.pos = P("p");
+        early = self.fixed.name + Str(f());
+        k = fn() { self.byLambda = "k"; };
+        k();
+      }
+    }
+    class Child : Holder {
+      fn poke() { self.inherited = "p"; }
+    }
+    impl Child {
+      fn __init__(f: () -> int) { __super__(f); self.childInit = "child"; }
+    }
+    fn outside(h: Holder, f: () -> int) -> Str { return h.fixed.name + Str(f()); }
+    fn stores(h: Holder) {
+      h.assigned = "x";
+      bump(h.byArg);
+      x: inout = h.byLocal;
+      x = "y";
+      match h.byArm {
+        s: inout Special { s = Special("s"); }
+        _ { }
+      }
+      setTag(h);
+    }
+    class Vault {
+      __secret: Str;
+      _shared: Str;
+      open: Str;
+      _spoiled: Str;
+      view fn secretRead(f: () -> int) -> Str { return self.__secret + Str(f()); }
+      view fn sharedRead(f: () -> int) -> Str { return self._shared + Str(f()); }
+      view fn openRead(f: () -> int) -> Str { return self.open + Str(f()); }
+      view fn spoiledRead(f: () -> int) -> Str { return self._spoiled + Str(f()); }
+    }
+    impl Vault {
+      fn __init__() {
+        self.__secret = "s";
+        self._shared = "m";
+        self.open = "o";
+        self._spoiled = "p";
+      }
+    }
+    fn spoil<T>(v: T) { v._spoiled = "t"; }
+    class Link {
+      tag: Str;
+      view fn tagRead(f: () -> int) -> Str { return self.tag + Str(f()); }
+    }
+    impl Link {
+      fn __init__(prev: Link?) {
+        self.tag = "t";
+        match prev {
+          o: Link { o.tag = "o"; }
+          None { }
+        }
+      }
+    }
+    fn main() -> int { return 0; }
+  )";
+  struct Case {
+    const char *Fn, *Read;
+    bool Closed, Open; // fixed in that world
+  };
+  const Case cases[] = {
+      {"Holder.fixedRead", ", Item.name", true, false},
+      {"Holder.childInitRead", ", Holder.childInit", true, false},
+      {"Holder.assignedRead", ", Holder.assigned", false, false},
+      {"Holder.compoundRead", ", Holder.compound", false, false},
+      {"Holder.byArgRead", ", Holder.byArg", false, false},
+      {"Holder.byLocalRead", ", Holder.byLocal", false, false},
+      {"Holder.byArmRead", ", Item.name", false, false},
+      {"Holder.byResultRead", ", Holder.byResult", false, false},
+      {"Holder.byTernaryRead", ", Holder.byTernary", false, false},
+      {"Holder.byLambdaRead", ", Holder.byLambda", false, false},
+      {"Holder.inheritedRead", ", Holder.inherited", false, false},
+      {"Holder.genericRead", ", Holder.generic", false, false},
+      {"Holder.posRead", "ptr.load box, %pos.addr", false, false},
+      {"Holder.__init__", ", Item.name", false, false},
+      {"outside", ", Item.name", false, false},
+      {"Vault.secretRead", ", Vault.__secret", true, true},
+      {"Vault.sharedRead", ", Vault._shared", true, true},
+      {"Vault.openRead", ", Vault.open", true, false},
+      {"Vault.spoiledRead", ", Vault._spoiled", true, false},
+      {"Link.tagRead", ", Link.tag", false, false},
+  };
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    auto l = lower(source, "", lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    for (const Case &c : cases) {
+      const bool fixed = world == lowering::World::Closed ? c.Closed : c.Open;
+      std::string f = function(l.Text, c.Fn);
+      ASSERT_FALSE(f.empty()) << c.Fn << "\n" << l.Text;
+      EXPECT_EQ(heldAcross(f, defined(f, c.Read), "icall "), !fixed)
+          << c.Fn << "\n"
+          << f;
+      EXPECT_EQ(stableLoad(f, c.Read), fixed) << c.Fn << "\n" << f;
+    }
+  }
 }
 
 // The storage of a value held in an object's field, used where it is while
@@ -1863,6 +2399,59 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   EXPECT_NE(t.find("fn @Adder.add("), std::string::npos) << t;
 }
 
+// A method another module compiles is not read here, and may be
+// overridden by a class of any module that imports it: what it does is not
+// known, also in the main module of a program, which knows only its own
+// classes' overrides.  So `self.origin` is held across `sum()`, though a
+// Point reaches no object, and so is `self.mine`, a main class's object,
+// across the `sum()` it inherits from the imported class: `move` may have
+// replaced either (another module's code may run the program's, as a
+// Point's `equals` override would).  A field the program stores only at
+// construction keeps its Point whatever `sum()` does, and the main module
+// of a program, the only one naming `Fixed`, knows it: `Fixed.origin` is
+// read in place, by a stable load.
+TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("lowering_foreign_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "point.pkn")
+      << "class Point { x: int; y: int; "
+         "view fn sum() -> int { return self.x + self.y; } }\n";
+  const std::string source =
+      "import point;\n"
+      "class Mine : point::Point { tag: Str; }\n"
+      "class Box {\n"
+      "  origin: point::Point;\n"
+      "  mine: Mine;\n"
+      "  view fn total() -> int { return self.origin.sum(); }\n"
+      "  view fn own() -> int { return self.mine.sum(); }\n"
+      "  fn move(p: point::Point, m: Mine) { self.origin = p; self.mine = m; "
+      "}\n"
+      "}\n"
+      "class Fixed {\n"
+      "  origin: point::Point;\n"
+      "  view fn total() -> int { return self.origin.sum(); }\n"
+      "}\n"
+      "fn main() -> int { return 0; }\n";
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    auto l = lower(source, dir.string(), lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    for (const auto &[fn, read] : {std::pair{"Box.total", ", Box.origin"},
+                                   std::pair{"Box.own", ", Box.mine"}}) {
+      std::string f = function(l.Text, fn);
+      EXPECT_TRUE(heldAcross(f, defined(f, read), "vcall ")) << f;
+      EXPECT_FALSE(stableLoad(f, read)) << f;
+    }
+    const bool closed = world == lowering::World::Closed;
+    std::string f = function(l.Text, "Fixed.total");
+    EXPECT_EQ(heldAcross(f, defined(f, ", Fixed.origin"), "vcall "), !closed)
+        << f;
+    EXPECT_EQ(stableLoad(f, ", Fixed.origin"), closed) << f;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 // #102: every module is named by its canonical module name -- the module
 // path, never the file's (absolute) path -- and two modules with the same
 // stem in different directories keep distinct names.  A module imported under
@@ -2291,10 +2880,9 @@ const char *const kTake = R"(
     fn take(n: Node) -> int { return n.n; }
 )";
 
-/// @p source (after kTake) lowered, through the moves-at-last-use pass and
-/// verified after it; what the pass did is in @p stats.
-Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
-  Lowered l = lower(kTake + source);
+/// @p l through the moves-at-last-use pass and verified after it; what the
+/// pass did is in @p stats.
+Lowered moved(Lowered l, pir::Statistics &stats) {
   if (!l.Ok)
     return l;
   pir::PassManager passes(/*verifyEach=*/true);
@@ -2306,6 +2894,11 @@ Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
   }
   l.Text = pir::toString(l.Program);
   return l;
+}
+
+/// @p source (after kTake) lowered and moved (moved).
+Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
+  return moved(lower(kTake + source), stats);
 }
 
 Lowered lowerMoved(const std::string &source) {
@@ -2609,4 +3202,67 @@ TEST(LoweringMoves, HeldValuesCopiedWholeAtTheirLastUseMove) {
   std::string f = function(l.Text, "function");
   EXPECT_EQ(count(f, "retain"), 1u) << f;
   EXPECT_EQ(count(f, "release"), 1u) << f;
+}
+
+// A read rooted in a parameter the function may hand on keeps its reference
+// across any call that may let go of one, also one that lets go of no
+// reference of the read's class (touchGen replaces a `Gen<int>`, the read
+// is a `Str` of a `Lbl`): without it the read would be borrowed across the
+// call, and `x` would stay a copy at take(), dying at the end of f instead
+// of when take returns (docs/pir.md §7).
+TEST(LoweringMoves, AReadRootedInAParameterKeepsTheHandOffBeforeIt) {
+  auto l = lowerMoved(R"(
+    class Gen<T> { v: T; }
+    class Lbl { name: Str; }
+    class Pair { lbl: Lbl; g: Gen<int>; }
+    fn touchGen(p: Pair) -> Str {
+      p.g = Gen<int>(2);
+      return "!";
+    }
+    fn f(p: Pair) -> Str {
+      x = Node(1);
+      t = take(x);
+      return p.lbl.name + touchGen(p) + Str(t);
+    }
+    fn main() -> int { return f(Pair(Lbl("l"), Gen<int>(1))).len(); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_TRUE(heldAcross(f, defined(f, ", Lbl.name"), "call @touchGen(")) << f;
+  EXPECT_FALSE(stableLoad(f, ", Lbl.name")) << f;
+  // `x` is handed on: no retain before take().
+  const size_t take = f.find("call @take(");
+  ASSERT_NE(take, std::string::npos) << f;
+  EXPECT_EQ(f.substr(0, take).find("retain "), std::string::npos) << f;
+}
+
+// The standard library's containers read their state by a stable load
+// across the calls that store their arguments (a stack's push, a queue's
+// enqueue, a map's put, a set's add of strings), so the argument is handed
+// on to the call, as the hold of the state made it before: the functions
+// retain nothing (docs/pir.md §7, §12).
+TEST(LoweringMoves, AStableReadOfAContainersStateKeepsTheHandOff) {
+  pir::Statistics stats;
+  auto l = moved(lower(R"(import ::collections as c;
+    fn main() -> int {
+      s = c::Stack<Str>();
+      s.push("a");
+      q = c::Queue<Str>();
+      q.enqueue("b");
+      m = c::HashMap<Str, int>();
+      m.put("c", 1);
+      h = c::HashSet<Str>();
+      h.add("d");
+      return int(s.len() + q.len() + m.len() + h.len());
+    }
+  )"),
+                 stats);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"Stack<Str>.push", "Queue<Str>.enqueue",
+                         "\"HashMap<Str, int>.put\"", "HashSet<Str>.add"}) {
+    std::string f = function(l.Text, fn);
+    ASSERT_FALSE(f.empty()) << fn << "\n" << l.Text;
+    EXPECT_TRUE(stableLoad(f, "ptr.load box, %self.addr")) << fn << "\n" << f;
+    EXPECT_EQ(count(f, "retain "), 0u) << fn << "\n" << f;
+  }
 }

@@ -80,7 +80,7 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::ICall, 51, "icall"},
     // An object's class while its `__init__` runs (docs/pir.md §5).
     {Opcode::VTableStore, 52, "vtable.store"},
-    // 53-255 reserved.
+    // 53 kStableLoadCode, 54-255 reserved.
 };
 
 struct TypeEntry {
@@ -104,6 +104,10 @@ inline constexpr TypeEntry kTypeTable[] = {
 /// The code written before a local's slot type when the local is a
 /// `view`'s (docs/pir.md §3): no type has it.
 inline constexpr uint8_t kViewSlotCode = 18;
+
+/// The code written before a `field.load`'s or a `ptr.load`'s opcode when
+/// the load is `stable` (docs/pir.md §6): no opcode has it.
+inline constexpr uint8_t kStableLoadCode = 53;
 
 namespace detail {
 

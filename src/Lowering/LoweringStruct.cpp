@@ -84,6 +84,7 @@ void ModuleLowering::declareStruct(ast::StructDecl *sd) {
     fn->Params[0].Name = kSelf;
     nameParams(*fn, 1, funcDecl->getParams());
     Bodies[fn->Name] = funcDecl;
+    BodyOwners[funcDecl] = st;
   }
   pir::Function *ctor =
       getOrCreateFunction(sd->getName(), structConstructorSignature(st));
@@ -168,8 +169,9 @@ Val ModuleLowering::lowerStructFieldRead(ast::MemberAccessExpr *node,
       emitTupleElementAddress(node->getReceiver(), static_cast<size_t>(idx));
   if (!addr)
     return Val();
-  return ownElementRead(node, emitElementLoad(addr, node->getResolvedType()),
-                        mark);
+  return ownElementRead(
+      node, emitElementLoad(addr, node->getResolvedType(), isStableRead(node)),
+      mark);
 }
 
 Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,

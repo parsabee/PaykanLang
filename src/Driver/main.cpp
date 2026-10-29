@@ -657,11 +657,15 @@ int main(int argc, char *argv[]) {
   // instead.
   // Each module keeps its own copies of the instantiations it uses until the
   // cache entries (and --emit-pkm's file) are written: those must not
-  // depend on this program.
+  // depend on this program.  The main module of a program to run or build,
+  // which no module imports, knows every class derived from its classes; a
+  // module --emit-pkm writes may be imported.
   paykan::pir::Program program;
-  if (!paykan::lowering::lowerProgram(semaCtx, root, mainName, projectRoot,
-                                      program, std::cerr, &resolver,
-                                      paykan::lowering::Copies::PerModule))
+  if (!paykan::lowering::lowerProgram(
+          semaCtx, root, mainName, projectRoot, program, std::cerr, &resolver,
+          paykan::lowering::Copies::PerModule,
+          opts.EmitPkm ? paykan::lowering::World::Open
+                       : paykan::lowering::World::Closed))
     return fail("lowering to PIR failed");
   auto errors = paykan::pir::verify(program);
   if (opts.EmitPkm) {
@@ -684,8 +688,10 @@ int main(int argc, char *argv[]) {
   // What the PIR passes do, to the modules' code and to the program's.
   paykan::pir::Statistics stats;
   for (const std::string &name : resolver.cacheable()) {
+    // An import: the main module, first, is never cached (a program's
+    // knows what no module that may be imported may know).
     auto mod = std::find_if(
-        program.Modules.begin(), program.Modules.end(),
+        std::next(program.Modules.begin()), program.Modules.end(),
         [&](const paykan::pir::Module &m) { return m.Name == name; });
     const pkm::Interface *iface = resolver.builtInterface(name);
     if (mod == program.Modules.end() || !iface)

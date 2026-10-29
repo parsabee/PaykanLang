@@ -484,6 +484,12 @@ add_executable(runtime_tests
 target_include_directories(runtime_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/src/Runtime
+            ${CMAKE_SOURCE_DIR}/include
+)
+# The Buffer functions the lowering knows the effects of are checked against
+# their source (BufferTests.cpp).
+target_compile_definitions(runtime_tests
+    PRIVATE PAYKAN_RUNTIME_BUFFER_SOURCE="${CMAKE_SOURCE_DIR}/src/Runtime/Buffer.c"
 )
 target_link_libraries(runtime_tests
     PRIVATE gtest_main
