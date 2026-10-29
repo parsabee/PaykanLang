@@ -42,7 +42,7 @@ fn main() -> int {
   b = None;                    // releases Node(2)
   b = Node(3);
   a = b;                       // shares Node(3)
-  c = a;                       // shares Node(3) again
+  let c = a;                   // shares Node(3) again
   show(c);                     // 3
   show(make(False));           // none — call temporary, no box to release
   show(make(True));            // 1 — call temporary released at match.end

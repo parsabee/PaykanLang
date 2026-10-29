@@ -69,12 +69,12 @@ fn setOptional(h: H) -> Str {
 }
 
 fn viaInout(c: inout C) {
-  d = c;
+  let d = c;
   d.p = P(7, 2, 9);
 }
 
 fn viaBinding(c: inout C) {
-  e = c;
+  let e = c;
   e.xs = [4, 4, 4];
 }
 
@@ -202,12 +202,12 @@ fn main() -> int {
   let x = c.xs[0];
   viaRebind(c, C(P(0, 0, 0), [0, 0, 0]));
   let r = c.p.b;
-  let f = fn(y: inout C) { d = y; d.p = P(7, 5, 9); };
+  let f = fn(y: inout C) { let d = y; d.p = P(7, 5, 9); };
   f(c);
   let l = c.p.b;
   h = H(c, None);
   at: inout = held(h);
-  q = at;
+  let q = at;
   q.p = P(7, 6, 9);
   io::println("inout: " + Str(b) + " " + Str(x) + " " + Str(r) + " " + Str(l)
       + " " + Str(c.p.b));

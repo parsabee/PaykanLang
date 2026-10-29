@@ -323,7 +323,7 @@ the caller's variable holds.
 import ::io;
 
 fn swap(a: inout Str, b: inout Str) {
-  t = a;
+  let t = a;
   a = b;
   b = t;
 }

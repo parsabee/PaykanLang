@@ -182,7 +182,7 @@ fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
   let hits = memory::Box(0);
-  alias = hits;
+  let alias = hits;
   bump(hits.get());
   n: inout int = alias.get();
   n = n * 10;

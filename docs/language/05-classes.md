@@ -172,7 +172,7 @@ fn bump(b: Box) {
 
 fn main() -> int {
   let a = Box(1);
-  b = a;           // b and a are the same object
+  let b = a;       // b and a are the same object
   b.value = 5;
   bump(a);
   io::println(Str(a.value) + " " + Str(b.value));

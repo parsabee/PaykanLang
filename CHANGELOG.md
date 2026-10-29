@@ -398,8 +398,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     when the program keeps its diagnostics and its `--emit-pir` byte for byte. An
     assignment in an inner block to a variable of an enclosing one is not a declaration
     (`let` there would declare another variable), and a program Sema rejects keeps its
-    errors. `--apply` makes the declarations it reports `let`. There is no compiler warning
-    for it.
+    errors. `let` is Sema's alone, so a declaration that Sema accepts as `let` but whose
+    `let` changes the program's `--emit-pir` is an error of the check: the two forms are
+    lowered differently. `--apply` makes the declarations it reports `let`. There is no
+    compiler warning for it.
+    - A first assignment `x = y;` of a variable `y` holding a box (a `Str`, an object, an
+      optional) read `y`'s value, with an `unbox` no one used, before it loaded the box `x`
+      shares, which `let x = y;` loads alone: so `let` changed such a program's PIR, and
+      the check took every such local for one that needs to be plain. It reads the box
+      alone now, as `let x = y;` does.
     - Not checked: borrows, `weak` locals, destructuring, `for` variables and declarations
       without an initializer, which cannot be `let`; a generic body that the program never
       instantiates, which Sema checks for each instantiation only (the standard library's
@@ -407,9 +414,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       changed sources); and a docs example whose fence follows the line
       `<!-- let_check: plain -->`, as the three of docs/language/02-basics.md that show the
       plain declaration itself do.
-    - The tree follows it: 1,450 declarations are `let` now (832 in samples/codegen and
-      samples/leak-check, 376 in samples/sema and samples/imports, 211 in the docs'
-      examples, 31 in the standard library), and the `--emit-pir` of no program changed.
+    - The tree follows it: 1,462 declarations are `let` now (840 in samples/codegen and
+      samples/leak-check, 376 in samples/sema and samples/imports, 215 in the docs'
+      examples, 31 in the standard library), and making them `let` changed the
+      `--emit-pir` of no program.
 
 ### Changed
 

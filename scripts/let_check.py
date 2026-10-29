@@ -24,6 +24,8 @@ The compiler is the oracle:
 3. What is left must change nothing else: the program's diagnostics stay as
    they were, and a program with `fn main` keeps its `paykan --emit-pir`
    byte for byte.  A declaration that changes them is taken back too.
+   `let` is Sema's alone, so one that Sema accepts but that changes the
+   PIR is lowered unlike its `let` form, and is an error.
 
 Each declaration left is reported.  The program is compiled with
 `--emit-pir` when it has `fn main`, with `--check-only` otherwise; a
@@ -387,6 +389,7 @@ class Program:
         self.error_lines = error_lines  # a docs example's Error: block
         self.mode = None                # --emit-pir or --check-only
         self.notes = []                 # why declarations were not checked
+        self.errors = []                # what fails the check besides them
 
     def module_name(self, src):
         return ("::" if self.stdlib else "") + \
@@ -604,9 +607,21 @@ def check_program(args, program):
         if not refused:
             break
         active = [d for d in active if d not in refused]
-    # No `let` error says what differs: one declaration at a time.
-    active = [d for d in active
-              if compile_program(args, program, [d]).same(base, program)]
+    # No `let` error says what differs: one declaration at a time.  One
+    # that Sema accepts but whose PIR changes is lowered unlike its `let`
+    # form: a difference of the lowering's, which keeps it plain unseen.
+    kept = []
+    for d in active:
+        r = compile_program(args, program, [d])
+        if r.same(base, program):
+            kept.append(d)
+        elif base.pir is not None and r.pir is not None and \
+                r.diags == base.diags:
+            program.errors.append(
+                f"{d.where()}: '{d.name}' is never reassigned, but 'let' "
+                "changes the program's --emit-pir: the two declarations "
+                "lower differently")
+    active = kept
     if active and not compile_program(args, program,
                                       active).same(base, program):
         program.notes.append(f"{program.name}: the declarations that "
@@ -796,15 +811,18 @@ def main():
         print(f"{d.where()}: '{d.name}' is never reassigned: declare it "
               "with 'let'")
     notes = [n for p in programs for n in p.notes]
+    errors = [e for p in programs for e in p.errors]
+    for e in errors:
+        print(f"error: {e}")
     if args.verbose:
         for n in notes:
             print(f"not checked: {n}")
     print(f"{len(programs)} programs checked: {len(report)} declaration(s) "
-          f"to make 'let', {len(notes)} not checked")
+          f"to make 'let', {len(notes)} not checked, {len(errors)} error(s)")
     if args.apply:
         apply(report)
-        return 0
-    return 1 if report else 0
+        return 1 if errors else 0
+    return 1 if report or errors else 0
 
 
 if __name__ == "__main__":

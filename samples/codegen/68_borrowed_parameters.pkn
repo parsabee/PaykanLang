@@ -413,7 +413,7 @@ fn movesLent() {
   report(wm, "after the match");
 
   let t = Node("t");
-  u = t;
+  let u = t;
   inner(u);                  // u's last use: t keeps the node
   io::println("t still " + t.name);
 }

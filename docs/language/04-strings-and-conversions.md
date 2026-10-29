@@ -112,7 +112,7 @@ import ::io;
 
 fn main() -> int {
   let s = "to";
-  t = s;              // t and s name one string
+  let t = s;          // t and s name one string
   s.concat("do");     // changes that string in place
   let u = s + "!";    // a new string; s is unchanged
   io::println(s + " " + t + " " + u);

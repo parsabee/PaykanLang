@@ -79,12 +79,12 @@ class A {
 
 // The next `toString()` of `h.c` replaces `h.c`, which holds it alone.
 fn arm(h: H, n: int) {
-  v = h;
+  let v = h;
   h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
 }
 
 fn armB(b: B, n: int) {
-  v = b;
+  let v = b;
   b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
 }
 
