@@ -405,7 +405,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     with the programs of tests/Stdlib), so a compiler that prints no AST fails the check
     instead of leaving everything unchecked, as the ctest `LetDeclsWithoutAnAST` shows.
     `--apply` makes the declarations it reports `let`. There is no compiler warning for
-    it.
+    it. CI runs it (the `docs` suite) for a pull request that changes the samples, the
+    docs, the standard library, a program of tests/Stdlib, the script, or the AST
+    interchange writer (`src/ASTInterchange/*`) whose `--emit-ast` it reads
+    (tests/suites.json; `TestSelection` checks the last three).
     - A first assignment `x = y;` of a variable `y` holding a box (a `Str`, an object, an
       optional) read `y`'s value, with an `unbox` no one used, before it loaded the box `x`
       shares, which `let x = y;` loads alone: so `let` changed such a program's PIR, and
