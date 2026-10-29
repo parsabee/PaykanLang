@@ -755,13 +755,14 @@ paykan_test_suite(docs PAYKAN_TEST_SUITE_docs)
 if(PAYKAN_TEST_SUITE_docs AND NOT PAYKAN_COVERAGE)
     paykan_add_python_test(MarkdownLinks check_links.py)
     # A "compiler" that prints no AST (Python, given paykan's options) makes
-    # the check fail, not pass with nothing checked.
-    paykan_add_python_test(LetDeclsWithoutAnAST let_check.py
-                --paykan ${Python3_EXECUTABLE}
-                ${CMAKE_SOURCE_DIR}/samples/codegen/01_literals.pkn)
-    if(TEST LetDeclsWithoutAnAST)
-        set_tests_properties(LetDeclsWithoutAnAST PROPERTIES
-            PASS_REGULAR_EXPRESSION "error: no program parses with")
+    # the check fail, not pass with nothing checked: its exit status and its
+    # message are both checked (LetDeclsWithoutAnAST.cmake).
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME LetDeclsWithoutAnAST
+            COMMAND ${CMAKE_COMMAND}
+                    -DPYTHON=${Python3_EXECUTABLE}
+                    -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/LetDeclsWithoutAnAST.cmake)
     endif()
 endif()
 paykan_test_suite(docs PAYKAN_TEST_SUITE_docs)

@@ -403,7 +403,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lowered differently. A program that must compile and does not is an error too (a sample
     that is not an `err_` one, a docs example that shows its output, the standard library
     with the programs of tests/Stdlib), so a compiler that prints no AST fails the check
-    instead of leaving everything unchecked, as the ctest `LetDeclsWithoutAnAST` shows.
+    instead of leaving everything unchecked, as the ctest `LetDeclsWithoutAnAST` shows: it
+    checks that the script then exits with status 1 and says that no program parses.
     `--apply` makes the declarations it reports `let`. There is no compiler warning for
     it. CI runs it (the `docs` suite) for a pull request that changes the samples, the
     docs, the standard library, a program of tests/Stdlib, the script, or the AST

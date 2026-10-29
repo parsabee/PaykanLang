@@ -64,6 +64,7 @@
     ["tests/Frontend/*", ["frontend", "out-of-tree"]],
     ["tests/OutOfTree/*", ["out-of-tree"]],
     ["tests/DefaultConfigure.cmake", ["configure"]],
+    ["tests/LetDeclsWithoutAnAST.cmake", ["docs"]],
     ["tests/Stdlib/*", ["stdlib", "docs"]],
     ["tests/*", "all"],
 
