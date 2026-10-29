@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sema tests: arrays, `T[n]`, and slices, `view T[]` / `inout T[]`
 // (docs/language/09-arrays.md).  An array is for now the type of a local
-// variable, a parameter, a result or a field, of scalars, enums, references
-// and other arrays.
+// variable, a parameter, a result or a class field, of scalars, enums,
+// references and other arrays.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -186,10 +186,10 @@ TEST(FixedArray, Fields) {
               "'__init__'");
 }
 
-TEST(FixedArray, OnlyALocalAParameterAResultOrAFieldForNow) {
+TEST(FixedArray, OnlyALocalAParameterAResultOrAClassFieldForNow) {
   const std::string notYet = "a fixed-size array ('int[2]') can only be a "
                              "local variable, a parameter, a result or a "
-                             "field for now";
+                             "class field for now";
   expectBodyError("  o: int[2]? = None;", "variable 'o': " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",
                   "tuple element 0: " + notYet);
@@ -201,6 +201,50 @@ TEST(FixedArray, OnlyALocalAParameterAResultOrAFieldForNow) {
               "fn main() -> int {\n  xs: int[2] = [1, 2];\n  ys = id(xs);\n"
               "  return 0;\n}\n",
               "type argument 1 of 'id': " + notYet);
+}
+
+// Finding 64: a slice type where no parameter takes it suggests a length
+// ('int[3]') only where a fixed-size array would do: a local, a result, a
+// class field.  A struct's or a variant's field and a tuple's element cannot
+// be an array yet, and say so; an optional's value or a type argument gets
+// no hint.  A fixed-size array in a tuple names the fields it can be.
+TEST(FixedArray, ASliceTypeSuggestsALengthOnlyWhereAnArrayWouldDo) {
+  const std::string slice = "has type 'int[]': a slice can only be a 'view' "
+                            "or 'inout' parameter";
+  const std::string length = slice + ", and an array has a length ('int[3]')";
+  expectError("struct P { a: int[]; }\nfn main() -> int { return 0; }",
+              "field 'a' in struct 'P' " + slice +
+                  ", and a struct field cannot be an array yet");
+  expectError("struct Q<T> { a: T; b: int[]; }\n"
+              "fn main() -> int { q = Q(1, 2); return 0; }",
+              "field 'b' in struct 'Q<int>' " + slice +
+                  ", and a struct field cannot be an array yet");
+  expectError("enum E { A(a: int[]), B }\nfn main() -> int { return 0; }",
+              "field 'a' in variant 'A' of enum 'E' " + slice +
+                  ", and a variant's field cannot be an array yet");
+  expectBodyError("  t: (int[], int) = ([1], 2);",
+                  "variable 't' element 0 " + slice +
+                      ", and a tuple element cannot be an array yet");
+  expectError("struct S { t: (int, int[]); }\nfn main() -> int { return 0; }",
+              "field 't' in struct 'S' element 1 " + slice +
+                  ", and a tuple element cannot be an array yet");
+  expectError("class C { a: int[]; }\nfn main() -> int { return 0; }",
+              "field 'a' in class 'C' " + length);
+  expectBodyError("  xs: int[] = [1];", "variable 'xs' " + length);
+  expectError("fn f() -> int[] { return [1]; }\nfn main() -> int { return 0; }",
+              length);
+  for (const char *body :
+       {"  o: int[]? = None;", "  t: (int[]?, int)? = None;"}) {
+    auto r = semaCheck(wrapMain(body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find(slice + "\n"), std::string::npos)
+        << body << "\n"
+        << r.Diagnostics;
+  }
+  expectBodyError("  t: (int[3], int) = ([1, 2, 3], 2);",
+                  "variable 't' element 0: a fixed-size array ('int[3]') can "
+                  "only be a local variable, a parameter, a result or a class "
+                  "field for now");
 }
 
 // An element is a reference like any other: a view of the array is a view

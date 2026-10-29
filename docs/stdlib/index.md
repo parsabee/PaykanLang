@@ -57,9 +57,10 @@ What the modules have in common:
   its own methods`, `'memory::_new' is private to module '::memory'`). These pages do not
   document them.
 - **Type names are global** across an import graph, so a program that imports `::io` (which
-  imports `::error` and `::result`) cannot declare its own `File`, `Error`, `Result` or
-  `ErrorCode`
-  (`class 'File' conflicts with an imported type of the same name`). The library's function
+  imports `::error` and `::result`) cannot declare its own `File`, `Error` or `ErrorCode`
+  (`class 'File' conflicts with an imported type of the same name`, `enum 'ErrorCode' ...`).
+  A generic type (`Result`, `List`, `HashMap`) is named through its module
+  (`res::Result<T, E>`), so a program may declare its own `Result`. The library's function
   names are not reserved: a program may declare its own `fn print`.
 - **Sized numeric types** ([`u8`, `i32`, `unsigned`, `f32`, ...](../language/02-basics.md#sized-numeric-types))
   are elements and keys like `int` and `float` (`List<u8>`, `HashMap<u32, Str>`,

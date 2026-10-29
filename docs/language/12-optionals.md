@@ -632,7 +632,7 @@ Retaining, releasing and destroying an absent optional are no-ops. See [Memory](
 |-------|---------|
 | `optional type 'void?' is not supported` | `void?` (at parse time, or a type argument `void`) |
 | `nested optional type 'T??' is not supported` | a written `T??` |
-| `a fixed-size array ('int[3]') can only be a local variable, a parameter, a result or a field for now` | `int[3]?`: a fixed-size array cannot be optional |
+| `a fixed-size array ('int[3]') can only be a local variable, a parameter, a result or a class field for now` | `int[3]?`: a fixed-size array cannot be optional |
 | `cannot use optional 'T?' as 'T' without unwrapping (use match)` | narrowing on declaration / assignment / return / argument / field or array store; member access, method call, subscript, operator or unary on a `T?` |
 | `cannot compare optional 'T?' with non-optional 'U'; compare against None or unwrap it with match` | `opt == present` |
 | `operands of '==' have mismatched types 'A?' and 'B?'` | two optionals of unrelated types |

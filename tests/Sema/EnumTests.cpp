@@ -146,6 +146,41 @@ TEST(Enum, MatchUnknownVariantRejected) {
   EXPECT_FALSE(r.Ok);
 }
 
+// Finding 50: an arm whose type is no name (`int`, a tuple, an optional, an
+// array) names it in the error, which was "'' is not a variant of enum 'E'",
+// and says what an arm names; a name keeps its message.
+TEST(Enum, MatchArmOfANonNameTypeNamesIt) {
+  auto r = semaCheck(R"(enum E { A(x: int), B }
+fn main() -> int {
+  e = E::A(1);
+  match e {
+    a: int { }
+    t: (int, Str) { }
+    o: E? { }
+    k: int[3] { }
+    Q { }
+    _ { }
+  }
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"5:5: error: 'int' is not a variant of enum 'E': an arm names one of "
+        "its variants, such as 'A'",
+        "6:5: error: '(int, Str)' is not a variant of enum 'E': an arm names "
+        "one of its variants, such as 'A'",
+        "7:5: error: 'E?' is not a variant of enum 'E': an arm names one of "
+        "its variants, such as 'A'",
+        "8:5: error: 'int[3]' is not a variant of enum 'E': an arm names one "
+        "of its variants, such as 'A'",
+        "9:5: error: 'Q' is not a variant of enum 'E'\n"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("''"), std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 5) << r.Diagnostics;
+}
+
 TEST(Enum, MatchWildcardNotLastRejected) {
   auto r = semaCheck(withEnums("enum Color { Red, Green }", R"(
     c: Color = Color::Red;
@@ -420,6 +455,110 @@ struct Cell<T> { m: Maybe<T>; }
     m: Maybe<float> = c.m;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// A variant without type arguments takes them from the other side of `==`
+// or `!=`, or the other arm of a conditional, whichever side it is on: the
+// side that needs the other less is typed first.  `Maybe::Nothing == x` and
+// `if c then Maybe::Nothing else Maybe::Just(n)` were `cannot infer the
+// type arguments`, though their mirrors compiled.
+TEST(Enum, GenericVariantsTakeTheOtherSideEitherWay) {
+  auto r = semaCheck(withEnums(kGeneric, R"(
+    x = Maybe::Just(5);
+    n = 2;
+    a: bool = Maybe::Nothing == x;
+    b: bool = x == Maybe::Nothing;
+    c: bool = Maybe::Nothing != x;
+    d: bool = Maybe::Nothing != Maybe::Just(1);
+    e = if n > 0 then Maybe::Nothing else Maybe::Just(n);
+    f = if n > 0 then Maybe::Just(n) else Maybe::Nothing;
+    g = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Nothing
+        else Maybe::Just(n);
+    h: bool = Maybe::Nothing == (if n > 1 then x else Maybe::Nothing);
+    i: bool = x != (if n > 1 then Maybe::Nothing else Maybe::Nothing);
+    k: Maybe<int> = e;
+    k = f;
+    k = g;
+    r = Result<int, Str>::Ok(1);
+    o: bool = Result::Ok(1) == r;
+    p: bool = Result::Err("no") != r;
+    q = if n > 0 then Result::Err("no") else r;
+    small: Maybe<u8> = Maybe::Just(200);
+    s: bool = Maybe::Just(200) == small;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+// A generic function's call whose parameters leave a type parameter open
+// (`none()`, `ok(1)`) needs the other side's type, and so does a variant
+// whose fields leave one open (`Pair::Left(1)`) or whose field needs it
+// (`Maybe::Just(Maybe::Nothing)`): the side that needs it less is typed
+// first, whichever it is, and a variant made with fields that can infer
+// them stays first against such a call.
+TEST(Enum, GenericCallsAndOpenVariantsTakeTheOtherSideEitherWay) {
+  auto r = semaCheck(withEnums(std::string(kGeneric) + R"(
+    enum Pair<A, B> { Both(a: A, b: B), Left(a: A), Neither }
+    fn none<T>() -> Maybe<T> => Maybe::Nothing;
+    fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(v);)",
+                               R"(
+    n = 2;
+    a: bool = Maybe::Just(1) == none();
+    b: bool = none() == Maybe::Just(1);
+    c: bool = Maybe::Just(1) != none();
+    d = if n > 0 then Maybe::Just(2) else none();
+    e = if n > 0 then none() else Maybe::Just(2);
+    f = if n > 0 then Maybe::Just(2) else (if n > 1 then none() else none());
+    m: Maybe<int> = d;
+    m = e;
+    m = f;
+    r = Result<int, Str>::Ok(1);
+    g: bool = ok(1) == r;
+    h: bool = r == ok(1);
+    i = if n > 0 then ok(1) else r;
+    j = if n > 0 then r else ok(1);
+    k: Result<int, Str> = i;
+    k = j;
+    l: bool = Pair::Left(1) == Pair::Both(1, "s");
+    o = if n > 0 then Pair::Left(1) else Pair::Both(1, "s");
+    p: Pair<int, Str> = o;
+    q: bool = Maybe::Just(Maybe::Nothing) == Maybe::Just(Maybe::Just(1));
+    s = if n > 0 then Maybe::Just(Maybe::Nothing) else Maybe::Just(Maybe::Just(1));
+    t: Maybe<Maybe<int>> = s;
+    u: bool = Maybe::Just(none()) == Maybe::Just(Maybe::Just(1));
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+// With nothing to take them from on either side, they are still an error.
+TEST(Enum, GenericVariantsWithNoSideToTakeFrom) {
+  const std::string message =
+      "cannot infer the type arguments of generic enum 'Maybe' for "
+      "'Maybe::Nothing'";
+  for (const char *body :
+       {"a = Maybe::Nothing == Maybe::Nothing;",
+        "a = Maybe::Nothing != Maybe::Nothing;",
+        "n = 1; a = if n > 0 then Maybe::Nothing else Maybe::Nothing;"}) {
+    auto r = semaCheck(withEnums(kGeneric, body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find(message), std::string::npos) << body << "\n"
+                                                              << r.Diagnostics;
+  }
+  // Nor does a generic call against another that needs it.
+  for (const char *body :
+       {"a = none() == none();", "n = 1; a = if n > 0 then none() else none();",
+        "a = none() == Maybe::Nothing;"}) {
+    auto r = semaCheck(withEnums(
+        std::string(kGeneric) + "\nfn none<T>() -> Maybe<T> => Maybe::Nothing;",
+        body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find("cannot infer type parameter 'T' of 'none' "
+                                 "from the call arguments"),
+              std::string::npos)
+        << body << "\n"
+        << r.Diagnostics;
+  }
 }
 
 TEST(Enum, GenericVariantsChecked) {

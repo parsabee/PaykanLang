@@ -36,12 +36,26 @@ struct Diagnostic {
 //   diag.error(loc, "undeclared variable 'x'");
 //   if (diag.hasErrors()) { ... }
 //
+// An error limit (setErrorLimit) bounds what is printed: once that many
+// errors are out, the next one is replaced by a note saying so, and nothing
+// more is printed, though every diagnostic is still counted and recorded.
+//
 class DiagEngine {
   std::ostream &OS;
   std::string SourceName;
   const std::vector<std::string> *SourceLines = nullptr;
   unsigned ErrorCount = 0;
   std::vector<Diagnostic> Diagnostics;
+
+  // The errors printed against the limit, shared by the engines of one
+  // compilation (shareErrorLimit).
+  struct ErrorLimitState {
+    unsigned Max = 0;     // 0: no limit
+    unsigned Printed = 0; // errors printed
+    bool Reached = false; // the note is out: nothing more is printed
+  };
+  ErrorLimitState OwnLimit;
+  ErrorLimitState *Limit = &OwnLimit;
 
   void emit(Diagnostic::Severity level, ast::SourceLocation loc,
             const std::string &msg);
@@ -89,6 +103,13 @@ public:
   // double-report guard is then off, since the same error about each is no
   // repeat.
   void setExactLocations(bool exact) { ExactLocations = exact; }
+
+  // Print at most @p max errors (0, the default, for no limit); warnings
+  // and notes do not count.
+  void setErrorLimit(unsigned max) { Limit->Max = max; }
+  // Count this engine's errors against @p other's limit, as one compilation
+  // (an imported module's file reports through an engine of its own).
+  void shareErrorLimit(DiagEngine &other) { Limit = other.Limit; }
 
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);

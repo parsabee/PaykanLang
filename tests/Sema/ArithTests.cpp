@@ -110,6 +110,87 @@ TEST(Arith, EqualityTypeMismatch) {
   EXPECT_FALSE(r.Ok);
 }
 
+// `==` and `!=` take an `int` with a `float`, either way round, as `<` and
+// the arithmetic do: the int is converted to float.  They were `operands of
+// '==' have mismatched types 'int' and 'float'`.
+TEST(Arith, EqualityPromotesIntWithFloat) {
+  auto r = semaCheck(wrapMain(R"(
+    x = 2;
+    y = 2.0;
+    a: bool = x == y;
+    b: bool = y != x;
+    c: bool = 1 == 1.0;
+    d: bool = 2.5 != x;
+    e: bool = x <= y;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
+}
+
+// The promotion is between two operands of `int` and `float` only: a tuple
+// whose elements differ so is another type, and a sized type has none (a
+// literal takes its type instead).
+TEST(Arith, EqualityPromotesNoOtherPair) {
+  auto r = semaCheck(wrapMain(R"(
+    t = (1, 2) == (1, 2.0);
+    n: i32 = 2;
+    y = 1.0;
+    z = n == y;
+    f: f32 = 1.5;
+    w = f != 2;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+  for (const char *e :
+       {"operands of '==' have mismatched types '(int, int)' and '(int, "
+        "float)'",
+        "operator '==' is not defined for types 'i32' and 'float'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+}
+
+// A char orders against a char only, as it equals one only: `c < 100` and
+// `c < n` were accepted and failed PIR verification (`cmp operands have
+// different types: char and i64`), while `c == 100` was this error.
+TEST(Arith, CharComparesWithACharOnly) {
+  auto r = semaCheck(wrapMain(R"(
+    c = 'a';
+    n = 100;
+    u: u8 = 7;
+    a = c < 100;
+    b = c < n;
+    d = 100 > c;
+    e = c <= n;
+    f = c >= 3;
+    g = c > u;
+    h = c < 1.5;
+    i = c == n;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  for (const char *e : {"operands of '<' have mismatched types 'char' and "
+                        "'int'",
+                        "operands of '>' have mismatched types 'int' and "
+                        "'char'",
+                        "operands of '<=' have mismatched types 'char' and "
+                        "'int'",
+                        "operands of '>=' have mismatched types 'char' and "
+                        "'int'",
+                        "operands of '>' have mismatched types 'char' and "
+                        "'u8'",
+                        "operands of '<' have mismatched types 'char' and "
+                        "'float'",
+                        "operands of '==' have mismatched types 'char' and "
+                        "'int'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  auto ok = semaCheck(wrapMain(R"(
+    c = 'a';
+    a: bool = c < 'd' && 'z' >= c && int(c) < 100 && 100 > int(c);
+  )"));
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+}
+
 // -- Builtins
 
 TEST(Arith, OutAcceptsMultipleArgs) {

@@ -104,7 +104,9 @@ result: int = M::add(3, 4);
 An **alias** replaces the qualifier. It is useful for shortening long module paths, and
 required when two modules would otherwise share one: a qualifier (an alias, a plain
 import's last path segment, or a full module path) names exactly one module, so
-`import a::util; import b::util;` is an error; write `import b::util as bu;` instead.
+`import a::util; import b::util;` is an error (`import of module 'b::util': qualifier
+'util' already names module 'a::util' (give one of them an alias with 'as')`, each module
+by its canonical name, `::io` for a system module); write `import b::util as bu;` instead.
 Importing the same module under a second qualifier is fine.
 
 ### Selective Import
@@ -256,8 +258,10 @@ What `C` cannot do without importing `A` is *spell* the type: `t = w.get()` is f
 declared name, type names are global across the import graph (the main file and everything
 it imports, directly or not): if two modules reachable from one file both declare a class
 (or struct, or enum) called `Node`, importing them is an error naming both modules. A file
-also cannot declare a class, struct or enum with the same name as a type reached through any
-of its imports.
+also cannot declare a class, struct, enum, trait or function with the same name as a type
+reached through any of its imports (`enum 'Node' conflicts with an imported type of the same
+name`). A generic type is not reached by its name: its instantiations are
+(`Box<int>`), spelled through its module (`m::Box<int>`), so a file may declare its own `Box`.
 
 ```pkn
 // file: geometry/point.pkn

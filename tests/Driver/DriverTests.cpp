@@ -1811,6 +1811,346 @@ TEST(Driver, ModulesBindACSymbolWithOneSignature) {
   std::filesystem::remove_all(dir);
 }
 
+// Finding 89: two imports binding one qualifier name each module by its
+// canonical name, so a system module keeps its `::` on whichever side of
+// the message it is; it was `import of module 'io': qualifier 'util'
+// already names module 'a::util'`.
+TEST(Driver, AQualifierClashNamesEachModuleCanonically) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_qual_clash_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "a");
+  std::ofstream(dir / "a" / "util.pkn") << "fn u() -> int => 1;\n";
+  std::ofstream(dir / "user_first.pkn")
+      << "import a::util;\nimport ::io as util;\nfn main() -> int => 0;\n";
+  std::ofstream(dir / "system_first.pkn")
+      << "import ::io as util;\nimport a::util;\nfn main() -> int => 0;\n";
+  const struct {
+    const char *File;
+    const char *Message;
+  } cases[] = {
+      {"user_first.pkn",
+       "user_first.pkn:2:1: error: import of module '::io': qualifier 'util' "
+       "already names module 'a::util' (give one of them an alias with "
+       "'as')"},
+      {"system_first.pkn",
+       "system_first.pkn:2:1: error: import of module 'a::util': qualifier "
+       "'util' already names module '::io' (give one of them an alias with "
+       "'as')"}};
+  for (const auto &c : cases) {
+    auto r = run("cd " + dir.string() + " && " + paykanRun() +
+                 " --no-module-cache " + c.File + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << c.File << ": " << r.out;
+    EXPECT_NE(r.out.find(c.Message), std::string::npos)
+        << c.File << ": " << r.out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// Finding 99: an error in an imported module's template, reported at its
+// instantiation, names the module's generic enum, its variants and its
+// generic functions as the program spells them (`lib::g::R::Ok`), not by
+// the module's hidden qualifier (`$lib::g::R::Ok`).
+TEST(Driver, ErrorsInAnImportedTemplateNameItsGenericsPlainly) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_hidden_names_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "g.pkn")
+      << "enum R<T> { Ok(v: T), No }\n"
+         "fn wrap<T>(s: view T) -> R<T> => R::Ok(s);\n"
+         "fn bad<T>(x: T) -> R<int> => R::Ok(x);\n"
+         "fn none<T>(x: T) -> R<T> => R::No(x);\n"
+         "fn pick<U>() -> int => 0;\n"
+         "fn infer<T>(x: T) -> int => pick();\n"
+         "fn guess<T>(x: T) -> int { r = R::No; return 0; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import lib::g;\nfn main() -> int {\n  a = g::wrap(\"x\");\n"
+         "  b = g::bad(\"y\");\n  c = g::none(1);\n  d = g::infer(2);\n"
+         "  e = g::guess(3);\n  return 0;\n}\n";
+  auto r = run("cd " + dir.string() + " && " + std::string(kPaykan) +
+               " --no-module-cache --check-only main.pkn 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  for (const char *message :
+       {"lib/g.pkn:2:40: error: 's' is a 'view' parameter; it can only be "
+        "passed to a 'view' parameter, and parameter 1 of 'lib::g::R::Ok' is "
+        "not one",
+        "lib/g.pkn:3:36: error: field 'v' of 'lib::g::R::Ok' has type 'int', "
+        "got 'Str'",
+        "lib/g.pkn:4:29: error: variant 'No' of enum 'R<int>' has no fields: "
+        "write 'lib::g::R::No' without arguments",
+        "lib/g.pkn:6:29: error: cannot infer type parameter 'U' of "
+        "'lib::g::pick' from the call arguments",
+        "lib/g.pkn:7:32: error: cannot infer the type arguments of generic "
+        "enum 'lib::g::R' for 'lib::g::R::No': write them "
+        "('lib::g::R<...>::No'), or give the value a type ('x: "
+        "lib::g::R<...> = lib::g::R::No')",
+        "main.pkn:3:7: note: in instantiation of 'lib::g::wrap<Str>' "
+        "requested here"})
+    EXPECT_NE(r.out.find(message), std::string::npos) << message << "\n"
+                                                      << r.out;
+  EXPECT_EQ(r.out.find('$'), std::string::npos) << r.out;
+  std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+// The diagnostics of @p out of a kind ("error: ", "warning: ", "note: ").
+size_t countOf(const std::string &out, const std::string &kind) {
+  size_t n = 0;
+  for (size_t at = out.find(kind); at != std::string::npos;
+       at = out.find(kind, at + 1))
+    ++n;
+  return n;
+}
+
+// `fn main` assigning @p n undeclared variables, one per line: n errors.
+std::string undeclaredUses(int n) {
+  std::string src = "fn main() -> int {\n";
+  for (int i = 0; i < n; ++i)
+    src += "  x" + std::to_string(i) + " = y" + std::to_string(i) + ";\n";
+  return src + "  return 0;\n}\n";
+}
+
+const char *const kLimitNote =
+    "note: stopping after 20 errors, the error limit (--error-limit=N sets "
+    "it, and --error-limit=0 shows every error)\n";
+
+} // namespace
+
+// Added item B: a compilation prints at most 20 errors, then a note that the
+// limit was reached and nothing more; --error-limit=N changes it and 0
+// removes it.  The exit status is the error status either way.
+TEST(Driver, ErrorsStopAtTheErrorLimit) {
+  auto src = writeTmp(undeclaredUses(30));
+  auto dflt = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(dflt.exitCode, 1) << dflt.out;
+  EXPECT_EQ(countOf(dflt.out, "error: "), 20u) << dflt.out;
+  EXPECT_NE(dflt.out.find("'y19'"), std::string::npos) << dflt.out;
+  EXPECT_EQ(dflt.out.find("'y20'"), std::string::npos) << dflt.out;
+  ASSERT_GE(dflt.out.size(), std::string(kLimitNote).size());
+  EXPECT_EQ(dflt.out.substr(dflt.out.size() - std::string(kLimitNote).size()),
+            kLimitNote);
+  for (const auto &[option, errors, note] :
+       {std::tuple{" --error-limit=3", 3u, true},
+        std::tuple{" --error-limit 3", 3u, true},
+        std::tuple{" --error-limit=30", 30u, false},
+        std::tuple{" --error-limit=0", 30u, false}}) {
+    for (const char *how : {" --check-only ", " "}) {
+      std::string cmd = paykanRun();
+      cmd.append(option).append(how).append(src).append(" 2>&1");
+      auto r = run(cmd);
+      EXPECT_EQ(r.exitCode, 1) << option << how << r.out;
+      EXPECT_EQ(countOf(r.out, "error: "), errors) << option << how << r.out;
+      EXPECT_EQ(r.out.find("note: stopping after") != std::string::npos, note)
+          << option << how << r.out;
+    }
+  }
+  auto three = run(std::string(kPaykan) + " --error-limit=3 --check-only " +
+                   src + " 2>&1");
+  EXPECT_NE(three.out.find("note: stopping after 3 errors, the error limit"),
+            std::string::npos)
+      << three.out;
+  auto one = run(std::string(kPaykan) + " --error-limit=1 --check-only " + src +
+                 " 2>&1");
+  EXPECT_EQ(countOf(one.out, "error: "), 1u) << one.out;
+  EXPECT_NE(one.out.find("note: stopping after 1 error, the error limit"),
+            std::string::npos)
+      << one.out;
+  // Leading zeros are the number's: nine digits after them at most.
+  auto zeros =
+      run(std::string(kPaykan) + " --error-limit=0000000005 " + src + " 2>&1");
+  EXPECT_EQ(zeros.exitCode, 1) << zeros.out;
+  EXPECT_EQ(countOf(zeros.out, "error: "), 5u) << zeros.out;
+  for (const char *bad : {"x", "-1", "1e3", "12345678901", "01234567890"}) {
+    auto r = run(std::string(kPaykan) + " --error-limit=" + bad + " " + src +
+                 " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << bad << ": " << r.out;
+    EXPECT_NE(r.out.find(std::string("invalid error limit '") + bad +
+                         "' (expected a number of errors, or 0 for no "
+                         "limit)"),
+              std::string::npos)
+        << bad << ": " << r.out;
+  }
+  auto help = run(std::string(kPaykan) + " --help 2>&1");
+  EXPECT_NE(help.out.find("--error-limit=N   - Print at most N errors "
+                          "(default 20; 0 for no limit)"),
+            std::string::npos)
+      << help.out;
+  std::filesystem::remove(src);
+}
+
+// Warnings and notes do not count against the limit: a note that follows a
+// printed error is printed, and 25 warnings are printed whole.
+TEST(Driver, WarningsAndNotesDoNotCountAgainstTheErrorLimit) {
+  std::string calls = "fn g<T>() -> int { return 0; }\nfn main() -> int {\n";
+  for (int i = 0; i < 25; ++i)
+    calls += "  a" + std::to_string(i) + " = g();\n";
+  auto src = writeTmp(calls + "  return 0;\n}\n");
+  auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(countOf(r.out, "error: "), 20u) << r.out;
+  // Each error's hint, and the limit's note.
+  EXPECT_EQ(countOf(r.out, "note: "), 21u) << r.out;
+  std::filesystem::remove(src);
+
+  std::string methods = "struct P { x: int; }\nimpl P {\n";
+  for (int i = 0; i < 25; ++i)
+    methods += "  fn g" + std::to_string(i) + "() -> int { return self.x; }\n";
+  src = writeTmp(methods + "}\nfn main() -> int { return 0; }\n");
+  auto w = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(w.exitCode, 0) << w.out;
+  EXPECT_EQ(countOf(w.out, "warning: "), 25u) << w.out;
+  EXPECT_EQ(w.out.find("note: stopping"), std::string::npos) << w.out;
+  std::filesystem::remove(src);
+}
+
+// An imported module's errors count against the same limit as the
+// importer's: one compilation.
+TEST(Driver, AnImportedModulesErrorsShareTheErrorLimit) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_error_limit_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib");
+  std::string lib = "fn f() -> int {\n";
+  for (int i = 0; i < 15; ++i)
+    lib += "  a" + std::to_string(i) + " = b" + std::to_string(i) + ";\n";
+  std::ofstream(dir / "lib" / "m.pkn") << lib << "  return 0;\n}\n";
+  std::string main = "import lib::m;\nfn main() -> int {\n";
+  for (int i = 0; i < 15; ++i)
+    main += "  c" + std::to_string(i) + " = d" + std::to_string(i) + ";\n";
+  std::ofstream(dir / "main.pkn") << main << "  return m::f();\n}\n";
+  auto r = run("cd " + dir.string() + " && " + std::string(kPaykan) +
+               " --no-module-cache --check-only main.pkn 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(countOf(r.out, "lib/m.pkn:"), 15u) << r.out;
+  EXPECT_EQ(countOf(r.out, "error: "), 20u) << r.out;
+  EXPECT_NE(r.out.find(kLimitNote), std::string::npos) << r.out;
+  std::filesystem::remove_all(dir);
+}
+
+// Added item B: a source line longer than 120 characters is shown as the
+// 120 around the caret, cut with "...", the caret under its character with
+// tabs and UTF-8 before it; the lines around it show the same characters.
+// So 10000 errors on one 140 KB line print a few kilobytes, not a copy of
+// the line per error.
+TEST(Driver, ALongSourceLineIsShownAsAWindowAroundTheCaret) {
+  std::string body = "fn main() -> int {";
+  for (int i = 0; i < 100; ++i)
+    body += " a" + std::to_string(i) + " = 1;";
+  body += " b = nope;";
+  for (int i = 0; i < 100; ++i)
+    body += " c" + std::to_string(i) + " = 2;";
+  body += " return 0; }";
+  // The line above is as long (a comment), the line below short.
+  std::string above = "//" + body.substr(2);
+  std::replace(above.begin(), above.end(), 'a', 'z');
+  auto src = writeTmp("// short\n" + above + "\n" + body + "\n// end\n");
+  auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  const std::string col = std::to_string(body.find("nope") + 1);
+  EXPECT_NE(r.out.find(":3:" + col +
+                       ": error: use of undeclared variable "
+                       "'nope'"),
+            std::string::npos)
+      << r.out;
+  std::istringstream lines(r.out);
+  std::vector<std::string> shown;
+  for (std::string l; std::getline(lines, l);)
+    shown.push_back(l);
+  ASSERT_EQ(shown.size(), 5u) << r.out;
+  // 120 characters with the ellipses, after the gutter.
+  const std::string gutter = "  3 | ...";
+  ASSERT_EQ(shown[2].substr(0, gutter.size()), gutter) << r.out;
+  EXPECT_EQ(shown[2].size(), 6u + 120u) << r.out;
+  EXPECT_EQ(shown[2].substr(shown[2].size() - 3), "...") << r.out;
+  // The caret and its underline under `nope`.
+  EXPECT_EQ(shown[3].find("^~~~"), shown[2].find("nope")) << r.out;
+  EXPECT_EQ(shown[3].substr(0, 6), "    | ") << r.out;
+  // The long line above it is shown from the same column; the short line
+  // below it whole.
+  const size_t from = body.find(shown[2].substr(gutter.size(), 40));
+  ASSERT_NE(from, std::string::npos) << r.out;
+  EXPECT_EQ(shown[1], "  2 | ..." + above.substr(from, 114) + "...") << r.out;
+  EXPECT_EQ(shown[4], "  4 | // end") << r.out;
+  std::filesystem::remove(src);
+
+  // A line of 120 characters is shown whole; one of 121 in 120.
+  for (const size_t width : {120u, 121u}) {
+    std::string line = "fn main() -> int { return zz; }";
+    line.insert(19, width - line.size(), ' ');
+    auto w = writeTmp(line + "\n");
+    auto o = run(std::string(kPaykan) + " --check-only " + w + " 2>&1");
+    EXPECT_NE(o.out.find(width == 120 ? "  1 | " + line + "\n"
+                                      : "  1 | ..." + line.substr(4) + "\n"),
+              std::string::npos)
+        << o.out;
+    EXPECT_NE(
+        o.out.find("\n    | " + std::string(width == 120 ? 0 : 3, ' ') +
+                   std::string(line.find("zz") - (width == 120 ? 0 : 4), ' ') +
+                   "^~\n"),
+        std::string::npos)
+        << o.out;
+    std::filesystem::remove(w);
+  }
+
+  // A tab and UTF-8 characters before the caret: one character each.
+  auto utf =
+      writeTmp("fn main() -> int {\n\ts = \"\xC3\xA9\xC3\xA9\xE2\x82\xAC\"; "
+               "t = nope;\n  return 0;\n}\n");
+  auto u = run(std::string(kPaykan) + " --check-only " + utf + " 2>&1");
+  EXPECT_NE(u.out.find("  2 | \ts = \"\xC3\xA9\xC3\xA9\xE2\x82\xAC\"; t = "
+                       "nope;\n    | \t               ^~~~\n"),
+            std::string::npos)
+      << u.out;
+  std::filesystem::remove(utf);
+
+  // 10000 errors on one line.
+  std::string huge = "fn main() -> int {";
+  for (int i = 0; i < 10000; ++i)
+    huge += " x" + std::to_string(i) + " = y" + std::to_string(i) + ";";
+  auto big = writeTmp(huge + " return 0; }\n");
+  auto h = run(std::string(kPaykan) + " --check-only " + big + " 2>&1");
+  EXPECT_EQ(h.exitCode, 1);
+  EXPECT_EQ(countOf(h.out, "error: "), 20u);
+  EXPECT_LT(h.out.size(), 16384u) << h.out.substr(0, 4000);
+  // All of them: each as long as one. An error names its file, whose
+  // temporary path is 40 characters longer on macOS than in /tmp.
+  auto all = run(std::string(kPaykan) + " --error-limit=0 --check-only " + big +
+                 " 2>&1");
+  EXPECT_EQ(countOf(all.out, "error: "), 10000u);
+  EXPECT_LT(all.out.size(), 10000u * (300u + big.size()));
+  std::filesystem::remove(big);
+}
+
+// A byte that is in no UTF-8 character (a Latin-1 or Windows-1252 file's
+// `\xA9`, a stray continuation byte) is a character of its own: the lexer's
+// `invalid character` error shows its line and a caret under it, at the
+// start of a line and in the middle of one.  A line that started with one
+// sent the snippet's caret past the end of memory.
+TEST(Driver, AByteInNoUTF8CharacterIsShownAsOne) {
+  for (const auto &[text, expected] :
+       {std::pair<std::string, std::string>{
+            "fn main() -> int {\n\xA9 return 0; }\n",
+            "  2 | \xA9 return 0; }\n    | ^\n"},
+        {"fn main() -> int {\n\x80\x80 return 0;\n}\n",
+         "  2 | \x80\x80 return 0;\n    |  ^\n  3 | }\n"},
+        {"fn main() -> int {\n  s = \"\xC3\xA9\"; \xA9 return 0;\n}\n",
+         "  2 |   s = \"\xC3\xA9\"; \xA9 return 0;\n    | " +
+             std::string(11, ' ') + "^\n"},
+        {"fn main() -> int {\n\x80" + std::string(300, 'a') + "\n}\n",
+         "  2 | \x80" + std::string(116, 'a') + "...\n    | ^\n"}}) {
+    auto src = writeTmp(text);
+    auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << r.out;
+    EXPECT_NE(r.out.find("error: invalid character"), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find(expected), std::string::npos) << r.out;
+    std::filesystem::remove(src);
+  }
+}
+
 TEST(Driver, EmitCRejectsAnotherBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 0; }");
@@ -1844,6 +2184,31 @@ TEST(Driver, FloatNotEqualIsUnordered) {
   EXPECT_EQ(cRc, 0) << code;
   EXPECT_NE(code.find(" != "), std::string::npos) << code;
   EXPECT_EQ(code.find(" || "), std::string::npos) << code;
+  std::filesystem::remove(src);
+}
+
+// A char ordered against a number is Sema's error on every path, as `==`
+// on the pair is: `run`, `build` and `--emit-c` each report it and stop.
+// `c < n` got past Sema and failed PIR verification (`cmp operands have
+// different types: char and i64`).
+TEST(Driver, ACharOrderedAgainstANumberIsAnErrorOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main() -> int {\n  c = 'a';\n  n = 100;\n"
+                      "  if c < n { return 1; }\n  return 0;\n}\n");
+  const std::string exe = src + ".exe";
+  const std::string message =
+      "4:6: error: operands of '<' have mismatched types 'char' and 'int'";
+  const std::vector<std::string> commands = {
+      paykanRun() + " " + src, paykanRun() + " -o " + exe + " build " + src,
+      paykanRun() + " --emit-c " + src};
+  for (const std::string &cmd : commands) {
+    auto r = run(cmd + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
+    EXPECT_NE(r.out.find(message), std::string::npos) << cmd << ": " << r.out;
+    EXPECT_EQ(r.out.find("PIR verification"), std::string::npos)
+        << cmd << ": " << r.out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(exe));
   std::filesystem::remove(src);
 }
 

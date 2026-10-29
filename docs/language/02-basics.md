@@ -650,7 +650,13 @@ under [Conversions](04-strings-and-conversions.md#conversions)).
 ### Relational & Equality
 
 `<`, `>`, `<=`, `>=`, `==`, `!=` — result is `bool`.
-Equality operators require compatible types.
+The two operands have one type, as for arithmetic, with the one promotion: an `int` and a
+`float`, in either order, compare as floats (`2 == 2.0` and `2 <= 2.0` are `True`, `2 !=
+2.5` is `True`).  Otherwise equality takes two classes when one is a subclass of the other,
+and anything else is an error (`operands of '==' have mismatched types 'Str' and 'int'`),
+two tuples whose elements differ so too (`(1, 2) == (1, 2.0)`).  A `char` compares with a
+`char` only, by `<` as by `==`: `c < 100` is `operands of '<' have mismatched types 'char'
+and 'int'`, so write `c < 'd'`, or `int(c) < 100` for its byte value.
 
 For **reference types** (classes, `Str`), `==` dispatches to `equals`: `a == b` invokes
 `a.equals(b)` through the vtable, and `a != b` is its negation. A class may override `equals` to
@@ -1050,8 +1056,11 @@ enums.
 - A local never hides a function of the module: no variable, parameter (a method's or a
   lambda's included), `for` loop variable or `match` binding can take the name of one of
   the module's functions, a generic or a `native` one included, wherever the function is
-  declared (`'func' is a function of this module and cannot be used as a variable`). So a
-  call by the name always means the function. A field may share a function's name (it is
+  declared (`'func' is a function of this module and cannot be used as a variable`, `... as
+  a parameter name` at a parameter, once, at the first binding, even when its value has an
+  error of its own: the assignments that bind the name again are follow-ons of it). So a
+  call by the name
+  always means the function. A field may share a function's name (it is
   read as `obj.func`), and so may another module's function, which is always qualified
   (`io::println`).
 - A local never hides a method's `self`: in a method's body no declaration, `for` loop
@@ -1103,14 +1112,21 @@ fn float(x: int) -> int { ... }    // error: 'float' is a builtin type and canno
 The names of the standard library (`print`, `println`, `open`, `File`, `Error`, ...) are
 not builtins: a program may declare its own `fn print` or `class File`. Type names are
 global across an import graph, though ([Modules](15-modules.md)), so a program that imports
-`::io` cannot also declare its own `File`, `Error`, `Result` or `ErrorCode` (`class 'File'
-conflicts with an imported type of the same name`).
+`::io` cannot also declare a class, struct, enum, trait or function named `File`, `Error`
+or `ErrorCode` (`class 'File' conflicts with an imported type of the same name`, `enum
+'ErrorCode' ...`). A generic type of a module, such as `Result` or `List`, is named through
+its module (`res::Result<int, Str>`) and leaves its name free: a program may declare its
+own `Result`.
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot
-reuse an enum's name. A builtin class or type name cannot name a field, parameter or local
-variable either: it is a type name (`'Str' is a type name and cannot be used as a
-variable`). Nor can a function of the module name a parameter or a local variable
+reuse an enum's name. A builtin class or type name, or the name of a type the program
+declares or imports, cannot name a field (a class's, a struct's or a variant's, whether or
+not its type writes `__init__`, and a generic type's once, at its declaration, whether or
+not it is instantiated), a parameter or a local variable either. It is reported at the
+field, the parameter or the variable, as what it would name: `'Str' is a type name and
+cannot be used as a variable` (`... as a parameter name`, `... as a field name`). Nor can a
+function of the module name a parameter or a local variable
 ([Scoping Rules](#scoping-rules)).
 
 ---

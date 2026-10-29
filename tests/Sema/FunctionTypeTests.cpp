@@ -138,6 +138,41 @@ fn main() -> int {
                 "no field 'm' in class 'C'"});
 }
 
+// Finding 47: a module's generic function used as a value is reported as
+// one, as a local generic function is, and a name under an import's
+// qualifier that is no function of the module says so; both were "unknown
+// enum type 'io'".  A qualifier that names no module stays an unknown enum,
+// and a module's function and a `static fn` are values.
+TEST(FunctionType, QualifiedNamesThatAreNotValues) {
+  auto r = semaCheck(R"(import ::io;
+import ::collections as col;
+class C { x: int; }
+impl C { static fn make() -> C { return C(1); } }
+fn g<T>(x: T) -> T => x;
+fn main() -> int {
+  a = io::println;
+  b = io::nosuch;
+  d = col::List;
+  e = g;
+  f = Nope::x;
+  h = C::make;
+  k = io::open;
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"7:7: error: 'io::println' is a generic function; a generic "
+                "function cannot be a function value yet (wrap a call to it in "
+                "a lambda)",
+                "8:7: error: 'io::nosuch' is not a function of module '::io'",
+                "9:7: error: 'col::List' is not a function of module "
+                "'::collections'",
+                "10:7: error: 'g' is a generic function; a generic function "
+                "cannot be a function value yet",
+                "11:7: error: unknown enum type 'Nope'"});
+  EXPECT_EQ(r.ErrorCount, 5) << r.Diagnostics;
+}
+
 TEST(FunctionType, CallsAreChecked) {
   auto r = semaCheck(R"(
 fn square(x: int) -> int { return x * x; }

@@ -153,6 +153,50 @@ TEST(Traits, ScalarsShow) {
   guard.expectNoLeaks("scalar Show");
 }
 
+// A tuple, struct, enum and optional whose every part shows itself print
+// as before, with `io::println`, `toString()` and through a `T: Show`
+// bound: a function value inside an object (which shows itself through
+// its class) does not stop the struct holding the object from showing
+// itself.
+TEST(Traits, AggregatesOfShowPartsShow) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"pkn(import ::io;
+    class Handler {
+      f: (int) -> int;
+      view fn toString() -> Str { return "h" + Str(self.f(1)); }
+    }
+    impl Handler { fn __init__() { self.f = fn(x: int) => x + 1; } }
+    struct P { x: int; h: Handler; }
+    struct Q { p: P; at: (float, char?); }
+    enum E { A(q: Q), B(n: int?), N }
+    enum Maybe<X> { Just(v: X), Nothing }
+    fn show<X: Show>(x: view X) -> Str { return "<" + x.toString() + ">"; }
+    fn main() -> int {
+      q = Q(P(1, Handler()), (2.5, None));
+      io::println(q);
+      io::println(q.p.toString() + " " + (1, 'c').toString());
+      io::println(E::A(q));
+      io::println(E::B(None).toString() + " " + E::N.toString());
+      o: Q? = None;
+      io::println(o.toString());
+      o = q;
+      io::println(o);
+      m: Maybe<P> = Maybe::Just(q.p);
+      io::println(show(m) + show((q.at, E::B(3))));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Q(p: P(x: 1, h: h2), at: (2.5, None))\n"
+                      "P(x: 1, h: h2) (1, c)\n"
+                      "A(q: Q(p: P(x: 1, h: h2), at: (2.5, None)))\n"
+                      "B(n: None) N\n"
+                      "None\n"
+                      "Q(p: P(x: 1, h: h2), at: (2.5, None))\n"
+                      "<Just(v: P(x: 1, h: h2))><((2.5, None), B(n: 3))>\n");
+  guard.expectNoLeaks("aggregates of Show parts");
+}
+
 // `hash()` of int, bool, char and Str (the builtin `Hashable`): equal values
 // hash alike (a char and a bool as their codes), and a class's own `hash`
 // meets a `T: Hashable` bound.

@@ -109,6 +109,81 @@ TEST(Class, DestroyOverrideRejected) {
   EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }
 
+// `destroy` cannot be declared (pre-#18-destroy): one error, the same
+// everywhere, for a class body's method and an `impl` block's method or
+// `static fn` of a class or a struct, generic ones too (for each
+// instantiation).  A call of a rejected `static fn` is a follow-on.
+TEST(Class, DestroyIsReservedEverywhere) {
+  auto r = semaCheck(R"(class A { x: int; fn destroy() {} }
+class B { x: int; }
+impl B { fn destroy() {} static fn destroy() -> int { return 1; } }
+struct P { x: int; }
+impl P { view fn destroy() {} }
+impl P { static fn destroy() -> int { return 2; } }
+class G<T> { x: T; }
+impl G<T> { fn destroy() {} }
+struct Q<T> { x: T; }
+impl Q<T> { fn destroy() {} }
+struct R<T> { x: T; }
+impl R<T> { static fn destroy() -> int { return 3; } }
+fn main() -> int {
+  g = G(1);
+  q = Q(1);
+  return B::destroy() + P::destroy() + R<int>::destroy();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  const char *const kReserved =
+      "'destroy' is reserved for the compiler-generated destructor and cannot "
+      "be declared in ";
+  for (const std::string &where :
+       {"1:19: error: " + std::string(kReserved) + "class 'A'",
+        "3:10: error: " + std::string(kReserved) + "class 'B'",
+        "3:33: error: " + std::string(kReserved) + "class 'B'",
+        "5:10: error: " + std::string(kReserved) +
+            "struct 'P' (a struct has "
+            "none)",
+        "6:17: error: " + std::string(kReserved) +
+            "struct 'P' (a struct has "
+            "none)",
+        "8:13: error: " + std::string(kReserved) + "class 'G<int>'",
+        "10:13: error: " + std::string(kReserved) +
+            "struct 'Q<int>' (a "
+            "struct has none)",
+        "12:20: error: " + std::string(kReserved) +
+            "struct 'R<int>' (a "
+            "struct has none)"})
+    EXPECT_NE(r.Diagnostics.find(where), std::string::npos) << where << "\n"
+                                                            << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("already has a method"), std::string::npos)
+      << r.Diagnostics;
+
+  // A call of the struct's rejected method is a follow-on; the class's
+  // still finds the destructor, which cannot be called directly.
+  auto call = semaCheck(R"(struct P { x: int; }
+impl P { fn destroy() {} }
+class C { x: int; }
+fn main() -> int {
+  p = P(1);
+  p.destroy();
+  c = C(1);
+  c.destroy();
+  return 0;
+}
+)");
+  EXPECT_FALSE(call.Ok);
+  EXPECT_NE(call.Diagnostics.find("2:10: error: " + std::string(kReserved) +
+                                  "struct 'P' (a struct has none)"),
+            std::string::npos)
+      << call.Diagnostics;
+  EXPECT_NE(call.Diagnostics.find("8:3: error: 'destroy' cannot be called "
+                                  "directly"),
+            std::string::npos)
+      << call.Diagnostics;
+  EXPECT_EQ(call.ErrorCount, 2) << call.Diagnostics;
+}
+
 // -- Duplicate definitions
 
 TEST(Class, DuplicateName) {
@@ -151,6 +226,70 @@ TEST(Class, TheStandardLibrarysNamesAreNotReserved) {
           "class 'File' conflicts with an imported type of the same name"),
       std::string::npos)
       << r.Diagnostics;
+}
+
+// Finding 44: a declaration of any kind named like a type an import reached
+// conflicts with it, in the words of the class case above, an enum's too
+// (it was "redefinition of enum 'ErrorCode'", and a struct or enum named
+// like an imported type of the other kind "'Error' is already declared as a
+// struct").  Two enums of the program stay a redefinition.  A generic type
+// of a module (`Result`) leaves its name free: the program's own `Result`
+// is a class of its own, next to `res::Result<T, E>`.
+TEST(Class, ADeclarationNamedLikeAnImportedTypeConflictsWithIt) {
+  auto r = semaCheck(R"(import ::io;
+enum ErrorCode { A }
+enum Error { B }
+trait File {}
+enum E { X }
+enum E { Y }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"2:1: error: enum 'ErrorCode' conflicts with an imported type of the "
+        "same name",
+        "3:1: error: enum 'Error' conflicts with an imported type of the same "
+        "name",
+        "4:1: error: trait 'File' conflicts with an imported type of the "
+        "same name",
+        "6:1: error: redefinition of enum 'E'"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+
+  auto kinds = semaCheck(R"(import ::io;
+struct ErrorCode { x: int; }
+fn Error() -> int { return 1; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(kinds.Ok);
+  for (const char *d :
+       {"2:1: error: struct 'ErrorCode' conflicts with an imported type of "
+        "the same name",
+        "3:1: error: function 'Error' conflicts with an imported type of the "
+        "same name"})
+    EXPECT_NE(kinds.Diagnostics.find(d), std::string::npos)
+        << d << "\n"
+        << kinds.Diagnostics;
+  EXPECT_EQ(kinds.Diagnostics.find("already declared"), std::string::npos)
+      << kinds.Diagnostics;
+
+  auto own = semaCheck(R"(import ::io;
+import ::result as res;
+class Result { v: int; }
+fn half(n: int) -> res::Result<int, Str> {
+  return if n % 2 == 0 then res::Result::Ok(n / 2) else res::Result::Err("odd");
+}
+fn main() -> int {
+  r = Result(3);
+  match half(4) {
+    h: Ok { io::println(h.value + r.v); }
+    e: Err { io::println(e.error); }
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(own.Ok) << own.Diagnostics;
 }
 
 // The conversion builtins removed by #64 no longer reserve their names.
@@ -886,6 +1025,44 @@ TEST(Class, DefaultInitNeedsEveryField) {
         "it takes nothing)"})
     EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                         << r.Diagnostics;
+}
+
+// A subclass's default `__init__` takes the superclass constructor's
+// parameters by the names they are declared with (finding 84: `arg1`,
+// `arg2`, ... when none was `view` or `inout`), up a chain of default ones
+// and from a written `__init__`; one a field also names gets a `_`.
+TEST(Class, DefaultInitNamesTheSuperclassParameters) {
+  auto r = semaCheck(R"(
+    class Point { x: int; y: int; }
+    class Named : Point { name: Str; }
+    class Tagged : Named { tag: int; }
+    class Base { n: int; }
+    impl Base { fn __init__(start: int, label: Str) { self.n = start; } }
+    class Derived : Base { label: int; }
+    class Square : Base {}
+    class Cube : Square { d: int; }
+    impl Cube { fn __init__(w: int) { self.d = w; } }
+    fn main() -> int {
+      a = Named(1, 2);
+      b = Tagged(1, 2, "p");
+      c = Derived(1);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"function 'Named' expects 3 argument(s), got 2 (it has no '__init__', "
+        "so it takes x: int, y: int, name: Str)",
+        "function 'Tagged' expects 4 argument(s), got 3 (it has no "
+        "'__init__', so it takes x: int, y: int, name: Str, tag: int)",
+        "function 'Derived' expects 3 argument(s), got 1 (it has no "
+        "'__init__', so it takes start: int, label_: Str, label: int)",
+        "'__init__' in class 'Cube' must call '__super__' as its first "
+        "statement because its superclass 'Square' has fields to initialize "
+        "(its default '__init__' takes start: int, label: Str)"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
 }
 
 // An `__init__` of a subclass calls the superclass's default one when it

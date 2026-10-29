@@ -1168,7 +1168,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
           &name,
           Ctx.make<ClassType>(span(nameTok.Loc),
                               intern(names::untypedParamType(name)), nullptr),
-          ParamMode::Value});
+          ParamMode::Value, nameTok.Loc});
       continue;
     }
     if (!expect(Tok::Colon, "after the parameter name"))
@@ -1181,7 +1181,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty, mode});
+    out.push_back(Param{&name, ty, mode, span(nameTok.Loc)});
   } while (accept(Tok::Comma));
   return true;
 }
@@ -1340,19 +1340,24 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   // A class body's method whose signature ends with `;` is pure virtual: a
   // vtable slot with no definition (docs/language/05-classes.md); no other
   // function may leave out its body.  (An initializer is named as written,
-  // `___init__` too, and `destroy` gets the class body's error: it is the
-  // compiler-generated destructor.)
+  // `___init__` too, and `destroy` is reserved for the compiler-generated
+  // destructor, as Sema says of one with a body.)
   if (at(Tok::Semi)) {
     if (kind != FuncKind::ClassMethod) {
+      // `destroy` is reserved whatever its body: reported at the function,
+      // as Sema reports one with a body (which names its type).
+      if ((kind == FuncKind::ImplMethod || kind == FuncKind::StaticFn) &&
+          name == names::kMethodDestroy) {
+        error(span(start), "'destroy' is reserved for the compiler-generated "
+                           "destructor and cannot be declared");
+        return nullptr;
+      }
       std::string why;
       if (kind == FuncKind::StaticFn)
         why = "'" + name + "' has no body: a 'static fn' needs one";
       else if (kind == FuncKind::ImplMethod && name == names::kMethodInit)
         why = "'" + std::string(spelled) +
               "' has no body: an initializer needs one";
-      else if (kind == FuncKind::ImplMethod && name == names::kMethodDestroy)
-        why = "'destroy' is the compiler-generated destructor and cannot be "
-              "overridden";
       else if (kind == FuncKind::ImplMethod)
         why = "'" + name +
               "' in an 'impl' block has no body: an 'impl' block's methods "

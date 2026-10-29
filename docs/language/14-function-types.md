@@ -107,9 +107,11 @@ A **named function** used without an argument list is a value of its function ty
 free function of the module (`square`), an imported one (`m::square`), a `static fn`
 (`Point::origin`).  Not a constructor or a conversion (`'Point' is a constructor, not a
 function value`, and so is `Str`), not a method (`p.shift` is a field access, and there is no such field), not a
-generic function (`'first' is a generic function; a generic function cannot be a function
-value yet`), and not a function returning a borrow (`'peek' returns a borrow ('-> view');
-it cannot be a function value yet`).
+generic function, a module's too (`'first' is a generic function; a generic function
+cannot be a function value yet`, `'io::println' is ...`), and not a function returning a
+borrow (`'peek' returns a borrow ('-> view'); it cannot be a function value yet`). Under an
+import's qualifier a value is one of the module's functions (`'io::nosuch' is not a
+function of module '::io'`).
 
 A **lambda** is a function without a name, written where a value goes:
 
@@ -348,7 +350,9 @@ adder(1)` is `False`, and two different lambdas are never equal, even with the s
 
 A function type is a [`ValueType`](06-traits.md#valuetype) (`fn keep<T: ValueType>(x: T)`
 takes `square`).  It is not an `Obj`: it cannot be printed, converted to a `Str`, stored
-in an `Obj` slot, matched by class, or given to a `T: Show` or `T: Hashable` bound.  An
+in an `Obj` slot, matched by class, or given to a `T: Show` or `T: Hashable` bound.  Nor
+can a tuple, struct, enum or optional holding one, which does not implement `Show` either
+(`io::println((1, f))` is an error naming the element).  An
 optional function value, `((int) -> int)?`, takes the same 16 bytes: `None` is the value
 with no code.
 
@@ -434,14 +438,14 @@ Output:
 | A borrowed result | `(int) -> view Str`; `fn(x: int) -> view Str { ... }` |
 | A `void` parameter | `(void) -> int`; `fn(v: void) {}` |
 | Mismatched function types | `f: (int) -> int = fn(x: float) -> int { ... }`; a mode dropped; `int` where `float` is expected |
-| Not a function value | `p = Str`; `c = Point`; `g = first`; `q = peek` (`-> view`); `m = p.shift` |
+| Not a function value | `p = Str`; `c = Point`; `g = first`; `w = io::println` (generic); `q = peek` (`-> view`); `m = p.shift`; `x = io::nosuch` |
 | Calling a non-function | `n = 1; n(2)`; `obj.n(1)` with `n: int`; an optional function value without `match` |
 | Wrong arguments | `f(1, 2)` for `f: (int) -> int`; `f("a")`; a `let` or a `view` to an `inout` parameter |
 | Assigning a captured name | `n = 1; g = fn() { n = 2; };`; `bump(n)` inside the lambda; `p.x = 2` for a captured struct |
 | Capturing a borrow or `self` | a `view` or `inout` parameter or local, a `view fn`'s `self`, a struct method's `self` |
 | Capturing a borrowed variable | `x: inout = k;` then `fn() -> int { return k; }` while `x` is live; a reference a live `view` local views |
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
-| A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show` |
+| A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show`; the same for a tuple, struct or enum holding `f` |
 
 ## Not Yet Supported
 

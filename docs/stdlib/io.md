@@ -613,9 +613,12 @@ Writes `value.toString()` and a newline to standard error.
 
 Each print function takes exactly one value of any type that implements
 [`Show`](../language/06-traits.md): an object (every class, `Str`), a number of any size, a
-`bool`, a `char`, a tuple, a struct, or an optional of one, which prints `None` when it is
-absent. A function value is not `Show` (`'() -> int' does not implement trait 'Show',
-which 'io::println' requires of 'T'`). Paykan has no variadic functions or overloading, so
+`bool`, a `char`, and a tuple, a struct, an enum or an optional whose parts all do (an
+optional prints `None` when it is absent). A function value is not `Show` (`'() -> int'
+does not implement trait 'Show', which 'io::println' requires of 'T'`), and neither is a
+tuple, struct, enum or optional holding one (`'(int, (int) -> int)' does not implement
+trait 'Show', which 'io::println' requires of 'T': its element 1 has type '(int) -> int',
+which does not implement it`). Paykan has no variadic functions or overloading, so
 several pieces are joined into one `Str` with `+` first (`io::println("n = " + Str(n))`).
 The value is a `view`: a temporary, or a borrowed `view` parameter, prints without being
 copied.

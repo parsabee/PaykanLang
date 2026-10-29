@@ -1130,8 +1130,9 @@ backend](../c-backend.md)).
 | Function redefinition | Two functions with the same name |
 | Builtin name reused | A function named like a builtin class or type (`fn Str()`, `fn float(...)`) — see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved) |
 | Class / enum name reused | A function named like a class (its constructor) or an enum declared in the same program |
-| Duplicate parameter | Two parameters of one function, method or lambda with the same name |
-| Function name reused by a local | A variable, a parameter (a method's or a lambda's too), a `for` loop variable or a `match` binding named like a function of the module (`'func' is a function of this module and cannot be used as a variable`); see [Scoping Rules](02-basics.md#scoping-rules) |
+| Duplicate parameter | Two parameters of one function, method, trait requirement or lambda with the same name, reported at the second |
+| Type name as a parameter | A parameter named like a type (`fn f(u8: int)`, `fn f(Str: int)`, a class's name): `'u8' is a type name and cannot be used as a parameter name`, at the parameter; see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved) |
+| Function name reused by a local | A variable, a parameter (a method's or a lambda's too), a `for` loop variable or a `match` binding named like a function of the module (`'func' is a function of this module and cannot be used as a variable`, `... as a parameter name` for a parameter); see [Scoping Rules](02-basics.md#scoping-rules) |
 | Untyped parameter outside a free function | A lambda's, method's, `static fn`'s, trait method's, native function's or `main`'s parameter without a type (see [Untyped Parameters](#untyped-parameters)) |
 | Argument count mismatch | Wrong number of arguments |
 | Argument type mismatch | Argument type incompatible with parameter type |

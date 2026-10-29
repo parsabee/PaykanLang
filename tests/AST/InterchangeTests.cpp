@@ -893,9 +893,10 @@ TEST(ASTInterchange, ParamModes) {
       flat += c;
     else if (!flat.empty() && flat.back() != ' ')
       flat += ' ';
-  for (const char *param : {"(param \"n\" (named-type \"int\") (qual inout))",
-                            "(param \"by\" (named-type \"int\") (qual view))",
-                            "(param \"k\" (named-type \"int\"))"})
+  for (const char *param :
+       {"(param @1:9-1:21 \"n\" (named-type \"int\") (qual inout))",
+        "(param @1:23-1:35 \"by\" (named-type \"int\") (qual view))",
+        "(param @1:37-1:43 \"k\" (named-type \"int\"))"})
     EXPECT_NE(flat.find(param), std::string::npos) << param << "\n" << text;
   ast::ASTContext ctx;
   std::string error;
@@ -914,6 +915,40 @@ TEST(ASTInterchange, ParamModes) {
               std::string::npos)
         << bad << ": " << error;
   }
+}
+
+// A parameter is written with its location, `n: int` (the caret of an
+// error about it); read without one, which is optional, it is at its
+// function's or its lambda's.
+TEST(ASTInterchange, ParamLocations) {
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu =
+      read("(paykan-ast 1 (unit (fn @2:1-4:2 \"f\" (type-params) (params "
+           "(param @2:6-2:12 \"a\" (named-type \"int\")) (param \"b\" "
+           "(named-type \"int\"))) _ (block (expr (lambda @3:7-3:20 (params "
+           "(param \"x\" (named-type \"int\"))) _ (block)))))))",
+           ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  auto *f = tu->getFuncDecls()[0];
+  const ast::SourceLocation a = f->getParams()[0].Loc;
+  EXPECT_EQ(a.getLineStart(), 2u);
+  EXPECT_EQ(a.getColumnStart(), 6u);
+  EXPECT_EQ(a.getColumnEnd(), 12u);
+  const ast::SourceLocation b = f->getParams()[1].Loc;
+  EXPECT_EQ(b.getLineStart(), 2u);
+  EXPECT_EQ(b.getColumnStart(), 1u);
+  EXPECT_EQ(b.getLineEnd(), 4u);
+  auto *lambda = ast::cast<ast::LambdaExpr>(
+      ast::cast<ast::ExprStmt>(f->getBody()->getStatements()[0])->getExpr());
+  const ast::SourceLocation x = lambda->getParams()[0].Loc;
+  EXPECT_EQ(x.getLineStart(), 3u);
+  EXPECT_EQ(x.getColumnStart(), 7u);
+  // Written back with the locations it was given.
+  std::string text = write(*tu);
+  EXPECT_NE(text.find("(param @2:6-2:12 \"a\""), std::string::npos) << text;
+  EXPECT_NE(text.find("(param @2:1-4:2 \"b\""), std::string::npos) << text;
+  EXPECT_NE(text.find("(param @3:7-3:20 \"x\""), std::string::npos) << text;
 }
 
 // A `let` local is a `var` with a trailing `(let)`.

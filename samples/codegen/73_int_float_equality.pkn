@@ -1,0 +1,55 @@
+// 73 — `==` and `!=` between an int and a float
+// Exercises: the int operand of `==` and `!=` converted to float, as for
+//            `<`, `<=`, `>` and `>=` (docs/language/02-basics.md, "Sized
+//            numeric types"): literals and variables in both orders, a
+//            parameter, a field, an `if`, a `while` and a conditional's
+//            condition, a NaN (unequal to every int), `-0.0` (equal to 0) and
+//            an int past 2^53, which converts to the nearest float.
+// expect-stdout: True False True False
+// expect-stdout: True False False True
+// expect-stdout: equal unequal
+// expect-stdout: 3 steps
+// expect-stdout: False True True
+// expect-stdout: True True
+
+import ::io;
+
+class Reading {
+  value: float;
+}
+
+fn same(n: int, x: float) -> bool {
+  return n == x;
+}
+
+fn differs(x: float, n: int) -> bool {
+  return x != n;
+}
+
+fn main() -> int {
+  x = 2;
+  y = 2.0;
+  io::println(Str(x == y) + " " + Str(x != y) + " " + Str(2 != 2.5) + " "
+      + Str(2.5 == x));
+  io::println(Str(same(3, 3.0)) + " " + Str(same(3, 3.5)) + " "
+      + Str(differs(4.0, 4)) + " " + Str(differs(4.25, 4)));
+  r = Reading(7.0);
+  if r.value == 7 {
+    io::print("equal ");
+  }
+  if 8 != r.value {
+    io::println("unequal");
+  }
+  steps = 0;
+  f = 0.0;
+  while f != 3 {
+    f = f + 1.0;
+    steps = steps + 1;
+  }
+  io::println(Str(steps) + (if steps == 3.0 then " steps" else " ?"));
+  nan = 0.0 * (1.0e308 * 10.0);
+  io::println(Str(nan == 0) + " " + Str(nan != 0) + " " + Str(-0.0 == 0));
+  big = 9007199254740993;
+  io::println(Str(big == 9007199254740992.0) + " " + Str(1 == 1.0));
+  return 0;
+}

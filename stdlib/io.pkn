@@ -1,9 +1,10 @@
 // ::io: printing, files and the standard input.
 //
 // The print functions take any value that shows itself (`T: Show`: an
-// object, a Str, a number, a bool, a char, a tuple, a struct, or an optional
-// of one, None printing as "None") and write its `toString()` to stdout or
-// stderr, `println` and `printerrln` with a newline after it.
+// object, a Str, a number, a bool, a char, and a tuple, struct, enum or
+// optional whose parts all do, None printing as "None") and write its
+// `toString()` to stdout or stderr, `println` and `printerrln` with a
+// newline after it.
 //
 // A File is an open file: `open(path, mode)` opens one with C's `fopen` (the
 // mode "r", "w", "a", ...) and returns a Result (::result) holding it, or the

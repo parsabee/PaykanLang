@@ -538,11 +538,11 @@ fn main() -> int {
 )");
   EXPECT_FALSE(r.Ok);
   for (const char *e :
-       {"3:1: error: parameter 'v' cannot have type 'void'",
+       {"3:6: error: parameter 'v' cannot have type 'void'",
         "4:10: error: return value has type 'void' (the expression produces "
         "no value): make it a statement, then 'return;'",
         "6:11: error: field 'v' in class 'C' cannot have type 'void'",
-        "7:11: error: parameter 'v' of method 'm' in 'D' cannot have type "
+        "7:16: error: parameter 'v' of method 'm' in 'D' cannot have type "
         "'void'",
         "10:3: error: variable 'x' cannot have type 'void' (the expression "
         "produces no value)",
@@ -570,11 +570,11 @@ fn main() -> int { y: void[2] = [g(), g()]; return 0; }
 )");
   EXPECT_FALSE(more.Ok);
   for (const char *e :
-       {"3:12: error: parameter 'v' of method 'm' of trait 'Tr' cannot have "
+       {"3:17: error: parameter 'v' of method 'm' of trait 'Tr' cannot have "
         "type 'void'",
         "4:11: error: field 'a' in class 'E' has type 'void[2]': an array "
         "element cannot have type 'void'",
-        "5:1: error: parameter 'a' has type 'void[]': an array element cannot "
+        "5:6: error: parameter 'a' has type 'void[]': an array element cannot "
         "have type 'void'",
         "6:20: error: variable 'y' has type 'void[2]': an array element cannot "
         "have type 'void'"})

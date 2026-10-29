@@ -1682,7 +1682,7 @@ TEST(Lowering, InitMakesTheObjectOneOfItsClassOnceItsFieldsAreAssigned) {
   EXPECT_LT(b.find("call @A.__init__("), b.find("vtable.store")) << b;
   std::string c = function(t, "C.__init__");
   EXPECT_EQ(count(c, "vtable.store"), 1u) << c;
-  EXPECT_NE(c.find("  call @B.__init__(%self.6, %arg1.7)\n"
+  EXPECT_NE(c.find("  call @B.__init__(%self.6, %f.7)\n"
                    "  %self.8 = load %self.0\n"
                    "  vtable.store %self.8, C\n"),
             std::string::npos)

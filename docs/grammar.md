@@ -245,7 +245,9 @@ signature with ';' (a pure virtual method)` for an `impl` block's method,
 and `'f' has no body: a 'static fn' needs one` and `'__init__' has no body:
 an initializer needs one` for a `static fn` and an initializer (named as
 written, `___init__` too); `destroy`, which is never declared, gets
-`'destroy' is the compiler-generated destructor and cannot be overridden`.
+`'destroy' is reserved for the compiler-generated destructor and cannot be
+declared` at the function, an `impl` block's method or `static fn`, as
+Sema reports one with a body.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/03-functions.md](language/03-functions.md)):
@@ -296,7 +298,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   `view` or `inout` parameter's slice
   ([language/09-arrays.md](language/09-arrays.md#slices)): Sema rejects it
   anywhere else (`variable 'x' has type 'int[]': a slice can only be a 'view'
-  or 'inout' parameter, and an array has a length ('int[3]')`).
+  or 'inout' parameter, and an array has a length ('int[3]')`, or `..., and a
+  struct field cannot be an array yet` where no fixed-size array would do).
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms
@@ -591,7 +594,10 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 ## 9. Diagnostics and recovery
 
 Diagnostics go through `DiagEngine` in the clang-style
-`file:line:col: error: message` format with a source snippet and caret.
+`file:line:col: error: message` format with a source snippet and caret (a
+line over 120 characters is shown in 120 around the caret, cut with `...`),
+and at most `--error-limit=N` errors (20 by default) are printed
+([The paykan command](language/17-the-paykan-command.md)).
 So do the lexical errors `--dump-tokens` finds: it lists every token, then
 fails.
 The messages listed in this document are binding (tests assert on them);

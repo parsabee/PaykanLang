@@ -451,9 +451,10 @@ fn main() -> int {
                                "class body"),
             std::string::npos)
       << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find("'destroy' is the compiler-generated destructor "
-                               "and cannot be overridden"),
-            std::string::npos)
+  EXPECT_NE(
+      r.Diagnostics.find("'destroy' is reserved for the compiler-generated "
+                         "destructor and cannot be declared in class 'B'"),
+      std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics.find("abstract"), std::string::npos) << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;

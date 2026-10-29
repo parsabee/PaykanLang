@@ -247,7 +247,9 @@ slot: `p: (Node?, int) = (None, 1)` and
 [Optionals](12-optionals.md#literals-take-their-destinations-types)).
 
 An element cannot be a fixed-size array for now (`tuple element 0: a fixed-size array
-('int[2]') can only be a local variable, a parameter, a result or a field for now`).
+('int[2]') can only be a local variable, a parameter, a result or a class field for now`),
+nor a slice (`variable 't' element 0 has type 'int[]': a slice can only be a 'view' or
+'inout' parameter, and a tuple element cannot be an array yet`).
 
 ---
 
@@ -389,7 +391,10 @@ A tuple's `toString()` shows each element through its own `toString()`:
 `None` for an absent optional, an object through its class's `toString`.  A
 tuple meets a `Show` bound (`fn show<T: Show>(x: view T)`, see
 [Traits](06-traits.md)), as `int` does, so `::io`'s `print`, `println`, `printerr`
-and `printerrln` (each `fn println<T: Show>(value: view T)`) print one.
+and `printerrln` (each `fn println<T: Show>(value: view T)`) print one.  A tuple
+with an element that does not implement `Show`, a function value, does not
+either: `io::println((1, f))` and `(1, f).toString()` are errors naming the
+element (`its element 1 has type '(int) -> int', which does not implement it`).
 
 Comparison is element-wise even when both sides are the same variable;
 there is no identity shortcut.  So `float` elements follow IEEE 754: a tuple

@@ -87,6 +87,32 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     error(loc, "'" + name + "' is a builtin type and cannot be redeclared");
     return false;
   }
+  // Type names are global across an import graph (docs/language/
+  // 15-modules.md): a declaration named like a class, struct or enum an
+  // import reached conflicts with it, whatever it declares.
+  const bool imported = ImportedTypeOrigins.count(name) != 0;
+  const auto importConflict = [&] {
+    const char *what = "function";
+    switch (kind) {
+    case DeclKind::Function:
+      break;
+    case DeclKind::Class:
+      what = "class";
+      break;
+    case DeclKind::Enum:
+      what = "enum";
+      break;
+    case DeclKind::Trait:
+      what = "trait";
+      break;
+    case DeclKind::Struct:
+      what = "struct";
+      break;
+    }
+    error(loc, std::string(what) + " '" + name +
+                   "' conflicts with an imported type of the same name");
+    return false;
+  };
   // Compiler builtins are registered before any user declaration and must
   // never be replaced.  Which names are builtin is not spelled out here: a
   // class is builtin iff the ASTContext bootstrap flagged it
@@ -96,11 +122,8 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
   if (auto *ct = Ctx.lookupClassType(name)) {
     if (ct->isBuiltin())
       error(loc, "'" + name + "' is a builtin class and cannot be redeclared");
-    else if (kind == DeclKind::Class)
-      // Local classes are checked before any of them is registered, so a
-      // class hit while declaring a class can only come from an import.
-      error(loc, "class '" + name +
-                     "' conflicts with an imported type of the same name");
+    else if (imported)
+      return importConflict();
     else
       error(loc, "'" + name + "' is already declared as a class");
     return false;
@@ -110,13 +133,9 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     return false;
   }
   if (Ctx.lookupStructType(name)) {
-    if (kind == DeclKind::Struct && !LocalStructNames.count(name))
-      // Local structs are checked before any of them is registered, so a
-      // struct hit while declaring a struct can only come from an import
-      // (or, for a generic struct, from a struct of the module).
-      error(loc, "struct '" + name +
-                     "' conflicts with an imported type of the same name");
-    else if (kind == DeclKind::Class)
+    if (imported)
+      return importConflict();
+    if (kind == DeclKind::Class)
       error(loc,
             "class '" + name + "' conflicts with a struct of the same name");
     else
@@ -124,6 +143,8 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     return false;
   }
   if (Ctx.lookupEnumType(name)) {
+    if (imported)
+      return importConflict();
     if (kind == DeclKind::Enum)
       error(loc, "redefinition of enum '" + name + "'");
     else if (kind == DeclKind::Class)
@@ -222,6 +243,15 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
     return true;
   }
   return false;
+}
+
+ast::Type *Sema::promotedOperandType(const ast::Type *lhs,
+                                     const ast::Type *rhs) const {
+  const ast::Type *intTy = Ctx.getIntTy();
+  ast::Type *floatTy = Ctx.getFloatTy();
+  if ((lhs == intTy && rhs == floatTy) || (lhs == floatTy && rhs == intTy))
+    return floatTy;
+  return nullptr;
 }
 
 bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
@@ -420,6 +450,14 @@ void Sema::errorOptionalUnwrap(ast::SourceLocation loc,
                  "' without unwrapping (use match)");
 }
 
+void Sema::errorNoToString(ast::SourceLocation loc, ast::Type *ty,
+                           const std::string &why) {
+  error(loc, "no method '" + std::string(names::kMethodToString) +
+                 "' on type '" + typeName(ty) +
+                 "', which does not implement trait '" + names::kTraitShow +
+                 "'" + (why.empty() ? "" : ": " + why));
+}
+
 /// The alignment of a value of @p ty held in memory: a scalar's or a box's
 /// is its size, an optional value's its payload's, an array's its element's,
 /// a tuple's its most aligned element's.
@@ -578,7 +616,7 @@ bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
   }
   error(loc, where + ": a fixed-size array ('" + typeName(ty) +
                  "') can only be a local variable, a parameter, a result or "
-                 "a field for now");
+                 "a class field for now");
   return false;
 }
 
@@ -651,6 +689,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   const bool allowFixed = std::exchange(FixedArrayAllowed, false);
   const bool allowInferred = std::exchange(InferredLengthAllowed, false);
   const bool allowSlice = std::exchange(SliceAllowed, false);
+  const char *noArray = std::exchange(NoArrayHolder, nullptr);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
   // A parameter's slice, resolved already.
@@ -720,14 +759,22 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   // `T[]` is a slice, the type of a `view` or `inout` parameter only.
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
     if (!allowSlice) {
-      const std::string elem = typeName(at->getElementType());
-      error(loc, context + " has type '" + typeName(at) +
-                     "': a slice can only be a 'view' or 'inout' parameter, "
-                     "and an array has a length ('" +
-                     (ast::isa<ast::FunctionType>(at->getElementType())
-                          ? "(" + elem + ")"
-                          : elem) +
-                     "[3]')");
+      std::string msg = context + " has type '" + typeName(at) +
+                        "': a slice can only be a 'view' or 'inout' parameter";
+      if (noArray) {
+        msg += ", and ";
+        msg += noArray;
+        msg += " cannot be an array yet";
+      } else if (allowFixed) {
+        // Here a fixed-size array would do.
+        const std::string elem = typeName(at->getElementType());
+        msg += ", and an array has a length ('" +
+               (ast::isa<ast::FunctionType>(at->getElementType())
+                    ? "(" + elem + ")"
+                    : elem) +
+               "[3]')";
+      }
+      error(loc, msg);
       return nullptr;
     }
     FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
@@ -890,6 +937,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     std::vector<ast::Type *> elems;
     elems.reserve(tt->getArity());
     for (size_t i = 0; i < tt->getArity(); ++i) {
+      NoArrayHolder = "a tuple element";
       auto *elemTy = resolveType(tt->getElementType(i), loc,
                                  context + " element " + std::to_string(i));
       if (!elemTy)
@@ -952,16 +1000,16 @@ void Sema::declarePoisoned(Scope *scope, std::string_view name) {
 }
 
 bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc,
-                           bool binds) {
+                           bool binds, std::string_view what) {
   if (isTypeNameForVariable(name)) {
-    error(loc,
-          "'" + name + "' is a type name and cannot be used as a variable");
+    error(loc, "'" + name + "' is a type name and cannot be used as " +
+                   std::string(what));
     return false;
   }
   if (binds && isFunctionNameForVariable(name)) {
     error(loc, "'" + name +
-                   "' is a function of this module and cannot be used as a "
-                   "variable");
+                   "' is a function of this module and cannot be used as " +
+                   std::string(what));
     return false;
   }
   return true;
@@ -986,8 +1034,7 @@ bool Sema::checkDistinctParams(const ast::FuncDecl *fn,
   StringSet seen;
   for (const ast::Param &p : fn->getParams())
     if (!seen.insert(p.getName()).second) {
-      error(fn->getLocation(),
-            "duplicate parameter '" + p.getName() + "' in " + what);
+      error(p.Loc, "duplicate parameter '" + p.getName() + "' in " + what);
       return false;
     }
   return true;
@@ -1042,6 +1089,16 @@ bool Sema::isTypeNameForVariable(const std::string &name) const {
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
          (ast::builtinKindOfName(name, kind) && kind != ast::BuiltinType::Void);
+}
+
+bool Sema::rebindsPoisonedFunctionName(const std::string &name) {
+  if (!isFunctionNameForVariable(name))
+    return false;
+  Scope *owner = CurrentScope->findOwner(name);
+  if (!owner || !ast::isa<ast::PoisonType>(owner->lookup(name)))
+    return false;
+  ++SuppressedFollowOns;
+  return true;
 }
 
 bool Sema::isFunctionNameForVariable(const std::string &name) const {
@@ -1224,10 +1281,7 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
       return fnt;
     }
     if (S.FuncTemplates.count(node->getName())) {
-      S.error(node->getLocation(),
-              "'" + node->getName() +
-                  "' is a generic function; a generic function cannot be a "
-                  "function value yet (wrap a call to it in a lambda)");
+      S.errorGenericFunctionValue(node->getName(), node->getLocation());
       return nullptr;
     }
   }
@@ -1324,10 +1378,22 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
       node->setResolvedType(fnt);
       return fnt;
     }
-    if (S.reportPrivateImport(qualified, node->getLocation()) ||
-        S.reportPrivateImport(node->getEnumName(), node->getLocation()))
+    if (S.FuncTemplates.count(qualified)) {
+      S.errorGenericFunctionValue(qualified, node->getLocation());
       return nullptr;
-    if (!S.isFailedImportUse(node->getEnumName()))
+    }
+    if (S.reportPrivateImport(qualified, node->getLocation()) ||
+        S.reportPrivateImport(node->getEnumName(), node->getLocation()) ||
+        S.isFailedImportUse(node->getEnumName()))
+      return nullptr;
+    // Under an import's qualifier, a value is one of the module's
+    // functions.
+    if (auto q = S.ImportQualifiers.find(node->getEnumName());
+        q != S.ImportQualifiers.end())
+      S.error(node->getLocation(), "'" + qualified +
+                                       "' is not a function of module '" +
+                                       q->second.Module + "'");
+    else
       S.error(node->getLocation(),
               "unknown enum type '" + node->getEnumName() + "'");
     return nullptr;
@@ -1363,7 +1429,10 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
     std::optional<std::vector<ast::Type *>> *argTypes) {
   const ast::SourceLocation loc = node->getLocation();
   const ast::EnumDecl *tmpl = S.EnumTemplates.find(tmplName)->second;
-  const std::string spelled = tmplName + names::kQualSep + variant;
+  // The messages name it as the program spells it, not by another module's
+  // hidden qualifier (a variant made in that module's template).
+  const std::string shown = S.displayName(tmplName);
+  const std::string spelled = shown + names::kQualSep + variant;
   // Written: `Maybe<int>::Just(1)`.
   if (!typeArgAnns.empty()) {
     std::vector<ast::Type *> typeArgs;
@@ -1393,20 +1462,20 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
   while (idx < variants.size() && *variants[idx] != variant)
     ++idx;
   if (idx == variants.size()) {
-    S.error(loc, "enum '" + tmplName + "' has no variant '" + variant + "'");
+    S.error(loc, "enum '" + shown + "' has no variant '" + variant + "'");
     return nullptr;
   }
   const auto &fields = tmpl->getPayload(idx);
   if (fields.empty()) {
     if (argTypes)
-      S.error(loc, "variant '" + variant + "' of enum '" + tmplName +
+      S.error(loc, "variant '" + variant + "' of enum '" + shown +
                        "' has no fields: write '" + spelled +
                        "' without arguments");
     else
-      S.error(loc, "cannot infer the type arguments of generic enum '" +
-                       tmplName + "' for '" + spelled + "': write them ('" +
-                       tmplName + "<...>" + names::kQualSep + variant +
-                       "'), or give the value a type ('x: " + tmplName +
+      S.error(loc, "cannot infer the type arguments of generic enum '" + shown +
+                       "' for '" + spelled + "': write them ('" + shown +
+                       "<...>" + names::kQualSep + variant +
+                       "'), or give the value a type ('x: " + shown +
                        "<...> = " + spelled + "')");
     return nullptr;
   }
@@ -1426,7 +1495,7 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
     for (size_t i = 0; i < fields.size(); ++i)
       list += (i ? ", " : "") + fields[i]->getName() + ": " +
               typeName(fields[i]->getType());
-    S.error(loc, "variant '" + variant + "' of enum '" + tmplName + "' has " +
+    S.error(loc, "variant '" + variant + "' of enum '" + shown + "' has " +
                      std::to_string(fields.size()) + " field(s) (" + list +
                      "), got " + std::to_string(args.size()) + " argument(s)");
     return nullptr;
@@ -1441,9 +1510,9 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
                   .cloneType(f->getType())
             : f->getType());
   std::vector<ast::Type *> typeArgs;
-  if (!S.inferTypeArgs(
-          tmplName, tmpl->getTypeParams(), paramTypes, tys, loc, typeArgs,
-          tmplName + "<...>" + names::kQualSep + variant + "(...)"))
+  if (!S.inferTypeArgs(tmplName, tmpl->getTypeParams(), paramTypes, tys, loc,
+                       typeArgs,
+                       shown + "<...>" + names::kQualSep + variant + "(...)"))
     return nullptr;
   return S.instantiateEnum(tmplName, typeArgs, loc);
 }
@@ -1452,7 +1521,9 @@ ast::Type *
 Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
                                     const std::string &variant,
                                     const std::vector<ast::Type *> *argTypes) {
-  const std::string &callee = node->getCalleeName();
+  // For the messages only: as the program spells it, not by another
+  // module's hidden qualifier (a call in that module's template).
+  const std::string callee = S.displayName(node->getCalleeName());
   int64_t idx = enumTy->findVariant(variant);
   if (idx < 0) {
     S.error(node->getLocation(), "enum '" + enumTy->getName() +
@@ -1582,12 +1653,109 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
     ChainTypes[*it] = visit(*it);
 }
 
+namespace {
+
+// Adds to @p out the names in @p t where inference can bind a type
+// parameter (Sema::unifyTypes): a named type, and the parts of a slice,
+// tuple, optional, function or generic type.
+void inferableNames(ast::Type *t, StringSet &out) {
+  if (!t)
+    return;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(t)) {
+    out.insert(ct->getName());
+  } else if (auto *at = ast::dyn_cast<ast::ArrayType>(t)) {
+    inferableNames(at->getElementType(), out);
+  } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {
+    for (ast::Type *el : tt->getElementTypes())
+      inferableNames(el, out);
+  } else if (auto *ot = ast::dyn_cast<ast::OptionalType>(t)) {
+    inferableNames(ot->getInnerType(), out);
+  } else if (auto *ft = ast::dyn_cast<ast::FunctionType>(t)) {
+    for (ast::Type *p : ft->getParamTypes())
+      inferableNames(p, out);
+    inferableNames(ft->getReturnType(), out);
+  } else if (auto *gt = ast::dyn_cast<ast::GenericType>(t)) {
+    for (ast::Type *arg : gt->getArgs())
+      inferableNames(arg, out);
+  }
+}
+
+// Whether @p types name every one of @p params where inference can bind it.
+bool inferableFrom(const std::vector<const std::string *> &params,
+                   const std::vector<ast::Type *> &types) {
+  StringSet named;
+  for (ast::Type *t : types)
+    inferableNames(t, named);
+  return std::all_of(params.begin(), params.end(),
+                     [&](const std::string *p) { return named.count(*p); });
+}
+
+} // namespace
+
+Sema::ExprChecker::OtherSide
+Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
+  if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
+    return std::min(needsOtherSide(t->getTrueExpr()),
+                    needsOtherSide(t->getFalseExpr()));
+  if (const auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e))
+    return S.EnumTemplates.count(ev->getEnumName()) && !ev->hasTypeArgs()
+               ? OtherSide::Needed
+               : OtherSide::NotNeeded;
+  const auto *call = ast::dyn_cast<ast::CallExpr>(e);
+  if (!call || call->hasTypeArgs())
+    return OtherSide::NotNeeded;
+  const std::string &callee = call->getCalleeName();
+  // `none()`, `res::ok(1)`: a generic function's type parameters that its
+  // parameters leave open come from the type its result flows into.
+  if (auto fn = S.FuncTemplates.find(callee); fn != S.FuncTemplates.end()) {
+    std::vector<ast::Type *> paramTypes;
+    for (const ast::Param &p : fn->second->getParams())
+      paramTypes.push_back(p.ParamType);
+    return inferableFrom(fn->second->getTypeParams(), paramTypes)
+               ? OtherSide::NotNeeded
+               : OtherSide::Needed;
+  }
+  // `Maybe::Just(n)`: a generic enum's variant made with fields, which its
+  // arguments are typed for without the other side's type.  It needs that
+  // type when the fields leave a type parameter open (`Pair::Left(1)` of a
+  // `Pair<A, B>`, `Result::Ok(1)`) or an argument needs it
+  // (`Maybe::Just(Maybe::Nothing)`); otherwise it may infer them.
+  const size_t sep = callee.rfind(names::kQualSep);
+  if (sep == std::string::npos)
+    return OtherSide::NotNeeded;
+  auto tmpl = S.EnumTemplates.find(callee.substr(0, sep));
+  if (tmpl == S.EnumTemplates.end())
+    return OtherSide::NotNeeded;
+  const ast::EnumDecl *ed = tmpl->second;
+  const std::string_view variant = std::string_view(callee).substr(sep + 2);
+  for (size_t v = 0; v < ed->getNumVariants(); ++v) {
+    if (*ed->getVariants()[v] != variant)
+      continue;
+    std::vector<ast::Type *> fieldTypes;
+    for (const ast::VarDecl *f : ed->getPayload(v))
+      fieldTypes.push_back(f->getType());
+    if (!inferableFrom(ed->getTypeParams(), fieldTypes))
+      return OtherSide::Needed;
+  }
+  for (const ast::Expr *arg : call->getArguments())
+    if (needsOtherSide(arg) == OtherSide::Needed)
+      return OtherSide::Needed;
+  return OtherSide::Helps;
+}
+
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // A numeric literal operand takes the other operand's sized type (`x + 1`
-  // with `x: u8` adds two `u8`), so the non-literal operand is typed first.
+  // with `x: u8` adds two `u8`), so the non-literal operand is typed first,
+  // and so is the operand of `==` or `!=` a generic enum's variant or a
+  // generic function's call without type arguments takes them from
+  // (`Maybe::Nothing == m`, `res::ok(1) == r`; needsOtherSide).
   ast::Type *lhsTy = nullptr;
   ast::Type *rhsTy = nullptr;
-  if (isNumericLiteral(node->getLHS()) && !isNumericLiteral(node->getRHS())) {
+  const bool equality = node->getOpcode() == ast::BinaryOpcode::Eq ||
+                        node->getOpcode() == ast::BinaryOpcode::Ne;
+  if ((isNumericLiteral(node->getLHS()) && !isNumericLiteral(node->getRHS())) ||
+      (equality &&
+       needsOtherSide(node->getLHS()) > needsOtherSide(node->getRHS()))) {
     rhsTy = visit(node->getRHS());
     lhsTy = visitOperand(node->getLHS(), rhsTy);
   } else {
@@ -1662,10 +1830,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   auto *rhsBT = ast::dyn_cast<ast::BuiltinType>(rhsTy);
   const bool numericPair =
       lhsBT && rhsBT && lhsBT->isNumeric() && rhsBT->isNumeric();
-  const bool intWithFloat =
-      (lhsTy == S.Ctx.getIntTy() && rhsTy == S.Ctx.getFloatTy()) ||
-      (lhsTy == S.Ctx.getFloatTy() && rhsTy == S.Ctx.getIntTy());
-  if (numericPair && lhsTy != rhsTy && !intWithFloat) {
+  ast::Type *promoted = S.promotedOperandType(lhsTy, rhsTy);
+  if (numericPair && lhsTy != rhsTy && !promoted) {
     S.error(node->getLocation(),
             "operator '" + std::string(node->getOpcodeStr()) +
                 "' is not defined for types '" + typeName(lhsTy) + "' and '" +
@@ -1675,23 +1841,26 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     return nullptr;
   }
 
-  // Equality requires compatible types.
-  if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
-       node->getOpcode() == ast::BinaryOpcode::Ne)) {
-    // Same type is always OK (types are canonical, so `(int, Str) == (int,
-    // Str)` unifies while `(int, Str) == (Str, int)` stays an error).
-    if (!typesEqual(lhsTy, rhsTy)) {
-      // Allow class subtype comparisons (either direction).
-      auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
-      auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
-      if (!lhsCT || !rhsCT ||
-          (!lhsCT->isSubtypeOf(rhsCT) && !rhsCT->isSubtypeOf(lhsCT))) {
-        S.error(node->getLocation(),
-                "operands of '" + std::string(node->getOpcodeStr()) +
-                    "' have mismatched types '" + typeName(lhsTy) + "' and '" +
-                    typeName(rhsTy) + "'");
-        return nullptr;
-      }
+  // A comparison takes two operands of one type (types are canonical, so
+  // `(int, Str) == (int, Str)` unifies while `(int, Str) == (Str, int)`
+  // stays an error), or `int` with `float`, compared as floats (`2 ==
+  // 2.0`), and equality two classes one of which is the other's subclass.
+  // Not two tuples whose elements differ so (`(1, 2) == (1, 2.0)`), nor a
+  // char with a number, for `<` as for `==` (`c < 100`).
+  const ast::BinaryOpcode op = node->getOpcode();
+  const bool comparison =
+      op == ast::BinaryOpcode::Lt || op == ast::BinaryOpcode::Gt ||
+      op == ast::BinaryOpcode::Le || op == ast::BinaryOpcode::Ge || equality;
+  if (comparison && !typesEqual(lhsTy, rhsTy) && !promoted) {
+    auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
+    auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
+    if (!equality || !lhsCT || !rhsCT ||
+        (!lhsCT->isSubtypeOf(rhsCT) && !rhsCT->isSubtypeOf(lhsCT))) {
+      S.error(node->getLocation(),
+              "operands of '" + std::string(node->getOpcodeStr()) +
+                  "' have mismatched types '" + typeName(lhsTy) + "' and '" +
+                  typeName(rhsTy) + "'");
+      return nullptr;
     }
   }
 
@@ -1716,11 +1885,7 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   case ast::BinaryOpcode::Div:
   case ast::BinaryOpcode::Mod:
     // One numeric type gives that type; `int` with `float` gives `float`.
-    if (numericPair && lhsTy == rhsTy)
-      return lhsTy;
-    if (lhsTy == S.Ctx.getFloatTy() || rhsTy == S.Ctx.getFloatTy())
-      return S.Ctx.getFloatTy();
-    return S.Ctx.getIntTy();
+    return promoted ? promoted : lhsTy;
 
   // Relational / Equality: result is bool.
   case ast::BinaryOpcode::Lt:
@@ -2075,17 +2240,19 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
 
   // A method cannot be called on an optional receiver (it may be None),
-  // but for the builtin `Show`'s `toString()` of an optional object or
-  // scalar: "None", or its value's text.
+  // but for the builtin `Show`'s `toString()` of an optional whose value
+  // has a text: "None", or the value's text.
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
-    ast::Type *inner = ot->getInnerType();
     if (node->getMethodName() == names::kMethodToString &&
-        node->getNumArguments() == 0 &&
-        (ast::isa<ast::ClassType>(inner) || ast::isa<ast::TupleType>(inner) ||
-         ast::isa<ast::EnumType>(inner) ||
-         (ast::isa<ast::BuiltinType>(inner) && inner != S.Ctx.getVoidTy()))) {
-      node->setResolvedType(S.Ctx.getStrTy());
-      return S.Ctx.getStrTy();
+        node->getNumArguments() == 0) {
+      if (S.hasText(ot)) {
+        node->setResolvedType(S.Ctx.getStrTy());
+        return S.Ctx.getStrTy();
+      }
+      if (std::string why = S.noTextReason(ot); !why.empty()) {
+        S.errorNoToString(node->getLocation(), ot, why);
+        return nullptr;
+      }
     }
     S.errorOptionalUnwrap(node->getLocation(), ot);
     return nullptr;
@@ -2113,22 +2280,27 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::StructType *st = ast::dyn_cast<ast::StructType>(recvTy);
 
   // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
-  // or on an enum (its variant, and its fields): the builtin `Show`;
-  // `n.hash()` on an int, bool or char, and `s.hash()` on a Str: the builtin
-  // `Hashable`.
+  // or on an enum (its variant, and its fields), each part of which has a
+  // text: the builtin `Show`; `n.hash()` on an int, bool or char, and
+  // `s.hash()` on a Str: the builtin `Hashable`.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
        ast::isa<ast::TupleType>(recvTy) || ast::isa<ast::EnumType>(recvTy)) &&
-      mname == names::kMethodToString)
+      mname == names::kMethodToString) {
+    if (!S.hasText(recvTy)) {
+      S.errorNoToString(node->getLocation(), recvTy, S.noTextReason(recvTy));
+      return nullptr;
+    }
     builtinResult = S.Ctx.getStrTy();
-  else if (mname == names::kMethodHash &&
-           ((ast::isa<ast::BuiltinType>(recvTy) &&
-             (ast::cast<ast::BuiltinType>(recvTy)->isInteger() ||
-              recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
-            ct == S.Ctx.getStrTy()))
+  } else if (mname == names::kMethodHash &&
+             ((ast::isa<ast::BuiltinType>(recvTy) &&
+               (ast::cast<ast::BuiltinType>(recvTy)->isInteger() ||
+                recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
+              ct == S.Ctx.getStrTy())) {
     builtinResult = S.Ctx.getIntTy();
+  }
   if (builtinResult) {
     if (node->getNumArguments() != 0) {
       S.error(node->getLocation(), "method '" + mname +
@@ -2535,9 +2707,11 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
-  // A generic enum's variant in an arm takes its type arguments from the
-  // slot the value flows into, else (the false arm) from the true arm's
-  // type: `if c then Maybe::Just(1) else Maybe::Nothing`.
+  // A generic enum's variant or a generic function's call in an arm takes
+  // its type arguments from the slot the value flows into, else from the
+  // other arm's type: the arm that needs it less is typed first (`if c then
+  // Maybe::Just(1) else Maybe::Nothing`, `if c then Maybe::Nothing else
+  // Maybe::Just(1)`, `if c then none() else Maybe::Just(1)`).
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
   auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
     if (want &&
@@ -2547,8 +2721,16 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     return visit(arm);
   };
   auto *condTy = visit(node->getCondition());
-  auto *trueTy = visitArm(node->getTrueExpr(), expected);
-  auto *falseTy = visitArm(node->getFalseExpr(), expected ? expected : trueTy);
+  ast::Type *trueTy = nullptr;
+  ast::Type *falseTy = nullptr;
+  if (!expected && needsOtherSide(node->getTrueExpr()) >
+                       needsOtherSide(node->getFalseExpr())) {
+    falseTy = visitArm(node->getFalseExpr(), nullptr);
+    trueTy = visitArm(node->getTrueExpr(), falseTy);
+  } else {
+    trueTy = visitArm(node->getTrueExpr(), expected);
+    falseTy = visitArm(node->getFalseExpr(), expected ? expected : trueTy);
+  }
   if (!condTy || !trueTy || !falseTy)
     return nullptr;
 
@@ -2750,6 +2932,16 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       const std::string &name = target.getName();
       if (!seen.insert(name).second || isTypeNameForVariable(name))
         continue;
+      // A function's name is reported all the same, and poisoned, as in
+      // visitAssignStmt.
+      if (isFunctionNameForVariable(name)) {
+        if (!rebindsPoisonedFunctionName(name)) {
+          checkBinderName(name, target.Loc);
+          if (!CurrentScope->findOwner(name))
+            declarePoisoned(CurrentScope, name);
+        }
+        continue;
+      }
       if (target.DeclType) {
         if (CurrentScope->contains(name))
           continue; // a redeclaration: the existing binding stands
@@ -2802,6 +2994,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
 
     if (!seen.insert(name).second) {
       error(target.Loc, "duplicate target '" + name + "' in destructuring");
+      ok = false;
+      continue;
+    }
+    if (rebindsPoisonedFunctionName(name)) {
       ok = false;
       continue;
     }
@@ -3225,6 +3421,27 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     InstantiationStack = std::move(savedStack);
   }
   DeferredOptionalChecks.clear();
+  // Every type's name is known: the fields of a template that was not
+  // instantiated yet are checked as an instantiation's would be, in the
+  // order the templates are written.
+  std::vector<const ast::Decl *> templates(node->getGenericClassDecls().begin(),
+                                           node->getGenericClassDecls().end());
+  templates.insert(templates.end(), node->getGenericStructDecls().begin(),
+                   node->getGenericStructDecls().end());
+  templates.insert(templates.end(), node->getGenericEnumDecls().begin(),
+                   node->getGenericEnumDecls().end());
+  // By position, never by address, so the order is deterministic; stable,
+  // so templates without a position keep the AST's order.
+  // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
+  std::stable_sort(templates.begin(), templates.end(),
+                   [](const ast::Decl *a, const ast::Decl *b) {
+                     return std::pair(a->getLocation().getLineStart(),
+                                      a->getLocation().getColumnStart()) <
+                            std::pair(b->getLocation().getLineStart(),
+                                      b->getLocation().getColumnStart());
+                   });
+  for (const ast::Decl *tmpl : templates)
+    checkTemplateFieldNames(tmpl);
   // Then the traits' signatures, which may name the classes, and the
   // `impl` blocks, which record what implements a trait; only then can a
   // template's bounds be checked (SemaTraits.cpp).
@@ -3507,15 +3724,22 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   if (!valTy) {
     // The value's error was reported.  A first assignment still declares the
     // variable -- poisoned -- so its uses are not reported as undeclared; an
-    // existing variable keeps its type.
+    // existing variable keeps its type.  A function's name is reported all
+    // the same, binding it being an error of its own, so the binding that
+    // poisons it always has its error (rebindsPoisonedFunctionName).
+    if (isFunctionNameForVariable(varName) &&
+        !rebindsPoisonedFunctionName(varName))
+      checkBinderName(varName, node->getLocation());
     if (!isTypeNameForVariable(varName) && !CurrentScope->findOwner(varName))
       declarePoisoned(CurrentScope, varName);
     return false;
   }
 
   // Guard: the target name must not shadow a type, a function or a reserved
-  // name.  A function's name is then poisoned, so its uses that follow are
-  // not reported again as uses of the function.
+  // name.  A function's name is then poisoned, so its uses and assignments
+  // that follow are not reported again.
+  if (rebindsPoisonedFunctionName(varName))
+    return false;
   if (!checkBinderName(varName, node->getLocation())) {
     if (isFunctionNameForVariable(varName) && !CurrentScope->findOwner(varName))
       declarePoisoned(CurrentScope, varName);
@@ -3945,15 +4169,15 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getMutableParams()) {
-    if (!checkBinderName(p.getName(), node->getLocation(),
-                         /*binds=*/!node->isNative())) {
+    if (!checkBinderName(p.getName(), p.Loc, /*binds=*/!node->isNative(),
+                         "a parameter name")) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *ty = resolveValueType(p.ParamType, node->getLocation(),
-                                "parameter '" + p.getName() + "'");
+    auto *ty =
+        resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
     if (!ty) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
@@ -4787,6 +5011,18 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
           std::string msg = "'" + variant;
           msg += "' is not a valid match arm; use the bare variant name '";
           msg += bare + "'";
+          error(arm->getLocation(), msg);
+        } else if (variant.empty()) {
+          // A type that is no name (`int`, `(int, Str)`, `E?`, `int[3]`)
+          // cannot be one.
+          std::string msg = "'" + typeName(arm->getArmType()) +
+                            "' is not a variant of enum '" +
+                            subjectTy->getName() + "'";
+          if (subjectTy->getNumVariants() != 0) {
+            msg += ": an arm names one of its variants, such as '";
+            msg += *subjectTy->getVariants().front();
+            msg += "'";
+          }
           error(arm->getLocation(), msg);
         } else {
           error(arm->getLocation(), "'" + variant +

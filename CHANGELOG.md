@@ -611,6 +611,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
   prints, compiled with the runtime's sources (`StdlibTestsC`, `--cc <compiler>`).  The
   samples corpus is built at -O0 too (`SamplesParityBuildO0`).
+- A tuple, struct, enum or optional holding a function value does not implement `Show`
+  (*Fixed*): `io::println(S(fn(x: int) => x + k))` for `struct S { f: (int) -> int; }`,
+  `io::println((1, f))`, `E::F(f).toString()` for `enum E { F(h: (int) -> int), N }` and
+  `O(None)` for `struct O { g: ((int) -> int)?; }` compiled and printed the closure's code
+  address and environment (`S(f: (139785902924240, Object@0x55b69d53ee30))`, `O(g: (0,
+  None))`), different on every run.  An aggregate now implements `Show` only when every
+  element, field, variant field and optional's value does (`Sema::hasText`, the one rule
+  for which types show themselves), so these are errors naming the part that does not:
+  `'S' does not implement trait 'Show', which 'io::println' requires of 'T': its field 'f'
+  has type '(int) -> int', which does not implement it`, for a `T: Show` bound,
+  `toString()` (`no method 'toString' on type 'S', which does not implement trait 'Show':
+  ...`) and `impl Show for S {}` (`struct 'S' cannot implement 'Show' (its 'toString' is
+  built in): ...`), through nested aggregates (`its field 's' has type 'S', whose field 'f'
+  has type ...`).  A function value inside an object does not count: the object shows
+  itself through its class.  No program of the standard library, the samples or the docs
+  printed such a value.
+- A `char` ordered against a number by `<`, `<=`, `>` or `>=` is an error, as `==` on the
+  pair is: `c < 100`, `c < n` and `100 > c` got past Sema and stopped the compiler with
+  `paykan: PIR verification failed: ... cmp operands have different types: char and i64`
+  on every path, and now are `operands of '<' have mismatched types 'char' and 'int'` (`'int'
+  and 'char'` for `100 > c`), with the line and caret of the compare.  Compare with a char
+  (`c < 'd'`) or the byte value (`int(c) < 100`) (docs/language/02-basics.md, "Relational &
+  Equality").  No program that ran or built is rejected, though `--check-only` accepted
+  these.
+- A trait requirement's parameters follow a function's rules: two of one name (`trait T {
+  fn m(x: int, x: int); }`) are `duplicate parameter 'x' in method 'm' of trait 'T'`, and
+  one named like a type (`fn m(u8: int)`, a class's name) is `'u8' is a type name and
+  cannot be used as a parameter name`, at the parameter.  Both were accepted, unlike a
+  function's or a method's parameters (docs/language/06-traits.md, "Semantic Checks").  A
+  function of the module may still name one, the requirement having no body, as for a
+  native function.
+- `destroy` cannot name a method or a `static fn` anywhere: a struct's `impl` block took
+  `fn destroy()` as an ordinary method, which no call could reach (`p.destroy()` was
+  `'destroy' cannot be called directly; an object is destroyed automatically ...`, wrong for
+  a struct), and `static fn destroy()` too, a generic struct's as well; a class's `impl`
+  block got `class 'A' already has a method 'destroy' (from 'Obj')` and its body `'destroy'
+  is the compiler-generated destructor and cannot be overridden`.  Each is now the one
+  error `'destroy' is reserved for the compiler-generated destructor and cannot be declared
+  in class 'A'` (`... in struct 'P' (a struct has none)`), for a class body's method and
+  an `impl` block's method or `static fn` of a class or a struct, generic or not
+  (`Sema::rejectReservedDestroy`), and a call of the rejected `static fn` is a follow-on;
+  a bodiless one in an `impl` block, a `static fn` too, is the syntax error `'destroy' is
+  reserved for the compiler-generated destructor and cannot be declared`, at the function
+  as Sema's (docs/language/05-classes.md, 11-structs.md, "Semantic Checks").
+- A compilation prints at most 20 errors: past them `paykan` prints `note: stopping after
+  20 errors, the error limit (--error-limit=N sets it, and --error-limit=0 shows every
+  error)` and no more diagnostics, though it still exits with status 1 (and a file that
+  does not parse still ends with `parsing failed with N error(s)`, counting them all).  The
+  new `--error-limit=N` sets the limit (`0` for none; leading zeros are allowed); warnings
+  and notes do not count, and an imported module's errors count against the importer's
+  limit.  And a source line longer than 120 characters is shown in 120 around the caret,
+  `...` standing for what is cut, a line above or below it whole if it fits in 120 and
+  from the same column if not, where every error printed its whole line and the lines
+  around it: 10000 errors on one 148 KB line printed 2.2 GB, and print 5 KB now; with
+  `--error-limit=0`, 20000 errors on one 100 KB line take 1 s to print 5 MB, where they
+  took 24 s to print 2.8 GB.  Only the characters around the caret are looked at, so an
+  error's cost does not grow with its line either.  A caret whose column is past its line
+  (a frontend plugin's AST of another file) stands after the line's last character.  The
+  caret counts a UTF-8 character as one, and each byte in none (a Latin-1 file's `©`) as
+  one too, where it counted bytes and stood to the right of its place after a UTF-8
+  character (docs/language/17-the-paykan-command.md).
+- A field named like a type is an error whatever declares it: `class C { u8: int; }` with
+  `impl C { fn __init__() { self.u8 = 1; } }`, `struct S { Str: int; }` with its own
+  `__init__` and `enum E { B(u8: int) }` compiled, since only the default `__init__`'s
+  parameters were checked, which a written one replaces and a variant has none of, against
+  docs/language/02-basics.md ("Builtin Names Are Reserved").  The field itself is checked
+  now: `'u8' is a type name and cannot be used as a field name`, at the field; a generic
+  type's once, at its template, whether or not it is instantiated (`struct Box<T> { u8: T;
+  }` compiled until a program instantiated it, and was then reported once per
+  instantiation).  And a
+  parameter named like a type or like a function of the module is reported at the
+  parameter, as one (`'u8' is a type name and cannot be used as a parameter name`), where
+  the error stood under the whole function, lambda or trait requirement (the whole struct
+  or class for a field) and said `... as a variable`; so is a parameter's type error
+  (`parameter 'v' cannot have type 'void'`), a method's parameter named `self`, and a
+  duplicate parameter, at the second.  A `param` of the AST interchange format has its
+  location, which is optional: one without it is at its function's or lambda's
+  (docs/plugins/ast-format.md).  `--emit-ast` writes it, so a reader of the format takes it
+  (the 0.2.0 format had none).
 - `paykan build --track-heap` is an error (``--track-heap applies to `run`: to track the
   heap of a program `build` wrote, run it with PAYKAN_TRACK_HEAP set``), where it was
   accepted and did nothing: the executable tracks its heap when it runs with
@@ -1180,6 +1259,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MB to `--emit-pir`, most of it spent printing 96 MB of indented PIR, and 7.8 s and 82 MB
   to `build`, most of it in the MLIR and LLVM pipelines.  The verifier reports what it did
   before, and the samples compile as fast as they did.
+- `==` and `!=` did not take an `int` with a `float`, though `<`, `<=`, `>`, `>=` and the
+  arithmetic did and the docs say the one promotion is `int` with `float`: `x == y` with
+  `x = 2; y = 2.0;`, `1 == 1.0` and `2.5 != x` were `operands of '==' have mismatched types
+  'int' and 'float'`.  They now compare as floats, the int converted (`2 == 2.0` is `True`,
+  a NaN is unequal to every int), on every path; `(1, 2) == (1, 2.0)` stays an error, the
+  tuples being of two types.  The pairing is one rule, `Sema::promotedOperandType`, which
+  arithmetic, the ordering compares and equality ask (docs/language/02-basics.md,
+  "Relational & Equality").  `samples/codegen/73_int_float_equality.pkn` compares the pair
+  in each order, through a parameter, a field and a loop's condition.
+- A generic enum's variant written without type arguments took them from the other side of
+  `==` or `!=`, or the other arm of a conditional expression, only when it came second:
+  `x == Maybe::Nothing` and `if c then Maybe::Just(n) else Maybe::Nothing` compiled, but
+  `Maybe::Nothing == x`, `Maybe::Nothing != Maybe::Just(1)` and `b = if n > 0 then
+  Maybe::Nothing else Maybe::Just(n)` were `cannot infer the type arguments of generic enum
+  'Maybe' for 'Maybe::Nothing': ...`, and `Result::Ok(1) == r` could not infer `E`, against
+  docs/language/07-enums.md, which names no order.  So could a generic function's call that
+  takes its type arguments from the type its result flows into (`fn none<T>() -> Maybe<T>`,
+  `res::ok(1)`): `r == res::ok(1)` compiled, `res::ok(1) == r` did not.  The side that
+  needs the other's type less is now typed first (`ExprChecker::needsOtherSide`: a variant
+  without fields needs it, and so does a variant whose fields leave a type parameter open
+  (`Pair::Left(1)` of a `Pair<A, B>`, `Result::Ok(1)`) or whose field needs it
+  (`Maybe::Just(Maybe::Nothing)`), and a generic function's call whose parameters leave
+  one open; another variant made with fields may infer them from its fields; anything else
+  does not need it; of two that need it as much, the first is typed first), in either
+  order of `==` and `!=` and of a conditional's arms, nested conditionals and a
+  conditional compared with a variant too; so `Maybe::Just(200) == small` with `small:
+  Maybe<u8>` compares two `Maybe<u8>`, as its mirror did, and `Maybe::Just(1) == none()`
+  and `if c then Maybe::Just(2) else none()` give `none` the variant's type, as they did.
+  `Maybe::Nothing == Maybe::Nothing` and `none() == none()` stay errors, having nothing to
+  take them from.  `samples/codegen/74_generic_enum_either_side.pkn` runs each form.
+- A declaration named like a type an import reached is reported as the conflict it is,
+  whatever it declares: `enum ErrorCode { A }` in a program that imports `::io` was
+  `redefinition of enum 'ErrorCode'`, and `enum Error { B }`, `struct ErrorCode { ... }`,
+  `trait File {}` or `fn Error()` said `'Error' is already declared as a struct` (or a
+  class, or an enum), as if the program had declared it; each is now `enum 'ErrorCode'
+  conflicts with an imported type of the same name` (`struct ...`, `trait ...`, `function
+  ...`), the words `class File` already got.  Two enums of the program stay `redefinition of
+  enum 'E'`.  And the docs no longer say a program that imports `::io` cannot declare its
+  own `Result`: a generic type of a module is named through it (`res::Result<int, Str>`)
+  and leaves its name free, as a program's `class Result` next to the library's showed
+  (docs/language/02-basics.md, "Builtin Names Are Reserved"; 15-modules.md;
+  docs/stdlib/index.md).
+- A module's generic function used as a value, `x = io::println`, was `unknown enum type
+  'io'`, and so was a name the module does not have (`x = io::nosuch`, `col::List`).  The
+  first is now the error a local generic function gets, `'io::println' is a generic
+  function; a generic function cannot be a function value yet (wrap a call to it in a
+  lambda)` (one helper, `Sema::errorGenericFunctionValue`, says it for both), and the
+  second `'io::nosuch' is not a function of module '::io'`, naming the module as imported;
+  `unknown enum type 'Nope'` stays for a qualifier that is no module's
+  (docs/language/14-function-types.md, "Function Values").
+- Two imports binding one qualifier name each module by its canonical name: `import
+  a::util; import ::io as util;` said `import of module 'io': qualifier 'util' already names
+  module 'a::util'`, dropping the system module's `::` (and `... already names module 'io'`
+  in the other order); it is `import of module '::io': ...` and `... already names module
+  '::io'` now (docs/language/15-modules.md, "Aliased Import").
+- A `match` arm on an enum whose type is no name, `a: int { }` (or a tuple, an optional, an
+  array), was `'' is not a variant of enum 'E'`; it names the type and what an arm names
+  now: `'int' is not a variant of enum 'E': an arm names one of its variants, such as 'A'`
+  (docs/language/08-match.md, "Semantic Checks").
+- A slice type outside a parameter suggests a length only where a fixed-size array would
+  do: `struct P { a: int[]; }`, `enum E { A(a: int[]) }` and `t: (int[], int)` were told
+  `... a slice can only be a 'view' or 'inout' parameter, and an array has a length
+  ('int[3]')`, which those positions reject in turn; they now end `..., and a struct field
+  (a variant's field, a tuple element) cannot be an array yet`, an optional's value or a
+  type argument (`int[]?`) gets no hint, and a local, a result and a class field keep
+  `('int[3]')`.  The fixed-size array error names the field it can be: `... can only be a
+  local variable, a parameter, a result or a class field for now`, where it said `a field`
+  (docs/language/09-arrays.md, "Slices" and "Limits for now"; 10-tuples.md).
+- The error for a local named like a function of the module is reported once, as its
+  entry above says: `func = 1; func = 2; func = 3;` reported `'func' is a function of this
+  module and cannot be used as a variable` three times, once per assignment, and a
+  destructuring target binding the name again (`func, b = (3, 4)`) once more.  The first
+  rejected binding poisons the name, and an assignment or a destructuring target binding it
+  again is now its follow-on (`Sema::rebindsPoisonedFunctionName`), in an inner block too
+  (docs/language/02-basics.md, "Scoping Rules").  The first binding is reported though its
+  value has an error of its own: `func = nope; func = 2;` reported `func` at the second
+  assignment, `func: int, b: int = nope;` bound the name to an `int`, and `a, func = 5;`
+  did not report it at all.
+- An error in an imported module's template, reported where the program instantiates it,
+  names the module's generic enum, its variants and its generic functions as the program
+  spells them: `R::Ok(s)` in `fn wrap<T>(s: view T) -> R<T>` of `lib::g` said `parameter 1
+  of '$lib::g::R::Ok' is not one`, with the module's hidden qualifier, and so did a
+  variant's wrong field type, a variant written with arguments it has no fields for, the
+  type arguments a variant or a generic function's call cannot infer (`'$lib::g::pick'`)
+  and their hints; they say `lib::g::R::Ok` and `lib::g::pick` now.
+- A subclass's default `__init__` names the superclass constructor's parameters as they
+  are declared: `Named(1, 2)` for `class Named : Point { name: Str; }` with `class Point {
+  x: int; y: int; }` said `function 'Named' expects 3 argument(s), got 2 (it has no
+  '__init__', so it takes arg1: int, arg2: int, name: Str)`, and says `... so it takes x:
+  int, y: int, name: Str` now, through a chain of default ones and from a written
+  `__init__` too, as does the error of an `__init__` that does not call `__super__` (`its
+  default '__init__' takes ...`).  The names are the method's own
+  (`MethodDecl::ParamNames`), kept apart from its parameters' modes, which the calling
+  convention reads and which named the parameters only when one was `view` or `inout`.  An
+  imported superclass's are still `arg1`, `arg2`, ... unless one of them is `view` or
+  `inout`, its module recording no other names (docs/language/05-classes.md, "The default
+  `__init__`").
 - `paykan build` could write its executable over the source file, and `--emit-pkm` and
   `pkm extract --object` their output over their input, each with exit status 0: `build
   noext` replaced `noext`, `build main.pkn.bak` replaced `main.pkn` (another source), and

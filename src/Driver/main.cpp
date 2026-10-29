@@ -779,6 +779,7 @@ int main(int argc, char *argv[]) {
   // driver and is filled by parseFile before the parser runs, so handing its
   // address over now is safe -- the vector itself never moves.
   paykan::sema::DiagEngine diag(std::cerr);
+  diag.setErrorLimit(opts.ErrorLimit);
   paykan::frontend::Options feOpts;
   feOpts.TraceParsing = opts.TraceParsing;
   feOpts.TraceScanning = opts.TraceScanning;

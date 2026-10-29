@@ -594,7 +594,8 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     auto *l = cast<LambdaExpr>(e);
     std::vector<Param> params;
     for (const Param &p : l->getParams())
-      params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode});
+      params.push_back(
+          Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Loc});
     auto *copy = Ctx.make<LambdaExpr>(loc, std::move(params),
                                       cloneType(l->getReturnType()),
                                       cloneCompound(l->getBody()));
@@ -734,7 +735,8 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   std::vector<Param> params;
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
-    params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode});
+    params.push_back(
+        Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Loc});
   auto *clone = Ctx.make<FuncDecl>(
       fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));

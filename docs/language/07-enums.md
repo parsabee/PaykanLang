@@ -429,7 +429,10 @@ the ones every `match` arm has ([Borrowing the subject](08-match.md#borrowing-th
 ### Text and equality
 
 `toString()`, and so `io::println`, gives the variant's name followed by its fields as a struct
-shows them, `Rect(w: 2, h: 3)`, or the bare name for a variant without fields, `Empty`. `==`
+shows them, `Rect(w: 2, h: 3)`, or the bare name for a variant without fields, `Empty`. An
+enum with a variant field that does not implement `Show`, a function value, does not either,
+whatever its value's variant: `io::println(e)` and `e.toString()` are errors naming the field
+(`its field 'h' of variant 'F' has type '(int) -> int', which does not implement it`). `==`
 and `!=` compare two values of the same tagged union: equal when they are the same variant
 with equal fields (compared as a struct's are: a `Str` by its text, an object by its
 `equals`). As for any enum, there is no ordering.
@@ -568,8 +571,15 @@ A variant written without its type arguments gets them, in this order:
 2. **From the type the value flows into**, when that is an instantiation of the same enum: a
    variable's declared type, a parameter's, a result's, a field's, an array element's, the
    other side of `==` or `!=`, or the other arm of a conditional expression (`if n > 0 then
-   Maybe::Just(n) else Maybe::Nothing`). It comes before inference, so `m: Maybe<u8> =
-   Maybe::Just(200)` holds a `u8`.
+   Maybe::Just(n) else Maybe::Nothing`). The other side or arm may be on either side
+   (`Maybe::Nothing == m`, `if n > 0 then Maybe::Nothing else Maybe::Just(n)`): the one that
+   needs the other's type less is typed first. A variant without fields needs it, and so does
+   one whose fields leave a type parameter open (`Pair::Left(1)` of an `enum Pair<A, B> {
+   Both(a: A, b: B), Left(a: A) }`) or whose field needs it (`Maybe::Just(Maybe::Nothing)`),
+   and a call of a generic function whose arguments leave one open (`none()` of a `fn
+   none<T>() -> Maybe<T>`); another variant made with fields needs it less, and anything
+   else not at all. Of two sides that need it as much, the first is typed first. It comes
+   before inference, so `m: Maybe<u8> = Maybe::Just(200)` holds a `u8`.
 3. **Inferred from the variant's fields**, as a generic class's constructor infers them:
    `Maybe::Just(3)` is a `Maybe<int>`, and `Maybe::Just(x)` in a generic function a `Maybe<T>`.
 
@@ -614,7 +624,7 @@ holds it in field 'tail'`), and a recursive one goes through a class, as `Expr` 
 | Binding a variant without fields | `x: Empty { … }` where the variant `Empty` has no fields |
 | Unknown field | `r.z` where the variant's fields have no `z` (`no field 'z' in variant 'Rect' of enum 'Shape'`) |
 | Enum holds itself | A variant's fields hold the enum, directly or through a struct or a tuple |
-| Bad field | Two fields of one variant share a name, a field is a fixed-size array, or a `view` is stored in one |
+| Bad field | Two fields of one variant share a name, one is named like a type (`B(u8: int)`: `'u8' is a type name and cannot be used as a field name`), a field is a fixed-size array, or a `view` is stored in one |
 | Generic enum without type arguments | `m: Maybe = …` for a generic `Maybe` (`write 'Maybe<...>'`) |
 | Type arguments cannot be inferred | A variant of a generic enum without written type arguments, an expected type of the same enum, or fields that determine them (`x = Maybe::Nothing;`, `Result::Ok(1)`) |
 | Wrong type arguments | `Maybe<int, int>` for a one-parameter enum, an argument that does not satisfy a bound, or `Color<int>` for an enum that is not generic |
