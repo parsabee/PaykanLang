@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
 ### Added
 
 - Pure virtual methods (docs/language/05-classes.md, "Pure virtual methods", #18): a method
@@ -433,10 +435,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** the runtime ABI and PIR are 0.3.0's (the version is `0.3.0-dev`,
-  `PAYKAN_RUNTIME_ABI_VERSION` 300), for borrowed box parameters (#98): a function that
-  takes a reference, a `box` parameter, now also takes an ownership mask after its
-  parameters, a `uint64_t` whose bit k says whether the caller hands its k-th box argument
+- **Breaking:** the runtime ABI and PIR are 0.3.0's (`PAYKAN_RUNTIME_ABI_VERSION` 300),
+  for borrowed box parameters (#98): a function that takes a reference, a `box`
+  parameter, now also takes an ownership mask after its parameters, a `uint64_t` whose
+  bit k says whether the caller hands its k-th box argument
   over (the callee releases it, keeps it or hands it on, as before) or lends it, keeping
   the object alive until the call returns (docs/pir.md §3; Runtime.h, "The ownership
   mask").  The 65th box parameter and those after it have no bit and are always handed
@@ -531,6 +533,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   data accesses and the same cache misses, +5%).
   Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
   always 0 (docs/design/pkm.md §3.5, §5.9).
+- Versions: every format carries the release version, 300 (dotted `0.3.0`), as in 0.2.0:
+  PIR (binary, and the text a backend plugin receives), the runtime ABI, the `.pkm`
+  container, manifest and interface, the plugin API and the AST interchange format
+  (`(paykan-ast 0.3.0 ...)`).  A prebuilt `.pkm` or a loadable plugin of 0.2.0 is
+  rejected, and a cache entry that 0.2.0 or a development build wrote is rebuilt.  0.3.0
+  accepts plugins built with 0.3.0 only: PIR and the runtime ABI changed incompatibly
+  since 0.2 (a function that takes a box takes the ownership mask, above).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
   while the result is used (docs/language/03-functions.md, "Where an `inout` result can
   point"): into `self` (a field of a class's `self`, or a field of a struct held in it; a
@@ -3871,7 +3880,8 @@ statically-typed, object-oriented language that compiled to LLVM IR and was
 - The `destroy()` destructor is compiler-generated and final: user classes cannot
   override it, and direct calls are rejected at compile time.
 
-[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/parsabee/PaykanLang/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/parsabee/PaykanLang/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/parsabee/PaykanLang/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.1.0
