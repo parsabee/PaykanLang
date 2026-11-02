@@ -39,21 +39,21 @@ PAYKAN_NORETURN static void count_overflow(const char *kind) {
 
 // -- Strong references
 
+// An object whose strong count is PAYKAN_REF_MAX is immortal (the
+// concurrency prototype's atomic cells, Atomic.c): nothing counts it, so a
+// handle to it crosses threads with no atomic count.  (Before the
+// prototype that count was an overflow, which the retain reported; the
+// retain that reaches it now leaves the object immortal instead.)
+
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
-  if (obj) {
-    if (PAYKAN_UNLIKELY(obj->strong == PAYKAN_REF_MAX))
-      count_overflow("strong");
+  if (obj && obj->strong != PAYKAN_REF_MAX)
     ++obj->strong;
-  }
   return obj;
 }
 
 void Paykan_retain(PaykanShared *shared) {
-  if (shared) {
-    if (PAYKAN_UNLIKELY(shared->strong == PAYKAN_REF_MAX))
-      count_overflow("strong");
+  if (shared && shared->strong != PAYKAN_REF_MAX)
     ++shared->strong;
-  }
 }
 
 PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
@@ -94,18 +94,21 @@ PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
 // header has no room for the link (its counts are 32 bits, a pointer 64),
 // which is why the stack is not threaded through the objects.
 //
-// Like the reference counts themselves this state is not thread-safe: the
-// runtime assumes a single thread of execution (08-memory-model.md).
+// The state is each thread's own (the concurrency prototype runs tasks on
+// several threads): a NULL `pending` means the inline array, since a
+// thread-local's address is no constant initializer.
 
 enum { kInlinePending = 256 };
 
-static int g_destroying; // nonzero while a release is draining
-static PaykanObject *g_inline_pending[kInlinePending];
-static PaykanObject **g_pending = g_inline_pending; // the pending stack ...
-static size_t g_pending_len;                        // ... its height ...
-static size_t g_pending_cap = kInlinePending;       // ... and its room
+static _Thread_local int g_destroying; // nonzero while a release is draining
+static _Thread_local PaykanObject *g_inline_pending[kInlinePending];
+static _Thread_local PaykanObject **g_pending; // the pending stack ...
+static _Thread_local size_t g_pending_len;     // ... its height ...
+static _Thread_local size_t g_pending_cap = kInlinePending; // ... its room
 
 static void push_pending(PaykanObject *obj) {
+  if (!g_pending)
+    g_pending = g_inline_pending;
   if (PAYKAN_UNLIKELY(g_pending_len == g_pending_cap)) {
     size_t cap = g_pending_cap * 2;
     PaykanObject **grown =
@@ -146,7 +149,7 @@ void Paykan_release(PaykanShared *shared) {
   // With an early `if (!shared || --strong > 0) return;` GCC lays that path
   // out as a taken jump to a distant `ret`, which measurably slows
   // retain/release-heavy programs; this shape gives `test; jle slow; pop; ret`.
-  if (shared && --shared->strong <= 0) {
+  if (shared && shared->strong != PAYKAN_REF_MAX && --shared->strong <= 0) {
     if (g_destroying) {
       // A destroy is running: defer to the outermost release.
       push_pending(shared);
@@ -154,7 +157,7 @@ void Paykan_release(PaykanShared *shared) {
     }
     g_destroying = 1;
     destroy_dead_object(shared);
-    while (g_pending_len)
+    while (g_pending_len && g_pending)
       destroy_dead_object(g_pending[--g_pending_len]);
     g_destroying = 0;
   }

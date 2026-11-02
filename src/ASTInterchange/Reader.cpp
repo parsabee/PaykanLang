@@ -1076,7 +1076,7 @@ private:
       ParamMode mode = ParamMode::Value;
       if (!pty || !paramMode(pf, mode) || !pf.done())
         return false;
-      out.push_back({pname, pty, mode, ploc});
+      out.push_back({pname, pty, mode, false, ploc});
     }
     return true;
   }
@@ -1999,6 +1999,10 @@ private:
         uop = UnaryOpcode::Not;
       else if (op->Text == "bitnot")
         uop = UnaryOpcode::BitNot;
+      else if (op->Text == "move")
+        uop = UnaryOpcode::Move;
+      else if (op->Text == "await")
+        uop = UnaryOpcode::Await;
       else
         return fail(*op, "unknown unary operator '" + op->Text +
                              "' (neg, not, bitnot)"),

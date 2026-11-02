@@ -360,7 +360,7 @@ ast::FuncDecl *Sema::defaultInit(ast::StructType *st, ast::SourceLocation loc) {
   for (size_t i = 0; i < st->getNumFields(); ++i) {
     const std::string &interned = Ctx.intern(st->getFieldName(i));
     params.push_back(
-        {&interned, st->getElementType(i), ast::ParamMode::Value, loc});
+        {&interned, st->getElementType(i), ast::ParamMode::Value, false, loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));

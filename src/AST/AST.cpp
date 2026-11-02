@@ -109,6 +109,10 @@ const char *UnaryExpr::getOpcodeStr() const {
     return "!";
   case UnaryOpcode::BitNot:
     return "~";
+  case UnaryOpcode::Move:
+    return "move";
+  case UnaryOpcode::Await:
+    return "await";
   case UnaryOpcode::Count:
     break;
   }
@@ -447,6 +451,10 @@ uint64_t ASTCloner::paramsNamed(const Type *ty) const {
     return paramsNamed(ft->getElementType());
   if (const auto *ot = dyn_cast<OptionalType>(ty))
     return paramsNamed(ot->getInnerType());
+  if (const auto *at = dyn_cast<AtomicType>(ty))
+    return paramsNamed(at->getInnerType());
+  if (const auto *tt = dyn_cast<TaskType>(ty))
+    return paramsNamed(tt->getInnerType());
   uint64_t named = 0;
   if (const auto *gt = dyn_cast<GenericType>(ty)) {
     for (const Type *a : gt->getArgs())
@@ -519,6 +527,18 @@ Type *ASTCloner::cloneType(Type *ty) {
                          : ty;
     noteTypeArgs(copy, gt->getArgs());
     return copy;
+  }
+  if (auto *at = dyn_cast<AtomicType>(ty)) {
+    Type *inner = cloneType(at->getInnerType());
+    if (inner == at->getInnerType() && !Foreign)
+      return ty;
+    return Ctx.make<AtomicType>(at->getLocation(), inner);
+  }
+  if (auto *tt = dyn_cast<TaskType>(ty)) {
+    Type *inner = cloneType(tt->getInnerType());
+    if (inner == tt->getInnerType() && !Foreign)
+      return ty;
+    return Ctx.make<TaskType>(tt->getLocation(), inner);
   }
   if (auto *ot = dyn_cast<OptionalType>(ty)) {
     Type *inner = cloneType(ot->getInnerType());
@@ -696,8 +716,8 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     auto *l = cast<LambdaExpr>(e);
     std::vector<Param> params;
     for (const Param &p : l->getParams())
-      params.push_back(
-          Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Loc});
+      params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode,
+                             p.Shared, p.Loc});
     auto *copy = Ctx.make<LambdaExpr>(loc, std::move(params),
                                       cloneType(l->getReturnType()),
                                       cloneCompound(l->getBody()));
@@ -837,8 +857,8 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   std::vector<Param> params;
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
-    params.push_back(
-        Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Loc});
+    params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode,
+                           p.Shared, p.Loc});
   auto *clone = Ctx.make<FuncDecl>(
       fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));

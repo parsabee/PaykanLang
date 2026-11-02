@@ -269,6 +269,49 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Loop nesting depth (0 = not inside a loop).
   unsigned LoopDepth = 0;
 
+  // -- The concurrency prototype (docs/design/concurrency.md,
+  // SemaConcurrency.cpp)
+
+  /// Whether the function being checked is an `async fn`.
+  bool InAsyncFn = false;
+  /// The variables declared `shared` in the current function, by name.
+  std::unordered_set<std::string> SharedVars;
+  /// The variables a `move` has ended, by name, with the move's location.
+  std::unordered_map<std::string, ast::SourceLocation> MovedVars;
+  /// The loop depth each variable was declared at, by name.
+  std::unordered_map<std::string, unsigned> DeclLoopDepth;
+  /// Set while an expression that is an `atomic` variable's handle (not
+  /// its value) is checked: an argument to an `atomic` parameter, the
+  /// initializer of an `atomic` variable.
+  bool WantAtomicHandle = false;
+  /// The `parallel for` loops being checked, innermost last: the loop and
+  /// the scope its variable is bound in (names bound there or inside its
+  /// body are an iteration's own).
+  struct ParallelContext {
+    ast::ForStmt *Loop;
+    Scope *Boundary;
+  };
+  std::vector<ParallelContext> ParallelStack;
+  /// Whether @p owner, the scope a name is bound in, is outside the
+  /// innermost `parallel for`.
+  bool isOuterScope(Scope *owner) const;
+  /// Whether a `parallel for` body may read @p name, of type @p ty.
+  bool checkParallelRead(const std::string &name, ast::Type *ty,
+                         ast::SourceLocation loc);
+  /// An assignment to a variable of the enclosing function in a `parallel
+  /// for` body: a reduction, recorded on the loop.
+  bool checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy);
+  /// An assignment to an `atomic` variable: a store, or `x += e` / `x -= e`
+  /// as one atomic add.
+  bool checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at);
+  /// The send check of an async call: every reference argument is moved
+  /// or a temporary, and never `shared`.
+  bool checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig);
+  /// `move x`: the variable's type, and x ends; nullptr after an error.
+  ast::Type *checkMove(ast::UnaryExpr *node);
+  /// Error at @p loc (and false) when @p name was moved.
+  bool checkNotMoved(const std::string &name, ast::SourceLocation loc);
+
   // -- Class analysis context
   //
   // Populated while visitClassDecl is running; nullptr outside of a class.
@@ -327,6 +370,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// what its `inout` arguments name (docs/language/03-functions.md,
     /// "Native Functions").
     bool Native = false;
+    /// An `async fn` (the concurrency prototype): ReturnType is the task
+    /// of its result.
+    bool Async = false;
   };
 
   /// Maps function names to their signatures.

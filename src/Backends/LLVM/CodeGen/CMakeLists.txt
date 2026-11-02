@@ -18,6 +18,11 @@ target_include_directories(paykan_llvm_codegen SYSTEM
     PUBLIC ${LLVM_INCLUDE_DIRS}
 )
 paykan_llvm_no_werror(paykan_llvm_codegen)
+# The concurrency prototype's runtimes, linked into a built program that
+# uses them (see paykan_jit).
+target_compile_definitions(paykan_llvm_codegen PRIVATE
+    PAYKAN_LLVM_LIBRARY_DIR="${LLVM_LIBRARY_DIR}"
+)
 target_link_libraries(paykan_llvm_codegen
     PUBLIC  paykan_pir
             paykan_jit

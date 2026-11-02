@@ -509,6 +509,13 @@ TranslationUnit *Parser::parseTranslationUnit() {
         break;
       }
       [[fallthrough]]; // `view fn`: Sema says only a method can be one
+    case Tok::KwAsync:
+      if (kind() == Tok::KwAsync && kind(1) != Tok::KwFn) {
+        errorAtCurrent("expected 'fn' after 'async'");
+        ok = false;
+        break;
+      }
+      [[fallthrough]]; // `async fn`: a task (the concurrency prototype)
     case Tok::KwFn:
       if (auto *d = parseFuncDecl())
         (d->isGeneric() ? genericFuncs : funcs).push_back(d);
@@ -699,10 +706,17 @@ VarDecl *Parser::parseVarDecl() {
   const std::string &name = intern(consume().Text);
   if (!expect(Tok::Colon, "after the name (a declaration needs a type)"))
     return nullptr;
-  Type *ty = parseTypeAnnotation();
-  if (!ty)
-    return nullptr;
-  return Ctx.make<VarDecl>(span(start), name, ty, nullptr);
+  // `x: shared T = e;` or `x: shared = e;` (the concurrency prototype).
+  const bool shared = accept(Tok::KwShared);
+  Type *ty = nullptr;
+  if (!shared || !at(Tok::Assign)) {
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return nullptr;
+  }
+  auto *vd = Ctx.make<VarDecl>(span(start), name, ty, nullptr);
+  vd->setShared(shared);
+  return vd;
 }
 
 ClassDecl *Parser::parseClassDecl() {
@@ -1125,7 +1139,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
           &name,
           Ctx.make<ClassType>(span(nameTok.Loc),
                               intern(names::untypedParamType(name)), nullptr),
-          ParamMode::Value, nameTok.Loc});
+          ParamMode::Value, false, nameTok.Loc});
       continue;
     }
     if (!expect(Tok::Colon, "after the parameter name"))
@@ -1135,10 +1149,12 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
       mode = ParamMode::View;
     else if (accept(Tok::KwInout))
       mode = ParamMode::Inout;
+    // `x: shared T` (the concurrency prototype).
+    const bool shared = accept(Tok::KwShared);
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty, mode, span(nameTok.Loc)});
+    out.push_back(Param{&name, ty, mode, shared, span(nameTok.Loc)});
   } while (accept(Tok::Comma));
   return true;
 }
@@ -1166,6 +1182,8 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   const bool native = kind == FuncKind::Native;
   const bool requirement = kind == FuncKind::Requirement;
   SourceLocation start = cur().Loc;
+  // `async fn` (the concurrency prototype): a free function that is a task.
+  const bool async = !native && accept(Tok::KwAsync);
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
   if (native && !expect(Tok::KwFn, "after 'native'"))
@@ -1280,6 +1298,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr);
     fn->setView(view);
+    fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
     return fn;
@@ -1331,6 +1350,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr, std::move(typeParams));
     fn->setView(view);
+    fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
     fn->setTypeParamBounds(std::move(bounds));
@@ -1368,6 +1388,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
                                 body, std::move(typeParams));
   fn->setInferredResult(expressionBody && !retTy);
   fn->setView(view);
+  fn->setAsync(async);
   fn->setResultMode(resultMode);
   fn->setModulePrivateInit(modulePrivateInit);
   fn->setTypeParamBounds(std::move(bounds));
@@ -1464,6 +1485,19 @@ bool Parser::parseStatement(Stmt *&out) {
     out = parseForStmt();
     return out != nullptr;
 
+  case Tok::KwParallel:
+    // `parallel for` (the concurrency prototype).
+    consume();
+    if (!at(Tok::KwFor)) {
+      errorAtCurrent("expected 'for' after 'parallel'");
+      return false;
+    }
+    out = parseForStmt();
+    if (!out)
+      return false;
+    cast<ForStmt>(out)->setParallel(true);
+    return true;
+
   case Tok::KwElif:
     errorAtCurrent("an 'elif' follows the block of an 'if' or another "
                    "'elif'");
@@ -1550,6 +1584,7 @@ bool Parser::parseTypedDecl(Stmt *&out) {
   // the statement.
   auto *vd =
       Ctx.make<VarDecl>(span(start), decl->getName(), decl->getType(), init);
+  vd->setShared(decl->isShared());
   auto *ds = Ctx.make<DeclStmt>(span(start), vd);
   if (!expect(Tok::Semi, "after the declaration"))
     return false;
@@ -1619,6 +1654,7 @@ bool Parser::parseLetDecl(Stmt *&out) {
   }
   const std::string &name = intern(consume().Text);
   Type *ty = nullptr;
+  bool shared = false;
   if (accept(Tok::Colon)) {
     if (at(Tok::KwView) || at(Tok::KwInout)) {
       error(cur().Loc, "a local borrow cannot be 'let': a '" +
@@ -1626,9 +1662,13 @@ bool Parser::parseLetDecl(Stmt *&out) {
                            "' local always names what it was given");
       return false;
     }
-    ty = parseTypeAnnotation();
-    if (!ty)
-      return false;
+    // `let x: shared T = e;` or `let x: shared = e;` (the prototype).
+    shared = accept(Tok::KwShared);
+    if (!shared || !at(Tok::Assign)) {
+      ty = parseTypeAnnotation();
+      if (!ty)
+        return false;
+    }
   }
   if (at(Tok::Comma)) {
     error(cur().Loc, "'let' declares one variable; destructuring with 'let' "
@@ -1644,6 +1684,7 @@ bool Parser::parseLetDecl(Stmt *&out) {
   // `;` is only part of the statement; both start at `let`.
   auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);
   vd->setLet(true);
+  vd->setShared(shared);
   auto *ds = Ctx.make<DeclStmt>(span(start), vd);
   if (!expect(Tok::Semi, "after the declaration"))
     return false;
@@ -2282,6 +2323,13 @@ Type *Parser::parsePrimaryType() {
 
 Type *Parser::parseTypeAnnotation() {
   SourceLocation start = cur().Loc;
+  // `atomic T` (the concurrency prototype) covers the whole type.
+  if (accept(Tok::KwAtomic)) {
+    Type *inner = parseTypeAnnotation();
+    if (!inner)
+      return nullptr;
+    return Ctx.make<AtomicType>(span(start), inner);
+  }
   Type *ty = parsePrimaryType();
   if (!ty)
     return nullptr;
@@ -2512,7 +2560,8 @@ Expr *Parser::parseBinary(int minPrec) {
 // unary ::= ( "!" | "-" | "~" ) unary | postfix   ("mov" is reserved: an
 // error)
 Expr *Parser::parseUnary() {
-  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMov)) {
+  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMov) ||
+      at(Tok::KwMove) || at(Tok::KwAwait)) {
     if (!enterNesting())
       return nullptr;
     const Tok op = kind();
@@ -2535,6 +2584,10 @@ Expr *Parser::parseUnary() {
       code = UnaryOpcode::Not;
     else if (op == Tok::Tilde)
       code = UnaryOpcode::BitNot;
+    else if (op == Tok::KwMove)
+      code = UnaryOpcode::Move;
+    else if (op == Tok::KwAwait)
+      code = UnaryOpcode::Await;
     return Ctx.make<UnaryExpr>(span(opLoc), code, operand);
   }
   return parsePostfix();

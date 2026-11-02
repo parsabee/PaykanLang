@@ -329,6 +329,14 @@ private:
       open("optional-type", ot);
       type(ot->getInnerType());
       close();
+    } else if (const auto *at = dyn_cast<AtomicType>(t)) {
+      open("atomic-type", at);
+      type(at->getInnerType());
+      close();
+    } else if (const auto *tt = dyn_cast<TaskType>(t)) {
+      open("task-type", tt);
+      type(tt->getInnerType());
+      close();
     } else if (const auto *tt = dyn_cast<TupleType>(t)) {
       open("tuple-type", tt);
       for (const Type *e : tt->getElementTypes())
@@ -590,6 +598,10 @@ private:
       return "not";
     case UnaryOpcode::BitNot:
       return "bitnot";
+    case UnaryOpcode::Move:
+      return "move";
+    case UnaryOpcode::Await:
+      return "await";
     case UnaryOpcode::Count:
       break;
     }

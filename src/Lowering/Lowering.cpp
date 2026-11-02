@@ -296,6 +296,7 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
     return it->second;
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
+  fn->IsAsync = node->isAsync();
   nameParams(*fn, 0, node->getParams());
   if (fn->Sig.Ret != Type::Ptr && ast::isMemType(node->getReturnType()))
     fn->Params.back().Name = "result"; // where the result is written
@@ -628,6 +629,11 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
     return ast::isRefType(expr->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
+  // `move x` is x's own box, `await t` the task's result (the prototype).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(expr);
+      u && (u->getOpcode() == ast::UnaryOpcode::Move ||
+            u->getOpcode() == ast::UnaryOpcode::Await))
+    return expr->getResolvedType() && ast::isRefType(expr->getResolvedType());
   // A call through a function value returns a +1 box, as a function does.
   if (auto *e = ast::dyn_cast<ast::CallValueExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
@@ -660,6 +666,11 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     return true;
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
     return CurrentScope && CurrentScope->isWeak(id->getName());
+  // `move x` is x's own box, `await t` the task's result (the prototype).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(expr);
+      u && (u->getOpcode() == ast::UnaryOpcode::Move ||
+            u->getOpcode() == ast::UnaryOpcode::Await))
+    return expr->getResolvedType() && ast::isRefType(expr->getResolvedType());
   if (isWeakFieldAccess(expr))
     return true;
   // A struct's field is an element of a value held in memory, like a
@@ -1059,6 +1070,9 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
+  // An `atomic` variable (the prototype) changes by its operations.
+  if (node->getAtomicKind() != ast::AssignStmt::AtomicKind::None)
+    return emitAtomicAssign(node);
   // A value held in memory: a new variable holding a copy, or its bytes
   // replaced.
   if (ast::Type *ty = node->getValue()->getResolvedType(); ast::isMemType(ty)) {
@@ -1208,6 +1222,8 @@ Val ModuleLowering::visitWhileStmt(ast::WhileStmt *node) {
 Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
   using pir::CmpPred;
   using pir::Opcode;
+  if (node->isParallel())
+    return emitParallelFor(node);
   ScopeGuard guard(*this);
   ast::Type *ty = node->getVar()->getType();
   const bool isUnsigned = ast::BuiltinType::isUnsignedKind(builtinKind(ty));
@@ -1301,6 +1317,170 @@ Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
   return Val();
 }
 
+// A `parallel for` (docs/design/concurrency.md, the prototype) is the
+// counted loop
+//
+//   n = more ? lastIndex + 1 : 0; part = identity (per reduction); k = 0
+//   while k < n { idx = k; k = k + 1; i = first + idx * step; BODY }
+//   s = s op part                                   (per reduction)
+//
+// annotated as parallel (pir::Parallel): the counter, the count, the
+// locals of one iteration and the partials.  Read as a plain `while` it is
+// the loop run in order; a backend may run its iterations on several
+// threads, each chunk accumulating into a partial of its own, combined in
+// chunk order.  The body's reads and writes of a reduction variable go to
+// its partial, which shadows it.
+Val ModuleLowering::emitParallelFor(ast::ForStmt *node) {
+  using pir::CmpPred;
+  using pir::Opcode;
+  ScopeGuard guard(*this);
+  ast::Type *ty = node->getVar()->getType();
+  const bool isUnsigned = ast::BuiltinType::isUnsignedKind(builtinKind(ty));
+  auto compare = [&](CmpPred pred, const Val &a, const Val &b) {
+    return isUnsigned ? B.ucmp(pred, a, b, "for.has")
+                      : B.cmp(pred, a, b, "for.has");
+  };
+  Val first = emitExpr(node->getStart());
+  Val end = first ? emitExpr(node->getEnd()) : Val();
+  if (!end)
+    return Val();
+  const std::optional<int64_t> constant = node->constantStep();
+  Val step = constant ? Val::i64(*constant) : emitExpr(node->getStep());
+  if (!step)
+    return Val();
+  if (!constant) {
+    Val zero = B.cmp(CmpPred::Eq, step, Val::i64(0), "for.zero");
+    pir::If *z = B.openIf(zero, false);
+    B.enter(*z->Then);
+    callRuntime(kPaykanPanicForStep, {});
+    B.emitUnreachable();
+    B.leave();
+  }
+  const bool inclusive = node->isInclusive();
+  struct Direction {
+    Val More, Dist, Magnitude;
+  };
+  auto upward = [&] {
+    return Direction{compare(inclusive ? CmpPred::Le : CmpPred::Lt, first, end),
+                     B.binary(Opcode::Sub, end, first, "for.dist"), step};
+  };
+  auto downward = [&] {
+    return Direction{compare(inclusive ? CmpPred::Ge : CmpPred::Gt, first, end),
+                     B.binary(Opcode::Sub, first, end, "for.dist"),
+                     B.unary(Opcode::Neg, step, "for.mag")};
+  };
+  Direction d;
+  if (constant) {
+    d = *constant > 0 ? upward() : downward();
+  } else {
+    Direction up = upward();
+    Direction down = downward();
+    Val isUp = B.cmp(CmpPred::Gt, step, Val::i64(0), "for.up");
+    d = {B.select(isUp, up.More, down.More, "for.has"),
+         B.select(isUp, up.Dist, down.Dist, "for.dist"),
+         B.select(isUp, up.Magnitude, down.Magnitude, "for.mag")};
+  }
+  Val lastIndex =
+      inclusive ? d.Dist : B.binary(Opcode::Sub, d.Dist, Val::i64(1));
+  const bool unit = constant && (*constant == 1 || *constant == -1);
+  if (!unit)
+    lastIndex = B.binary(Opcode::UDiv, lastIndex, d.Magnitude, "for.lastidx");
+  // The trip count.
+  Val count = B.select(d.More, B.binary(Opcode::Add, lastIndex, Val::i64(1)),
+                       Val::i64(0), "par.count");
+
+  // A partial per reduction, at its operation's identity.
+  struct Reduction {
+    std::string Name;
+    ast::Type *ASTType;
+    pir::LocalId Target, Partial;
+    Opcode Op;
+  };
+  std::vector<Reduction> reductions;
+  for (const ast::ForStmt::Reduction &r : node->getReductions()) {
+    pir::LocalId target = CurrentScope->lookup(*r.Name);
+    Type rty = B.localType(target);
+    const Opcode op =
+        r.Op == ast::BinaryOpcode::Mul ? Opcode::Mul : Opcode::Add;
+    pir::LocalId part = B.addLocal(*r.Name + ".part", rty);
+    const bool one = op == Opcode::Mul;
+    B.store(part, rty == Type::F64 ? Val::f64(one ? 1.0 : 0.0)
+                                   : Val::i64(one ? 1 : 0));
+    reductions.push_back(
+        {*r.Name, CurrentScope->lookupASTType(*r.Name), target, part, op});
+  }
+
+  pir::LocalId counter = B.addLocal("par.k", Type::I64);
+  B.store(counter, Val::i64(0));
+  pir::While *w = B.openWhile();
+  LoopStack.push_back({CurrentScope});
+  B.enter(*w->CondBlock);
+  B.setWhileCond(
+      w, B.ucmp(CmpPred::Lt, B.load(counter, "par.kv"), count, "par.go"));
+  B.leave();
+  const size_t firstPrivate = B.function()->Locals.size();
+  B.enterLoopBody(*w->Body);
+  {
+    ScopeGuard body(*this);
+    for (const Reduction &r : reductions)
+      CurrentScope->declare(r.Name, r.Partial, r.ASTType);
+    Val idx = B.load(counter, "par.idx");
+    B.store(counter, B.binary(Opcode::Add, idx, Val::i64(1), "par.next"));
+    Val value = unit ? B.binary(*constant == 1 ? Opcode::Add : Opcode::Sub,
+                                first, idx, "par.value")
+                     : B.binary(Opcode::Add, first,
+                                B.binary(Opcode::Mul, idx, step), "par.value");
+    const std::string &name = node->getVar()->getName();
+    if (!name.empty()) {
+      pir::LocalId var = B.addLocal(name, Type::I64);
+      B.store(var, value);
+      CurrentScope->declare(name, var, ty);
+    }
+    visit(node->getBody());
+  }
+  B.leaveLoopBody();
+  LoopStack.pop_back();
+
+  pir::Parallel par;
+  par.Counter = counter;
+  par.Count = count.Op;
+  for (size_t l = firstPrivate; l < B.function()->Locals.size(); ++l)
+    par.Privates.push_back(static_cast<pir::LocalId>(l));
+  for (const Reduction &r : reductions)
+    par.Reductions.push_back({r.Partial, r.Op});
+  w->Parallel = std::move(par);
+  // Each partial folds into its variable.
+  for (const Reduction &r : reductions)
+    B.store(r.Target,
+            B.binary(r.Op, B.load(r.Target, r.Name),
+                     B.load(r.Partial, r.Name + ".part"), r.Name + ".fold"));
+  return Val();
+}
+
+Val ModuleLowering::emitAtomicAssign(ast::AssignStmt *node) {
+  using K = ast::AssignStmt::AtomicKind;
+  const std::string &name = node->getVarName();
+  Val cell = B.load(CurrentScope->lookup(name), name + ".cell");
+  Val obj = emitSharedGet(cell, name + ".obj");
+  if (node->getAtomicKind() == K::Store) {
+    Val v = emitExpr(node->getValue());
+    if (!v)
+      return Val();
+    callRuntime(names::kPaykanAtomicStore, {obj, coerceTo(v, Type::I64)});
+    return Val();
+  }
+  // `x += e` / `x -= e`: one atomic add of e, or of -e.
+  auto *be = ast::cast<ast::BinaryExpr>(node->getValue());
+  Val v = emitExpr(be->getRHS());
+  if (!v)
+    return Val();
+  v = coerceTo(v, Type::I64);
+  if (node->getAtomicKind() == K::Sub)
+    v = B.unary(pir::Opcode::Neg, v, "neg");
+  callRuntime(names::kPaykanAtomicAdd, {obj, v}, name + ".old");
+  return Val();
+}
+
 Val ModuleLowering::visitBreakStmt(ast::BreakStmt *) {
   assert(!LoopStack.empty() && "break outside loop");
   emitLoopScopesCleanup();
@@ -1344,6 +1524,26 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
     pir::LocalId local = B.addLocal(node->getName(), Type::Weak);
     B.store(local, weak);
     CurrentScope->declareWeak(node->getName(), local, declTy);
+    return Val();
+  }
+
+  // An `atomic` variable (the prototype): a cell, held as a box; the
+  // initializer is its first value, or an `atomic` variable whose cell it
+  // shares.
+  if (ast::isa<ast::AtomicType>(declTy)) {
+    Val cell;
+    auto *handle = ast::dyn_cast<ast::Identifier>(node->getInitExpr());
+    if (handle && handle->isAtomicHandle())
+      cell = emitExpr(handle);
+    else
+      cell = callRuntime(names::kPaykanAtomicNew,
+                         {coerceTo(emitExpr(node->getInitExpr()), Type::I64)},
+                         node->getName() + ".cell");
+    if (!cell)
+      return Val();
+    pir::LocalId local = B.addLocal(node->getName(), Type::Box);
+    B.store(local, cell);
+    CurrentScope->declare(node->getName(), local, declTy);
     return Val();
   }
 
@@ -1448,21 +1648,50 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
 
 Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   pir::Function *fn = declareFunctionPrototype(node);
+  // `async fn main` (the prototype): the task runs under another name, and
+  // the program's entry point starts it and awaits its result.
+  const bool asyncMain = node->isAsync() && node->getName() == names::kMain;
+  if (asyncMain)
+    fn->Name = std::string(names::kMain) + ".async";
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
-  FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
   {
-    ScopeGuard guard(*this);
-    size_t at = 0;
-    for (const ast::Param &p : node->getParams())
-      at += declareParam(p.getName(), fn->Params, at,
-                         canonicalizeDeclType(p.ParamType), p.Mode);
-    if (node->isNative())
-      emitNativeBody(node, *fn);
-    else
-      emitBody(node->getBody());
+    FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
+    {
+      ScopeGuard guard(*this);
+      size_t at = 0;
+      for (const ast::Param &p : node->getParams())
+        at += declareParam(p.getName(), fn->Params, at,
+                           canonicalizeDeclType(p.ParamType), p.Mode);
+      if (node->isNative())
+        emitNativeBody(node, *fn);
+      else
+        emitBody(node->getBody());
+    }
+    emitImplicitReturn(fn->Sig);
   }
-  emitImplicitReturn(fn->Sig);
+  if (asyncMain)
+    emitAsyncMainEntry(*fn);
   return Val();
+}
+
+void ModuleLowering::emitAsyncMainEntry(const pir::Function &task) {
+  Funcs.emplace_back();
+  pir::Function &entry = Funcs.back();
+  entry.Name = names::kMain;
+  entry.Sig = task.Sig;
+  for (Type t : entry.Sig.Params)
+    entry.Params.push_back(pir::Value{entry.NextValueId++, t, ""});
+  FunctionStateGuard state(*this, &entry, nullptr, /*methodClassTy=*/nullptr);
+  std::vector<Val> args;
+  for (const pir::Value &p : entry.Params)
+    args.emplace_back(pir::Operand::value(p), p.Ty);
+  Val t = B.asyncCall(task.Name, task.Sig, args, "task");
+  if (task.Sig.Ret == Type::Void) {
+    B.await(t, Type::I64, "done");
+    B.emitRetVoid();
+  } else {
+    B.emitRet(B.await(t, task.Sig.Ret, "result"));
+  }
 }
 
 // A `native fn` (#198) calls its C symbol with the runtime builtins'
@@ -1932,6 +2161,9 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
 }
 
 Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
+  // An `atomic` variable's handle (the prototype): its cell, never counted.
+  if (auto *h = ast::dyn_cast<ast::Identifier>(expr); h && h->isAtomicHandle())
+    return emitExpr(expr);
   // Owned identifier: retain + return the existing box.  The copy of an
   // argument may be lent (docs/pir.md §6) unless a later part of the
   // statement may replace the variable (noteHeldReads); what an `inout`

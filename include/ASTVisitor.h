@@ -80,6 +80,8 @@ namespace ast {
   NODE(NK_TupleType, TupleType, TupleType)                                     \
   NODE(NK_StructType, StructType, StructType)                                  \
   NODE(NK_SliceType, SliceType, SliceType)                                     \
+  NODE(NK_AtomicType, AtomicType, AtomicType)                                  \
+  NODE(NK_TaskType, TaskType, TaskType)                                        \
   NODE(NK_PoisonType, PoisonType, PoisonType)                                  \
   NODE(NK_FunctionType, FunctionType, FunctionType)                            \
   NODE(NK_GenericType, GenericType, GenericType)

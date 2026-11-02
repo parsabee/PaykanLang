@@ -219,6 +219,15 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
+  // An `atomic` variable (the prototype): its handle, or its value read
+  // atomically.
+  if (astTy && ast::isa<ast::AtomicType>(astTy)) {
+    if (node->isAtomicHandle())
+      return val;
+    return L.callRuntime(kPaykanAtomicLoad,
+                         {L.emitSharedGet(val, node->getName() + ".obj")},
+                         node->getName());
+  }
   // A read its statement may replace the variable's value under
   // (noteHeldReads): the box, with a reference of its own, a fresh +1 one
   // (exprProducesFreshBox).
@@ -339,6 +348,25 @@ Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
+  // The concurrency prototype: `await t` is the task's result; `move x` is
+  // x's box, which x no longer holds (a value is read as it is).
+  if (node->getOpcode() == ast::UnaryOpcode::Await) {
+    Val task = visit(node->getOperand());
+    if (!task)
+      return Val();
+    ast::Type *ty = node->getResolvedType();
+    Type t = ty && ty != L.ASTCtx.getVoidTy() ? L.toPIRType(ty) : Type::I64;
+    return L.B.await(task, t, "awaited");
+  }
+  if (node->getOpcode() == ast::UnaryOpcode::Move) {
+    auto *id = ast::cast<ast::Identifier>(node->getOperand());
+    if (L.holdsBox(id->getName())) {
+      Val box = L.loadVarBox(id->getName());
+      L.B.store(L.CurrentScope->lookup(id->getName()), Val::null(Type::Box));
+      return box;
+    }
+    return visit(node->getOperand());
+  }
   Val operand = visit(node->getOperand());
   if (!operand)
     return Val();
@@ -377,6 +405,9 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     return L.canonicalize(
         L.B.binary(Opcode::Xor, operand, Val::i64(-1), "compl"), ty);
   }
+  case ast::UnaryOpcode::Move:
+  case ast::UnaryOpcode::Await:
+    break; // handled above
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -1137,8 +1168,11 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     L.releaseMemTemps(fixedMark);
     return slot;
   }
-  Val result = L.B.call(callee->Name, callee->Sig, args, "call");
-  if (result && result.Ty == Type::Ptr) // an `inout` result
+  // An `async fn` (the prototype): the call starts a task of its result.
+  Val result = callee->IsAsync
+                   ? L.B.asyncCall(callee->Name, callee->Sig, args, "task")
+                   : L.B.call(callee->Name, callee->Sig, args, "call");
+  if (!callee->IsAsync && result && result.Ty == Type::Ptr) // an `inout` result
     return L.takeInoutResult(result, node, wantAddress, keep, fixedMark,
                              places);
   L.releaseAfterCall(keep);

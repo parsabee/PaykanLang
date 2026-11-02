@@ -118,6 +118,8 @@ public:
     NK_TupleType,
     NK_StructType, // a TupleType with a name and named fields (see TupleType)
     NK_SliceType,
+    NK_AtomicType, // `atomic int` (the concurrency prototype)
+    NK_TaskType,   // the result of an async call (the concurrency prototype)
     NK_PoisonType,
     NK_FunctionType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
@@ -240,6 +242,8 @@ enum class UnaryOpcode {
   Neg,    // -
   Not,    // !
   BitNot, // ~ (docs/design/bitwise.md)
+  Move,   // move x: x's value, which x no longer holds (the prototype)
+  Await,  // await t: the result of task t, waited for (the prototype)
   Count,
 };
 
@@ -342,6 +346,7 @@ private:
   Expr *InitExpr;
   bool Let = false;
   bool Weak = false;
+  bool Shared = false; // `x: shared T = e;` (the concurrency prototype)
   ParamMode Mode = ParamMode::Value; // `x: view = e;`, `x: inout = p;`
 
 public:
@@ -368,6 +373,11 @@ public:
   bool isWeak() const { return Weak; }
   void setWeak(bool weak) { Weak = weak; }
 
+  /// Declared `shared` (docs/design/concurrency.md): the reference may be
+  /// aliased on its thread, and never crosses to another.
+  bool isShared() const { return Shared; }
+  void setShared(bool shared) { Shared = shared; }
+
   /// A local borrow (docs/language/02-basics.md, "Local borrows"):
   /// `view` or `inout`; Value for any other declaration.
   ParamMode getMode() const { return Mode; }
@@ -381,6 +391,7 @@ struct Param {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
   ParamMode Mode = ParamMode::Value; // `x: view int`, `x: inout int`
+  bool Shared = false;               // `x: shared T` (the prototype)
   /// Where it is written, `x: int`: its function's location for one the
   /// compiler declares, or one read from an AST without it.
   SourceLocation Loc;
@@ -447,6 +458,7 @@ private:
   const std::string *NativeSymbol = nullptr;
   bool View = false;   // `view fn`: a method that does not change `self`
   bool Static = false; // `static fn`: an `impl` block's function, no `self`
+  bool Async = false;  // `async fn`: a task (docs/design/concurrency.md)
   // Written `___init__` (Names.h): the initializer, private to its module.
   bool ModulePrivateInit = false;
   bool InferredResult = false;             // `fn double(x: int) => x * 2;`
@@ -506,6 +518,10 @@ public:
   /// Declared `static fn` in an `impl` block: called as `Type::name()`.
   bool isStatic() const { return Static; }
   void setStatic(bool isStatic) { Static = isStatic; }
+  /// Declared `async fn`: a call of it starts a task whose `await` is the
+  /// function's result (the concurrency prototype).
+  bool isAsync() const { return Async; }
+  void setAsync(bool async) { Async = async; }
   /// Written `___init__`: the initializer, private to its module (Names.h).
   bool isModulePrivateInit() const { return ModulePrivateInit; }
   void setModulePrivateInit(bool v) { ModulePrivateInit = v; }
@@ -566,15 +582,23 @@ class Identifier;
 
 // Assignment statement
 class AssignStmt : public Stmt {
+public:
+  /// What an assignment to an `atomic` variable does (the prototype): a
+  /// store of the value, or `x += e` / `x -= e` as one atomic add.
+  enum class AtomicKind : uint8_t { None, Store, Add, Sub };
+
 private:
   Identifier *LHS; // preserves source location of the target variable
   Expr *Value;
+  AtomicKind Atomic = AtomicKind::None;
 
 public:
   AssignStmt(SourceLocation loc, Identifier *lhs, Expr *value)
       : Stmt(NK_AssignStmt, loc), LHS(lhs), Value(value) {}
 
   Identifier *getLHS() const { return LHS; }
+  AtomicKind getAtomicKind() const { return Atomic; }
+  void setAtomicKind(AtomicKind k) { Atomic = k; }
   // Convenience: callers that only need the name string.
   // Defined as inline below, after Identifier is fully declared.
   inline const std::string &getVarName() const;
@@ -660,6 +684,15 @@ public:
 // null when not written (1).  The start, end and step are evaluated once,
 // in that order, before the first iteration.
 class ForStmt : public Stmt {
+public:
+  /// A reduction of a `parallel for` (docs/design/concurrency.md): an
+  /// outer numeric variable the body changes only by `s += e`, `s -= e` or
+  /// `s *= e`.
+  struct Reduction {
+    const std::string *Name;
+    BinaryOpcode Op; // Add, Sub or Mul
+  };
+
 private:
   VarDecl *Var;
   Expr *Start;
@@ -667,6 +700,8 @@ private:
   Expr *Step; // may be null
   bool Inclusive;
   Stmt *Body;
+  bool Parallel = false; // `parallel for` (the concurrency prototype)
+  std::vector<Reduction> Reductions; // set by Sema
 
 public:
   ForStmt(SourceLocation loc, VarDecl *var, Expr *start, Expr *end, Expr *step,
@@ -682,6 +717,18 @@ public:
   /// `..=`: the end is one of the values.
   bool isInclusive() const { return Inclusive; }
   Stmt *getBody() const { return Body; }
+
+  /// `parallel for`: the iterations are independent and may run on several
+  /// threads (the concurrency prototype).
+  bool isParallel() const { return Parallel; }
+  void setParallel(bool parallel) { Parallel = parallel; }
+  const std::vector<Reduction> &getReductions() const { return Reductions; }
+  void addReduction(const std::string &internedName, BinaryOpcode op) {
+    for (const Reduction &r : Reductions)
+      if (r.Name == &internedName)
+        return;
+    Reductions.push_back({&internedName, op});
+  }
 
   /// The step's value when it is a constant: 1 when not written, an integer
   /// literal, or a negated one.
@@ -995,12 +1042,17 @@ private:
   // knows it (the spelling, or, inside another module's template, that
   // module's qualified name), of which the lowering makes a function value.
   const std::string *FunctionRef = nullptr;
+  // Set by Sema when an `atomic` variable is read as its handle (passed to
+  // an `atomic` parameter), not as its value (the prototype).
+  bool AtomicHandle = false;
 
 public:
   Identifier(SourceLocation loc, const std::string &internedName)
       : Expr(NK_Identifier, loc), Name(&internedName) {}
 
   const std::string &getName() const { return *Name; }
+  bool isAtomicHandle() const { return AtomicHandle; }
+  void setAtomicHandle(bool handle) { AtomicHandle = handle; }
   void setFunctionRef(const std::string &internedName) {
     FunctionRef = &internedName;
   }
@@ -1858,6 +1910,39 @@ public:
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_OptionalType;
   }
+};
+
+/// `atomic T` (docs/design/concurrency.md, the prototype): a cell holding a
+/// number, which any thread reads and changes by atomic operations; a copy
+/// of the variable is another handle to the same cell.  A reference, held
+/// as a box; canonical per element type (ASTContext::getAtomicType).
+class AtomicType : public Type {
+  Type *InnerType;
+
+public:
+  AtomicType(SourceLocation loc, Type *inner)
+      : Type(NK_AtomicType, loc), InnerType(inner) {}
+
+  Type *getInnerType() const { return InnerType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_AtomicType;
+  }
+};
+
+/// The task an async call starts (the prototype): `await` yields its
+/// result, of the inner type.  Canonical per result type
+/// (ASTContext::getTaskType); never written by a program.
+class TaskType : public Type {
+  Type *InnerType;
+
+public:
+  TaskType(SourceLocation loc, Type *inner)
+      : Type(NK_TaskType, loc), InnerType(inner) {}
+
+  Type *getInnerType() const { return InnerType; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_TaskType; }
 };
 
 // Enum type (nominal value type backed by a 64-bit unsigned integer).

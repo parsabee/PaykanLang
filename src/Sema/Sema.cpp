@@ -746,6 +746,20 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   };
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
+  // `atomic T` (the concurrency prototype): T is `int`.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
+    ast::Type *inner = resolveType(at->getInnerType(), loc, context);
+    if (!inner)
+      return nullptr;
+    if (inner != Ctx.getIntTy()) {
+      error(loc, "'atomic' holds an 'int' in the prototype, not '" +
+                     typeName(inner) + "'");
+      return nullptr;
+    }
+    return Ctx.getAtomicType(inner);
+  }
+  if (ast::isa<ast::TaskType>(ty))
+    return ty; // canonical already: never written by a program
   // A parameter's slice, resolved already.
   if (ast::isa<ast::SliceType>(ty))
     return ty;
@@ -1558,6 +1572,21 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
   }
   S.checkNotBorrowed(node->getName(), node->getLocation());
   ast::Type *ty = S.checkIdentLive(node->getName(), node->getLocation());
+  // The concurrency prototype: not after a `move`, only values and handles
+  // in a `parallel for` body, and an `atomic` variable's read is its
+  // value unless its handle is wanted.
+  if (ty && !S.checkNotMoved(node->getName(), node->getLocation()))
+    return nullptr;
+  if (ty && !S.ParallelStack.empty() &&
+      !S.checkParallelRead(node->getName(), ty, node->getLocation()))
+    return nullptr;
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
+    if (std::exchange(S.WantAtomicHandle, false)) {
+      node->setAtomicHandle(true);
+      return at;
+    }
+    return at->getInnerType();
+  }
   // Inside a lambda, a variable of the function it is written in is
   // captured (by copy) when it is first used.
   if (ty && !S.LambdaStack.empty() &&
@@ -1864,6 +1893,34 @@ Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
 
 ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   ast::Expr *operand = node->getOperand();
+  // The concurrency prototype: `await t` is the task's result, `move x`
+  // x's value, which x no longer holds.
+  if (node->getOpcode() == ast::UnaryOpcode::Await) {
+    S.LiteralExpectation = nullptr;
+    S.VariantExpectation = nullptr;
+    if (!S.ParallelStack.empty()) {
+      S.error(node->getLocation(),
+              "'await' cannot be used in a 'parallel for' body");
+      return nullptr;
+    }
+    ast::Type *t = visit(operand);
+    if (!t)
+      return nullptr;
+    auto *tt = ast::dyn_cast<ast::TaskType>(t);
+    if (!tt) {
+      S.error(node->getLocation(),
+              "'await' takes a task (the result of calling an 'async fn'), "
+              "not a '" +
+                  typeName(t) + "'");
+      return nullptr;
+    }
+    return tt->getInnerType();
+  }
+  if (node->getOpcode() == ast::UnaryOpcode::Move) {
+    S.LiteralExpectation = nullptr;
+    S.VariantExpectation = nullptr;
+    return S.checkMove(node);
+  }
   const bool negation = node->getOpcode() == ast::UnaryOpcode::Neg;
   // `-5` flowing into a sized numeric slot: the negated literal takes the
   // slot's type when it fits (`-128` fits an `i8`, `-1` no `u8`).
@@ -1933,6 +1990,9 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     return operandTy;
   case ast::UnaryOpcode::Not:
     return S.Ctx.getBoolTy();
+  case ast::UnaryOpcode::Move:
+  case ast::UnaryOpcode::Await:
+    break; // handled above
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -2406,9 +2466,14 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         expectedArgs = init->getParamTypes();
   std::vector<ast::Type *> argTypes;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    // An `atomic` parameter takes the variable's handle (the prototype).
+    S.WantAtomicHandle = i < expectedArgs.size() &&
+                         ast::isa<ast::AtomicType>(expectedArgs[i]) &&
+                         ast::isa<ast::Identifier>(node->getArguments()[i]);
     auto *ty =
         visitExpecting(node->getArguments()[i],
                        i < expectedArgs.size() ? expectedArgs[i] : nullptr);
+    S.WantAtomicHandle = false;
     argTypes.push_back(ty);
   }
 
@@ -2617,6 +2682,10 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                   sliceArgNote(sig->ParamTypes[i], argTypes[i]));
     }
   }
+  // An async call starts a task: what it takes across is moved or copied
+  // (the concurrency prototype's send check).
+  if (sig->Async && !S.checkSendArgs(node, *sig))
+    return nullptr;
   const std::string callee = displayName(node->getCalleeName());
   S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
                    callee);
@@ -4073,7 +4142,10 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
         sig->Modes.mode(0) == ast::ParamMode::View)
       if (auto *st = ast::dyn_cast<ast::SliceType>(sig->ParamTypes[0]))
         params = st->getElementType() == Ctx.getStrTy();
-    if (sig->ReturnType == Ctx.getIntTy() && params)
+    ast::Type *ret = sig->ReturnType;
+    if (auto *tt = ast::dyn_cast<ast::TaskType>(ret))
+      ret = tt->getInnerType(); // `async fn main` (the prototype)
+    if (ret == Ctx.getIntTy() && params)
       return true;
     std::string actual = "fn main(";
     for (size_t i = 0; i < sig->ParamTypes.size(); ++i) {
@@ -4235,6 +4307,16 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
 }
 
 bool Sema::visitAssignStmt(ast::AssignStmt *node) {
+  // The concurrency prototype: an `atomic` variable changes by its
+  // operations; a variable of the function around a `parallel for` only by
+  // a reduction.
+  if (auto *owner = CurrentScope->findOwner(node->getVarName())) {
+    ast::Type *varTy = owner->lookup(node->getVarName());
+    if (auto *at = ast::dyn_cast<ast::AtomicType>(varTy))
+      return checkAtomicAssign(node, at);
+    if (isOuterScope(owner))
+      return checkParallelAssign(node, varTy);
+  }
   // An existing variable's type is the value's expected type.
   ast::Type *expected = nullptr;
   if (auto *existing = CurrentScope->findOwner(node->getVarName()))
@@ -4304,11 +4386,13 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       return false;
     }
     CurrentScope->set(varName, valTy);
+    DeclLoopDepth[varName] = LoopDepth;
     return viewOk;
   }
 
   if (!checkReassignable(varName, node->getLocation()))
     return false;
+  MovedVars.erase(varName); // assigned again after a move
   auto *varTy = owner->lookup(varName);
 
   // A poisoned variable (its declaration failed) is re-declared by a valid
@@ -4331,6 +4415,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
+  if (!ParallelStack.empty()) {
+    error(node->getLocation(), "'return' cannot leave a 'parallel for' body");
+    return false;
+  }
   if (node->getReturnValue()) {
     auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
     if (!valTy)
@@ -4524,9 +4612,17 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   }
   if (!discard)
     CurrentScope->Kinds[name] = VarKind::ForVar;
+  // A `parallel for` (the concurrency prototype): its variable, and what
+  // its body declares, are an iteration's own.
+  if (node->isParallel())
+    ParallelStack.push_back({node, CurrentScope});
+  if (!discard)
+    DeclLoopDepth[name] = LoopDepth + 1;
   ++LoopDepth;
   bool bodyOk = visit(node->getBody());
   --LoopDepth;
+  if (node->isParallel())
+    ParallelStack.pop_back();
   return ok && bodyOk;
 }
 
@@ -4535,12 +4631,22 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
     error(node->getLocation(), "'break' outside of a loop");
     return false;
   }
+  if (!ParallelStack.empty()) {
+    error(node->getLocation(),
+          "'break' cannot be used in a 'parallel for' body (the prototype)");
+    return false;
+  }
   return true;
 }
 
 bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
   if (LoopDepth == 0) {
     error(node->getLocation(), "'continue' outside of a loop");
+    return false;
+  }
+  if (!ParallelStack.empty()) {
+    error(node->getLocation(), "'continue' cannot be used in a 'parallel "
+                               "for' body (the prototype)");
     return false;
   }
   return true;
@@ -4738,14 +4844,39 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     return false;
   }
 
+  // An `async fn` (the concurrency prototype): a call of it is a task of
+  // its result, which is a number, bool, char, a reference, or nothing;
+  // its parameters are by value, since the task outlives the call.
+  ast::Type *callTy = retTy;
+  if (node->isAsync()) {
+    if (retTy && !ast::isa<ast::BuiltinType>(retTy) && !ast::isRefType(retTy)) {
+      error(node->getLocation(),
+            "an 'async fn' returns a number, bool, char, a reference or "
+            "nothing in the prototype, not '" +
+                typeName(retTy) + "'");
+      ErroneousNames.insert(node->getName());
+      return false;
+    }
+    for (const ast::Param &p : node->getParams())
+      if (p.Mode != ast::ParamMode::Value) {
+        error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +
+                         node->getName() + "' cannot be '" +
+                         ast::paramModeName(p.Mode) +
+                         "': a task outlives the call that starts it");
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
+    callTy = Ctx.getTaskType(retTy);
+  }
   // Register the function in the function table.
-  declareFunction(node->getName(), retTy, paramTypes);
+  declareFunction(node->getName(), callTy, paramTypes);
   if (inferred)
     InferredFunctions[node->getName()] = {node, Inference::Pending, nullptr};
   FunctionSig &sig = FunctionTable[node->getName()];
   sig.Modes = ast::paramModes(node->getParams());
   sig.Modes.Result = node->getResultMode();
   sig.Native = node->isNative();
+  sig.Async = node->isAsync();
   return checkResultDecl(node, /*method=*/false);
 }
 
@@ -4941,7 +5072,19 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     for (size_t i = 0; i < node->getParams().size(); ++i)
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
     declareParamKinds(node);
+    // The concurrency prototype: the function's own moves, `shared`
+    // variables and loop depths.
+    const bool savedAsync = std::exchange(InAsyncFn, node->isAsync());
+    SharedVars.clear();
+    MovedVars.clear();
+    DeclLoopDepth.clear();
+    for (const ast::Param &p : node->getParams()) {
+      if (p.Shared)
+        SharedVars.insert(p.getName());
+      DeclLoopDepth[p.getName()] = 0;
+    }
     bool ok = visitBody(node->getBody()->getStatements());
+    InAsyncFn = savedAsync;
     CurrentReturnType = savedRetTy;
     CurrentResult = savedResult;
     if (!ok)
@@ -5147,6 +5290,11 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
   if (node->isLet())
     CurrentScope->Kinds[node->getName()] = VarKind::Let;
+  // The concurrency prototype.
+  if (node->isShared())
+    SharedVars.insert(node->getName());
+  DeclLoopDepth[node->getName()] = LoopDepth;
+  MovedVars.erase(node->getName());
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
@@ -5169,7 +5317,19 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   bool weakOfView = false;
   if (node->getInitExpr()) {
     unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
-    auto *initTy = resolveExprType(node->getInitExpr(), declTy);
+    // An `atomic` variable (the prototype) starts as a new cell holding
+    // the value, or as another handle to an `atomic` variable's cell.
+    ast::Type *expectedInit = declTy;
+    if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy)) {
+      auto *id = ast::dyn_cast<ast::Identifier>(node->getInitExpr());
+      ast::Type *idTy = id ? CurrentScope->lookup(id->getName()) : nullptr;
+      if (idTy && ast::isa<ast::AtomicType>(idTy))
+        WantAtomicHandle = true;
+      else
+        expectedInit = at->getInnerType();
+    }
+    auto *initTy = resolveExprType(node->getInitExpr(), expectedInit);
+    WantAtomicHandle = false;
     // A `_` length is the initializer's: a literal fills it in as it is
     // checked (checkFixedArrayLiteral), anything else has it in its type.
     const bool inferred = declTy && hasInferredLength(declTy);
@@ -5216,7 +5376,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       weakOfView =
           sharesStorage(initTy) && !viewOf(node->getInitExpr()).empty();
     if (declTy) {
-      if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
+      auto *atomic = ast::dyn_cast<ast::AtomicType>(declTy);
+      if (atomic && initTy == atomic->getInnerType()) {
+        // A new cell holding the value (the prototype).
+      } else if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
         if (!diagnoseOptionalNarrowing(node->getLocation(), declTy, initTy))
           error(node->getLocation(),
                 "initializer of type '" + typeName(initTy) +

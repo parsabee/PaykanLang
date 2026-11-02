@@ -485,10 +485,12 @@ static inline void Paykan_retain_inline(PaykanShared *shared) {
   }
 }
 
-/// Paykan_release, inline while the object stays alive.
+/// Paykan_release, inline while the object stays alive.  A count of
+/// PAYKAN_REF_MAX is immortal (the prototype's atomic cells): the function
+/// leaves it alone.
 static inline void Paykan_release_inline(PaykanShared *shared) {
   if (shared) {
-    if (shared->strong > 1)
+    if (shared->strong > 1 && shared->strong != PAYKAN_REF_MAX)
       --shared->strong;
     else
       Paykan_release(shared);
@@ -510,7 +512,7 @@ static inline void Paykan_retain_nonnull_inline(PaykanShared *shared) {
 /// Paykan_release_inline of a box that is never NULL (the value a `retain
 /// nonnull` retains).
 static inline void Paykan_release_nonnull_inline(PaykanShared *shared) {
-  if (shared->strong > 1)
+  if (shared->strong > 1 && shared->strong != PAYKAN_REF_MAX)
     --shared->strong;
   else
     Paykan_release(shared);
@@ -672,6 +674,24 @@ PaykanString *PaykanEnum_toString(const void *value, const int64_t *layout);
 /// Whether the enums at @p a and @p b are equal: the same variant, with
 /// equal fields (compared as PaykanStruct_equals does).
 int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
+
+// -- Atomic cell (the concurrency prototype, docs/design/concurrency.md)
+//
+// `atomic int`: one heap cell holding an int64 that any thread reads and
+// changes by atomic operations; a copy of the variable is another handle to
+// the cell.  The prototype never counts a cell: it is immortal (its strong
+// count is PAYKAN_REF_MAX, which retains and releases leave alone), so a
+// handle crosses threads with no atomic count.  The design counts cells
+// atomically.
+
+/// A new cell holding @p value, as an owned box.
+PaykanShared *PaykanAtomic_new(int64_t value);
+/// The cell's value, read atomically.
+int64_t PaykanAtomic_load(PaykanObject *cell);
+/// Stores @p value in the cell atomically.
+void PaykanAtomic_store(PaykanObject *cell, int64_t value);
+/// Adds @p delta to the cell's value atomically; the value found.
+int64_t PaykanAtomic_add(PaykanObject *cell, int64_t delta);
 
 // -- Buffer
 //

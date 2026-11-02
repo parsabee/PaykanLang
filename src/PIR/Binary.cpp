@@ -38,9 +38,9 @@ constexpr uint8_t kIndexTrailer[4] = {'Y', 'S', 'K', 'P'};
 constexpr uint32_t kKnownModuleFlags = kFlagNamesStripped | kFlagDefinesMain;
 constexpr uint32_t kFnExtern = 1u << 0, kFnHasModule = 1u << 1,
                    kFnHasSymbol = 1u << 2, kFnShared = 1u << 3,
-                   kFnHasUses = 1u << 4;
+                   kFnHasUses = 1u << 4, kFnAsync = 1u << 5;
 constexpr uint32_t kKnownFnFlags =
-    kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses;
+    kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses | kFnAsync;
 constexpr uint32_t kClassExtern = 1u << 0, kClassShared = 1u << 1;
 constexpr uint32_t kKnownClassFlags = kClassExtern | kClassShared;
 
@@ -273,6 +273,7 @@ private:
       type(in.CastTo);
       break;
     case Opcode::Call:
+    case Opcode::AsyncCall:
     case Opcode::FnAddr:
       str(in.Callee);
       break;
@@ -395,7 +396,7 @@ private:
     str(f.Name);
     W.u32((f.IsExtern ? kFnExtern : 0) | (f.Module.empty() ? 0 : kFnHasModule) |
           (f.Symbol.empty() ? 0 : kFnHasSymbol) | (f.Shared ? kFnShared : 0) |
-          (f.Uses.empty() ? 0 : kFnHasUses));
+          (f.IsAsync ? kFnAsync : 0) | (f.Uses.empty() ? 0 : kFnHasUses));
     sig(f.Sig);
     if (!f.Module.empty())
       str(f.Module);
@@ -553,6 +554,7 @@ public:
       return R.fail("reserved function flag", R.offset() - 4);
     f.IsExtern = (flags & kFnExtern) != 0;
     f.Shared = (flags & kFnShared) != 0;
+    f.IsAsync = (flags & kFnAsync) != 0;
     if (!bodies)
       return true;
     if (!sig(f.Sig))
@@ -749,8 +751,8 @@ private:
     if (in.NonNull && in.Op != Opcode::Retain)
       return R.fail("a nonnull mark before an instruction that is no retain",
                     R.offset() - 1);
-    if (owns && in.Op != Opcode::Call && in.Op != Opcode::VCall &&
-        in.Op != Opcode::ICall)
+    if (owns && in.Op != Opcode::Call && in.Op != Opcode::AsyncCall &&
+        in.Op != Opcode::VCall && in.Op != Opcode::ICall)
       return R.fail("an ownership mark before an instruction that is no call",
                     R.offset() - 1);
     if (!R.uleb32(in.Result.Id))
@@ -778,6 +780,7 @@ private:
         return false;
       break;
     case Opcode::Call:
+    case Opcode::AsyncCall:
     case Opcode::FnAddr:
       if (!str(in.Callee))
         return false;

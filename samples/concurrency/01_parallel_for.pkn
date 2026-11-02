@@ -1,0 +1,46 @@
+// The concurrency prototype: `parallel for` (docs/design/concurrency.md).
+// A dot product with a reduction, an element-wise update of an `inout`
+// array, and an `atomic int` counter the iterations bump from any thread.
+// Every iteration is independent, so the loop runs its chunks on a worker
+// pool; the reduction is folded in chunk order, so the sum is the same on
+// every run and every machine.
+// expect-stdout: dot = 333283335000
+// expect-stdout: ys[7] = 21
+// expect-stdout: hits = 10000
+
+import ::io;
+
+fn dot(xs: view float[], ys: view float[]) -> float {
+  s = 0.0;
+  parallel for i in 0..xs.len() {
+    s += xs[i] * ys[i];
+  }
+  return s;
+}
+
+fn saxpy(a: float, xs: view float[], ys: inout float[]) {
+  parallel for i in 0..xs.len() {
+    ys[i] = a * xs[i] + ys[i];
+  }
+}
+
+fn main() -> int {
+  n = 10000;
+  xs = [0.0; 10000];
+  ys = [0.0; 10000];
+  for i in 0..n {
+    xs[i] = float<int>(i);
+    ys[i] = float<int>(i);
+  }
+  io::println("dot = " + Str(int(dot(xs, ys))));
+
+  saxpy(2.0, xs, ys);
+  io::println("ys[7] = " + Str(ys[7]));
+
+  let hits: atomic int = 0;
+  parallel for i in 0..n {
+    hits += 1;
+  }
+  io::println("hits = " + Str(hits));
+  return 0;
+}

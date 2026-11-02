@@ -203,10 +203,27 @@ StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
   return *result;
 }
 
+// The concurrency prototype: the runtimes the program's code calls (MLIR's
+// async runtime for tasks, LLVM's OpenMP runtime for parallel loops), noted
+// when its object is emitted and linked by buildHostExecutable.
+namespace {
+bool g_linkAsyncRuntime = false;
+bool g_linkOpenMP = false;
+} // namespace
+
 Status emitHostObject(llvm::Module &module, unsigned optLevel,
                       const std::string &path) {
   if (Status s = addEntryPoint(module); !s)
     return s;
+  for (const llvm::Function &f : module.functions()) {
+    if (!f.isDeclaration())
+      continue;
+    if (f.getName().starts_with("mlirAsyncRuntime"))
+      g_linkAsyncRuntime = true;
+    else if (f.getName().starts_with("__kmpc_") ||
+             f.getName().starts_with("omp_"))
+      g_linkOpenMP = true;
+  }
   return emitHostModuleObject(module, optLevel, path);
 }
 
@@ -244,6 +261,16 @@ Status buildHostExecutable(
   std::string object = tmp.Path + "/program.o";
   if (Status s = emitObject(object); !s)
     return s;
+  // Emitting the object noted the runtimes its code calls (emitHostObject).
+  if (g_linkAsyncRuntime || g_linkOpenMP) {
+    tc.ExtraFlags.push_back(std::string("-L") + PAYKAN_LLVM_LIBRARY_DIR);
+    tc.ExtraFlags.push_back(std::string("-Wl,-rpath,") +
+                            PAYKAN_LLVM_LIBRARY_DIR);
+    if (g_linkAsyncRuntime)
+      tc.ExtraFlags.push_back("-lmlir_async_runtime");
+    if (g_linkOpenMP)
+      tc.ExtraFlags.push_back("-lomp");
+  }
   if (!toolchain::linkExecutable({object}, output, tc, errs))
     return failed();
   return Status::ok();

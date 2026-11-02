@@ -365,6 +365,9 @@ enum class Opcode : uint8_t {
   Xor, // i64, i64 -> i64: bitwise exclusive or
   Shl, // i64, i64 -> i64: a << (b mod 64), the count's low six bits
   Shr, // i64, i64 -> i64: a >> (b mod 64), zeros shifted in
+  // The concurrency prototype (docs/design/concurrency.md): tasks.
+  AsyncCall, // Callee = @fn, an `async fn`; Args -> ptr: a task for its result
+  Await,     // ptr (a task) -> Result.Ty: the task's result, waited for
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
@@ -431,11 +434,37 @@ struct If {
   std::unique_ptr<Block> Else; // may be null
 };
 
+/// The concurrency prototype's `parallel for` (docs/design/concurrency.md):
+/// a `while` that is a counted loop whose iterations are independent, so a
+/// backend may run them on several threads.  Read as a plain `while` it is
+/// the same loop run in order, which every pass and the C path do.  The
+/// loop counts `Counter` from 0 up to `Count`: the condition region is
+/// `load Counter < Count`, and the body's first `load` of `Counter` is the
+/// iteration's index and its first `store` to it the increment.
+struct Parallel {
+  LocalId Counter;
+  Operand Count; // i64
+  /// Locals of one iteration: fresh for each (the loop variable, the
+  /// body's own variables and temporaries).
+  std::vector<LocalId> Privates;
+  /// A reduction: the body accumulates into `Partial`, which holds Op's
+  /// identity before the loop; partials of parallel chunks combine with
+  /// Op, in chunk order, into Partial, which the code after the loop folds
+  /// into the variable.
+  struct Reduction {
+    LocalId Partial;
+    Opcode Op; // Add or Mul
+  };
+  std::vector<Reduction> Reductions;
+};
+
 struct While {
   /// Condition region: statements, then `Cond` is the bool value it ends with.
   std::unique_ptr<Block> CondBlock;
   Operand Cond;
   std::unique_ptr<Block> Body;
+  /// Set when the loop is a `parallel for` (the prototype).
+  std::optional<Parallel> Parallel;
 };
 
 /// `switch %v { case c { ... } ... default { ... } }`: runs the block of the
@@ -508,6 +537,9 @@ struct Function {
   /// of this module its compiled body references, which a program must keep
   /// while it keeps the function.
   std::vector<std::string> Uses;
+  /// An `async fn` (the concurrency prototype): called with `async_call`,
+  /// which yields a task (ptr) whose `await` is the function's result.
+  bool IsAsync = false;
   /// Next free ValueId for the builder / parser (ids are dense from 1).
   ValueId NextValueId = 1;
 };

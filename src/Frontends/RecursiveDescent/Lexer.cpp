@@ -90,6 +90,9 @@ constexpr Keyword kKeywords[] = {
     {"view", Tok::KwView},     {"inout", Tok::KwInout},
     {"let", Tok::KwLet},       {"weak", Tok::KwWeak},
     {"trait", Tok::KwTrait},   {"struct", Tok::KwStruct},
+    {"move", Tok::KwMove},     {"async", Tok::KwAsync},
+    {"await", Tok::KwAwait},   {"parallel", Tok::KwParallel},
+    {"atomic", Tok::KwAtomic}, {"shared", Tok::KwShared},
 };
 
 // The table spells the grammar's keywords, frontend::kKeywords, each once
@@ -168,6 +171,18 @@ const char *describe(Tok k) {
     return "'let'";
   case Tok::KwWeak:
     return "'weak'";
+  case Tok::KwMove:
+    return "'move'";
+  case Tok::KwAsync:
+    return "'async'";
+  case Tok::KwAwait:
+    return "'await'";
+  case Tok::KwParallel:
+    return "'parallel'";
+  case Tok::KwAtomic:
+    return "'atomic'";
+  case Tok::KwShared:
+    return "'shared'";
   case Tok::Underscore:
     return "'_'";
   case Tok::Assign:
@@ -334,6 +349,18 @@ const char *tokenKindName(Tok k) {
     return "KW_LET";
   case Tok::KwWeak:
     return "KW_WEAK";
+  case Tok::KwMove:
+    return "KW_MOVE";
+  case Tok::KwAsync:
+    return "KW_ASYNC";
+  case Tok::KwAwait:
+    return "KW_AWAIT";
+  case Tok::KwParallel:
+    return "KW_PARALLEL";
+  case Tok::KwAtomic:
+    return "KW_ATOMIC";
+  case Tok::KwShared:
+    return "KW_SHARED";
   case Tok::Underscore:
     return "UNDERSCORE";
   case Tok::Assign:

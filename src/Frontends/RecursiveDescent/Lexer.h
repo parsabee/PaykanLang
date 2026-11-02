@@ -57,6 +57,13 @@ enum class Tok : uint8_t {
   KwInout,
   KwLet,
   KwWeak,
+  // The concurrency prototype (docs/design/concurrency.md).
+  KwMove,
+  KwAsync,
+  KwAwait,
+  KwParallel,
+  KwAtomic,
+  KwShared,
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators
   Assign, // =

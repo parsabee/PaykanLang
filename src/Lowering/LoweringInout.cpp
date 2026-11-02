@@ -301,7 +301,7 @@ size_t ModuleLowering::declareParam(const std::string &name,
     CurrentScope->declareInout(name, local,
                                toPIRType(canonicalizeDeclType(astTy)),
                                canonicalizeDeclType(astTy));
-  else if (astTy && ast::isRefType(astTy))
+  else if (astTy && (ast::isRefType(astTy) || ast::isa<ast::AtomicType>(astTy)))
     CurrentScope->declare(name, local, astTy);
   else
     CurrentScope->declare(name, local, nullptr);

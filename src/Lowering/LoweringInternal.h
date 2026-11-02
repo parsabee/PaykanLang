@@ -426,6 +426,17 @@ private:
   pir::Signature functionSignature(ast::FuncDecl *node);
   pir::Function *declareFunctionPrototype(ast::FuncDecl *node);
 
+  // -- The concurrency prototype (docs/design/concurrency.md)
+
+  /// A `parallel for`: a counted `while` with the parallel annotation
+  /// (pir::Parallel), its reductions accumulated in partials.
+  Val emitParallelFor(ast::ForStmt *node);
+  /// An assignment to an `atomic` variable: a store or an atomic add.
+  Val emitAtomicAssign(ast::AssignStmt *node);
+  /// The program's `main` for an `async fn main` (@p task): starts the task
+  /// and awaits its result.
+  void emitAsyncMainEntry(const pir::Function &task);
+
   // -- Ownership predicates
 
   bool exprAlreadyShared(ast::Expr *expr) const;

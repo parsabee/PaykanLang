@@ -494,6 +494,20 @@ void ASTPrinter::visitSliceType(SliceType *node) {
   visit(node->getElementType());
 }
 
+void ASTPrinter::visitAtomicType(AtomicType *node) {
+  header("AtomicType", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getInnerType());
+}
+
+void ASTPrinter::visitTaskType(TaskType *node) {
+  header("TaskType", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getInnerType());
+}
+
 void ASTPrinter::visitPoisonType(PoisonType *node) {
   header("PoisonType", node);
   OS << "\n";

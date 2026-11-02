@@ -253,6 +253,12 @@ inline constexpr BufferFunction kPaykanBufferFunctions[] = {
     {kPaykanBufferTryReserve, false},
 };
 
+// The concurrency prototype's `atomic int` cell (src/Runtime/Atomic.c).
+inline constexpr const char *kPaykanAtomicNew = "PaykanAtomic_new";
+inline constexpr const char *kPaykanAtomicLoad = "PaykanAtomic_load";
+inline constexpr const char *kPaykanAtomicStore = "PaykanAtomic_store";
+inline constexpr const char *kPaykanAtomicAdd = "PaykanAtomic_add";
+
 // The standard library's ::io (stdlib/io.pkn): reached only through its
 // `native fn`s
 inline constexpr const char *kPaykanIoOpen = "Paykan_io_open";
@@ -426,6 +432,10 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanWeakNew,
     kPaykanWeakLoad,
     kPaykanWeakRelease,
+    kPaykanAtomicNew,
+    kPaykanAtomicLoad,
+    kPaykanAtomicStore,
+    kPaykanAtomicAdd,
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,

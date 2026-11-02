@@ -772,8 +772,8 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
       while (!used.insert(name).second)
         name += "_";
       const std::string &interned = Ctx.intern(name);
-      params.push_back(
-          {&interned, superInit->getParamTypes()[i], modes.mode(i), loc});
+      params.push_back({&interned, superInit->getParamTypes()[i], modes.mode(i),
+                        false, loc});
       args.push_back(Ctx.make<ast::Identifier>(loc, interned));
     }
     body.push_back(Ctx.make<ast::ExprStmt>(
@@ -782,7 +782,7 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
   }
   for (auto &[name, type] : ct->getFields()) {
     const std::string &interned = Ctx.intern(name);
-    params.push_back({&interned, type, ast::ParamMode::Value, loc});
+    params.push_back({&interned, type, ast::ParamMode::Value, false, loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));

@@ -132,13 +132,16 @@ bool mayRelease(const Instr &in) {
     return true;
   case Opcode::Call:
     return callMayRelease(in.Callee);
+  case Opcode::AsyncCall:
+    return true; // the task may, on its own thread
   default:
     return false;
   }
 }
 
 bool isCall(Opcode op) {
-  return op == Opcode::Call || op == Opcode::VCall || op == Opcode::ICall;
+  return op == Opcode::Call || op == Opcode::VCall || op == Opcode::ICall ||
+         op == Opcode::AsyncCall;
 }
 
 /// Whether no value reaches a switch's absent default: its cases are a
@@ -512,6 +515,7 @@ private:
     case Opcode::Call:
     case Opcode::VCall:
     case Opcode::ICall:
+    case Opcode::AsyncCall:
       // A box returned is the caller's own and a runtime helper's object a
       // new one; another object or address may be one into an argument,
       // or into what the callee reached.
@@ -520,6 +524,7 @@ private:
     case Opcode::Box:
     case Opcode::New:
     case Opcode::WeakLoad:
+    case Opcode::Await:
     case Opcode::FnAddr:
     case Opcode::VTableAddr:
     case Opcode::VTableLoad:
@@ -613,6 +618,7 @@ private:
     case Opcode::Box:
     case Opcode::New:
     case Opcode::WeakLoad:
+    case Opcode::Await:
     case Opcode::FnAddr:
     case Opcode::VTableAddr:
     case Opcode::VTableLoad:
@@ -621,6 +627,7 @@ private:
     case Opcode::Call:
     case Opcode::VCall:
     case Opcode::ICall:
+    case Opcode::AsyncCall:
       // A box returned is the caller's reference; an object or an address
       // may be one into an argument.
       if (in.Result.Ty == Type::Obj || in.Result.Ty == Type::Ptr)
@@ -1289,7 +1296,7 @@ public:
     case Opcode::Call:
     case Opcode::VCall:
     case Opcode::ICall:
-      for (size_t i = in->Op == Opcode::Call ? 0 : 1; i < in->Args.size(); ++i)
+      for (size_t i = in->Op == Opcode::ICall ? 1 : 0; i < in->Args.size(); ++i)
         if (sameValue(in->Args[i], v) && in->ownership(i) != ArgOwnership::Lent)
           return true;
       return false;

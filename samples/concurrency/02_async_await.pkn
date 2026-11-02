@@ -1,0 +1,51 @@
+// The concurrency prototype: `async fn`, `await` and `move`
+// (docs/design/concurrency.md).  Calling an async function starts a task
+// on MLIR's async runtime; `await` suspends the awaiting task until the
+// result is there.  A reference crosses into a task only by `move`: the
+// caller's variable ends there, and reading it afterwards is an error.
+// expect-stdout: fib(20) = 6765
+// expect-stdout: Job(work) done twice: 42
+// expect-stdout: total = 1000
+
+import ::io;
+
+class Job {
+  name: Str;
+  n: int;
+}
+
+async fn fib(n: int) -> int {
+  if n < 2 { return n; }
+  let a = fib(n - 1);
+  let b = fib(n - 2);
+  return (await a) + (await b);
+}
+
+async fn run(j: Job) -> int {
+  let inner = fib(10);
+  let k = await inner;
+  return j.n * 2 + k - 55;
+}
+
+async fn count(upto: int) -> int {
+  s = 0;
+  for i in 0..upto { s += 1; }
+  return s;
+}
+
+async fn main() -> int {
+  io::println("fib(20) = " + Str(await fib(20)));
+
+  let job = Job("work", 21);
+  let t = run(move job);
+  io::println("Job(work) done twice: " + Str(await t));
+
+  // A hundred tasks, started before any is awaited.
+  total = 0;
+  for i in 0..100 {
+    let c = count(10);
+    total += await c;
+  }
+  io::println("total = " + Str(total));
+  return 0;
+}

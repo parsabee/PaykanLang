@@ -128,6 +128,7 @@ Use useOf(const Instr &in, size_t i) {
   case Opcode::Call:
   case Opcode::VCall:
   case Opcode::ICall:
+  case Opcode::AsyncCall:
     return in.ownership(i) == ArgOwnership::Lent ? Use::Borrow : Use::HandOn;
   case Opcode::FieldStore:
   case Opcode::PtrStore:
@@ -252,6 +253,7 @@ public:
     case Opcode::VCall:
     case Opcode::ICall:
     case Opcode::WeakLoad:
+    case Opcode::Await:
     case Opcode::Box:
       return true;
     default:
@@ -572,6 +574,8 @@ private:
       return true;
     case Opcode::Call:
       return !inertCall(in.Callee);
+    case Opcode::AsyncCall:
+      return true;
     case Opcode::FieldStore:
     case Opcode::PtrStore:
       return isBox(in.Args[1]);
@@ -825,7 +829,7 @@ private:
       const auto *in = std::get_if<Instr>(s);
       if (!in ||
           (in->Op != Opcode::Call && in->Op != Opcode::VCall &&
-           in->Op != Opcode::ICall) ||
+           in->Op != Opcode::ICall && in->Op != Opcode::AsyncCall) ||
           F.Info.at(s).At.B != F.Info.at(F.Def[v]).At.B)
         return false;
       const auto at =

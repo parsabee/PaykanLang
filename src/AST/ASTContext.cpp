@@ -105,6 +105,24 @@ OptionalType *ASTContext::getOptionalType(Type *innerTy) {
   return ot;
 }
 
+AtomicType *ASTContext::getAtomicType(Type *innerTy) {
+  auto it = AtomicTypes.find(innerTy);
+  if (it != AtomicTypes.end())
+    return it->second;
+  auto *at = make<AtomicType>(SourceLocation(), innerTy);
+  AtomicTypes[innerTy] = at;
+  return at;
+}
+
+TaskType *ASTContext::getTaskType(Type *innerTy) {
+  auto it = TaskTypes.find(innerTy);
+  if (it != TaskTypes.end())
+    return it->second;
+  auto *tt = make<TaskType>(SourceLocation(), innerTy);
+  TaskTypes[innerTy] = tt;
+  return tt;
+}
+
 // -- Canonical tuple types
 //
 // One TupleType per (canonical) element-type list, as for getFixedArrayType:
@@ -303,6 +321,10 @@ std::string typeName(Type *ty) {
   }
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return suffixed(ot->getInnerType()) + "?";
+  if (auto *at = dyn_cast<AtomicType>(ty))
+    return "atomic " + typeName(at->getInnerType());
+  if (auto *tt = dyn_cast<TaskType>(ty))
+    return "Task<" + typeName(tt->getInnerType()) + ">";
   // A slice is spelled as its parameter's type is, its mode aside.
   if (auto *st = dyn_cast<SliceType>(ty))
     return suffixed(st->getElementType()) + "[]";

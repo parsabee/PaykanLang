@@ -53,7 +53,8 @@ namespace paykan::pir {
 namespace {
 
 bool isCall(Opcode op) {
-  return op == Opcode::Call || op == Opcode::VCall || op == Opcode::ICall;
+  return op == Opcode::Call || op == Opcode::VCall || op == Opcode::ICall ||
+         op == Opcode::AsyncCall;
 }
 
 bool names(const Operand &o, ValueId v) {
@@ -69,6 +70,7 @@ bool handsOn(const Instr &in, size_t i) {
   case Opcode::Call:
   case Opcode::VCall:
   case Opcode::ICall:
+  case Opcode::AsyncCall:
     return in.ownership(i) != ArgOwnership::Lent;
   case Opcode::Store:
     return i == 0;
@@ -390,6 +392,7 @@ private:
     case Opcode::Call: // an argument the call lends
     case Opcode::VCall:
     case Opcode::ICall:
+    case Opcode::AsyncCall:
       return false;
     default:
       return true;
@@ -935,6 +938,7 @@ private:
     case Opcode::Call:
     case Opcode::VCall:
     case Opcode::ICall:
+    case Opcode::AsyncCall:
       if (u.Index < firstParamArg(*in))
         return UseKind::Unknown;
       switch (in->ownership(u.Index)) {

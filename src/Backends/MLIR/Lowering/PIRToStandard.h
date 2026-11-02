@@ -48,6 +48,12 @@ inline constexpr const char *kDropAttr = "pir.drop";
 /// name of its own, whichever module holds the copy a program keeps.
 inline constexpr const char *kSharedAttr = "pir.shared";
 
+/// The attribute the import puts on an `async fn` (the concurrency
+/// prototype, docs/design/concurrency.md): the LLVM path makes it an
+/// `async.func` whose result is the task's 64 bits, the C path a function
+/// returning them in a `ptr`.
+inline constexpr const char *kAsyncAttr = "pir.async";
+
 /// The link name of the symbol @p name of PIR module @p module, the same in
 /// every module of the program: `pk_<module>_S<name>`, both parts escaped
 /// so the result is a C identifier and no two (module, name) pairs share
@@ -62,11 +68,14 @@ std::string linkName(llvm::StringRef module, llvm::StringRef name);
 std::string vtableName(llvm::StringRef module, llvm::StringRef name);
 
 /// Lower @p module, one imported PIR module (Import/PIRImport.h), in place.
-mlir::LogicalResult lowerToStandard(mlir::ModuleOp module);
+/// With @p sequential (the C path), a `pir.parallel` loop runs in order
+/// and an `async fn` is a plain function (the concurrency prototype).
+mlir::LogicalResult lowerToStandard(mlir::ModuleOp module,
+                                    bool sequential = false);
 
 /// The lowering as a pass over a program: every module nested in the
 /// operated-on module that holds pir functions (or that module itself).
-std::unique_ptr<mlir::Pass> createPIRToStandardPass();
+std::unique_ptr<mlir::Pass> createPIRToStandardPass(bool sequential = false);
 
 /// Load the dialects the lowering produces (func, scf, arith, pir).
 void loadStandardDialects(mlir::MLIRContext &ctx);

@@ -354,6 +354,27 @@ public:
       i.Args.push_back(a.Op);
     return emit(std::move(i));
   }
+  /// `%t = async_call @callee(args)`: a task for an `async fn`'s result
+  /// (the concurrency prototype).
+  Val asyncCall(const std::string &callee, const Signature &sig,
+                const std::vector<Val> &args, std::string name = "") {
+    (void)sig;
+    Instr i;
+    i.Op = Opcode::AsyncCall;
+    i.Callee = callee;
+    i.Result = newValue(Type::Ptr, std::move(name));
+    for (auto &a : args)
+      i.Args.push_back(a.Op);
+    return emit(std::move(i));
+  }
+  /// `%v = await T, %task`: the task's result, waited for.
+  Val await(const Val &task, Type ty, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::Await;
+    i.Result = newValue(ty, std::move(name));
+    i.Args = {task.Op};
+    return emit(std::move(i));
+  }
   Val vcall(const Val &recv, const std::string &className, uint32_t slot,
             const Signature &sig, const std::vector<Val> &args,
             std::string name = "") {

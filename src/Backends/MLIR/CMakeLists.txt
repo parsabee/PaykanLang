@@ -34,6 +34,9 @@ target_link_libraries(paykan_backend_mlir
             MLIRArithDialect
             MLIRArithToEmitC
             MLIRArithToLLVM
+            MLIRAsyncDialect
+            MLIRAsyncToLLVM
+            MLIRAsyncTransforms
             MLIRBuiltinToLLVMIRTranslation
             MLIRControlFlowToLLVM
             MLIREmitCDialect
@@ -45,11 +48,15 @@ target_link_libraries(paykan_backend_mlir
             MLIRLLVMCommonConversion
             MLIRLLVMDialect
             MLIRLLVMToLLVMIRTranslation
+            MLIROpenMPDialect
+            MLIROpenMPToLLVM
+            MLIROpenMPToLLVMIRTranslation
             MLIRPass
             MLIRReconcileUnrealizedCasts
             MLIRSCFDialect
             MLIRSCFToControlFlow
             MLIRSCFToEmitC
+            MLIRSCFToOpenMP
             MLIRTargetCpp
             MLIRTargetLLVMIRExport
             MLIRTransforms
