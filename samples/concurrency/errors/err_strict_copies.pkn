@@ -16,7 +16,7 @@ fn take(n: Node) -> int {
 fn main() -> int {
   let a = Node(2);
   let b = a;                    // strict: cannot copy a unique
-  let s: shared Node = Node(3);
+  let s: shared = Node(3);
   let t = s;                    // fine: shared is Copyable
   io::println(Str(take(a)));    // strict: cannot copy into a parameter
   io::println(Str(take(move a)));

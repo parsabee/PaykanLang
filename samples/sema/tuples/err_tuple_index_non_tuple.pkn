@@ -1,6 +1,6 @@
 // ERROR: tuple index '.0' applied to non-tuple type 'int'
 fn main() -> int {
-  let x: int = 3;
+  let x = 3;
   let y = x.0;
   return 0;
 }

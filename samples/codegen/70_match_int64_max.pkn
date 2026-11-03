@@ -118,7 +118,7 @@ fn row(name: Str, f: (int) -> int, xs: int[6]) {
 fn main() -> int {
   let max = 9223372036854775807;
   let min = -max - 1;
-  let xs: int[6] = [max, min, 0, 7, 1, max - 1];
+  let xs = [max, min, 0, 7, 1, max - 1];
   row("first", first, xs);
   row("second", second, xs);
   row("last", last, xs);

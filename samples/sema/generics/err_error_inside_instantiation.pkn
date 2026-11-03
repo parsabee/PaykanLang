@@ -11,7 +11,7 @@ impl Adder<T> {
 }
 
 fn main() -> int {
-  let ok = Adder<int>(1);
-  let bad = Adder<bool>(True);
+  let ok = Adder(1);
+  let bad = Adder(True);
   return 0;
 }

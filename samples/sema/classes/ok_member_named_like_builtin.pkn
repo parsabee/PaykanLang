@@ -22,9 +22,9 @@ impl Stats {
 }
 
 fn main() -> int {
-  let l: mut Logger = Logger();
+  let l: mut = Logger();
   l.print("first");
   io::print("second\n");
-  let s: Stats = Stats();
+  let s = Stats();
   return s.open - 1;
 }

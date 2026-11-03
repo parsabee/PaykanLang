@@ -10,7 +10,7 @@ fn main(args: view Str[]) -> int {
   let reps = bench::arg(args, 2, 5);
   let work = bench::arg(args, 3, 2000);
   xs = [0.0; 16384];
-  for i in 0..n { xs[i] = float<int>(i % 97) * 0.01; }
+  for i in 0..n { xs[i] = float(i % 97) * 0.01; }
   best = 0;
   total = 0;
   s = 0.0;

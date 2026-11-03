@@ -39,5 +39,5 @@ fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
 // The module's own Box<int>: importers that instantiate Box<int> get this
 // very class.
 fn one() -> Box<int> {
-  return Box<int>(1);
+  return Box(1);
 }

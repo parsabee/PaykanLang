@@ -49,20 +49,20 @@ fn make() -> Holder {
 }
 
 fn show(c: C) {
-  io::println("show " + Str<int>(c.v));
+  io::println("show " + Str(c.v));
 }
 
 fn main() -> int {
-  let arr: C[2] = [C(1), C(2)];
-  x: C = C(9);
+  let arr = [C(1), C(2)];
+  x = C(9);
   x = arr[idx()];
   io::println(Str(x.v));
   x = arrs()[1];
-  io::println(Str<int>(x.v));
-  let y: C = arr[idx()];
+  io::println(Str(x.v));
+  let y = arr[idx()];
   io::println(Str(y.v));
   x = make().c;
-  io::println(Str<int>(x.v));
+  io::println(Str(x.v));
   show(arr[idx()]);
   return 0;
 }

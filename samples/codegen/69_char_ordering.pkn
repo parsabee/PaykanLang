@@ -48,7 +48,7 @@ fn bits(a: char, vs: int[11], op: int) -> Str {
 
 fn main() -> int {
   // Every pair of codes on both sides of 128, under each operator.
-  let vs: int[11] = [0, 1, 65, 122, 127, 128, 129, 195, 200, 254, 255];
+  let vs = [0, 1, 65, 122, 127, 128, 129, 195, 200, 254, 255];
   for i in 0..11 {
     let a = char(vs[i]);
     io::println(Str(vs[i]) + " " + bits(a, vs, 0) + " " + bits(a, vs, 1) + " "
@@ -72,8 +72,7 @@ fn main() -> int {
   io::println("min " + Str(int(lo)) + " max " + Str(int(hi)));
 
   // An insertion sort by `<`.
-  cs: char[7] =
-      [char(200), 'A', char(255), char(0), char(128), char(127), char(1)];
+  cs = [char(200), 'A', char(255), char(0), char(128), char(127), char(1)];
   for i in 1..7 {
     j = i;
     while j > 0 && cs[j] < cs[j - 1] {

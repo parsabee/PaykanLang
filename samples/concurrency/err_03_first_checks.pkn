@@ -14,7 +14,7 @@ fn main() -> int {
   let b = Node(2);
   let t2 = consume(move b);
   io::println(Str(b.id));       // error: 'b' was moved
-  let s: shared Node = Node(3);
+  let s: shared = Node(3);
   let t3 = consume(move s);     // error: 's' is shared: it never crosses
   let nodes = [Node(4)];
   total = 0;

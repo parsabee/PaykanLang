@@ -22,12 +22,12 @@ fn main() -> int {
   let o: A? = A(0);
   match o {
     a: A {
-      i: int = 0;
+      i = 0;
       while i < 3 {
         a = A(i);
         i = i + 1;
       }
-      io::println(Str<int>(a.v));
+      io::println(Str(a.v));
     }
     None { }
   }

@@ -56,8 +56,8 @@ class Slots {
 
 impl Slots {
   fn __init__() {
-    self.m = keys::Maybe<keys::Key>::Just(keys::Key(4, 0));
-    self.o = Opt<keys::CK>::Some(keys::CK(5));
+    self.m = keys::Maybe::Just(keys::Key(4, 0));
+    self.o = Opt::Some(keys::CK(5));
   }
 }
 
@@ -75,9 +75,9 @@ fn main() -> int {
   io::println(Str(m.len()) + " " + Str(s.len()) + " " + Str(t.len()));
 
   io::println(Str(h(keys::mkKeyed()) == h(7)) + " "
-      + Str(h(keys::Keyed<Str>("a")) == h("a")));
-  io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox<Str>("x"))) + " "
-      + keys::GBox<Str>("x").name());
+      + Str(h(keys::Keyed("a")) == h("a")));
+  io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox("x"))) + " "
+      + keys::GBox("x").name());
   io::println(Str(keys::distinct(0)));
 
   a = collections::HashSet<mid::MSub>();

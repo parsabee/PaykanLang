@@ -23,7 +23,7 @@ async fn record(counts: locked mut Counts, id: int, n: int) -> int {
 }
 
 fn main() -> int {
-  let counts: locked mut Counts = Counts([0; 16], 0);  // a unique value becomes a cell here
+  let counts: locked mut = Counts([0; 16], 0);      // a unique value becomes a cell here
   let a = record(counts, 1, 1000);                  // handles copied into the tasks
   let b = record(counts, 2, 1000);
   let c = record(counts, 3, 1000);

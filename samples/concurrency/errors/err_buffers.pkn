@@ -7,9 +7,9 @@ fn main() -> int {
   ys = mem::Buffer<float>();
   let g = ys.grow(16);
   parallel for i in 0..16 {
-    let a = ys.set(unsigned<int>(i + 1), 1.0);   // error: written at an index other than the loop's variable
+    let a = ys.set(unsigned(i + 1), 1.0);        // error: written at an index other than the loop's variable
     let b = ys.reserve(32);                      // error: reserve could move its storage
-    let c = ys.set(unsigned<int>(i), 2.0);       // fine
+    let c = ys.set(unsigned(i), 2.0);            // fine
   }
   return 0;
 }

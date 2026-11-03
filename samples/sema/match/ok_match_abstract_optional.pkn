@@ -20,5 +20,5 @@ fn area(s: Shape?) -> float {
 }
 
 fn main() -> int {
-  return int<float>(area(Square(2.0)));
+  return int(area(Square(2.0)));
 }

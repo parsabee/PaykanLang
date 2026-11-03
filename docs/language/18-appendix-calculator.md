@@ -115,7 +115,7 @@ binding; `e` borrows `cur` until its last use, so the next entry is read into `a
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
   fn lookup(key: Str) -> mut Entry? {
-    cur: mut Entry? = self.buckets[self.indexFor(key)];
+    cur: mut = self.buckets[self.indexFor(key)];
     while cur != None {
       match cur {
         e: inout Entry {
@@ -141,15 +141,15 @@ bucket keeps its keys in the order they were added:
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
   fn insert(key: Str, value: float) -> bool {
-    found: mut Entry? = self.lookup(key);
+    found: mut = self.lookup(key);
     match found {
       e: inout Entry {
         e.value = value; // update in place (Entry is a reference type)
         return False;
       }
       None {
-        let b: int = self.indexFor(key);
-        first: mut Entry? = self.buckets[b];
+        let b = self.indexFor(key);
+        first: mut = self.buckets[b];
         match first {
           f: inout Entry {
             f.append(Entry(key, value));
@@ -175,8 +175,8 @@ bucket, any other by `Entry.unlink`, which links the entry before it to the one 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
   fn remove(key: Str) -> bool {
-    let b: int = self.indexFor(key);
-    first: mut Entry? = self.buckets[b];
+    let b = self.indexFor(key);
+    first: mut = self.buckets[b];
     match first {
       f: inout Entry {
         if f.key.equals(key) {
@@ -205,9 +205,9 @@ fn listVars(env: mut hashmap::HashMap) {
     io::println("(no variables)");
     return;
   }
-  b: int = 0;
+  b = 0;
   while b < env.bucketCount() {
-    cur: hashmap::Entry? = env.bucket(b);
+    cur = env.bucket(b);
     while cur != None {
       match cur {
         e: hashmap::Entry {
@@ -276,13 +276,13 @@ chained conditional expression:
 // from: samples/imports/12_calc/calc/parser.pkn
 
   fn parseTerm() -> float {
-    result: float = self.parseFactor();
+    result = self.parseFactor();
     self.skipWs();
     while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
-      let op: Op = if self.atIs('*') then Op::Mul else if self.atIs('/')
+      let op = if self.atIs('*') then Op::Mul else if self.atIs('/')
           then Op::Div else Op::Mod;
       self.advance();
-      let rhs: float = self.parseFactor();
+      let rhs = self.parseFactor();
       result = applyOp(op, result, rhs);
       self.skipWs();
     }
@@ -296,7 +296,7 @@ A factor that is a name is looked up in the variable store. The `match` names th
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
     if self.atIsIdentStart() {
-      let name: Str = self.parseIdent();
+      let name = self.parseIdent();
       match self.env.lookup(name) {
         e: hashmap::Entry {
           return e.value;
@@ -319,20 +319,20 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
 // from: samples/imports/12_calc/calc/parser.pkn
   fn parseStatement() -> (Str?, float) {
     self.skipWs();
-    let start: int = self.pos;
+    let start = self.pos;
     if self.atIsIdentStart() {
-      let name: Str = self.parseIdent();
+      let name = self.parseIdent();
       self.skipWs();
       if self.atAssign() {
         self.advance(); // consume '='
-        let v: float = self.parseExpr();
+        let v = self.parseExpr();
         self.skipWs();
         let target: Str? = name;
         return (target, v);
       }
       self.pos = start; // not an assignment — rewind and parse as an expression
     }
-    let v: float = self.parseExpr();
+    let v = self.parseExpr();
     self.skipWs();
     let noName: Str? = None;
     return (noName, v);
@@ -390,7 +390,7 @@ changes it, and its blank is an empty statement:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  let history: mut Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
+  let history: mut = Ring(("", 0.0));
 ```
 
 ### Evaluating a statement
@@ -405,7 +405,7 @@ too, since parsing moves it along its input:
 // from: samples/imports/12_calc/main.pkn
 fn evalStatement(src: Str, env: mut hashmap::HashMap,
                  history: mut Ring<(Str, float)>, quiet: bool) {
-  let p: mut parser::Parser = parser::Parser(src, env);
+  let p: mut = parser::Parser(src, env);
   target, value = p.parseStatement();
 
   match p.error {
@@ -472,12 +472,12 @@ convention:
 // from: samples/imports/12_calc/main.pkn
 
 fn main(args: view Str[]) -> int {
-  quiet: bool = False;
-  runDemo: bool = True;
-  nexprs: int = 0;
+  quiet = False;
+  runDemo = True;
+  nexprs = 0;
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
-  i: int = 1;
+  i = 1;
   while i < args.len() {
     a: view = args[i];
     if a.equals("-h") || a.equals("--help") {
@@ -506,7 +506,7 @@ history can keep:
 ```pkn
 // from: samples/imports/12_calc/main.pkn
   if nexprs > 0 {
-    j: int = 1;
+    j = 1;
     while j < args.len() {
       if args[j].equals("-e") || args[j].equals("--eval") {
         j = j + 1;

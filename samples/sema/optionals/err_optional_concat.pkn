@@ -1,6 +1,6 @@
 // Arithmetic / concatenation is not defined on an optional value.
 fn main() -> int {
   let s: Str? = "a";
-  let t: Str = s + "b";   // error: cannot use optional 'Str?' as 'Str' without unwrapping (use match)
+  let t = s + "b";   // error: cannot use optional 'Str?' as 'Str' without unwrapping (use match)
   return 0;
 }

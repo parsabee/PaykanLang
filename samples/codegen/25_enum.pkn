@@ -108,13 +108,13 @@ impl Player {
 fn main() -> int {
   // 1. Declaration & variant access.
   io::println("== basics ==");
-  let d: Direction = Direction::East;
+  let d = Direction::East;
   io::println(dirName(d));                       // East
 
   // 2. Implicit ordering: variants are 0,1,2,3 in declaration order, so the
   //    later a variant is declared the later this chain reaches it.
   io::println("== ordering ==");
-  let probe: Direction = Direction::South;   // index 2
+  let probe = Direction::South;   // index 2
   if probe == Direction::North {
     io::println("0");
   }
@@ -159,15 +159,15 @@ fn main() -> int {
 
   // 7. Enum field in a class, mutated via a method.
   io::println("== class field ==");
-  let p: mut Player = Player(Direction::North);
+  let p: mut = Player(Direction::North);
   io::println(p.report());                       // North
   p.turnAround();
   io::println(p.report());                       // South
 
   // 8. State machine: reassign an enum in a loop using a transition function.
   io::println("== state machine ==");
-  l: Light = Light::Red;
-  i: int = 0;
+  l = Light::Red;
+  i = 0;
   while i < 4 {
     io::println(lightName(l));                   // Red, Green, Yellow, Red
     l = nextLight(l);
@@ -176,10 +176,10 @@ fn main() -> int {
 
   // 9. Arrays of enums: literal, subscript get/set, iteration.
   io::println("== arrays ==");
-  route: Direction[4] =
+  route =
       [Direction::North, Direction::East, Direction::South, Direction::West];
   route[0] = opposite(route[0]);             // North -> South
-  j: int = 0;
+  j = 0;
   while j < route.len() {
     io::println(dirName(route[j]));              // South, East, South, West
     j = j + 1;

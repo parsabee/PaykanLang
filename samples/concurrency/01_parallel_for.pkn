@@ -31,8 +31,8 @@ fn main() -> int {
   xs = [0.0; 10000];
   ys = [0.0; 10000];
   for i in 0..n {
-    xs[i] = float<int>(i);
-    ys[i] = float<int>(i);
+    xs[i] = float(i);
+    ys[i] = float(i);
   }
   io::println("dot = " + Str(int(dot(xs, ys))));
 

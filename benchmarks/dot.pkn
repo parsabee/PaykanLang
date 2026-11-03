@@ -9,7 +9,7 @@ fn main(args: view Str[]) -> int {
   let reps = bench::arg(args, 2, 5);
   xs = [0.0; 16384];
   ys = [0.0; 16384];
-  for i in 0..16384 { xs[i] = float<int>(i % 7); ys[i] = float<int>(i % 5); }
+  for i in 0..16384 { xs[i] = float(i % 7); ys[i] = float(i % 5); }
   best = 0;
   total = 0;
   s = 0.0;

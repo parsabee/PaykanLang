@@ -10,6 +10,6 @@ impl Node {
 
 fn main() -> int {
   let a: Node? = Node(1);
-  let x: int = a.val();   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
+  let x = a.val();   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
   return x;
 }

@@ -17,7 +17,7 @@ fn bump(c: locked Counts) {
 }
 
 fn main() -> int {
-  let counts: locked mut Counts = Counts([0; 16], 0);
+  let counts: locked mut = Counts([0; 16], 0);
   let t = counts.total;                 // error: locked: reach its contents in a lock block
   lock counts as c: view {
     c.total = 5;                        // error: view binding is read-only

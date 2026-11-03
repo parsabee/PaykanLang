@@ -93,6 +93,11 @@ samples/concurrency/README.md.
   number): a `.pkm` built by 0.3.0 is rebuilt from source by 0.4.0, whose vtables differ.
 - The generated `__init__` of a class or struct moves a move-only parameter into its field, so a
   type holding a `Str` or a unique reference passes `--strict-ownership` with no `__init__` of its own.
+- The samples, the benchmarks and the standard library leave out the types the compiler infers:
+  a declaration's type when its initializer has exactly that type (`let n = Node(1)`,
+  `cur: mut = self.buckets[b]`) and the type arguments its arguments determine (`Str(n)` for
+  `Str<int>(n)`, `_Node(v, None, t)`).  A sample that shows a spelling keeps it: the typed and
+  inferred declarations, the explicit conversions and type arguments, the contextual literals.
 
 ### Fixed
 

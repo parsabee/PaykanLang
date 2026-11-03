@@ -14,6 +14,6 @@ impl Named {
 }
 
 fn main() -> int {
-  let x: Named = Named("hi");
+  let x = Named("hi");
   return 0;
 }

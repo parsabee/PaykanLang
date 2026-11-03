@@ -24,7 +24,7 @@ impl Node {
 // ---- List operations -------------------------------------------------------
 
 fn push_front(head: Node?, v: int) -> Node {
-  let n: mut Node = Node(v);
+  let n: mut = Node(v);
   n.next = head;               // Node? field accepts a Node? value
   return n;
 }
@@ -44,14 +44,14 @@ fn find(head: Node?, key: int) -> Node? {
 }
 
 fn render(head: Node?) -> Str {
-  out: Str = "[";
+  out = "[";
   cur: Node? = head;
-  first: bool = True;
+  first = True;
   while cur != None {
     match cur {
       n: Node {
         if !first { out = out + ", "; }
-        out = out + Str<int>(n.v);
+        out = out + Str(n.v);
         first = False;
         cur = n.next;
       }
@@ -86,9 +86,9 @@ fn main() -> int {
   io::println(describe(find(None, 1)));          // not found
 
   io::println("=== None checks ===");
-  io::println(Str<bool>(head == None));            // False
+  io::println(Str(head == None));           // False
   io::println(Str(find(head, 9) == None));  // True
-  io::println(Str<bool>(find(head, 3) != None));  // True
+  io::println(Str(find(head, 3) != None));  // True
 
   io::println("=== printing an optional ===");
   let maybe: Node? = None;
@@ -108,7 +108,7 @@ fn main() -> int {
   let b: Str? = "same";
   let c: Str? = None;
   io::println(Str(a == b));                  // True  (content equality)
-  io::println(Str<bool>(a == c));                  // False (one is None)
+  io::println(Str(a == c));                  // False (one is None)
   io::println(Str(c == None));               // True
   return 0;
 }

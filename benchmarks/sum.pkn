@@ -9,7 +9,7 @@ fn main(args: view Str[]) -> int {
   let n = bench::arg(args, 1, 16777216);
   let reps = bench::arg(args, 2, 5);
   xs = [0.0; 16384];
-  for i in 0..16384 { xs[i] = float<int>(i % 7); }
+  for i in 0..16384 { xs[i] = float(i % 7); }
   best = 0;
   total = 0;
   s = 0.0;

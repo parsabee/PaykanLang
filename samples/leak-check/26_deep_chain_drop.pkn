@@ -98,7 +98,7 @@ fn arrays(n: int) -> int {
   prev: Obj = None;
   i = 0;
   while i < n {
-    prev = Link([prev, Str<int>(i), Node(i)]);
+    prev = Link([prev, Str(i), Node(i)]);
     i = i + 1;
   }
   return i;

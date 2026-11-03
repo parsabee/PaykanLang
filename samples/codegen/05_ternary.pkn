@@ -15,42 +15,42 @@ fn pickStr(flag: bool, a: Str, b: Str) -> Str {
 
 fn main() -> int {
   io::println("=== int ternary ===");
-  let x: int = if True then 10 else 20;
-  let y: int = if False then 10 else 20;
-  io::println("True  ->" + Str<int>(x));    // 10
+  let x = if True then 10 else 20;
+  let y = if False then 10 else 20;
+  io::println("True  ->" + Str(x));    // 10
   io::println("False ->" + Str(y));    // 20
 
   io::println("=== float ternary ===");
-  let f: float = if 1 < 2 then 1.5 else 2.5;
-  io::println("1<2 ->" + Str<float>(f));    // 1.5
+  let f = if 1 < 2 then 1.5 else 2.5;
+  io::println("1<2 ->" + Str(f));    // 1.5
 
   io::println("=== bool ternary ===");
-  let b: bool = if True then False else True;
+  let b = if True then False else True;
   io::println("bool ->" + Str(b));    // False
 
   io::println("=== nested ternary ===");
-  let grade: int = 85;
+  let grade = 85;
   let label: int = if grade >= 90 then 1 else if grade >= 80 then 2
       else if grade >= 70 then 3 else 4;
-  io::println("grade 85 -> band" + Str<int>(label));  // 2
+  io::println("grade 85 -> band" + Str(label));  // 2
 
   io::println("=== ternary with relational condition ===");
-  let a: int = 7;
+  let a = 7;
   io::println("max(7,3)=" + Str(if a > 3 then a else 3));  // 7
-  io::println("min(7,3)=" + Str<int>(if a < 3 then a else 3));  // 3
+  io::println("min(7,3)=" + Str(if a < 3 then a else 3));  // 3
 
   io::println("=== Str ternary (class branches) ===");
   // Both branches produce Str — exercises the isClassResult path which
   // calls emitAsShared on each branch.
-  let cond: bool = True;
-  s: Str = if cond then "yes" else "no";
+  let cond = True;
+  s = if cond then "yes" else "no";
   io::println(s);           // yes
   s = if !cond then "yes" else "no";
   io::println(s);           // no
 
   io::println("=== Str ternary rebind (double-box regression) ===");
   // Assigning a ternary-Str to an existing variable must not double-box.
-  t: Str = "initial";
+  t = "initial";
   t = if True then "replaced" else "original";
   io::println(t);           // replaced
 
@@ -60,9 +60,9 @@ fn main() -> int {
   io::println(classify(0));    // zero
 
   io::println("=== ternary with owned Str variables as branches ===");
-  let p: Str = "alpha";
-  let q: Str = "beta";
-  r: Str = pickStr(True, p, q);
+  let p = "alpha";
+  let q = "beta";
+  r = pickStr(True, p, q);
   io::println(r);           // alpha
   r = pickStr(False, p, q);
   io::println(r);           // beta

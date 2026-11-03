@@ -60,7 +60,7 @@ fn main() -> int {
   l.a.y = 0;
   let s: mut = Shape(Point::origin());
   s.at.shift(3);
-  ps: Point[2] = [p, q];
+  ps = [p, q];
   ps[1].x = 9;
   let pair = twice(p);
   io::println(show(l) + " " + Str(p == q) + " " + Str(p.hash()));

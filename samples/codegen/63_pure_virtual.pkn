@@ -44,7 +44,7 @@ class Polygon : Shape {
   sides: int;
   side: float;
 
-  view fn perimeter() -> float { return float<int>(self.sides) * self.side; }
+  view fn perimeter() -> float { return float(self.sides) * self.side; }
 }
 
 impl Polygon {

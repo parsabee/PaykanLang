@@ -31,7 +31,7 @@ fn main() -> int {
     break;
   }
   let e = Job("e");
-  v: view Job = e;
+  v: view = e;
   keep(move e);                        // error: viewed by 'v'
   io::println(v.name);
   let f = Job("f");

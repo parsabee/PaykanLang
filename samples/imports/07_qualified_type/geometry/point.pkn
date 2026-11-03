@@ -4,9 +4,8 @@ class Point {
   x: int;
   y: int;
   view fn sum() -> int { return self.x + self.y; }
-  view fn toString() -> Str {
-    return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
-  }
+  view fn toString() -> Str
+                       { return "(" + Str(self.x) + "," + Str(self.y) + ")"; }
 }
 
 impl Point {

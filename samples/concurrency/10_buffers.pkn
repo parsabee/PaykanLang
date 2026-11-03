@@ -12,19 +12,19 @@ import ::memory as mem;
 fn main() -> int {
   let n = 100000;
   xs = mem::Buffer<float>();
-  let grown = xs.grow(unsigned<int>(n));
-  for i in 0..n { let e = xs.set(unsigned<int>(i), float<int>(i)); }
+  let grown = xs.grow(unsigned(n));
+  for i in 0..n { let e = xs.set(unsigned(i), float(i)); }
   ys = mem::Buffer<float>();
-  let grown2 = ys.grow(unsigned<int>(n));
+  let grown2 = ys.grow(unsigned(n));
   // Written at the loop's variable: no two iterations touch one element.
   parallel for i in 0..n {
-    let e = ys.set(unsigned<int>(i), xs.at(unsigned<int>(i)) * 2.0);
+    let e = ys.set(unsigned(i), xs.at(unsigned(i)) * 2.0);
   }
   // Frozen in a box: a handle every thread reads.
-  let frozen: atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move xs);
+  let frozen: atomic shared = mem::Box(move xs);
   s = 0.0;
   parallel for i in 0..n {
-    let u = unsigned<int>(i);
+    let u = unsigned(i);
     s += frozen.value().at(u) + ys.at(u);
   }
   io::println("sum " + Str(s) + " of " + Str(ys.len()) + " elements");

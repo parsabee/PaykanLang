@@ -14,7 +14,7 @@ fn main() -> int {
   let x: Obj = Dog("Rex");
   match x {
     d: Dog {
-      let sound: Str = d.bark();
+      let sound = d.bark();
       io::println(sound);
     }
     _ { }

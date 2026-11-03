@@ -143,7 +143,7 @@ fn main() -> int {
     A { io::print("A "); }
   }
   io::println(Str(b2.e) + " " + Str(x) + " " + Str(y));
-  let c: mut = Cell<E>(E::R(4, "c" + ""));
+  let c: mut = Cell(E::R(4, "c" + ""));
   match c.slot() {
     r: inout R { r.w = 40; }
     A { }

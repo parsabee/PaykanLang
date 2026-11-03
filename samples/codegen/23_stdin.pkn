@@ -14,19 +14,19 @@ import ::io;
 fn main() -> int {
   // --- readln: read lines until EOF ---
   io::println("=== readln ===");
-  i: int = 0;
+  i = 0;
   while True {
     match io::stdin().readln() {
       read: Ok {
         let line = read.value;
         // strip trailing newline for display
-        let n: int = line.len();
-        display: Str = "";
-        j: int = 0;
+        let n = line.len();
+        display = "";
+        j = 0;
         while j < n {
-          let c: char = line[j];
+          let c = line[j];
           if c != '\n' {
-            display = display + Str<char>(c);
+            display = display + Str(c);
           }
           j = j + 1;
         }
@@ -36,7 +36,7 @@ fn main() -> int {
       _ { break; }
     }
   }
-  io::println("read " + Str<int>(i) + " lines");
+  io::println("read " + Str(i) + " lines");
 
   return 0;
 }

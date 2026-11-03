@@ -8,9 +8,8 @@ class Shape {
   name: Str;
   view fn area() -> int  { return 0; }
   view fn kind() -> Kind { return Kind::Flat; }
-  view fn describe() -> Str {
-    return self.name + " of area " + Str<int>(self.area());
-  }
+  view fn describe() -> Str
+                         { return self.name + " of area " + Str(self.area()); }
 }
 
 impl Shape {
@@ -37,8 +36,8 @@ impl Square {
 
 // The total area of some shapes.
 fn total(shapes: view Shape[]) -> int {
-  sum: int = 0;
-  i: int = 0;
+  sum = 0;
+  i = 0;
   while i < shapes.len() {
     sum = sum + shapes[i].area();
     i = i + 1;

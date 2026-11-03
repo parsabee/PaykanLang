@@ -20,7 +20,7 @@ import ::io;
 
 fn show(o: float?) -> Str {
   match o {
-    f: float { return Str<float>(f); }
+    f: float { return Str(f); }
     None { return "None"; }
   }
 }
@@ -34,14 +34,13 @@ fn same(s: Str, want: float) -> bool {
 
 fn main() -> int {
   let least = 5e-324;
-  let sub: float = 1e-310;
-  io::println("tiny: " + Str(least) + " " + Str<float>(sub));
-  io::println("halved: " + Str(least / 2.0) + " doubled: "
-      + Str<float>(least * 2.0));
+  let sub = 1e-310;
+  io::println("tiny: " + Str(least) + " " + Str(sub));
+  io::println("halved: " + Str(least / 2.0) + " doubled: " + Str(least * 2.0));
   io::println("normal: " + Str(2.2250738585072014e-308) + " "
-      + Str<float>(1.7976931348623157e308));
+      + Str(1.7976931348623157e308));
   io::println("parsed: " + Str(same("5e-324", least)) + " "
-      + Str<bool>(same("1e-310", sub)));
+      + Str(same("1e-310", sub)));
   io::println("too large: " + show("1e999".toFloat()));
   io::println("too small: " + show("1e-400".toFloat()));
   io::println("zero: " + show("0e-999".toFloat()));

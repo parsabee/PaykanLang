@@ -18,7 +18,7 @@ class Point {
   x: int;
   y: int;
   view fn toString() -> Str {
-    return "P(" + Str<int>(self.x) + "," + Str(self.y) + ")";
+    return "P(" + Str(self.x) + "," + Str(self.y) + ")";
   }
 }
 
@@ -66,17 +66,17 @@ fn main() -> int {
   // Literals and element access.
   let t = (1, "a", 2.5, True);
   io::println(t);                             // (1, a, 2.5, True)
-  io::println(Str<int>(t.0));                   // 1
+  io::println(Str(t.0));                      // 1
   io::println(t.1);                           // a
   io::println(Str(t.2));                 // 2.5
 
   // Multiple return + destructuring.
   q, r = divmod(7, 2);
-  io::println(Str<int>(q) + " " + Str(r));  // 3 1
+  io::println(Str(q) + " " + Str(r));     // 3 1
   _, rem = divmod(9, 4);                  // `_` skips an element
-  io::println(Str<int>(rem));                   // 1
+  io::println(Str(rem));                  // 1
   q, r = divmod(20, 6);                   // re-assigns the existing q and r
-  io::println(Str(q) + " " + Str<int>(r));  // 3 2
+  io::println(Str(q) + " " + Str(r));     // 3 2
 
   // Nesting and chained access.
   let nested = ((1, 2), ("x", (3, "y")));
@@ -92,16 +92,16 @@ fn main() -> int {
   // Tuples holding objects, as fields, and returned from methods.
   name, pt = label(Point(1, 2));
   io::println(name + " " + pt.toString());  // point P(1,2)
-  let rg: Range = Range(10, 25);
-  io::println(Str<int>(rg.width()));            // 15
+  let rg = Range(10, 25);
+  io::println(Str(rg.width()));            // 15
   lo, hi = rg.get();
-  io::println(Str(lo) + ".." + Str<int>(hi));  // 10..25
+  io::println(Str(lo) + ".." + Str(hi));  // 10..25
 
   // Equality is element-wise (Str by content, objects by their `equals`).
   a = (1, "s");
   let b = (1, "s");
   io::println(Str(a == b));               // True
-  io::println(Str<bool>(a != (2, "s")));        // True
+  io::println(Str(a != (2, "s")));           // True
   io::println(Str(label(pt) == label(pt)));  // True  (same Point object)
 
   // A copy is its own value; re-assigning the source leaves the copy intact.
@@ -115,7 +115,7 @@ fn main() -> int {
   let bx = Box<(Str, int)>(("seven", 7));
   io::println(bx.get());                      // (seven, 7)
   io::println(bracket((q, r)));               // [(3, 2)]
-  let s: Str = (q, r).toString();
+  let s = (q, r).toString();
   io::println(s + "!");                       // (3, 2)!
 
   // Covariant elements: a `(int, Str)` passed where `(int, Obj)` is expected.

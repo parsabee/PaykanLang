@@ -136,7 +136,7 @@ class Person {
   age: int;
 
   view fn toString() -> Str
-                { return self.name + " (age " + Str<int>(self.age) + ")"; }
+                { return self.name + " (age " + Str(self.age) + ")"; }
   fn birthday() { self.age = self.age + 1; }
 }
 
@@ -203,42 +203,42 @@ fn makeAdult(n: Str) -> Person {
 fn main() -> int {
   // --- Counter ---
   io::println("=== Counter ===");
-  let c: mut Counter = Counter(0);
+  let c: mut = Counter(0);
   c.increment();
   c.increment();
   c.increment();
-  io::println(Str<int>(c.value()));    // 3
+  io::println(Str(c.value()));    // 3
   c.decrement();
   io::println(Str(c.value()));    // 2
   c.reset();
-  io::println(Str<int>(c.value()));    // 0
+  io::println(Str(c.value()));    // 0
 
   // --- Counter via helper functions ---
   io::println("=== Counter via helpers ===");
-  let c2: mut Counter = makeCounter(10);
+  let c2: mut = makeCounter(10);
   printCounterValue(c2);        // 10
   c2.increment();
   printCounterValue(c2);        // 11
 
   // --- Greeter with field mutation ---
   io::println("=== Greeter ===");
-  let g: mut Greeter = Greeter("World");
+  let g: mut = Greeter("World");
   io::println(g.greet());               // Hello, World!
   g.rename("PaykanLang");
   io::println(g.greet());               // Hello, PaykanLang!
 
   // --- Rectangle ---
   io::println("=== Rectangle ===");
-  let r: Rectangle = Rectangle(4, 5);
+  let r = Rectangle(4, 5);
   io::println(Str(r.area()));     // 20
-  io::println(Str<int>(r.perimeter())); // 18
+  io::println(Str(r.perimeter()));      // 18
   io::println(r.describe());            // rectangle
 
   // --- Square (3-level inheritance) ---
   io::println("=== Square ===");
-  let sq: Square = Square(6);
+  let sq = Square(6);
   io::println(Str(sq.area()));    // 36
-  io::println(Str<int>(sq.perimeter())); // 24
+  io::println(Str(sq.perimeter()));     // 24
   io::println(sq.describe());           // square
 
   // --- sumAreas ---
@@ -263,7 +263,7 @@ fn main() -> int {
 
   // --- Person (mixed fields, method, Str return) ---
   io::println("=== Person ===");
-  let p: mut Person = Person("Alice", 29);
+  let p: mut = Person("Alice", 29);
   io::println(p.toString());            // Alice (age 29)
   p.birthday();
   io::println(p.toString());            // Alice (age 30)
@@ -276,7 +276,7 @@ fn main() -> int {
   io::println("=== Vehicle hierarchy ===");
   let v: Vehicle = Car(120);
   io::println(v.kind());                // car
-  io::println(Str<int>(v.topSpeed())); // 120
+  io::println(Str(v.topSpeed()));       // 120
 
   let sc = SportsCar(180, 40);
   io::println(sc.kind());               // sports car
@@ -286,7 +286,7 @@ fn main() -> int {
   io::println("=== Summer ===");
   let sm: mut = Summer();
   sm.sumTo(10);
-  io::println(Str<int>(sm.total));     // 55
+  io::println(Str(sm.total));     // 55
   sm.reset();
   sm.sumTo(4);
   io::println(Str(sm.total));     // 10

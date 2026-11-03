@@ -24,6 +24,6 @@ impl Slot<T> {
   view fn size() -> int => 1;
 }
 
-fn cellOf(s: Str) -> Cell<Str> => Cell<Str>(s);
+fn cellOf(s: Str) -> Cell<Str> => Cell(s);
 
-fn slotOf(s: Str) -> Slot<Str> => Slot<Str>(s);
+fn slotOf(s: Str) -> Slot<Str> => Slot(s);

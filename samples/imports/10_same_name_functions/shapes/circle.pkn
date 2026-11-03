@@ -16,5 +16,5 @@ fn make(r: int) -> Circle {
   return Circle(r);
 }
 fn describe(c: Circle) -> Str {
-  return name() + "(" + Str<int>(c.r) + ")";
+  return name() + "(" + Str(c.r) + ")";
 }

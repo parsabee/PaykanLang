@@ -62,7 +62,7 @@ fn main() -> int {
   f.tick();
   report(f);
 
-  let box = Box<int>(7);
+  let box = Box(7);
   let names = ["a", "b"];
   io::println("box " + Str(box.get()) + ", names " + Str(names.len())
       + ", printable " + Str(names[0].toString().len() > 0));

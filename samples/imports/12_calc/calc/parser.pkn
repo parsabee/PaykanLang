@@ -49,25 +49,25 @@ class Parser {
 
   view fn atIsOr(a: char, b: char) -> bool {
     if self.done() { return False; }
-    let c: char = self.input[self.pos];
+    let c = self.input[self.pos];
     return c == a || c == b;
   }
 
   view fn atIsDigit() -> bool {
     if self.done() { return False; }
-    let c: char = self.input[self.pos];
+    let c = self.input[self.pos];
     return c >= '0' && c <= '9';
   }
 
   view fn atIsIdentStart() -> bool {
     if self.done() { return False; }
-    let c: char = self.input[self.pos];
+    let c = self.input[self.pos];
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
   }
 
   view fn atIsIdentChar() -> bool {
     if self.done() { return False; }
-    let c: char = self.input[self.pos];
+    let c = self.input[self.pos];
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_';
   }
@@ -83,7 +83,7 @@ class Parser {
 
   view fn atDigitVal() -> int {
     if self.done() { return 0; }
-    let c: char = self.input[self.pos];
+    let c = self.input[self.pos];
     match c {
       '0' { return 0; }
       '1' { return 1; }
@@ -106,9 +106,9 @@ class Parser {
   }
 
   fn parseIdent() -> Str {
-    name: Str = "";
+    name = "";
     while self.atIsIdentChar() {
-      name = name + Str<char>(self.input[self.pos]);
+      name = name + Str(self.input[self.pos]);
       self.advance();
     }
     return name;
@@ -116,8 +116,8 @@ class Parser {
 
   // The unconsumed remainder of the input (for "unexpected '…'" diagnostics).
   view fn rest() -> Str {
-    out: Str = "";
-    i: int = self.pos;
+    out = "";
+    i = self.pos;
     while i < self.input.len() {
       out = out + Str(self.input[i]);
       i = i + 1;
@@ -126,14 +126,14 @@ class Parser {
   }
 
   fn parseNumber() -> float {
-    result: float = 0.0;
+    result = 0.0;
     while self.atIsDigit() {
       result = result * 10.0 + self.atDigitVal();
       self.advance();
     }
     if self.atIs('.') {
       self.advance();
-      frac: float = 0.1;
+      frac = 0.1;
       while self.atIsDigit() {
         result = result + self.atDigitVal() * frac;
         frac = frac * 0.1;
@@ -147,7 +147,7 @@ class Parser {
     self.skipWs();
     if self.atIs('(') {
       self.advance();
-      let val: float = self.parseExpr();
+      let val = self.parseExpr();
       self.skipWs();
       if self.atIs(')') {
         self.advance();
@@ -161,7 +161,7 @@ class Parser {
       return 0.0 - self.parseFactor();
     }
     if self.atIsIdentStart() {
-      let name: Str = self.parseIdent();
+      let name = self.parseIdent();
       match self.env.lookup(name) {
         e: hashmap::Entry {
           return e.value;
@@ -180,13 +180,13 @@ class Parser {
   }
 
   fn parseTerm() -> float {
-    result: float = self.parseFactor();
+    result = self.parseFactor();
     self.skipWs();
     while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
-      let op: Op = if self.atIs('*') then Op::Mul else if self.atIs('/')
+      let op = if self.atIs('*') then Op::Mul else if self.atIs('/')
           then Op::Div else Op::Mod;
       self.advance();
-      let rhs: float = self.parseFactor();
+      let rhs = self.parseFactor();
       result = applyOp(op, result, rhs);
       self.skipWs();
     }
@@ -194,12 +194,12 @@ class Parser {
   }
 
   fn parseExpr() -> float {
-    result: float = self.parseTerm();
+    result = self.parseTerm();
     self.skipWs();
     while self.atIsOr('+', '-') {
-      let op: Op = if self.atIs('+') then Op::Add else Op::Sub;
+      let op = if self.atIs('+') then Op::Add else Op::Sub;
       self.advance();
-      let rhs: float = self.parseTerm();
+      let rhs = self.parseTerm();
       result = applyOp(op, result, rhs);
       self.skipWs();
     }
@@ -211,20 +211,20 @@ class Parser {
   // that merely starts with a variable name backtracks cleanly.
   fn parseStatement() -> (Str?, float) {
     self.skipWs();
-    let start: int = self.pos;
+    let start = self.pos;
     if self.atIsIdentStart() {
-      let name: Str = self.parseIdent();
+      let name = self.parseIdent();
       self.skipWs();
       if self.atAssign() {
         self.advance(); // consume '='
-        let v: float = self.parseExpr();
+        let v = self.parseExpr();
         self.skipWs();
         let target: Str? = name;
         return (target, v);
       }
       self.pos = start; // not an assignment — rewind and parse as an expression
     }
-    let v: float = self.parseExpr();
+    let v = self.parseExpr();
     self.skipWs();
     let noName: Str? = None;
     return (noName, v);

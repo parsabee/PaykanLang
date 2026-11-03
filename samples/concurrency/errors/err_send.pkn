@@ -48,8 +48,8 @@ fn main() -> int {
   let o = any(move h);                  // error: field 'job.cache' is shared
   let f = fn() => 3;
   let c = call(move f);                 // (reported at the declaration of 'call')
-  let k: atomic shared Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
-  s: shared mut Job = Job("s", Cache(3));
+  let k: atomic shared = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
+  s: shared mut = Job("s", Cache(3));
   grow(s);                              // fine: a shared mut object passes to inout, with no retain or release
   show(s);                              // fine: a view takes every form
   let d = twice(Named("d", 2));         // error: 'Named' is not Copyable

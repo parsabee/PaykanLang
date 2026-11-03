@@ -38,7 +38,7 @@ fn digit(c: char) -> int? {
 }
 
 fn digitValue(c: char) -> int {
-  let digits: Str = "0123456789";
+  let digits = "0123456789";
   i = 0;
   while i < 10 {
     if digits[i] == c { return i; }

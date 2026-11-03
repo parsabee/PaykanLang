@@ -6,8 +6,8 @@
 import ::io;
 
 fn countChar(s: Str, target: char) -> int {
-  count: int = 0;
-  i: int = 0;
+  count = 0;
+  i = 0;
   while i < s.len() {
     if s[i] == target {
       count = count + 1;
@@ -18,18 +18,18 @@ fn countChar(s: Str, target: char) -> int {
 }
 
 fn reverseStr(s: Str) -> Str {
-  result: Str = "";
-  i: int = s.len() - 1;
+  result = "";
+  i = s.len() - 1;
   while i >= 0 {
-    result = result + Str<char>(s[i]);
+    result = result + Str(s[i]);
     i = i - 1;
   }
   return result;
 }
 
 fn isPalindrome(s: Str) -> bool {
-  lo: int = 0;
-  hi: int = s.len() - 1;
+  lo = 0;
+  hi = s.len() - 1;
   while lo < hi {
     if s[lo] != s[hi] {
       return False;
@@ -42,12 +42,12 @@ fn isPalindrome(s: Str) -> bool {
 
 fn main() -> int {
   // Basic indexing
-  let word: Str = "hello";
+  let word = "hello";
   io::println(Str(word[0]));   // h
-  io::println(Str<char>(word[4]));   // o
+  io::println(Str(word[4]));   // o
 
-  // Round-trip: index then Str<char>
-  i: int = 0;
+  // Round-trip: index, then convert the char back to Str
+  i = 0;
   while i < word.len() {
     io::print(Str(word[i]));
     i = i + 1;
@@ -55,8 +55,8 @@ fn main() -> int {
   io::println("");   // newline
 
   // Count occurrences of a char
-  let sentence: Str = "the quick brown fox jumps over the lazy dog";
-  io::println("'e' count: " + Str<int>(countChar(sentence, 'e')));  // 3
+  let sentence = "the quick brown fox jumps over the lazy dog";
+  io::println("'e' count: " + Str(countChar(sentence, 'e')));  // 3
   io::println("'o' count: " + Str(countChar(sentence, 'o')));  // 4
 
   // Reverse a string
@@ -64,13 +64,13 @@ fn main() -> int {
   io::println(reverseStr("racecar")); // racecar
 
   // Palindrome check
-  io::println(Str<bool>(isPalindrome("racecar")));  // True
+  io::println(Str(isPalindrome("racecar")));  // True
   io::println(Str(isPalindrome("hello")));  // False
-  io::println(Str<bool>(isPalindrome("a")));  // True
+  io::println(Str(isPalindrome("a")));        // True
   io::println(Str(isPalindrome("")));         // True
 
   // Comparison between indexed chars
-  let s: Str = "az";
+  let s = "az";
   if s[0] < s[1] {
     io::println("a < z: true");
   }

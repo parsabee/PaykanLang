@@ -46,8 +46,8 @@ impl Splitter {
 enum Kind { Even, Odd }
 
 fn total(cs: view Cell[]) -> int {
-  s: int = 0;
-  i: int = 0;
+  s = 0;
+  i = 0;
   while i < cs.len() {
     s = s + cs[i].v;
     i = i + 1;

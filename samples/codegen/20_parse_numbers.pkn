@@ -11,7 +11,7 @@ import ::io;
 fn tryParseInt(s: Str) -> Str {
   match s.toInt() {
     n: int {
-      return "ok: " + Str<int>(n);
+      return "ok: " + Str(n);
     }
     None {
       return "invalid: '" + s + "'";
@@ -63,16 +63,16 @@ fn main() -> int {
   // === counting valid inputs ===
   io::println("=== counting valid inputs ===");
 
-  i: int = 0;
+  i = 0;
   total = 0;
-  let inputs: Str[6] = ["10", "20", "bad", "30", "nope", "40"];
+  let inputs = ["10", "20", "bad", "30", "nope", "40"];
   while i < inputs.len() {
     if inputs[i].toInt() != None {
       total = total + 1;
     }
     i = i + 1;
   }
-  io::println("valid ints in list: " + Str<int>(total));
+  io::println("valid ints in list: " + Str(total));
 
   // === printing and comparing the optionals ===
   io::println("=== print / compare ===");

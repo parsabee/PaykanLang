@@ -33,9 +33,9 @@ fn main() -> int {
   let nothing: Point? = None;
   io::println(describe<Point?>(nothing));
   io::println(describe<(int, Str)>((1, "a")));
-  io::println(Str<int>(pick<int>(True, 1, 2)));
+  io::println(Str(pick<int>(True, 1, 2)));
   io::println(pick<Str>(False, "left", "right"));
-  io::println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
+  io::println(Str(pick<Point>(True, Point(3), Point(4)).x));
   io::println(pick<(int, Str)>(False, (5, "five"), (6, "six")));
   left: mut = "left";
   right: mut = "right";
@@ -44,7 +44,7 @@ fn main() -> int {
   yes = True;
   no = False;
   swap<bool>(yes, no);
-  io::println(Str<bool>(yes));
+  io::println(Str(yes));
   lt = (1, "one");
   rt = (2, "two");
   swap<(int, Str)>(lt, rt);

@@ -17,12 +17,12 @@ import ::io;
 import geometry::shapes;
 
 fn main() -> int {
-  let r: shapes::Rect = shapes::Rect(3, 4);
-  let s: shapes::Square = shapes::Square(5);
+  let r = shapes::Rect(3, 4);
+  let s = shapes::Square(5);
   io::println(r.describe());
   io::println(s.describe());
   let all: shapes::Shape[2] = [r, s];
-  io::println(Str<int>(shapes::total(all)));
+  io::println(Str(shapes::total(all)));
   io::println(shapes::kindName(r.kind()));
   io::println(shapes::kindName(s.kind()));
   return 0;

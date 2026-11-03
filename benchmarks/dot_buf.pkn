@@ -9,14 +9,14 @@ fn main(args: view Str[]) -> int {
   let reps = bench::arg(args, 2, 3);
   a = mem::Buffer<float>();
   b = mem::Buffer<float>();
-  let ga = a.grow(unsigned<int>(n));
-  let gb = b.grow(unsigned<int>(n));
+  let ga = a.grow(unsigned(n));
+  let gb = b.grow(unsigned(n));
   for i in 0..n {
-    let ea = a.set(unsigned<int>(i), float<int>(i % 7));
-    let eb = b.set(unsigned<int>(i), float<int>(i % 5));
+    let ea = a.set(unsigned(i), float(i % 7));
+    let eb = b.set(unsigned(i), float(i % 5));
   }
-  let xs: atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move a);
-  let ys: atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move b);
+  let xs: atomic shared = mem::Box(move a);
+  let ys: atomic shared = mem::Box(move b);
   best = 0;
   total = 0;
   s = 0.0;
@@ -26,7 +26,7 @@ fn main(args: view Str[]) -> int {
     let t0 = bench::now();
     s = 0.0;
     parallel for i in 0..n {
-      let u = unsigned<int>(i);
+      let u = unsigned(i);
       s += xs.value().at(u) * ys.value().at(u);
     }
     let dt = bench::now() - t0;

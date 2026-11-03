@@ -62,96 +62,96 @@ fn P_vtable() -> int {
 
 // User locals named like the backend's suffixed names.
 fn suffixes() -> int {
-  let x: int = 1;
-  let x_0: int = 2;
-  let x_1: int = 3;
-  let x_2: int = 4;
+  let x = 1;
+  let x_0 = 2;
+  let x_1 = 3;
+  let x_2 = 4;
   return x + x_0 + x_1 + x_2;
 }
 
 // Many locals `a_<n>` and many values derived from `a`.
 fn manyValues() -> int {
-  a: int = 1;
-  let a_0: int = 0;
-  let a_1: int = 1;
-  let a_2: int = 2;
-  let a_3: int = 3;
-  let a_4: int = 4;
-  let a_5: int = 5;
-  let a_6: int = 6;
-  let a_7: int = 7;
-  let a_8: int = 8;
-  let a_9: int = 9;
-  let a_10: int = 10;
-  let a_11: int = 11;
-  let a_12: int = 12;
-  let a_13: int = 13;
-  let a_14: int = 14;
-  let a_15: int = 15;
-  let a_16: int = 16;
-  let a_17: int = 17;
-  let a_18: int = 18;
-  let a_19: int = 19;
-  let a_20: int = 20;
-  let a_21: int = 21;
-  let a_22: int = 22;
-  let a_23: int = 23;
-  let a_24: int = 24;
-  let a_25: int = 25;
-  let a_26: int = 26;
-  let a_27: int = 27;
-  let a_28: int = 28;
-  let a_29: int = 29;
-  let a_30: int = 30;
-  let a_31: int = 31;
-  let a_32: int = 32;
-  let a_33: int = 33;
-  let a_34: int = 34;
-  let a_35: int = 35;
-  let a_36: int = 36;
-  let a_37: int = 37;
-  let a_38: int = 38;
-  let a_39: int = 39;
-  let a_40: int = 40;
-  let a_41: int = 41;
-  let a_42: int = 42;
-  let a_43: int = 43;
-  let a_44: int = 44;
-  let a_45: int = 45;
-  let a_46: int = 46;
-  let a_47: int = 47;
-  let a_48: int = 48;
-  let a_49: int = 49;
-  let a_50: int = 50;
-  let a_51: int = 51;
-  let a_52: int = 52;
-  let a_53: int = 53;
-  let a_54: int = 54;
-  let a_55: int = 55;
-  let a_56: int = 56;
-  let a_57: int = 57;
-  let a_58: int = 58;
-  let a_59: int = 59;
-  let a_60: int = 60;
-  let a_61: int = 61;
-  let a_62: int = 62;
-  let a_63: int = 63;
-  let a_64: int = 64;
-  let a_65: int = 65;
-  let a_66: int = 66;
-  let a_67: int = 67;
-  let a_68: int = 68;
-  let a_69: int = 69;
-  let a_70: int = 70;
-  let a_71: int = 71;
-  let a_72: int = 72;
-  let a_73: int = 73;
-  let a_74: int = 74;
-  let a_75: int = 75;
-  let a_76: int = 76;
-  let a_77: int = 77;
-  let a_78: int = 78;
-  let a_79: int = 79;
+  a = 1;
+  let a_0 = 0;
+  let a_1 = 1;
+  let a_2 = 2;
+  let a_3 = 3;
+  let a_4 = 4;
+  let a_5 = 5;
+  let a_6 = 6;
+  let a_7 = 7;
+  let a_8 = 8;
+  let a_9 = 9;
+  let a_10 = 10;
+  let a_11 = 11;
+  let a_12 = 12;
+  let a_13 = 13;
+  let a_14 = 14;
+  let a_15 = 15;
+  let a_16 = 16;
+  let a_17 = 17;
+  let a_18 = 18;
+  let a_19 = 19;
+  let a_20 = 20;
+  let a_21 = 21;
+  let a_22 = 22;
+  let a_23 = 23;
+  let a_24 = 24;
+  let a_25 = 25;
+  let a_26 = 26;
+  let a_27 = 27;
+  let a_28 = 28;
+  let a_29 = 29;
+  let a_30 = 30;
+  let a_31 = 31;
+  let a_32 = 32;
+  let a_33 = 33;
+  let a_34 = 34;
+  let a_35 = 35;
+  let a_36 = 36;
+  let a_37 = 37;
+  let a_38 = 38;
+  let a_39 = 39;
+  let a_40 = 40;
+  let a_41 = 41;
+  let a_42 = 42;
+  let a_43 = 43;
+  let a_44 = 44;
+  let a_45 = 45;
+  let a_46 = 46;
+  let a_47 = 47;
+  let a_48 = 48;
+  let a_49 = 49;
+  let a_50 = 50;
+  let a_51 = 51;
+  let a_52 = 52;
+  let a_53 = 53;
+  let a_54 = 54;
+  let a_55 = 55;
+  let a_56 = 56;
+  let a_57 = 57;
+  let a_58 = 58;
+  let a_59 = 59;
+  let a_60 = 60;
+  let a_61 = 61;
+  let a_62 = 62;
+  let a_63 = 63;
+  let a_64 = 64;
+  let a_65 = 65;
+  let a_66 = 66;
+  let a_67 = 67;
+  let a_68 = 68;
+  let a_69 = 69;
+  let a_70 = 70;
+  let a_71 = 71;
+  let a_72 = 72;
+  let a_73 = 73;
+  let a_74 = 74;
+  let a_75 = 75;
+  let a_76 = 76;
+  let a_77 = 77;
+  let a_78 = 78;
+  let a_79 = 79;
   a = a + 1;
   a = a + 1;
   a = a + 1;
@@ -201,42 +201,41 @@ fn params(int64_t: int, errno: int, l_x: int, v1: int) -> int {
 
 fn main() -> int {
   // C library macros as locals.
-  let errno: int = 3;
-  let stdout: int = 4;
-  let EOF: int = 5;
-  io::println(Str<int>(errno + stdout + EOF));
+  let errno = 3;
+  let stdout = 4;
+  let EOF = 5;
+  io::println(Str(errno + stdout + EOF));
 
   // A local hiding a libc function used by float `%`.
-  let x: float = 7.5;
-  let fmod_: float = 2.0;
-  let y: float = x % fmod_;
+  let x = 7.5;
+  let fmod_ = 2.0;
+  let y = x % fmod_;
   io::println(Str(y));
-  io::println(Str<float>(fmod(x, fmod_)));
+  io::println(Str(fmod(x, fmod_)));
   io::println(Str(malloc(1)));
 
   // A C type name as a variable.
-  let int64_t: int = 3;
-  let b: int = int64_t + 1;
-  io::println(Str<int>(b));
+  let int64_t = 3;
+  let b = int64_t + 1;
+  io::println(Str(b));
 
   io::println(Str(suffixes()));
-  io::println(Str<int>(manyValues()));
+  io::println(Str(manyValues()));
   io::println(Str(params(1, 2, 3, 4)));
 
   // Shadowing in a nested scope.
-  let n: int = 1;
+  let n = 1;
   if n == 1 {
-    let n: int = 5;
-    io::println(Str<int>(n));
+    let n = 5;
+    io::println(Str(n));
   }
   io::println(Str(n));
 
-  let bx: Box<int> = Box<int>(5);
-  let plain: Box_3Cint_3E = Box_3Cint_3E();
-  io::println(Str<int>(bx.get()) + plain.get() + Str(f_5F(1))
-      + Str<int>(f_(1)));
+  let bx = Box(5);
+  let plain = Box_3Cint_3E();
+  io::println(Str(bx.get()) + plain.get() + Str(f_5F(1)) + Str(f_(1)));
 
-  let p: P = P(3);
-  io::println(Str(p.EOF()) + p.stdout + Str<int>(P_vtable()));
+  let p = P(3);
+  io::println(Str(p.EOF()) + p.stdout + Str(P_vtable()));
   return 0;
 }

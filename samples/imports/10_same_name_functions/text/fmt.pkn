@@ -5,7 +5,7 @@ fn name() -> Str {
   return "fmt";
 }
 fn describe(n: int) -> Str {
-  return name() + "<" + Str<int>(n) + ">";
+  return name() + "<" + Str(n) + ">";
 }
 fn both(c: circle::Circle) -> Str {
   return describe(c.r) + "+" + circle::describe(c);

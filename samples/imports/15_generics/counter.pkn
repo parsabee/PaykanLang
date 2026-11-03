@@ -3,7 +3,7 @@
 import containers::box;
 
 fn start() -> box::Box<int> {
-  return box::Box<int>(10);
+  return box::Box(10);
 }
 
 fn named() -> box::Pair<Str, int> {

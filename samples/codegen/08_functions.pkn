@@ -62,7 +62,7 @@ fn average(a: float, b: float) -> float {
 // ---- Void functions --------------------------------------------------------
 
 fn printInt(label: Str, n: int) {
-  io::println(label + Str<int>(n));
+  io::println(label + Str(n));
 }
 fn printBool(label: Str, b: bool) {
   io::println(label + Str(b));
@@ -74,8 +74,8 @@ fn greeting(name: Str) -> Str {
   return "Hello, " + name + "!";
 }
 fn repeat(s: Str, times: int) -> Str {
-  result: Str = "";
-  i: int = 0;
+  result = "";
+  i = 0;
   while i < times {
     result = result + s;
     i = i + 1;
@@ -95,15 +95,15 @@ fn fib(n: int) -> int {
 }
 fn gcd(a: int, b: int) -> int {
   while b != 0 {
-    let tmp: int = b;
+    let tmp = b;
     b = a % b;
     a = tmp;
   }
   return a;
 }
 fn power(base: int, exp: int) -> int {
-  result: int = 1;
-  i: int = 0;
+  result = 1;
+  i = 0;
   while i < exp {
     result = result * base;
     i = i + 1;
@@ -150,7 +150,7 @@ fn main() -> int {
   printBool("inRange(0,1,10)=", inRange(0, 1, 10));  // False
 
   io::println("=== float ===");
-  io::println("avg(3.0,7.0)=" + Str<float>(average(3.0, 7.0)));  // 5
+  io::println("avg(3.0,7.0)=" + Str(average(3.0, 7.0)));  // 5
 
   io::println("=== Str-returning ===");
   io::println(greeting("Paykan"));          // Hello, Paykan!

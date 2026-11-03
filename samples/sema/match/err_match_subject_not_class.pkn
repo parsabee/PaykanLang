@@ -2,7 +2,7 @@
 // literal patterns — a type-name arm is rejected.
 class Animal {}
 fn main() -> int {
-  let x: int = 42;
+  let x = 42;
   match x {
     Animal { }   // sema error: value-match requires literal patterns, not type names
     _ { }

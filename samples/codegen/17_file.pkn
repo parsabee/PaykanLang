@@ -60,7 +60,7 @@ fn showToString(path: Str) {
       io::printerrln("showToString: " + e.error.message());
     }
     r: Ok {
-      let s: Str = r.value.toString();
+      let s = r.value.toString();
       io::println(s);   // File@0x...
     }
   }
@@ -77,8 +77,8 @@ fn showEquals(path: Str) {
           io::printerrln("showEquals inner: " + e2.error.message());
         }
         r2: Ok {
-          let eq: bool = r.value.equals(r2.value);
-          io::println(Str<bool>(eq));  // False — different handles
+          let eq = r.value.equals(r2.value);
+          io::println(Str(eq));  // False — different handles
         }
       }
     }
@@ -86,7 +86,7 @@ fn showEquals(path: Str) {
 }
 
 fn main(args: view Str[]) -> int {
-  let path: Str = scratchPath(args, "paykan_sample_17.txt");
+  let path = scratchPath(args, "paykan_sample_17.txt");
 
   // --- 1. open for writing, write lines ------------------------------------
   io::println("=== write lines ===");

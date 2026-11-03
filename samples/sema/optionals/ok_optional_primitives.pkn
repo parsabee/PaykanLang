@@ -15,7 +15,7 @@ fn main() -> int {
   let xs: int?[3] = [1, 2, None];
   match a {
     n: int {
-      io::println(Str<int>(n + 1));
+      io::println(Str(n + 1));
     }
     None { io::println("odd"); }
   }

@@ -16,7 +16,7 @@ fn name() -> Str {
   return "main";
 }
 fn describe(n: int) -> Str {
-  return name() + "[" + Str<int>(n) + "]";
+  return name() + "[" + Str(n) + "]";
 }
 
 fn main() -> int {
