@@ -30,7 +30,7 @@ fn grow(m: c::HashMap<Str, int>) {
 fn describe(o: Obj) -> Str {
   match o {
     b: mem::Box<c::List<int>> {
-      return "a boxed list of " + Str(b.get().len());
+      return "a boxed list of " + Str(b.value().len());
     }
     _ { return "something else"; }
   }
@@ -47,7 +47,7 @@ fn main() -> int {
   io::println(Str(xs == xs.copy()));
 
   // A field holds the same list.
-  h = Holder(xs);
+  h: mut = Holder(xs);
   h.xs.pop();
   io::println(Str(xs.len()));
 
@@ -79,7 +79,7 @@ fn main() -> int {
       + lo.pop() + " " + hi.pop());
 
   // A container in a Box is an object.
-  b = mem::Box(xs);
+  b: mut = mem::Box(xs);
   b.get().push(7);
   o: Obj = b;
   io::println(describe(o) + ", " + describe(h) + ", " + Str(xs.len()));

@@ -66,22 +66,22 @@ TEST(Weak, FieldsBreakCycles) {
       fn __init__(name: Str) {
         self.name = name; self.parent = None; self.first = None; self.next = None;
       }
-      fn add(child: Node) {
+      fn add(child: mut Node) {
         child.parent = self;
         child.next = self.first;
         self.first = child;
       }
-      fn path() -> Str {
+      view fn path() -> Str {
         match self.parent {
           p: Node { return p.path() + "/" + self.name; }
-          None { return self.name; }
+          None { return self.name + ""; }
         }
       }
     }
     fn main() -> int {
-      root = Node("root");
-      a = Node("a");
-      b = Node("b");
+      root: mut = Node("root");
+      a: mut = Node("a");
+      b: mut = Node("b");
       root.add(a);
       a.add(b);
       io::println(b.path());
@@ -124,7 +124,7 @@ TEST(Weak, LambdasCaptureWeakly) {
       view fn click() -> Str { return self.onClick(); }
     }
     fn main() -> int {
-      b = Button("ok");
+      b: mut = Button("ok");
       io::println(b.click());
       b.wire();
       io::println(b.click());
@@ -149,7 +149,7 @@ TEST(Weak, NestedLambdasCaptureWeakly) {
     class B { n: int; f: (() -> Str)?; }
     fn state(w: B?) -> Str => if w == None then "gone" else "alive";
     fn main() -> int {
-      b = B(1, None);
+      b: mut = B(1, None);
       weak me = b;
       let outer = fn() -> () -> Str { return fn() -> Str => state(me); };
       let three = fn() -> () -> () -> Str {
@@ -185,10 +185,10 @@ TEST(Weak, PassedReturnedAndStored) {
     fn main() -> int {
       x = P(5);
       weak w = x;
-      h = Holder();
+      h: mut = Holder();
       h.item = w;
       h.peek = x;
-      h2 = Holder();
+      h2: mut = Holder();
       h2.peek = h.peek;
       io::println(take(w) + " " + look(w) + " " + take(pass(w)) + " " + take(h.item) +
               " " + take(h.peek) + " " + take(h2.peek));
@@ -217,13 +217,13 @@ TEST(Weak, InheritedAndGenericFields) {
     class Cell<T> { value: T; weak next: Cell<T>?; }
     impl Cell<T> { fn __init__(v: T) { self.value = v; self.next = None; } }
     fn main() -> int {
-      d = Derived("d");
+      d: mut = Derived("d");
       e = Derived("e");
       d.owner = e;
       match d.owner { o: Derived { io::println(o.tag); } _ { io::println("other"); } }
       e = Derived("f");
       match d.owner { o: Base { io::println("alive"); } None { io::println("gone"); } }
-      c1 = Cell<int>(1);
+      c1: mut = Cell<int>(1);
       c2 = Cell<int>(2);
       c1.next = c2;
       match c1.next { n: Cell<int> { io::println(Str(n.value)); } None { io::println("none"); } }
@@ -305,14 +305,14 @@ TEST(Weak, CursorInAViewMethod) {
         return None;
       }
     }
-    fn show(c: Chain) -> Str {
+    fn show(c: mut Chain) -> Str {
       match c.find(2) {
         n: Node { return Str(c.sum()) + " found " + Str(n.v); }
         None { return Str(c.sum()) + " none"; }
       }
     }
     fn main() -> int {
-      c = Chain();
+      c: mut = Chain();
       io::println(show(c));
       c.push(1);
       c.push(2);

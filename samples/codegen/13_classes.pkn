@@ -203,7 +203,7 @@ fn makeAdult(n: Str) -> Person {
 fn main() -> int {
   // --- Counter ---
   io::println("=== Counter ===");
-  let c: Counter = Counter(0);
+  let c: mut Counter = Counter(0);
   c.increment();
   c.increment();
   c.increment();
@@ -215,14 +215,14 @@ fn main() -> int {
 
   // --- Counter via helper functions ---
   io::println("=== Counter via helpers ===");
-  let c2: Counter = makeCounter(10);
+  let c2: mut Counter = makeCounter(10);
   printCounterValue(c2);        // 10
   c2.increment();
   printCounterValue(c2);        // 11
 
   // --- Greeter with field mutation ---
   io::println("=== Greeter ===");
-  let g: Greeter = Greeter("World");
+  let g: mut Greeter = Greeter("World");
   io::println(g.greet());               // Hello, World!
   g.rename("PaykanLang");
   io::println(g.greet());               // Hello, PaykanLang!
@@ -263,7 +263,7 @@ fn main() -> int {
 
   // --- Person (mixed fields, method, Str return) ---
   io::println("=== Person ===");
-  let p: Person = Person("Alice", 29);
+  let p: mut Person = Person("Alice", 29);
   io::println(p.toString());            // Alice (age 29)
   p.birthday();
   io::println(p.toString());            // Alice (age 30)
@@ -284,7 +284,7 @@ fn main() -> int {
 
   // --- Summer (loop inside method) ---
   io::println("=== Summer ===");
-  let sm = Summer();
+  let sm: mut = Summer();
   sm.sumTo(10);
   io::println(Str<int>(sm.total));     // 55
   sm.reset();

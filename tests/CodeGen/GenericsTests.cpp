@@ -37,11 +37,11 @@ std::string withMain(const std::string &decls, const std::string &body) {
 TEST(Generics, BoxStrGetSet) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
-    b: Box<Str> = Box<Str>("hello");
+    b: mut Box<Str> = Box<Str>("hello");
     io::println(b.get());
     b.set("world");
     io::println(b.get());
-    c = Box<Str>(b.get() + "!");
+    c: mut = Box<Str>(b.get() + "!");
     io::println(c.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -52,8 +52,8 @@ TEST(Generics, BoxStrGetSet) {
 TEST(Generics, BoxIntAndBoxStrCoexist) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
-    a: Box<int> = Box<int>(3);
-    b: Box<Str> = Box<Str>("s");
+    a: mut Box<int> = Box<int>(3);
+    b: mut Box<Str> = Box<Str>("s");
     a.set(a.get() * 2);
     io::println(Str<int>(a.get()));
     io::println(b.get());
@@ -79,7 +79,7 @@ TEST(Generics, PairStrInt) {
     }
   )",
                                   R"(
-    p: Pair<Str, int> = Pair<Str, int>("age", 42);
+    p: mut Pair<Str, int> = Pair<Str, int>("age", 42);
     io::println(p.key() + ":" + Str<int>(p.value()));
     io::println(p.toString());
     io::println(p);
@@ -92,12 +92,12 @@ TEST(Generics, PairStrInt) {
 TEST(Generics, BoxOfBoxInt) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
-    inner: Box<int> = Box<int>(5);
-    outer: Box<Box<int>> = Box<Box<int>>(inner);
+    inner: mut Box<int> = Box<int>(5);
+    outer: mut Box<Box<int>> = Box<Box<int>>(inner);
     io::println(Str<int>(outer.get().get()));
     outer.get().set(9);
     io::println(Str<int>(inner.get()));
-    fresh = Box<Box<int>>(Box<int>(1));
+    fresh: mut = Box<Box<int>>(Box<int>(1));
     io::println(Str<int>(fresh.get().get()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -115,7 +115,7 @@ TEST(Generics, StackOfStrAndInt) {
       items: T[4];
       n: int;
       fn push(v: T) {
-        self.items[self.n] = v;
+        self.items[self.n] = move v;
         self.n = self.n + 1;
       }
       fn pop() -> T {
@@ -134,13 +134,13 @@ TEST(Generics, StackOfStrAndInt) {
     }
   )",
                                   R"(
-    s: Stack<Str> = Stack<Str>("");
+    s: mut Stack<Str> = Stack<Str>("");
     s.push("a");
     s.push("b");
     s.push("c");
     io::println(Str<int>(s.size()));
     while !s.empty() { io::println(s.pop()); }
-    n: Stack<int> = Stack<int>(0);
+    n: mut Stack<int> = Stack<int>(0);
     n.push(1);
     n.push(2);
     total: int = 0;
@@ -176,8 +176,8 @@ TEST(Generics, GenericFirstOnIntAndStrArrays) {
 TEST(Generics, GenericFunctionOverInstantiation) {
   LeakGuard g;
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
-    fn unbox<T>(b: Box<T>) -> T { return b.get(); }
-    fn rebox<T>(b: Box<T>) -> Box<T> { return Box<T>(b.get()); }
+    fn unbox<T>(b: Box<T>) -> T { return b.v; }
+    fn rebox<T>(b: Box<T>) -> Box<T> { return Box<T>(b.v); }
   )",
                                   R"(
     io::println(Str<int>(unbox(Box<int>(4))));
@@ -193,7 +193,7 @@ TEST(Generics, MatchOnInstantiation) {
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
     fn describe(o: Obj) -> Str {
       match o {
-        b: Box<int> { return "Box<int> holding " + Str<int>(b.get()); }
+        b: Box<int> { return "Box<int> holding " + Str<int>(b.v); }
         Box<Str> { return "Box<Str>"; }
         _ { return "other"; }
       }
@@ -212,11 +212,11 @@ TEST(Generics, MatchOnInstantiation) {
 TEST(Generics, InstantiationTransfer) {
   LeakGuard g;
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
-    fn consume(b: Box<Str>) -> Str { return b.get(); }
+    fn consume(b: mut Box<Str>) -> Str { return b.get(); }
   )",
                                   R"(
-    a: Box<Str> = Box<Str>("moved");
-    b: Box<Str> = a;
+    a: mut Box<Str> = Box<Str>("moved");
+    b: mut Box<Str> = a;
     io::println(b.get());
     io::println(consume(b));
   )"));
@@ -233,7 +233,7 @@ TEST(Generics, EqualityDispatchesToEquals) {
       fn get() -> T { return self.v; }
       view fn equals(other: Obj) -> bool {
         match other {
-          o: Box<T> { return o.get() == self.v; }
+          o: Box<T> { return o.v == self.v; }
           _ { return False; }
         }
       }
@@ -277,7 +277,7 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
     i: int = 0;
     while i < arr.len() { total = total + arr[i].get(); i = i + 1; }
     io::println(Str<int>(total));
-    h: Holder = Holder(40);
+    h: mut Holder = Holder(40);
     io::println(Str<int>(h.get().get() + 2));
     names: Box<Str>[1] = [Box<Str>("n")];
     io::println(names[0].get());
@@ -290,9 +290,9 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
 TEST(Generics, ConstructorInference) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
-    b = Box(5);
+    b: mut = Box(5);
     io::println(Str<int>(b.get()));
-    s = Box("inferred");
+    s: mut = Box("inferred");
     io::println(s.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -308,7 +308,7 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
   auto r = compileAndRun(withMain(R"(
     class Base {
       n: int;
-      fn name() -> Str { return "base"; }
+      view fn name() -> Str { return "base"; }
     }
 
     impl Base {
@@ -316,7 +316,7 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
     }
     class Wrap<T> : Base {
       v: T;
-      fn name() -> Str { return "wrap"; }
+      view fn name() -> Str { return "wrap"; }
       fn get() -> T { return self.v; }
     }
 
@@ -325,7 +325,7 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
     }
   )",
                                   R"(
-    w: Wrap<Str> = Wrap<Str>("payload", 5);
+    w: mut Wrap<Str> = Wrap<Str>("payload", 5);
     b: Base = w;
     io::println(b.name() + " " + Str<int>(b.n) + " " + w.get());
   )"));
@@ -353,7 +353,7 @@ fn mk() -> Box<int> { return Box<int>(41); }
     std::ofstream mainFile(mainPath);
     mainFile << R"(
 import lib::gen;
-fn main() -> int { b = gen::mk(); return b.get() + 1; }
+fn main() -> int { b: mut = gen::mk(); return b.get() + 1; }
 )";
   }
   auto r = compileAndRunFile(mainPath);
@@ -381,11 +381,11 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
     fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
     fn dup<T>(x: T) -> (T, T) { return (x, x); }
     fn main() -> int {
-      q = Pair<Str, int>("a", 1);
+      q: mut = Pair<Str, int>("a", 1);
       io::println(q.first());
       io::println(Str<int>(q.second()));
       io::println(q.swap());
-      r: Pair<int, Str> = Pair<int, Str>(2, "b");
+      r: mut Pair<int, Str> = Pair<int, Str>(2, "b");
       io::println(r.swap());
       io::println(Str<int>(firstOf((7, "x"))));
       a, b = dup("z");
@@ -421,12 +421,12 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
     }
     fn ident<T>(x: T) -> T { return x; }
     fn main() -> int {
-      b = Slot<Node>();
+      b: mut = Slot<Node>();
       io::println(Str<int>(orElse(b.get(), Node(0)).v));
       b.set(Node(5));
       io::println(Str<int>(orElse(b.get(), Node(0)).v));
       io::println(Str<int>(orElse(None, Node(9)).v));
-      s = Slot<Str>();
+      s: mut = Slot<Str>();
       io::println(orElse(s.get(), "dflt"));
       n: Node? = None;
       m = ident<Node?>(n);
@@ -513,25 +513,25 @@ TEST(GenericsTypes, ArmOfAnOptionalTypeArgumentBindsAT) {
       match s { t: Sh { match t { l: L { return Sh::L(l.s + "!"); } _ { return None; } } } None { return None; } }
     }
     fn main() -> int {
-      a = Slot<Str>("a" + "");
+      a: mut = Slot<Str>("a" + "");
       a.poke(twice);
       a.pass(twice);
-      b = Slot<Str?>("b" + "");
+      b: mut = Slot<Str?>("b" + "");
       b.poke(twiceO);
       b.pass(twiceO);
       io::print(a.v.toString() + " " + b.v.toString() + " ");
       b.poke(gone);
-      d = Slot<int?>(5);
+      d: mut = Slot<int?>(5);
       d.poke(incO);
       d.pass(incO);
       io::println(b.v.toString() + " " + d.v.toString());
       d.poke(noInt);
-      e = Slot<P>(P("e" + "", 1));
+      e: mut = Slot<P>(P("e" + "", 1));
       e.poke(grow);
-      f = Slot<P?>(P("f" + "", 2));
+      f: mut = Slot<P?>(P("f" + "", 2));
       f.poke(growO);
       f.pass(growO);
-      h = Slot<Sh?>(Sh::L("h" + ""));
+      h: mut = Slot<Sh?>(Sh::L("h" + ""));
       h.poke(shO);
       h.pass(shO);
       io::println(d.v.toString() + " " + e.v.toString() + " " + f.v.toString() + " " +
@@ -578,9 +578,9 @@ fn mkBoxTuple() -> Box<(Str, int)> { return Box<(Str, int)>(("t", 3)); }
     mainFile << R"(import ::io;
 import lib;
 fn main() -> int {
-  p = lib::mkPair();
+  p: mut = lib::mkPair();
   io::println(p.first());
-  b = lib::mkBoxTuple();
+  b: mut = lib::mkBoxTuple();
   return b.get().1;
 }
 )";

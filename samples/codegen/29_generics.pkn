@@ -42,7 +42,7 @@ class Stack<T> {
   items: T[4];
   count: int;
   fn push(v: T) {
-    self.items[self.count] = v;
+    self.items[self.count] = move v;
     self.count = self.count + 1;
   }
   fn pop() -> T {
@@ -89,7 +89,7 @@ fn describe(o: Obj) -> Str {
 fn main() -> int {
   let bi: Box<int> = Box<int>(3);             // explicit type argument
   io::println(Str(bi.get()));                  // 3
-  let bs = Box<Str>("hello");
+  let bs: mut = Box<Str>("hello");
   bs.set("world");
   io::println(bs.get());                          // world
 
@@ -99,7 +99,7 @@ fn main() -> int {
   let bb: Box<Box<int>> = Box<Box<int>>(bi);  // nested instantiation
   io::println(Str(bb.get().get()));            // 3
 
-  let s: Stack<Str> = Stack<Str>("");
+  let s: mut Stack<Str> = Stack<Str>("");
   s.push("a");
   s.push("b");
   while !s.empty() {

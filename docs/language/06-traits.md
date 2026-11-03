@@ -108,8 +108,9 @@ You use a built-in trait every time you print: `io::println` is declared
   place and copied whole: `int`, `float`, `bool`, `char`, every sized numeric type, every
   enum, every tuple, every struct and every function type (see [ValueType](#valuetype)).
 - The built-in trait `Copyable` has no methods and is never implemented: a type is
-  Copyable by what it holds. A number, `bool`, `char`, an enum, a `shared` reference and an
-  `atomic`, `atomic shared const` or `locked` handle are, and so are a struct, a tuple, a
+  Copyable by what it holds. A number, `bool`, `char`, an enum, a `shared` reference
+  (`shared T` or `shared mut T`) and an `atomic`, `atomic shared` or `locked` handle are,
+  and so are a struct, a tuple, a
   fixed-size array and an optional of such parts; a unique reference, a `Str`, a function
   value and a task are not. `T: Copyable` bounds a template (see [Copyable](#copyable)).
 - `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
@@ -314,7 +315,8 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 `Copyable` is a built-in trait with no methods, of the types a program may copy freely
 ([Concurrency](19-concurrency.md#copyable)). It is structural: a type is Copyable by what it
 holds, and no `impl` block gives it. A number, `bool`, `char`, an enum, a `shared` reference
-and an `atomic`, `atomic shared const` or `locked` handle are Copyable, and so are a struct, a
+(`shared T` or `shared mut T`) and an `atomic`, `atomic shared` or `locked` handle are
+Copyable, and so are a struct, a
 tuple, a fixed-size array and an optional whose every part is (a struct's `shared` field
 counts). A unique reference, a `Str`, a function value and a task are not: they are
 move-only, and reach another owner by [`move`](19-concurrency.md#move-an-explicit-transfer).
@@ -333,7 +335,7 @@ class Node {
 }
 
 struct Ref {
-  n: shared Node;
+  n: shared mut Node;
 }
 
 fn twice<T: Copyable>(v: T) -> (T, T) { return (v, v); }
@@ -341,9 +343,9 @@ fn twice<T: Copyable>(v: T) -> (T, T) { return (v, v); }
 fn main() -> int {
   let p = twice(Point(1, 2));
   let n = twice(3);
-  let s: shared Node = Node(7);
+  let s: shared mut Node = Node(7);
   let pair = twice(Ref(s));           // a struct of a shared reference is Copyable
-  pair.0.n.id = 8;
+  s.id = 8;                           // the one node, seen through both copies
   io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1) + " " + Str(pair.1.n.id));
   return 0;
 }

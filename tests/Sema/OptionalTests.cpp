@@ -16,7 +16,7 @@ static const char *const kNodeClass =
     "class Node {\n"
     "  v: int;\n"
     "  next: Node?;\n"
-    "  fn val() -> int { return self.v; }\n"
+    "  view fn val() -> int { return self.v; }\n"
     "}\n"
     "impl Node {\n"
     "  fn __init__(x: int) { self.v = x; }\n"
@@ -101,7 +101,7 @@ TEST(Optional, OptionalIsNotAnObj) {
   expectError(std::string(kNodeClass) +
                   "class H { o: Obj; }\n"
                   "impl H { fn __init__() { self.o = None; } }\n"
-                  "fn main() -> int { h = H(); n: Node? = None; h.o = n; "
+                  "fn main() -> int { h: mut = H(); n: Node? = None; h.o = n; "
                   "return 0; }\n",
               msg);
   expectError(withNode("n: Node? = None; xs: Obj[1] = [Node(1)]; xs[0] = n;"),
@@ -486,7 +486,7 @@ TEST(Optional, NonOptionalFieldStillMustBeAssigned) {
 TEST(Optional, OptionalFieldAssignedViaMatch) {
   expectOk(std::string(kNodeClass) + R"(
     fn main() -> int {
-      a: Node = Node(1);
+      a: mut Node = Node(1);
       b: Node = Node(2);
       a.next = b;
       a.next = None;
@@ -513,7 +513,7 @@ TEST(Optional, LinkedListTraversal) {
       return total;
     }
     fn main() -> int {
-      a: Node = Node(1);
+      a: mut Node = Node(1);
       b: Node = Node(2);
       a.next = b;
       return sum(a);
@@ -574,7 +574,7 @@ TEST(Optional, OptionalEnumTupleAndStructAreAccepted) {
     fn main() -> int {
       c: Color? = None;
       c = Color::Green;
-      p = P();
+      p: mut = P();
       p.s = S(2);
       t: (int, Str)? = (1, "a");
       match t { v: (int, Str) { n = v.0; } None { } }
@@ -649,7 +649,7 @@ TEST(OptionalModule, ExportedOptionalSignaturesRoundTrip) {
   auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import list;
 fn main() -> int {
-  n: list::Node = list::Node(1);
+  n: mut list::Node = list::Node(1);
   n.link(None);
   n.link(list::Node(2));
   t: list::Node? = n.tail();
@@ -753,7 +753,7 @@ TEST(OptionalTuple, DestructuredOptionalElementStillNeedsUnwrap) {
 TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
   expectOk(std::string(kNodeClass) + R"(
     class Box { p: (Node?, int);
-                fn set(p: (int?, Str)) -> Str { return p.1; } }
+                view fn set(p: (int?, Str)) -> Str { return p.1; } }
     impl Box { fn __init__() { self.p = (None, 0); } }
     fn take(p: (int?, Str)) -> Str { return p.1; }
     fn mk() -> (Node?, int) { return (None, 2); }
@@ -762,7 +762,7 @@ TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
       b: (Node?, int) = (None, 1);
       b = (None, 3);
       take((None, "x"));
-      bx = Box();
+      bx: mut = Box();
       bx.set((None, "y"));
       bx.p = (None, 4);
       ps: (Node?, int)[1] = [(None, 5)];

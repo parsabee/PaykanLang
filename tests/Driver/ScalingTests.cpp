@@ -288,8 +288,8 @@ TEST(Scaling, TheLendingPassRemovesABlocksRetainsInOnePass) {
       "struct P { x: int; y: int; }\nclass C { p: P; }\n"
       "fn first(a: P, b: int) -> int => a.x + b;\n"
       "fn bump(p: inout P) -> int { p.x = p.x + 1; return 0; }\n"
-      "fn reset(c: C) -> int { c.p = P(9, 9); return 0; }\n"
-      "fn main() -> int {\n  p = P(1, 2);\n  c = C(P(1, 2));\n  r = 0;\n" +
+      "fn reset(c: mut C) -> int { c.p = P(9, 9); return 0; }\n"
+      "fn main() -> int {\n  p = P(1, 2);\n  c: mut = C(P(1, 2));\n  r = 0;\n" +
       repeated("  r += first(p, bump(p)) + first(c.p, reset(c));\n", 3000) +
       "  return r % 256;\n}\n";
   const std::string path = dir.write("lend.pkn", src);
@@ -368,7 +368,7 @@ TEST(Scaling, AppendingToAStringGrowsItWhereItIs) {
   const std::string appends =
       dir.write("appends.pkn", "import ::io;\n"
                                "fn main() -> int {\n"
-                               "  let s = \"\";\n"
+                               "  let s: mut = \"\";\n"
                                "  for _ in 0..1600000 {\n"
                                "    s.concat(\"x\");\n"
                                "  }\n"

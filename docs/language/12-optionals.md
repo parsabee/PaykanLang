@@ -123,7 +123,7 @@ impl Person {
 }
 
 fn main() -> int {
-  let p = Person("Ada");
+  let p: mut = Person("Ada");
   io::println(p.contact());
   p.email = "ada@example.org";
   io::println(p.contact());
@@ -207,8 +207,9 @@ True
 
 Two changes to `tasks`. A deadline becomes an optional field instead of a subclass, so any
 task can get one later. And `TaskList.find` looks a task up by its title, returning `None`
-when there is none, which lets the caller decide what to do. It isn't a `view fn`, because
-the caller may change the task it returns:
+when there is none, which lets the caller decide what to do. It returns a `mut Task?`, so
+the caller may change the task it finds: `setDue` keeps the result in a `mut` variable and
+matches that with an `inout` arm, a borrow of the task that writes it with no copy:
 
 ```pkn
 import ::io;
@@ -245,7 +246,7 @@ class TaskList {
     return True;
   }
 
-  fn find(title: Str) -> Task? {
+  fn find(title: Str) -> mut Task? {
     i = 0;
     while i < self.count {
       if self.tasks[i].title == title { return self.tasks[i]; }
@@ -262,15 +263,16 @@ impl TaskList {
   }
 }
 
-fn setDue(list: TaskList, title: Str, due: Str) {
-  match list.find(title) {
-    t: Task { t.due = due; io::println(t); }
-    None    { io::println("no task called '" + title + "'"); }
+fn setDue(list: mut TaskList, title: Str, due: Str) {
+  found: mut = list.find(title);
+  match found {
+    t: inout Task { t.due = due; io::println(t); }
+    None          { io::println("no task called '" + title + "'"); }
   }
 }
 
 fn main() -> int {
-  let list = TaskList();
+  let list: mut = TaskList();
   list.add("file taxes");
   list.add("buy milk");
   setDue(list, "file taxes", "April 15");
@@ -352,7 +354,9 @@ match maybe {
 
 - The arm naming the wrapped type `T` matches **every** present value and binds it as `T`. This
   differs from a class-typed subject, where a type arm is an exact-runtime-type test: for an
-  optional, the `T` arm is the "present" pattern.
+  optional, the `T` arm is the "present" pattern. The binding is a copy of the reference,
+  which reads the object; to change it, match a `mut` variable or field with an `inout` arm,
+  `t: inout Task { … }` ([Borrowing the subject](08-match.md#borrowing-the-subject)).
 - An arm naming a **strict subclass** of `T` matches on exact runtime type, as in type mode,
   and must come before the `T` arm (an arm after the `T` arm is unreachable and rejected):
 

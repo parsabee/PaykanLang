@@ -2347,46 +2347,70 @@ Type *Parser::parsePrimaryType() {
 }
 
 // typeAnnotation ::= qualifier? primaryType suffixes
-// qualifier      ::= "const" | "shared" "const"? | "atomic" "shared" "const"
-//                  | "locked"
+// qualifier      ::= "mut" | "shared" "mut"? | "atomic" "shared"
+//                  | "locked" "mut"?
 //                  | "atomic"                     -- a cell of a number
 //
-// `atomic` says the reference crosses threads, `shared` that it has several
-// owners (one on each thread at least), `const` that nothing writes it: an
-// object crosses frozen, as `atomic shared const`, or behind a lock, as
-// `locked`.  The two spellings that leave a word out are errors naming the
-// whole one.
+// The bare type is immutable and the cheapest form (docs/design/
+// concurrency.md); each word buys one thing at one cost: `mut`, writes
+// through the owner; `shared`, several owners; `atomic shared`, an object
+// frozen for every thread; `locked mut`, an object written under a lock.
+// `const` is gone (a reference is immutable unless written `mut`), `atomic
+// shared mut` and `atomic mut` are errors naming the forms that exist, and
+// `locked` without `mut` is a warning (Sema).
 //
-// A qualifier (docs/design/concurrency.md) covers the whole type.  In a
-// declaration it may stand alone, with the type inferred (`x: shared =
-// e;`).  A type takes one qualifier.
+// A qualifier covers the whole type.  In a declaration it may stand alone,
+// with the type inferred (`x: shared = e;`).  A type takes one qualifier.
 Type *Parser::parseTypeAnnotation() {
   SourceLocation start = cur().Loc;
   Qualifier qual;
   bool qualified = true;
-  if (accept(Tok::KwConst)) {
-    qual.Const = true;
+  auto constGone = [&] {
+    error(cur().Loc, "'const' is gone: a reference is immutable unless "
+                     "written 'mut T' ('shared mut T', 'locked mut T')");
+    return nullptr;
+  };
+  auto cellTakesNoMut = [&] {
+    error(cur().Loc, "an 'atomic' cell takes no 'mut': it changes by its "
+                     "operations; an object crosses threads as 'atomic "
+                     "shared T' (frozen) or 'locked mut T'");
+    return nullptr;
+  };
+  if (at(Tok::KwConst)) {
+    return constGone();
+  } else if (accept(Tok::KwMut)) {
+    if (at(Tok::KwShared) || at(Tok::KwLocked)) {
+      const std::string form(cur().Text);
+      error(cur().Loc, "'mut " + form + "' is spelled '" + form +
+                           " mut': the form first, then the writes");
+      return nullptr;
+    }
+    if (at(Tok::KwAtomic))
+      return cellTakesNoMut();
+    qual.Mut = true;
   } else if (accept(Tok::KwShared)) {
     qual.Form = QualForm::Shared;
-    qual.Const = accept(Tok::KwConst);
+    qual.Mut = accept(Tok::KwMut);
   } else if (accept(Tok::KwLocked)) {
     qual.Form = QualForm::Locked;
-  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwShared &&
-             kind(2) == Tok::KwConst) {
-    consume();
-    consume();
-    consume();
-    qual.Form = QualForm::AtomicSharedConst;
-  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwConst) {
-    error(cur().Loc, "'atomic const' is 'atomic shared const': an object read "
-                     "from several threads has several owners; write 'atomic "
-                     "shared const T'");
-    return nullptr;
+    qual.Mut = accept(Tok::KwMut);
   } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwShared) {
-    error(cur().Loc, "'atomic shared T' would be written from several threads "
-                     "with no lock; write 'atomic shared const T' to freeze "
-                     "it, or 'locked T' to change it under a lock");
-    return nullptr;
+    consume();
+    consume();
+    if (at(Tok::KwMut)) {
+      error(cur().Loc, "'atomic shared mut T' would be written from several "
+                       "threads with no lock; write 'atomic shared T' to "
+                       "freeze it, or 'locked mut T' to change it under a "
+                       "lock");
+      return nullptr;
+    }
+    qual.Form = QualForm::AtomicShared;
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwMut) {
+    consume();
+    return cellTakesNoMut();
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwConst) {
+    consume();
+    return constGone();
   } else if (accept(Tok::KwAtomic)) {
     // `atomic T`: a cell holding a number.
     Type *inner = parseTypeAnnotation();
@@ -2397,7 +2421,9 @@ Type *Parser::parseTypeAnnotation() {
     qualified = false;
   }
   if (qualified) {
-    if (at(Tok::KwConst) || at(Tok::KwShared) || at(Tok::KwLocked) ||
+    if (at(Tok::KwConst))
+      return constGone();
+    if (at(Tok::KwMut) || at(Tok::KwShared) || at(Tok::KwLocked) ||
         at(Tok::KwAtomic)) {
       error(cur().Loc, std::string("a type takes one qualifier: '") +
                            qual.spelling() + " " + std::string(cur().Text) +

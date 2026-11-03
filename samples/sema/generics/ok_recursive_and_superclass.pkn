@@ -31,7 +31,7 @@ impl Node<T> {
 fn main() -> int {
   let w: Wrap<Str> = Wrap<Str>("a", 5);
   let b: Base = w;
-  let a: Node<int> = Node<int>(1);
+  let a: mut Node<int> = Node<int>(1);
   a.link(Node<int>(2));
   return b.num() + w.num();
 }

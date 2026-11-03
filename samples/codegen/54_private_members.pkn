@@ -27,7 +27,7 @@ class Counter {
 
 impl Counter {
   static fn make(n: int) -> Counter {
-    let c = Counter(0, n);
+    let c: mut = Counter(0, n);
     c.__count = 10;
     return c;
   }
@@ -83,9 +83,9 @@ impl Box<T> {
 }
 
 fn main() -> int {
-  let c = Counter::make(3);
+  let c: mut = Counter::make(3);
   c.tick();
-  let d = Counter(0, 1);
+  let d: mut = Counter(0, 1);
   d.copyFrom(c);
   let add = c.adder();
   io::println(Str(c.value()) + " " + Str(d.value()) + " " + c.name() + " "
@@ -98,7 +98,7 @@ fn main() -> int {
       + Str(p == P(2, 0)));
 
   let chain = _Node(1, _Node(2, _Node(3, None)));
-  let b = Box("s");
+  let b: mut = Box("s");
   b.set("t");
   let o = Box("u");
   b.take(o);

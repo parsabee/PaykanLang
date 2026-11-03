@@ -3,14 +3,14 @@
 // Codegen / E2E tests for the concurrency prototype
 // (docs/design/concurrency.md, samples/concurrency/README.md): tasks
 // (`async fn`, `await`), `parallel for`, `atomic` and `locked` cells,
-// `atomic shared const` objects, `move` and the qualifiers at run time.  Each
+// `atomic shared` objects, `move` and the qualifiers at run time.  Each
 // test compiles and runs a small program through the mlir backend's JIT, which
 // loads MLIR's async runtime and LLVM's OpenMP runtime when a program uses
 // them, and checks its exact output.
 //
 // Two things decide which tests check the heap:
 //
-// * An `atomic` cell, a `locked` cell and a frozen (`atomic shared const`)
+// * An `atomic` cell, a `locked` cell and a frozen (`atomic shared`)
 //   object are immortal in the prototype: their counts are PAYKAN_REF_MAX
 //   and they are never freed (the samples README, "What is not").  A
 //   program that makes one leaks it by design, so those tests run without
@@ -289,7 +289,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
     fn bump(c: atomic int, by: int) { c += by; }
     fn read(c: atomic int) -> int { return c; }
     fn fresh(v: int) -> atomic int { return v; }
-    async fn hit(st: atomic shared const Stats, n: int) -> int {
+    async fn hit(st: atomic shared Stats, n: int) -> int {
       for i in 0..n { st.served += 1; }
       return n;
     }
@@ -304,7 +304,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
       let k = fresh(3);
       k += 1;
       io::println(Str(k) + " " + Str(a));
-      let st: atomic shared const Stats = Stats("s", 0);
+      let st: atomic shared Stats = Stats("s", 0);
       let t1 = hit(st, 500);
       let t2 = hit(st, 500);
       let n = await t1 + await t2;
@@ -331,7 +331,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
 TEST(Concurrency, LockedCellIsReachedInLockBlocks) {
   auto r = compileAndRun(R"(import ::io;
     class Counts { hits: int[4]; total: int; }
-    async fn record(counts: locked Counts, id: int, n: int) -> int {
+    async fn record(counts: locked mut Counts, id: int, n: int) -> int {
       for i in 0..n {
         lock counts as c: inout {
           c.hits[(id + i) % 4] += 1;
@@ -341,7 +341,7 @@ TEST(Concurrency, LockedCellIsReachedInLockBlocks) {
       return id;
     }
     fn main() -> int {
-      let counts: locked Counts = Counts([0; 4], 0);
+      let counts: locked mut Counts = Counts([0; 4], 0);
       lock counts as c: inout { c.total = 10; c.hits[1] = 2; }
       lock counts as v: view {
         io::println(Str(v.total) + " " + Str(v.hits[1]));
@@ -362,22 +362,22 @@ TEST(Concurrency, LockedCellIsReachedInLockBlocks) {
   EXPECT_EQ(r.ExitCode, 0);
 }
 
-// -- atomic shared const
+// -- atomic shared
 
-// A unique object flowing into an `atomic shared const` slot is frozen with
+// A unique object flowing into an `atomic shared` slot is frozen with
 // everything it holds (here a Str, an object and an array); the handle
 // copies into three tasks, which read the graph with no count, and main
 // reads it after them.  The frozen object is immortal: no heap check.
-TEST(Concurrency, AtomicSharedConstObjectIsReadByTasks) {
+TEST(Concurrency, AtomicSharedObjectIsReadByTasks) {
   auto r = compileAndRun(R"(import ::io;
     class Limits { lo: int; hi: int; }
     class Config { name: Str; limits: Limits; weights: float[4]; }
-    async fn score(cfg: atomic shared const Config, x: int) -> int {
+    async fn score(cfg: atomic shared Config, x: int) -> int {
       if x < cfg.limits.lo || x > cfg.limits.hi { return 0; }
       return x * cfg.name.len() + int(cfg.weights[x % 4]);
     }
     fn main() -> int {
-      let cfg: atomic shared const Config =
+      let cfg: atomic shared Config =
           Config("demo", Limits(0, 100), [1.0, 2.0, 3.0, 4.0]);
       let a = score(cfg, 7);
       let b = score(cfg, 8);
@@ -398,14 +398,14 @@ TEST(Concurrency, AtomicSharedConstObjectIsReadByTasks) {
 // through the box's `value()`: the prototype's way to data larger than a
 // fixed-size array.  The body calls, so it is heavy and forks at 1000
 // iterations.  The frozen box is immortal: no heap check.
-TEST(Concurrency, AtomicSharedConstBoxedBufferIsReadInAParallelFor) {
+TEST(Concurrency, AtomicSharedBoxedBufferIsReadInAParallelFor) {
   auto r = compileAndRun(R"(import ::io;
     import ::memory as mem;
     fn main() -> int {
       buf = mem::Buffer<float>();
       let grown = buf.grow(unsigned(1000));
       for i in 0..1000 { let e = buf.set(unsigned(i), float(i)); }
-      let xs: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move buf);
+      let xs: atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move buf);
       s = 0.0;
       parallel for i in 0..1000 { s += xs.value().at(unsigned(i)); }
       io::println(Str(s) + " " + Str(xs.value().len()) + " "
@@ -470,7 +470,7 @@ TEST(Concurrency, MovesReleaseTheObjectOnce) {
 // A `shared` reference aliases on its thread: a change through one name
 // shows through the other, and the two compare equal.  A `const` object
 // is read through a `view` local, a `view` parameter and a `view fn`, and
-// converts into `shared const`.
+// converts into `shared`.
 TEST(Concurrency, QualifiersAtRunTime) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -481,16 +481,16 @@ TEST(Concurrency, QualifiersAtRunTime) {
     }
     fn describe(n: view Node) -> Str { return n.name + " #" + Str(n.id); }
     fn main() -> int {
-      let s: shared Node = Node(2, "s");
+      let s: shared mut Node = Node(2, "s");
       let t = s;
       t.id = 22;
       s.name = "ss";
       io::println(describe(s) + " " + describe(t) + " " + Str(s == t));
       let a = Node(1, "a");
-      let c: const Node = move a;
+      let c: Node = move a;
       v: view Node = c;
       io::println(describe(c) + " " + v.label() + " " + c.label());
-      let d: shared const Node = c;
+      let d: shared Node = c;
       io::println(describe(d));
       return 0;
     }

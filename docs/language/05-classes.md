@@ -36,7 +36,7 @@ impl Counter {
 }
 
 fn main() -> int {
-  let c = Counter("visitors");
+  let c: mut = Counter("visitors");
   c.increment();
   c.increment();
   io::println(c.report());
@@ -71,15 +71,21 @@ Create an object by calling the class name with the constructor's arguments, as 
   underscores (`__count`) is private to its class: only the class's own methods reach it. A
   name starting with one underscore (`_cache`) is private to its module. See
   [Private fields and methods](#private-fields-and-methods).
+- An object is immutable unless the reference to it says `mut`. `main` declares `c` as
+  `let c: mut = Counter("visitors")` (or `c: mut Counter = ...`), so it can call
+  `increment`, which changes the object, and assign `c.count`; with `let c =
+  Counter("visitors")` only `report`, a `view fn`, could be called on it. `let` fixes the
+  variable to that one object; `mut` is about the object
+  ([Variables](02-basics.md#variables--declarations)).
 - By convention class names are `UpperCamelCase`.
 
 ## Methods that only read: `view fn`
 
 A method may change its object. A method that only reads it is written `view fn`, and the
-compiler holds it to that: inside it, `self` is read-only. A `view` parameter (see
-[Parameter modes](03-functions.md#parameter-modes-view-and-inout)) promises the caller that
-the function will not change what it was given, so only `view fn` methods can be called on
-one:
+compiler holds it to that: inside it, `self` is read-only. A `view fn` is what can be called
+on an object that is not `mut`, and on a `view` parameter (see
+[Parameter modes](03-functions.md#parameter-modes-view-and-inout)), which promises the
+caller that the function will not change what it was given:
 
 ```pkn
 import ::io;
@@ -99,7 +105,7 @@ fn show(a: view Account) {
 }
 
 fn main() -> int {
-  let a = Account(10);
+  let a: mut = Account(10);
   a.deposit(5);
   show(a);
   return 0;
@@ -143,6 +149,10 @@ error: 'self' is read-only in 'view fn report'; cannot assign to its field 'bala
 error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
 ```
 
+So is `deposit` on an `Account` that is not `mut`: with `let a = Account(10);` in `main`,
+`a.deposit(5)` is `'a' is immutable (a 'Account'; write 'mut Account' to change it);
+'deposit' is not a 'view fn'`.
+
 The compiler warns about a method that never changes its object but is not a `view fn`,
 so mark such methods as you write them. A `view fn` that returns part of its object, such
 as a `Str` field, says so with `-> view Str`: the caller gets a `view` of it, which it can
@@ -153,7 +163,8 @@ read but not change or keep. The exact rules are in
 
 Objects live on the heap, and a variable holds a **reference** to one. Assigning an object
 to another variable, or passing it to a function, shares the same object; it does not copy
-it:
+it. Each reference says whether the object may be changed through it: `a` and `bump`'s
+parameter are `mut`, and `b`, a plain `Box`, reads the same object and sees their writes:
 
 ```pkn
 import ::io;
@@ -166,14 +177,14 @@ impl Box {
   fn __init__(v: int) { self.value = v; }
 }
 
-fn bump(b: Box) {
+fn bump(b: mut Box) {
   b.value = b.value + 1;
 }
 
 fn main() -> int {
-  let a = Box(1);
+  let a: mut = Box(1);
   let b = a;       // b and a are the same object
-  b.value = 5;
+  a.value = 5;
   bump(a);
   io::println(Str(a.value) + " " + Str(b.value));
   return 0;
@@ -545,7 +556,7 @@ impl DeadlineTask {
 }
 
 fn main() -> int {
-  let milk = Task("buy milk");
+  let milk: mut = Task("buy milk");
   let taxes: Task = DeadlineTask("file taxes", "April 15");
   milk.complete();
   io::println(milk);
@@ -588,7 +599,7 @@ The rest of this chapter gives the precise rules.
   for the compiler-generated destructor and cannot be declared in class 'A'` (and in a
   struct's `impl` block `... in struct 'P' (a struct has none)`). `__walk` is reserved the
   same way: the compiler-generated walk of a class's references, which freezing an object as
-  `atomic shared const` runs ([Concurrency](19-concurrency.md#atomic-shared-const-frozen-objects)); a
+  `atomic shared` runs ([Concurrency](19-concurrency.md#atomic-shared-frozen-objects)); a
   method or `static fn` named `__walk` is `'__walk' is reserved for the compiler-generated
   walk and cannot be declared in class 'C'`.
 
@@ -616,7 +627,13 @@ The rest of this chapter gives the precise rules.
   exhaustive `match` counts ([Exhaustiveness and Control
   Flow](08-match.md#exhaustiveness-and-control-flow)).
 - Field types may be builtins, `Str`, fixed-size arrays (`T[n]`), other class types, enums,
-  tuples, structs, optionals and function types; not a slice (`T[]`).
+  tuples, structs, optionals and function types; not a slice (`T[]`). A field holding an
+  object follows the object it is part of: it is written through a `mut` reference to that
+  object (or through `self` in a method that may change it) and read through any other, so
+  it is never declared `mut` itself. A field whose object has several owners says so,
+  `next: shared Node` or `next: shared mut Node` ([Concurrency](19-concurrency.md)); a
+  `shared mut` field is the object's own form and keeps its writes through any object that
+  holds it, a `shared` one is read-only by its declaration.
 - A field declared `weak` (`weak parent: Node?;`) refers to its object without keeping it
   alive and reads as `None` once the object is gone; its type is `T?` for a class `T`. It is
   the back link that breaks a reference cycle (see [Weak references](16-memory.md#weak-references)).
@@ -741,7 +758,7 @@ class Counter {
 }
 
 fn main() -> int {
-  let c = Counter(0, 2);                           // the private field is a constructor argument
+  let c: mut = Counter(0, 2);                           // the private field is a constructor argument
   c.tick();
   c.tick();
   io::println(Str(c.value()) + " " + Str(c.step));
@@ -870,7 +887,9 @@ A method may change `self`. One that does not is written `view fn`, like `report
   reads is a `view` as well ([Weak references](16-memory.md#weak-references)).
 
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
-not a 'view fn'`. Other objects can change as usual.
+not a 'view fn'`. Other objects can change as usual. In every other method `self` is
+mutable (`__init__` builds it), and so is what its fields hold: `self.child.tick()` and
+`self.child.n = 1` are fine in a method that may change `self`.
 
 Part of `self` that is an object, string or optional, or an array or tuple holding one,
 is a `view` in a `view fn`, so the method returns it as one, `-> view T`
@@ -882,12 +901,15 @@ count() -> int`, `view fn bounds() -> (int, int)`). An override of a
 method that returns a copy, such as `toString`, returns a new value instead. A method that
 is not a `view fn` may return part of `self` for its caller to change.
 
-Only a `view fn` can be called on a `view`, a parameter or a local
+Only a `view fn` can be called on an object that is not `mut`, held by a variable, a
+parameter or a field alike (`'c' is immutable (a 'Counter'; write 'mut Counter' to change
+it); 'increment' is not a 'view fn'`), or on a `view`, a parameter or a local
 ([`view`: read-only](03-functions.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
-`toString`, `equals`, `len`; `concat` is not. (The standard library's
-`io::File` methods are `view fn`s.) A `let`
-local only cannot be reassigned: any method can be called on what it holds.
+`toString`, `equals`, `len`; `concat` is not, so it needs a `mut Str`. (The standard
+library's `io::File` methods are `view fn`s.) `let` is about the variable, not the object:
+a `let` local cannot be reassigned, and whether a method may change what it holds is its
+type's, `mut` or not ([Variables](02-basics.md#variables--declarations)).
 
 - `__init__` cannot be a `view fn`: it sets up `self`.
 - An override keeps the marker of the method it overrides, both ways:
@@ -934,7 +956,7 @@ impl Point {
 }
 
 fn main() -> int {
-  let p = Point::origin();
+  let p: mut = Point::origin();
   p.shift(3);
   return p.lengthSquared();   // 18
 }
@@ -1131,7 +1153,7 @@ Every class transitively extends `Obj`. `Obj` defines:
 | `toString` | `view fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
 | `equals`   | `view fn equals(other: Obj) -> bool` | Identity (pointer) comparison |
 | `destroy`  | (compiler-generated)                 | Frees the object             |
-| `__walk`   | (compiler-generated)                 | Freezes what the object holds when it is made `atomic shared const` ([Concurrency](19-concurrency.md#atomic-shared-const-frozen-objects)) |
+| `__walk`   | (compiler-generated)                 | Freezes what the object holds when it is made `atomic shared` ([Concurrency](19-concurrency.md#atomic-shared-frozen-objects)) |
 
 Override `toString` and `equals` in your class to customise behaviour. `destroy` and `__walk`
 are generated by the compiler and are final: neither can be declared, overridden or called.
@@ -1182,7 +1204,7 @@ created for that argument list. See [Generics](13-generics.md).
 | `weak` field of the wrong type | `weak f: Node;` (not optional) or `weak f: int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
 | `weak` field passed `inout` | `f(obj.parent)` where `parent` is `weak` and the parameter is `inout`: a weak reference is not a place a strong reference could be written to |
 | Override of `destroy` | A class declares its own `fn destroy()` or `static fn destroy()`, in its body or an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in class 'A'` |
-| Declaration of `__walk` | A class declares a method or `static fn` named `__walk`, in its body or an `impl` block: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'` (the walk freezes what an `atomic shared const` object holds, [Concurrency](19-concurrency.md#atomic-shared-const-frozen-objects)) |
+| Declaration of `__walk` | A class declares a method or `static fn` named `__walk`, in its body or an `impl` block: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'` (the walk freezes what an `atomic shared` object holds, [Concurrency](19-concurrency.md#atomic-shared-frozen-objects)) |
 | Override signature mismatch | Override has a different parameter or return type than the base method |
 | Constructing an abstract class | `Shape()` where a pure virtual method of `Shape` has no implementation: `cannot instantiate abstract class 'Shape': 'Shape.area' has no implementation` |
 | Pure virtual over an implementation | A subclass declares without a body a method its superclass implements |

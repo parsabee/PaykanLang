@@ -9,9 +9,12 @@ this design's choice: it is marked "(proposed; owner may change)" and listed
 under [Open questions](#open-questions).  The qualifiers themselves are the
 owner's: `atomic` and `locked` in place of the first draft's cross-thread
 qualifier and types, with no `locked view` (33); `const` and `shared
-const`, apart from `let` and `view` (36); `atomic shared const` for read-only
+const`, apart from `let` and `view` (36); `atomic shared` for read-only
 sharing across threads, with no `atomic shared` and `atomic` only on
-numbers (37).  The rules recorded under those decisions come from the
+numbers (37); and, on 2026-11-03, the mut model: `const` is gone, the bare
+type is immutable and `mut` buys the writes ([Syntax](#syntax)), with a
+sentence marked "(the mut model, owner 2026-11-03: ...)" wherever a `const`
+form below reads differently now.  The rules recorded under those decisions come from the
 discussion, so every rule cited as decision 33, 36 or 37 beyond that is
 proposed; owner may change.  A prototype of the qualifier, `move`, send,
 `atomic`, `locked` and `parallel for` sections is on branch
@@ -24,14 +27,15 @@ names the classes it uses.
 v0.4 gives Paykan one model for concurrent programs.  Every reference is
 unique (the default) or `shared` (aliased on one thread, plain counts),
 either may be `const` (the object never changes), and ownership moves with
-an explicit `move`.  Across threads a value moves, is copied, is shared
-read-only as `atomic shared const` (counted atomically on the object, its interior
+an explicit `move` (the mut model, owner 2026-11-03: either is immutable
+unless written `mut`, and `const` is gone).  Across threads a value moves, is copied, is shared
+read-only as `atomic shared` (counted atomically on the object, its interior
 frozen so reads inside count nothing), or sits in a cell whose copies are
 handles: `atomic` for numbers, `locked` for state reached in `lock` blocks.
 Tasks are `async fn`s on one event loop per thread, talking through bounded
 channels; data parallelism is a verified `parallel for`.  Programs that
 compile have no data races, and objects of user classes keep plain counts
-unless their type says `atomic shared const`.  Two settled rules are reversed:
+unless their type says `atomic shared`.  Two settled rules are reversed:
 `move` returns, and a copy of an unmarked container is no longer the same
 container.  `paykan migrate` carries programs across.
 
@@ -39,7 +43,7 @@ container.  `paykan migrate` carries programs across.
 
 | Topic | Decision |
 |---|---|
-| Qualifiers | unique (unwritten), `const`, `shared`, `shared const`, `atomic`, `atomic shared const` or `locked`; a unique value converts one way into any, a `const` one into the other `const` forms, none back but `sync::take` |
+| Qualifiers | unique (unwritten), `const`, `shared`, `shared`, `atomic`, `atomic shared` or `locked`; a unique value converts one way into any, a `const` one into the other `const` forms, none back but `sync::take` (the mut model, owner 2026-11-03: `T`, `mut T`, `shared T`, `shared mut T`, `atomic T`, `atomic shared T` and `locked mut T`; `mut T` flows into `T`, `T` gains `mut` only by `move`, and `shared` and `shared mut` never convert) |
 | Transfer | `move x`, `return move x` included; `b = a` of a unique value is an error |
 | Borrows | `view` and `inout`, never counted; exclusivity exact on owned paths, held elsewhere |
 | Crossing threads | the send check, handles copied, a run-time check on values moved out of borrowed storage |
@@ -49,13 +53,14 @@ container.  `paykan migrate` carries programs across.
 | Cancellation | cooperative, at waits and `task::cancelled()`, propagated to started tasks |
 | Communication | bounded `sync::Channel<T>`, `lock` blocks on `locked` cells, `atomic` operations |
 | Data parallelism | verified `parallel for`, reductions reproducible on every machine |
-| Runtime | thread-safe C11, atomic counts only on `atomic shared const` objects, handles and task records, kqueue and epoll loops, timers, files on helper threads, TSan |
+| Runtime | thread-safe C11, atomic counts only on `atomic shared` objects, handles and task records, kqueue and epoll loops, timers, files on helper threads, TSan |
 | Migration | `paykan migrate <paths>` writes `shared` and `move`; one breaking release |
 
 Decisions 33-35 replaced the first draft's `thread_shared` qualifier,
 `sync::Locked<T>` and `sync::Atomic<T>` types, `@par` attribute and v0.4
-attributes (#171); decision 36 added `const`, and decision 37 replaced
-decision 33's `atomic view` cell with `atomic shared const`, counted on the object.
+attributes (#171); decision 36 added `const` (gone since the mut model,
+owner 2026-11-03), and decision 37 replaced
+decision 33's `atomic view` cell with `atomic shared`, counted on the object.
 
 ## Goals and non-goals
 
@@ -66,12 +71,14 @@ Goals:
   layer later (decision 2).
 * No data races in programs that compile, with diagnostics naming the path.
 * Confinement by default and plain counts in single-threaded code
-  (decision 3); atomic counts only on `atomic shared const` objects, chosen by
+  (decision 3); atomic counts only on `atomic shared` objects, chosen by
   type, and on the cells, channels, loops and task records (decisions 33,
   37).  Value structs are the encouraged way into a task: they are copied,
   cross threads freely and need no qualifier.
 * Immutability in the type: a `const` object never changes, so reads
-  through it need no holds (decision 36).
+  through it need no holds (decision 36).  (The mut model, owner
+  2026-11-03: the bare type is the immutable one, and `mut T` the object
+  that changes.)
 * Every backend: the JIT, native builds, strict C11 from `--emit-c`, plugins.
 
 Non-goals for v0.4: scoped task blocks (decision 6); CPU functions as tasks
@@ -86,23 +93,28 @@ attributes (decision 35); `parallel` on anything but `for` (decision 34).
 
 | Written | Reached by | Counts | Crosses threads | Made from | Used |
 |---|---|---|---|---|---|
-| nothing (unique) | one owner | plain, often none | by `move` | a new value | freely |
-| `const T` | one owner | plain, often none | by `move`, when its parts can | a unique, moved or new | read only |
-| `shared T` | aliases on one thread | plain | never | a unique, moved or new | freely |
-| `shared const T` | aliases on one thread | plain | never | a unique or `const`, moved or new | read only |
+| `mut T` (was: nothing, unique) | one owner | plain, often none | by `move` | a new value, or a `T` by `move` | freely |
+| nothing (`T`; was `const T`) | one owner | plain, often none | by `move`, when its parts can | a `mut T`, moved or new | read only |
+| `shared mut T` (was `shared T`) | aliases on one thread | plain | never | a unique, moved or new | freely |
+| `shared T` (was `shared const T`) | aliases on one thread | plain | never | a unique, moved or new | read only |
 | `atomic T` | handles on any thread | the cell's, atomic | as a handle | a number, `bool`, `char` or fixed array of them | by atomic operations |
-| `atomic shared const T` | references on any thread | the object's, atomic; none inside | as a handle | a crossable unique or `const`, moved or new, then frozen inside | read only |
-| `locked T` | handles on any thread | the cell's, atomic; plain inside | as a handle | a crossable value, moved or new | in `lock` blocks |
+| `atomic shared T` (was `atomic shared const T`) | references on any thread | the object's, atomic; none inside | as a handle | a crossable unique, moved or new, then frozen inside | read only |
+| `locked mut T` (was `locked T`; `locked T` alone warns) | handles on any thread | the cell's, atomic; plain inside | as a handle | a crossable value, moved or new | in `lock` blocks |
+
+The first column is in the mut model's spelling (owner, 2026-11-03), the
+earlier spelling in parentheses: unique is the bare `T`, immutable, or `mut
+T`; the rows that are read only are the ones with no `mut`.
 
 `atomic` and `locked` each make one heap cell with an atomic count, and a
 copy is another handle to it (decision 33; proposed; owner may change).  An
-`atomic shared const` reference is the object's own pointer, its atomic count in
+`atomic shared` reference is the object's own pointer, its atomic count in
 the object, as with Rust's `Arc` (decision 37).  In this design a
-**handle** is a reference counted atomically: an `atomic shared const` reference,
+**handle** is a reference counted atomically: an `atomic shared` reference,
 a handle to an `atomic` or `locked` cell, a `sync::Channel` or a
 `task::Loop`, each Copyable and crossable.  A `task::Task` is a **task
 handle**, unique and a different thing ([Task handles](#task-handles)).
-"Read only" is `const` access ([`const`](#const)).  Every reference type
+"Read only" is `const` access ([`const`](#const); the mut model, owner
+2026-11-03: the access through a reference not written `mut`).  Every reference type
 takes the qualifiers (decision 21): classes, `Obj`, `Str`, `Box`, `Buffer`,
 the containers and function values (in the prototype `Buffer` stays a
 struct, a value, and takes none; [`Str` and the
@@ -115,7 +127,7 @@ docs/grammar.md changes first, then the frontends (docs/grammar.md:12-13):
 
 ```
 typeAnnotation ::= qualifier* primaryType ( "[" "]" | "[" ( INT | "_" ) "]" | "?" )*
-qualifier      ::= "shared" "const"? | "atomic" ( "shared" "const" )? | "locked" | "const"
+qualifier      ::= "mut" | "shared" "mut"? | "atomic" "shared"? | "locked" "mut"?   -- the mut model (owner, 2026-11-03)
 unary          ::= ( "!" | "-" | "~" | "move" | "await" ) unary | postfix
 funcDecl       ::= "async"? receiver? "fn" IDENT typeParams? "(" paramList? ")"
                    ( "->" ( "view" | "inout" )? typeAnnotation )?
@@ -135,22 +147,61 @@ lockStmt       ::= "lock" expression "as" IDENT ":" ( "view" | "inout" ) block
 forStmt        ::= "parallel"? "for" ...                -- as today after "for"
 ```
 
-* `const`, `shared` and `shared const` bind to the primary type (`shared
-  Node[3]` is three references); `atomic`, `locked` and `atomic shared const`, each
+**The mut model (owner, 2026-11-03).**  The bare type is the cheapest form
+and immutable: a `T` has one owner, and through it no field is assigned,
+no method but a `view fn` is called and nothing is passed to an `inout`
+parameter, at zero overhead.  Every added word buys one thing at one cost:
+`mut T` the writes through the owner; `shared T` several owners on one
+thread, immutable, and `shared mut T` several owners with writes; `atomic
+shared T` an object frozen for every thread (the form once spelled `atomic
+const`, then `atomic shared const`); `locked mut T` an object written under
+a lock, inside `lock c as v: inout { }`, and `locked T` alone is accepted
+with a warning, since it locks what nothing writes; `atomic T` stays the
+cell of a number, `bool` or `char`.  `const` is gone: `const T`, `shared
+const T` and `atomic shared const T` are parse errors.  A value takes no
+`mut`: for a number, `bool`, `char`, struct, tuple or fixed array `let`
+alone decides whether its storage is rewritten (and so for a function
+value, in the prototype).  A borrow takes none: `view T` reads and `inout
+T` writes what it names, the `inout` being the borrow's writes, on a
+parameter, a local or a `match` binding; a plain `match` binding takes no
+qualifier and is a copy of its subject in the subject's form.  No `mut`
+goes on a cell or a frozen object: `atomic mut T` and `atomic shared mut
+T` are errors, and `mut shared` and `mut locked` are spelled `shared mut`
+and `locked mut`.  `self` is mutable in every method but a `view fn`
+(`__init__` builds it); a unique field follows its root, writable under a
+`mut` object and immutable under an immutable one, so it is never written
+`mut`, while a `shared mut` field is the object's own form and keeps its
+writes through any root (it is written through every alias); an object held in a value (a
+struct field, an array or tuple element) follows the variable's `let`, not
+`mut`.  Conversions: `mut T` flows into `T` freely; `T` gains `mut` only
+by `move` (or straight from a temporary, such as a constructor call); `T`
+or `mut T` moves into `atomic shared T`, frozen then; `shared T` and
+`shared mut T` never convert into each other, and a frozen object and a
+cell convert only as they are.  Declarations: `let n = Node(1)` is
+immutable; `let n: mut Node = Node(1)`, `n: mut = Node(1)` (a first
+assignment, the type inferred) and `n: mut Node = Node(1)` are mutable;
+`fn f(n: mut Node)`, `-> mut Node`, `next: shared mut Node`.
+
+* `const`, `shared` and `shared` (the mut model, owner 2026-11-03: `mut`,
+  `shared` and `shared mut`) bind to the primary type (`shared
+  Node[3]` is three references); `atomic`, `locked` and `atomic shared`, each
   one object, cover the whole type (`atomic int[1024]`, decision 33;
-  `locked Node?`; `atomic shared const Node[3]`, one boxed array), except that
-  `atomic shared const` leaves a trailing `?` outside: `atomic shared const Str?` is an
+  `locked Node?`; `atomic shared Node[3]`, one boxed array), except that
+  `atomic shared` leaves a trailing `?` outside: `atomic shared Str?` is an
   optional reference (proposed; owner may change).  A mode and a
   qualifier never meet: a borrow is written `n: view Node` or `n: inout
   Node` (owner, 2026-11-02).  In the prototype a struct, tuple or fixed
-  array takes no qualifier at all, so `shared Node[3]` and `atomic shared const
+  array takes no qualifier at all, so `shared Node[3]` and `atomic shared
   Node[3]` are both errors that point to `mem::Box<Node[3]>`
   ([`const`](#const); prototype, 2026-11-03).
 * `x: shared = e;` and `let x: const = e;` infer the type, as a borrow
   declaration does (docs/grammar.md:385) (decision 36 for `const`; proposed;
-  owner may change).  There is no `const x = e;` (decision 36).  A receiver
+  owner may change).  There is no `const x = e;` (decision 36).  (The mut
+  model, owner 2026-11-03: `n: mut = Node(1)`, a first assignment with the
+  type inferred, likewise; `const` is gone.)  A receiver
   prefix other than `view` is for methods only.
-* `move`, `shared`, `atomic`, `locked`, `const`, `async`, `await`, `lock`
+* `move`, `shared`, `atomic`, `locked`, `const` (the mut model, owner
+  2026-11-03: `mut` in its place), `async`, `await`, `lock`
   and `parallel` become keywords (include/paykan/Keywords.h:21-25); `view`
   is one already.  `unique` is never written.
 * Recovery (docs/grammar.md:672-678) adds `async fn`, `shared fn` and
@@ -160,27 +211,41 @@ forStmt        ::= "parallel"? "for" ...                -- as today after "for"
 * `shared int` is `'shared' qualifies a reference; 'int' is a value`, and
   `const int` is `'const' applies to objects; 'int' is a value, which 'let'
   fixes` (decision 36).  A type takes one qualifier: the parser reads a run
-  of them and reports `locked atomic shared const Config`; a class holding the
+  of them and reports `locked atomic shared Config`; a class holding the
   handle can be `locked` (proposed; owner may change).  There is no `locked
   view` (decision 33), `locked const` or `atomic shared` (decision 37), and
   the parser reports each by name.  The frozen form is spelled `atomic
-  shared const`, each word saying one thing (`atomic`: the reference
+  shared`, each word saying one thing (`atomic`: the reference
   crosses threads; `shared`: the object has several owners, one on each
   thread at least; `const`: nothing writes it), and the parser rejects the
   two spellings that leave a word out, `atomic const N` with
-  `'atomic const' is 'atomic shared const': an object read from several
-  threads has several owners; write 'atomic shared const T'` and `atomic
+  `'atomic const' is 'atomic shared': an object read from several
+  threads has several owners; write 'atomic shared T'` and `atomic
   shared N` with `'atomic shared T' would be written from several threads
-  with no lock; write 'atomic shared const T' to freeze it, or 'locked T'
-  to change it under a lock` (owner, 2026-11-03).
+  with no lock; write 'atomic shared T' to freeze it, or 'locked T'
+  to change it under a lock` (owner, 2026-11-03).  (The mut model, owner
+  2026-11-03: `mut int` is `'mut' applies to objects; 'int' is a value: its
+  storage is rewritten by assignment, which 'let' fixes`; `const` in any
+  form is `'const' is gone: a reference is immutable unless written 'mut
+  T' ('shared mut T', 'locked mut T')`; the frozen form is `atomic shared
+  T`, two words, immutability being the bare type's, and `atomic shared
+  mut N` is `'atomic shared mut T' would be written from several threads
+  with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to
+  change it under a lock`; `atomic mut N` is `an 'atomic' cell takes no
+  'mut': it changes by its operations; an object crosses threads as
+  'atomic shared T' (frozen) or 'locked mut T'`; `mut shared N` is `'mut
+  shared' is spelled 'shared mut': the form first, then the writes`; and
+  two qualifiers are `a type takes one qualifier: 'shared mut shared' is
+  two`.)
 
 ### Copies and `move`
 
 A type is **Copyable** when it is a number, `bool`, `char`, an enum with
 Copyable payloads, a tuple, struct, fixed array or optional of Copyable
-parts, a `shared` or `shared const` reference, or a handle, `atomic shared const`
+parts, a `shared` or `shared` reference, or a handle, `atomic shared`
 included (decisions 33, 36, 37).  Everything else is move-only: unique
-classes, `Str`, containers and function values, their `const` forms, task
+classes, `Str`, containers and function values, their `const` forms (the
+mut model, owner 2026-11-03: bare or `mut`), task
 handles, and every aggregate holding one.
 
 A move-only value read from a place (a variable, parameter, field, element,
@@ -252,9 +317,9 @@ io::println(job.name);   // error: 'job' was moved at 2:25; it cannot be read af
 
 An **owned root** is a local, a by-value parameter or an owned `match`
 binding.  An **owned path** is an owned root followed only by unique (or
-`const`) fields and fixed-array elements.  Every other root is **borrowed**: `self`, `view`
+`const`; the mut model, owner 2026-11-03: unique, bare or `mut`) fields and fixed-array elements.  Every other root is **borrowed**: `self`, `view`
 and `inout` parameters and locals, `view` and `inout` match bindings,
-borrowed results, every `shared`, `shared const` and `atomic shared const`
+borrowed results, every `shared`, `shared` and `atomic shared`
 reference and the contents of every cell.  Whatever its declared
 qualifier, a borrowed root may be reached through a shared alias: `view T`
 accepts every form of `T`, and an `inout Node` may name the unique field of
@@ -277,21 +342,29 @@ The lowering holds `h.child` across `call @look` today (a probe's PIR:
 count savings ([Counting](#counting)), operand conflicts in place of holds,
 and exact exclusivity.  Borrowed roots keep today's holds and snapshots
 (BorrowedReads and SnapshotReads, src/Lowering/LoweringHolds.cpp:62-152),
-except for reads inside a `const` region ([`const`](#const)).
+except for reads inside a `const` region ([`const`](#const); the mut
+model, owner 2026-11-03: a region under an immutable root, a bare `T`).
 
 A hold of a handle is an atomic retain of its cell or object.  An object
-frozen inside an `atomic shared const` lives as long as its root, and a hold of one
+frozen inside an `atomic shared` lives as long as its root, and a hold of one
 writes nothing, so a hold whose path passes through a handle holds the
-handle, unless the handle sits in an owned local, in a `const` region or,
+handle, unless the handle sits in an owned local, in a `const` region (an
+immutable root's, in the mut model) or,
 for a `parallel` body, in the blocked parent's frame (proposed; owner may
 change).
 
 ### `const`
 
+(The mut model, owner 2026-11-03: `const` is gone, and this section's forms
+read as follows.  `const T` is the bare `T`, `shared const T` is `shared T`
+and `atomic shared const T` is `atomic shared T`; the forms that change are
+`mut T`, `shared mut T` and `locked mut T`.  The rules below hold with
+those spellings, and what differs is noted in place.)
+
 `const` says an object never changes, through any reference, for its whole
-life (decision 36).  `const T` has one owner, `shared const T` aliases on
-one thread with plain counts, and `atomic shared const T` is shared across threads
-([`atomic shared const`](#atomic-shared-const)).  `let` stays reassignment only, shallow
+life (decision 36).  `const T` has one owner, `shared T` aliases on
+one thread with plain counts, and `atomic shared T` is shared across threads
+([`atomic shared`](#atomic-shared)).  `let` stays reassignment only, shallow
 for a reference and deep for a value (docs/language/02-basics.md:149-154),
 and `view` stays a borrow mode.  Decision 36's rules (proposed; owner may
 change):
@@ -302,13 +375,19 @@ change):
   called ([Lambdas](#lambdas)).  `atomic` and `locked` fields, channels and
   the objects behind `shared` references stay usable: the reference is
   fixed, what it names may change.  Decision 36 states the `shared`
-  exception for `shared const`; a `const T` may hold `shared` references
+  exception for `shared`; a `const T` may hold `shared` references
   too (decision 20) and gets the same rule (proposed; owner may change).
 * **One-way.**  A unique value becomes `const` through its declared type,
   moved in or new; nothing converts back.  `shared T` never becomes `shared
   const T`, as other aliases may still write; `const T` moves into `shared
-  const T` or `atomic shared const T` without a copy.  A changed version is a new
-  object.
+  const T` or `atomic shared T` without a copy.  A changed version is a new
+  object.  (The mut model, owner 2026-11-03: `mut T` flows into `T`
+  freely; `T` gains `mut` only by `move` or straight from a temporary,
+  `cannot store a 'Node' in variable 'v', a 'mut Node': a reference gains
+  'mut' only by 'move'`; `shared T` and `shared mut T` never convert into
+  each other, `cannot store a 'shared mut Node' in variable 'v', a 'shared
+  Node': a 'shared' reference, a frozen object and a cell convert only as
+  they are`.)
 * **Values.**  `const` on a plain value is an error.  On a struct, tuple or
   fixed array holding references it makes them `const`, and the value is
   read only, though a variable not declared `let` may still be assigned
@@ -317,33 +396,53 @@ change):
   `const` included; one is shared or frozen through `mem::Box<T>`, an
   object, and Sema says so: `'const' applies to objects; 'Pair' is a
   value: box it ('mem::Box<Pair>') to share what it holds` (prototype,
-  2026-11-03).
+  2026-11-03).  (The mut model, owner 2026-11-03: `mut` never goes on a
+  value either, `'mut' applies to objects; 'int' is a value: its storage
+  is rewritten by assignment, which 'let' fixes`, and in the prototype a
+  function value counts as one; an object held in a struct, tuple or array
+  follows the variable's `let`.)
 * **Borrows.**  A `view` parameter accepts a `const` argument and an
   `inout` one does not (decision 36).  A borrow is written with no
   qualifier: `view const T`, `inout const T`, `view shared T` and `inout
   shared T` are errors (a `view` is read-only already, and an `inout` of
   a `const` object could not change it).  A `view T` takes every form of
   the object, an `inout T` a unique or `shared` one, with no retain or
-  release (owner, 2026-11-02).
+  release (owner, 2026-11-02).  (The mut model, owner 2026-11-03: a borrow
+  still takes no qualifier; `inout` is the borrow's writes, so an `inout`
+  parameter, local or `match` binding writes what it names, and it takes
+  a `mut T` or a `shared mut T`: `'x' is immutable (a 'T'; write 'mut T'
+  to change it); it cannot be passed to 'inout' parameter 'p'`.)
 * **Crossing.**  `const T` crosses by `move` when its parts can; `shared
   const` never crosses.  No `const` value holds a `task::Task`: it could
   never be awaited, joined, cancelled or detached (proposed; owner may
-  change).
+  change).  (The mut model, owner 2026-11-03: a `T` or a `mut T` moves
+  into `atomic shared T`.)
 
 ```pkn
 class Node { name: Str; next: Node?; }
 let a: const Node = Node("a", None);
 a.name = "b";                        // error: cannot assign 'a.name': 'a' is 'const', which never changes; a field that changes is 'atomic' or 'locked'
-let s: shared const Node = move a;   // no copy
+let s: shared Node = move a;   // no copy
 let t: shared Node = Node("t", None);
-let u: shared const Node = t;        // error: no conversion from 'shared Node' to 'shared const Node': other references may still change it
+let u: shared Node = t;        // error: no conversion from 'shared Node' to 'shared Node': other references may still change it
+```
+
+In the mut model (owner, 2026-11-03) the same program reads:
+
+```pkn
+class Node { name: Str; next: Node?; }
+let a = Node("a", None);
+a.name = "b";                        // error: 'a' is immutable (a 'Node'; write 'mut Node' to change it); cannot assign to its field 'name'
+let s: shared Node = move a;         // no copy
+let t: shared mut Node = Node("t", None);
+let u: shared Node = t;              // error: cannot store a 'shared mut Node' in variable 'u', a 'shared Node': a 'shared' reference, a frozen object and a cell convert only as they are
 ```
 
 **Reads through `const`.**  Nothing in a `const` object can be replaced, so
 a read of a field of an object in a **`const` region** takes no hold and no
 snapshot (decision 36; with plain counts on one thread).  A region is a
 `const` root, the objects it owns through unique fields, elements and
-value parts, and the objects behind its `const`, `shared const` and `atomic shared
+value parts, and the objects behind its `const`, `shared` and `atomic shared
 const` references, each in turn.  It stops at a `shared` or weak reference,
 whose object other aliases may change, and at a cell's contents.  The root
 is kept alive by what reached it: an owned binder, a counted local, a `view
@@ -351,17 +450,18 @@ const` parameter, or, for `h.cfg` of a `shared Holder`, the hold on the
 read of `h.cfg`, a field another alias may replace, and nothing past it.  A
 `view T` parameter given a `const` argument does not know it, so its body
 keeps today's holds, sound but without the saving (proposed; owner may
-change).
+change).  (The mut model, owner 2026-11-03: a region's root is an
+immutable reference, a bare `T`, a `shared T` or an `atomic shared T`.)
 
 ### Parameters, borrows and exclusivity
 
 | Parameter | The caller writes | The callee gets |
 |---|---|---|
-| `n: Node`, `n: const Node` | `move a`, or a temporary (a unique one converts to `const`) | ownership (decision 22) |
-| `n: shared Node`, `n: shared const Node` | `s` (a copy), `move s`, or `move a` (converts) | a new shared reference |
-| `n: atomic shared const Node`, and `atomic`, `locked` | `h` (a copy), `move h`, or `move a` (converts) | another handle |
+| `n: Node`, `n: const Node` (the mut model, owner 2026-11-03: `n: mut Node`, `n: Node`) | `move a`, or a temporary (a `mut` one converts to the bare form) | ownership (decision 22) |
+| `n: shared Node`, `n: shared Node` (the mut model: `shared mut Node`, `shared Node`) | `s` (a copy), `move s`, or `move a` (converts) | a new shared reference |
+| `n: atomic shared Node`, and `atomic`, `locked` | `h` (a copy), `move h`, or `move a` (converts) | another handle |
 | `n: view Node` | `a` in any form, or a temporary | a borrow, never counted |
-| `n: inout Node` | `a`, a unique or `shared` `Node` | the caller's storage |
+| `n: inout Node` | `a`, a unique or `shared` `Node` (the mut model: a `mut` or `shared mut` one) | the caller's storage |
 
 ```pkn
 keep(move a);   // fn keep(n: Node): a is unusable afterwards
@@ -374,7 +474,8 @@ grow(s);        // s: shared Node -- fine: a borrow counts nothing, whatever the
   prologue (docs/pir.md:211-268).
 * `view T` accepts every form of `T`, and `inout T` a unique or `shared`
   one, both counted plainly, so a store through it releases by the right
-  kind (decision 36 for `const`; owner, 2026-11-02).
+  kind (decision 36 for `const`; owner, 2026-11-02).  (The mut model,
+  owner 2026-11-03: `inout T` takes a `mut T` or a `shared mut T`.)
 * `move x` is a write for exclusivity (callConflict,
   src/Sema/SemaParamModes.cpp:53).  On an owned path, an earlier operand's
   read of a non-Copyable value conflicts with a later `inout` or `move` of
@@ -395,15 +496,15 @@ a unique 'Node'; bind 'n: view Node' or 'n: inout Node', or match 'move x'`;
 a temporary subject is owned by its binding.  A downcast binding keeps its
 subject's qualifier: on a `shared Obj`, `p: Node` binds a `shared Node`, and
 a written qualifier must match: `'p' binds part of a 'shared Obj': its type
-is 'shared Node', not 'atomic shared const Node'` (proposed; owner may change).
+is 'shared Node', not 'atomic shared Node'` (proposed; owner may change).
 
 A type arm over `self`, a `view` or `inout` parameter or local, or a cell's
 contents binds a borrow and emits no `box`, the acquire that today counts
 any subject (src/Lowering/LoweringMatch.cpp:242; a probe's PIR: `box
 %self`).  Over a `shared` or owned subject the binding is counted by its
 type, atomically for a handle (proposed; owner may change).  The borrow
-rule is also what keeps `atomic shared const` sound: a `view Obj` may borrow an
-`atomic shared const` object, and a `box` there would count it plainly
+rule is also what keeps `atomic shared` sound: a `view Obj` may borrow an
+`atomic shared` object, and a `box` there would count it plainly
 ([Counting](#counting)).
 
 ### Conversion by declared type
@@ -411,66 +512,82 @@ rule is also what keeps `atomic shared const` sound: a `view Obj` may borrow an
 The declared type converts (decision 23), in checkAssignable, the funnel for
 every declaration, argument, return and store (src/Sema/Sema.cpp:343-366).
 
-| Into, from | new, or `move` of a unique | `move` of a `const` | a move-only place | `shared` | `shared const` | `atomic shared const` | `atomic`, `locked` |
+| Into, from | new, or `move` of a unique (`mut T`) | `move` of a `const` (a bare `T`) | a move-only place | `shared` (`shared mut`) | `shared` (was `shared const`) | `atomic shared` | `atomic`, `locked` |
 |---|---|---|---|---|---|---|---|
-| unique | moves | error | copy error | error | error | error | error (`atomic` loads into a `T`) |
-| `const` | converts | moves | copy error | error | error | error | error |
-| `shared` | converts | error | copy error | copies | error | error | error |
-| `shared const` | converts | converts | copy error | error | copies | error | error |
-| `atomic shared const` | converts after the send check, frozen inside | the same | copy error | error | error | copies | error |
+| unique (`mut T`) | moves | error (the mut model: moves) | copy error | error | error | error | error (`atomic` loads into a `T`) |
+| `const` (a bare `T`) | converts | moves | copy error | error | error | error | error |
+| `shared` (`shared mut`) | converts | error (the mut model: moves) | copy error | copies | error | error | error |
+| `shared` (was `shared const`) | converts | converts | copy error | error | copies | error | error |
+| `atomic shared` | converts after the send check, frozen inside | the same | copy error | error | error | copies | error |
 | `atomic`, `locked` | converts into a new cell (`locked` after the send check) | error | copy error | error | error | error | copies, same qualifier |
+
+(The mut model, owner 2026-11-03: the spellings in parentheses; a bare `T`
+moves into `mut T` and `shared mut T`, since `mut` is gained by `move`,
+and `mut T` flows into `T` with no move.)
 
 ```pkn
 class Config { path: Str; hits: atomic int; }
 let s: shared Node = move a;                         // converts
-let cfg: atomic shared const Config = Config("w.bin", 0);   // a new value converts and is frozen inside
+let cfg: atomic shared Config = Config("w.bin", 0);   // a new value converts and is frozen inside
 let n: Node = s;               // error: no conversion from 'shared Node' to 'Node'
-let v: atomic shared const Node = s;  // error: no conversion from 'shared Node' to 'atomic shared const Node': a shared object stays on its thread
-let w: Config = cfg;           // error: no conversion from 'atomic shared const Config' to 'Config'
-let o: Obj = cfg;              // error: no conversion from 'atomic shared const Config' to 'Obj': write 'atomic shared const Obj'
+let v: atomic shared Node = s;  // error: no conversion from 'shared Node' to 'atomic shared Node': a shared object stays on its thread
+let w: Config = cfg;           // error: no conversion from 'atomic shared Config' to 'Config'
+let o: Obj = cfg;              // error: no conversion from 'atomic shared Config' to 'Obj': write 'atomic shared Obj'
 ```
 
+(The mut model, owner 2026-11-03: the prototype words these `cannot store
+a 'shared Node' in variable 'n', a 'Node': a 'shared' reference, a frozen
+object and a cell convert only as they are`.)
+
 A Copyable value converts by copy.  Upcasts keep the qualifier: an `atomic shared
-const Config` becomes an `atomic shared const Obj`, never a plain `Obj`, which
+const Config` becomes an `atomic shared Obj`, never a plain `Obj`, which
 would be counted plainly ([Counting](#counting)), and a `const Node` a
-`const Obj` (proposed; owner may change).  `sync::Channel` and `task::Loop`
+`const Obj` (the mut model, owner 2026-11-03: a `Node` an `Obj`, a `mut
+Node` a `mut Obj`; proposed; owner may change).  `sync::Channel` and `task::Loop`
 are final and convert only to themselves: as an `Obj` either would be
 counted plainly, so `'sync::Channel<int>' is a handle: it cannot become an
 'Obj'`, though a `view Obj` may borrow one (proposed; owner may change).
-Unique to `const`, `shared` or `shared const` costs nothing at run time; to
-a cell, one allocation; to `atomic shared const`, one walk of the value, plus an
+Unique to `const`, `shared` or `shared` (the mut model: `mut T` to `T`,
+`shared T` or `shared mut T`) costs nothing at run time; to
+a cell, one allocation; to `atomic shared`, one walk of the value, plus an
 allocation only to box a value type.
 
 ### What each qualifier may hold
 
-| Holder | unique part | `shared`, `shared const` part | handle | value |
+| Holder | unique part | `shared`, `shared mut` part | handle | value |
 |---|---|---|---|---|
-| unique or `shared` object | yes | yes (it cannot be sent) | yes | yes |
-| `const` or `shared const` object | yes, `const` | yes, usable (it cannot be sent) | yes, usable | yes, read only |
-| `atomic shared const` object | yes, frozen | no | yes, usable | yes, read only |
-| `locked` cell | yes | no | yes | yes |
+| `mut` or `shared mut` object (the mut model, owner 2026-11-03; was unique or `shared`) | yes | yes (it cannot be sent) | yes | yes |
+| bare `T` or `shared T` object, immutable (was `const` or `shared const`) | yes, immutable | yes, usable (it cannot be sent); a `shared mut` part reads immutable | yes, usable | yes, read only |
+| `atomic shared` object | yes, frozen | no | yes, usable | yes, read only |
+| `locked` cell (`locked mut`; `locked T` alone is read only) | yes | no | yes | yes |
 | `atomic` cell | no | no | no | numbers, `bool`, `char`, fixed arrays of them |
 
 A unique object may hold anything (decision 20), and so may a `const` one,
-its unique parts `const` (decision 36).  A `locked` cell or an `atomic shared
+its unique parts `const` (decision 36).  (The mut model, owner 2026-11-03:
+a unique field follows its root, writable under a `mut` object and
+immutable under a bare one, so it is never written `mut`; a `shared mut`
+field is the object's own form and keeps its writes through any root,
+while a `shared` field is immutable by its declaration: `field 'f' is
+immutable (a 'shared T'; write 'shared mut T' to change it); cannot assign
+to its field 'g'`.)  A `locked` cell or an `atomic shared
 const` object holds any `T` that passes the send check (decisions 33, 37;
 proposed; owner may change), checked at every conversion and per generic
 instance (`locked Holder<(Str, int)>`):
 
 ```pkn
 class Settings { path: Str; cache: shared Cache; }
-let st: atomic shared const Settings = Settings("w.bin", c);   // c: shared Cache
-// error: cannot make 'Settings' 'atomic shared const': field 'cache' is shared
+let st: atomic shared Settings = Settings("w.bin", c);   // c: shared Cache
+// error: cannot make 'Settings' 'atomic shared': field 'cache' is shared
 ```
 
-No `const` value holds a `task::Task` ([`const`](#const)); for `atomic shared
+No `const` value (the mut model: no immutable one) holds a `task::Task` ([`const`](#const)); for `atomic shared
 const` the freeze would also write a count the runtime still uses.  A
 `locked` cell may hold one, taken out under the lock (proposed; owner may
 change).
 
 No other rule is needed, though methods keep plain holds under `self`:
 `locked` contents are touched only under the mutex, holds released before
-the unlock, and an `atomic shared const` object's interior is frozen, its root
+the unlock, and an `atomic shared` object's interior is frozen, its root
 counted only where its type is known ([Counting](#counting)).  A value
 leaves either by copy, or from a `locked` cell by a checked move out of
 borrowed storage.
@@ -478,10 +595,10 @@ borrowed storage.
 ### The send check
 
 The send check (decision 20) runs at `task::spawnOn`'s arguments, receiver
-and result, at every conversion to `atomic shared const` or `locked`, and at a
+and result, at every conversion to `atomic shared` or `locked`, and at a
 channel's `T`.  The prototype has no `spawnOn`, and its tasks run on a
 pool, so it runs the check at every async call's arguments, at every
-conversion to `atomic shared const` or `locked`, and at the declaration of an
+conversion to `atomic shared` or `locked`, and at the declaration of an
 `async fn`'s result, where a result that cannot cross is reported once,
 at the function: `the result of 'async fn' 'give' (a 'shared Job') cannot
 cross to the task's awaiter: is 'shared Job': a 'shared' reference is
@@ -489,12 +606,12 @@ aliased on its own thread` (prototype, 2026-11-03).
 
 | Type | Crossable |
 |---|---|
-| numbers, `bool`, `char`, payload-free enums, unique and `const` `Str` | yes |
-| unique or `const` class | when all its fields are, own and inherited |
+| numbers, `bool`, `char`, payload-free enums, unique and `const` `Str` (the mut model: `Str` and `mut Str`) | yes |
+| unique or `const` class (the mut model: bare or `mut`) | when all its fields are, own and inherited |
 | `Buffer<T>`, `task::Task<T>` | when `T` is |
 | structs, tuples, fixed arrays, optionals, payloads | when their parts are |
-| handles: `atomic shared const` references (`atomic shared const Obj` too), `atomic` and `locked` handles, `sync::Channel<T>`, `task::Loop` | yes: the contents were checked when the object, cell or channel was made |
-| `shared T`, `shared const T`, and weak references | no: they count plainly, and a weak load is a plain retain |
+| handles: `atomic shared` references (`atomic shared Obj` too), `atomic` and `locked` handles, `sync::Channel<T>`, `task::Loop` | yes: the contents were checked when the object, cell or channel was made |
+| `shared T`, `shared T`, and weak references | no: they count plainly, and a weak load is a plain retain |
 | function values | no: a function type does not show its captures |
 | `Obj` | no: it may be any class |
 
@@ -550,7 +667,7 @@ an uncrossable `Job { name: Str; cache: shared Cache; }` could otherwise
 leave later through an owned path, unchecked.  An unresolved virtual call
 returning a move-only value counts as MovesOut.  The cost is one load per
 object moved.  So every unique object reachable from an owned root has count
-1, and a value that crosses (or converts to `locked` or `atomic shared const`) is
+1, and a value that crosses (or converts to `locked` or `atomic shared`) is
 new, on an owned path, or checked as it left; the crossing points need no check of their
 own, and the freeze's check is a backstop.  The walk also catches a
 write-back `inout` arm (docs/language/08-match.md:470-476) whose payload is
@@ -559,19 +676,23 @@ moved out through an alias.
 ### Generics and `Copyable`
 
 Qualifiers are part of type arguments (decision 24): `List<Node>`, `List<const
-Node>`, `List<shared Node>` and `List<atomic shared const Node>` are separate
+Node>`, `List<shared Node>` and `List<atomic shared Node>` are separate
 instances, each counting by its qualifier.  In a template a qualifier
 written on `T` joins `T`'s own, as `T?` collapses
 (docs/language/13-generics.md:503-505): `const T` with `T` = `shared Node`
-is `shared const Node`, and with `T` = `atomic shared const Config` is itself;
+is `shared Node`, and with `T` = `atomic shared Config` is itself;
 `const T` on a plain value is the value.  A join that is no qualifier
-(`shared` with `atomic shared const`, `const` with `locked`, `shared` on a value)
+(`shared` with `atomic shared`, `const` with `locked`, `shared` on a value)
 is an error, and each instance is checked whole, so a conversion the join
-implies (a `shared Node` into a `shared const Node`) is still an error where
+implies (a `shared Node` into a `shared Node`) is still an error where
 it happens.  `atomic T` and `locked T` take no qualified `T`, and `atomic shared
 const T` and `locked T` send-check `T` per instance (proposed; owner may
-change).  `Copyable` holds for `shared const` and `atomic shared const` references
-and not for `const T`, which stays move-only.
+change).  `Copyable` holds for `shared` and `atomic shared` references
+and not for `const T`, which stays move-only.  (The mut model, owner
+2026-11-03: `const` reads as the bare form and `mut` is the qualifier that
+joins, `List<Node>` and `List<mut Node>`; how `mut T` joins a `T` of
+`shared Node` is for the owner, as the prototype keeps qualifiers out of
+type arguments.)
 
 Inside a template `T` is move-only unless declared `T: Copyable`, a
 structural built-in bound beside `ValueType`
@@ -606,29 +727,34 @@ nodes.get(0);   // nodes: List<Node> -- error: 'get' needs 'T: Copyable', and 'N
 ### Weak references
 
 A weak reference refers only to a `shared` object and never crosses threads
-(decisions 33 and 37, revising 25).  A `shared const` object is a `shared`
+(decisions 33 and 37, revising 25).  A `shared` object is a `shared`
 one on one thread, and a cycle can pass through the `shared` references it
 holds, so it may be a weak target too (proposed; owner may change).
-checkWeakType (src/Sema/Sema.cpp:5288) accepts `shared T?` and `shared const
+checkWeakType (src/Sema/Sema.cpp:5288) accepts `shared T?` and `shared
 T?`; `weak u = s` takes `s`'s qualifier, and a read gives it back.
 
 ```pkn
-weak w = a;   // a: Node -- error: a weak reference refers to a 'shared' or 'shared const' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)
+weak w = a;   // a: Node -- error: a weak reference refers to a 'shared' or 'shared' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)
 ```
 
-Handles can form cycles: a `locked Registry` holding an `atomic shared const
+Handles can form cycles: a `locked Registry` holding an `atomic shared
 Config` that holds the registry's handle, or a cell holding a handle to
 itself.  No weak reference can break one, so it leaks, frozen graphs
 included, until a field is cleared; `--track-heap` reports live cells and
-`atomic shared const` objects at exit (proposed; owner may change).
+`atomic shared` objects at exit (proposed; owner may change).
 
 ### `Str` and the containers
 
 `Str` keeps in-place `concat` (src/Runtime/String.c:317-331).  A unique `Str`
-moves, `shared Str` aliases as today, `const Str` and `shared const Str`
-never change (`concat` is no `view fn`), `atomic shared const Str` is shared across
+moves, `shared Str` aliases as today, `const Str` and `shared Str`
+never change (`concat` is no `view fn`), `atomic shared Str` is shared across
 threads with nothing inside to freeze, and a `locked Str` changes in place
-inside `lock` blocks.
+inside `lock` blocks.  (The mut model, owner 2026-11-03: a bare `Str` and
+a `shared Str` never change, `let s = "a"; s.concat("b")` being `'s' is
+immutable (a 'Str'; write 'mut Str' to change it); 'concat' is not a 'view
+fn'`, while `s + "b"` makes a new string and is fine; `mut Str` and
+`shared mut Str` change in place, and a `locked mut Str` in `lock`
+blocks.)
 
 ```pkn
 let s = "abc";
@@ -638,6 +764,9 @@ let a: shared Str = "x";
 let b = a;
 b.concat("y");         // a reads "xy" too
 ```
+
+(The mut model, owner 2026-11-03: `a` is a `shared mut Str` for
+`b.concat("y")` to compile.)
 
 `Str(s)` of a `Str` always makes a new unique string; the identity is just
 `s`.  Today it returns `s` (docs/language/03-functions.md:283-284), which
@@ -662,7 +791,7 @@ classes (proposed; owner may change):
 The prototype keeps `mem::Buffer<T>` a struct whose one field is the
 runtime's buffer object, so it takes no qualifier of its own; it crosses
 when `T` does, as the send table says, since the object's walk freezes
-the elements, and `let xs: atomic shared const mem::Box<mem::Buffer<float>> =
+the elements, and `let xs: atomic shared mem::Box<mem::Buffer<float>> =
 mem::Box(move b)` freezes the box, the buffer and its elements.  A
 `parallel for` body then reads it through the box's `value()` and the
 buffer's `at`, the prototype's route to data larger than a fixed array
@@ -673,9 +802,17 @@ module and no count on the buffer's object, and through a box's
 `value()` or `get()` the box's field itself rather than the copy a `view`
 result of a struct is (prototype, 2026-11-03).
 
-Threads change a `locked cl::HashMap<Str, int>` and read an `atomic shared const
-cl::List<Str>`; one thread reads a `shared const cl::List<Str>` through any
-alias with no holds.  Structs whose `shared S` shares their contents are
+Threads change a `locked cl::HashMap<Str, int>` and read an `atomic shared
+cl::List<Str>`; one thread reads a `shared cl::List<Str>` through any
+alias with no holds.  (The mut model, owner 2026-11-03: `locked mut
+cl::HashMap<Str, int>`; a container's writing methods, `push`, `set`,
+`grow`, `insert`, `remove` and `clear`, are not `view fn`s, so a container
+that is written is `mut` once the containers are classes, while in the
+prototype `cl::List<T>` is a struct, a value, and a written one is simply
+not `let`: `'l' is declared with 'let'; its value cannot change, and 'push'
+is not a 'view fn'`; `len`, `at`, `get` and `contains` read through any
+form; `mem::Box`'s `get()` returns an `inout T` and needs a `mut` box,
+`value()` being the `view fn`.)  Structs whose `shared S` shares their contents are
 unsound: a method could move a field out and send it.
 
 ### Values that hold unique references
@@ -686,13 +823,14 @@ never copied (decision 21).  `[Node(); 3]` is `'[v; n]' copies its value:
 (docs/language/16-memory.md:663-682) never copy a move-only value: on owned
 paths they become the exclusivity errors above, elsewhere holds released
 after the call.  `err::Error.msg` (stdlib/error.pkn:49-52) becomes `atomic shared
-const Str?`, so `Error` and `res::Result<T, err::Error>` stay Copyable when
+const Str?` (the mut model: `atomic shared Str?`), so `Error` and `res::Result<T, err::Error>` stay Copyable when
 `T` is and cross threads (decision 37).
 
 ### Lambdas
 
 Copyable values are captured by copy, as today, a handle by an atomic
-retain, and a `shared const` one by a plain retain; a `const` value, being
+retain, and a `shared` one by a plain retain; a `const` value (the mut
+model: a bare `T`), being
 move-only, only by `move`.  `move j` in a lambda body captures `j` by
 transfer when the lambda is made (decision 32):
 
@@ -716,11 +854,15 @@ function value is unique, named functions and non-capturing lambdas
 included.  Callbacks are `view` parameters; `shared (A) -> R` is today's
 copyable function value.  For the same reason no function value crosses
 threads in v0.4; a callback for another thread is a class with a `view fn`,
-held as `atomic shared const`.  A call may change what a unique function value's
+held as `atomic shared`.  A call may change what a unique function value's
 captures own (docs/design/function-types.md:84-86), so one reached through
 a `const` root is not called, as a method other than a `view fn` is not; a
 `shared` one, outside the region, is.  `const` on a function type is an
-error for the same reason (proposed; owner may change).
+error for the same reason (proposed; owner may change).  (The mut model,
+owner 2026-11-03: the root is an immutable one, a bare `T`; in the
+prototype `mut` on a function type is `'mut' applies to objects; '() ->
+int' is a value: its storage is rewritten by assignment, which 'let'
+fixes`.)
 
 `self` is a borrow, so only a `shared fn`'s lambda may capture it:
 `cannot capture 'self': a method borrows its receiver; declare the method
@@ -751,7 +893,10 @@ impl Node {
 root.add(n);   // root: Node -- error: 'add' is a 'shared fn': call it through a 'shared' reference ('root' is a unique 'Node')
 ```
 
-Through a `const`, `shared const` or `atomic shared const` reference only `view
+Through a `const`, `shared` or `atomic shared` reference (the mut model,
+owner 2026-11-03: a bare `T`, a `shared T` or an `atomic shared T`;
+`self` is mutable in every method but a `view fn`, and `__init__` builds
+it) only `view
 fn`s can be called (decisions 36, 37), and not a `shared view fn`, whose
 `self` is a `shared` reference that could be stored and written through
 (proposed; owner may change).  `equals` becomes `view fn equals(other:
@@ -762,8 +907,9 @@ parameter owns its argument (proposed; owner may change).
 
 A native whose result may alias an object other code holds declares it
 `shared` or borrowed (`-> view T`), and only a borrowed result aliases part
-of a `view` argument, so nothing comes to own a frozen or `const` object or
-count an `atomic shared const` one plainly; otherwise the runtime object it
+of a `view` argument, so nothing comes to own a frozen or `const` (the mut
+model: immutable) object or
+count an `atomic shared` one plainly; otherwise the runtime object it
 returns is immutable or locks itself.  `io::stdin()`
 is `File(_stdin())` (stdlib/io.pkn:121-122), a new unique `File` around the
 one immortal `PaykanFile_Stdin` (src/Runtime/File.c:248-254, 345-346) on
@@ -772,24 +918,24 @@ every call and thread, so the runtime locks it (proposed; owner may change).
 ### Counting
 
 Plain or atomic is chosen statically, by type, since a header bit would
-branch on every plain count (against decision 3): an `atomic shared const` object,
+branch on every plain count (against decision 3): an `atomic shared` object,
 a cell, a channel, a loop and a task record count atomically, every other
 object plainly, and a frozen or immortal count is never written (decision
 37).  Atomic counts on user objects are sound only if every retain or
-release of an `atomic shared const` object happens where the static type says
-`atomic shared const` (proposed; owner may change):
+release of an `atomic shared` object happens where the static type says
+`atomic shared` (proposed; owner may change):
 
-1. Nothing converts an `atomic shared const T` to another qualifier or to a plain
+1. Nothing converts an `atomic shared T` to another qualifier or to a plain
    `Obj`; an upcast keeps it ([Conversion by declared
    type](#conversion-by-declared-type)).
 2. A borrow never counts its root: the lowering never retains, releases or
    holds `self`, a `view` parameter or a `view` local, and Sema rejects
    copying, storing, capturing or `weak` of one, so code compiled once for
-   `view Node` never touches an `atomic shared const` root.  An `inout` parameter
+   `view Node` never touches an `atomic shared` root.  An `inout` parameter
    takes a unique or `shared` object, both counted plainly, so its stores
    count by the right kind (owner, 2026-11-02).
 3. A hold or copy is of a place whose declared type the site knows (a
-   local, a field, an element), so one of an `atomic shared const` place is atomic.
+   local, a field, an element), so one of an `atomic shared` place is atomic.
    Under a borrowed root, a hold or snapshot that reaches into an `atomic shared
    const` object meets frozen objects and writes nothing.
 4. Templates are instantiated per qualifier, and the runtime helpers that
@@ -802,7 +948,8 @@ release of an `atomic shared const` object happens where the static type says
    ([Methods and `self`](#methods-and-self)).
 
 Unique references skip counting where the owner is visible (the owner's
-default), on owned paths only, and reads in a `const` region skip holds
+default), on owned paths only, and reads in a `const` region (an immutable
+root's, in the mut model) skip holds
 ([`const`](#const)):
 
 1. no copies, so no retain at a hand-off, and no prologue retain;
@@ -878,13 +1025,13 @@ async fn main() -> int {
 * `task::spawn` never runs the new task before it returns; the task first
   runs when its thread next runs the loop (an `await` that parks, a `join`).
 * Inputs are owned (decision 6): unique and `const` values moved, Copyable
-  values copied, `shared` and `shared const` references for `spawn` only.
+  values copied, `shared` and `shared` references for `spawn` only.
   Decision 6's "transferred at their last use" is written `move` (decision
   18).  `spawnOn` send-checks its arguments, receiver and `R`: what crosses
   is moved with the frame or, if Copyable, copied, a handle by an atomic
   retain.  A callee with `view` or `inout` parameters cannot be spawned; a
-  spawned method's receiver is kept by the task: `shared`, `shared const` or
-  `atomic shared const` for `spawn`, `atomic shared const` for `spawnOn`.
+  spawned method's receiver is kept by the task: `shared`, `shared` or
+  `atomic shared` for `spawn`, `atomic shared` for `spawnOn`.
 * A spawned function returns `res::Result<T, err::Error>` or `err::Error`
   (decision 8), so a cancelled wait is a value (proposed; owner may change).
 * `task::newLoop() -> res::Result<task::Loop, err::Error>` starts a thread
@@ -1055,8 +1202,9 @@ cancellation point delays exit.
 
 `sync::Channel<T>` is bounded (decision 30) and an always-crossable handle
 class (decision 33), so its `T` must pass the send check (proposed; owner
-may change): a `Channel<const Job>` moves values that never change, a
-`Channel<atomic shared const Config>` copies references.  The ring and the waiters
+may change): a `Channel<const Job>` (the mut model: `Channel<Job>`, bare
+and immutable; `Channel<mut Job>` moves objects that change) moves values that never change, a
+`Channel<atomic shared Config>` copies references.  The ring and the waiters
 are runtime state behind the channel's mutex; on one thread the lock is
 uncontended.
 
@@ -1082,7 +1230,14 @@ inside `lock x as v: inout { }` or `lock x as v: view { }` (decision 33;
 proposed; owner may change); there is no `locked view` (decision 33) and no
 `locked const`, as a value that never changes needs no lock (decision 37).
 Besides `atomic`'s numbers and channels, state that changes across threads
-is `locked` (decision 37).
+is `locked` (decision 37).  (The mut model, owner 2026-11-03: the cell
+written in `lock x as v: inout { }` is `locked mut T`; `locked T` alone is
+accepted with the warning `'locked T' locks an object nothing writes;
+'atomic shared T' is read from every thread with no lock`, and an `inout`
+lock block on it is `'x' is 'locked T', whose contents are never written;
+declare it 'locked mut T' for a 'lock ... as v: inout' block`; `locked
+const` is `'const' is gone: ...`, and `mut locked` is spelled `locked
+mut`.)
 
 ```pkn
 class Counts { hits: int[16]; }
@@ -1095,10 +1250,13 @@ impl Stats {
     self.served += 1;
   }
 }
-let st: atomic shared const Stats = Stats(Counts([0; 16]), 0);
+let st: atomic shared Stats = Stats(Counts([0; 16]), 0);
 st.record(3);              // on any thread that has a handle
 let h = st.counts.hits;    // error: 'st.counts' is 'locked': reach its contents in 'lock st.counts as c: view { }'
 ```
+
+(The mut model, owner 2026-11-03: `counts: locked mut Counts`, as `record`
+writes it.)
 
 The operand (`lockStmt`) is a `locked` variable, field path or parameter,
 borrowed, and held if reached through a borrowed root, until after the
@@ -1136,8 +1294,9 @@ cannot wait for itself` (proposed; owner may change).
 cell of atomic elements (decision 33; proposed; owner may change); the
 prototype's `atomic T` takes every number type, `bool` and `char`, and no
 fixed array yet: `'atomic' holds a number, a 'bool' or a 'char', not
-'Node': an object crosses threads as 'atomic shared const Node' (frozen) or
-'locked Node'` (prototype, 2026-11-03).  A
+'Node': an object crosses threads as 'atomic shared Node' (frozen) or
+'locked Node'` (prototype, 2026-11-03; the mut model: `'locked mut
+Node'`).  A
 read is an atomic load and `=` an atomic store; `+=`, `-=`, and on unsigned
 types `&=`, `|=` and `^=`, are atomic read-modify-writes.  Integers wrap
 like `+` (docs/language/02-basics.md:691); floats add by a compare-and-swap
@@ -1188,14 +1347,17 @@ slot, as the Buffer natives do, so `HashMap<Str, atomic int>.set` replaces a
 counter's cell instead of storing into it; `b = a` of a struct holding an
 `atomic` likewise rebinds `b`'s handles (proposed; owner may change).
 `atomic` on a reference is an error: a reference shared across threads is
-`atomic shared const` (decision 37).
+`atomic shared` (decision 37).  (The mut model, owner 2026-11-03: and
+`atomic mut T` is `an 'atomic' cell takes no 'mut': it changes by its
+operations; an object crosses threads as 'atomic shared T' (frozen) or
+'locked mut T'`.)
 
-### `atomic shared const`
+### `atomic shared`
 
-`atomic shared const T` shares a value read-only across threads (decision 37).
+`atomic shared T` shares a value read-only across threads (decision 37).
 There is no `atomic shared`: across threads, state that changes is `locked`,
 and `atomic` alone stays numbers.  `T` passes the send check and
-holds no `task::Task`; `atomic shared const` of a number, `bool` or `char` is an
+holds no `task::Task`; `atomic shared` of a number, `bool` or `char` is an
 error, as the value can be copied.  Access is `const`
 ([`const`](#const)), so `atomic` and `locked` fields and channels inside
 stay usable, being handles.  The spelling is the owner's, in place of
@@ -1204,45 +1366,63 @@ decision 37's `atomic const`: `atomic` says the reference crosses threads,
 and `const` that nothing writes it, so the two spellings that leave a word
 out are parse errors, `atomic const N` (`'atomic const' is 'atomic shared
 const': an object read from several threads has several owners; write
-'atomic shared const T'`) and `atomic shared N` (`'atomic shared T' would
-be written from several threads with no lock; write 'atomic shared const
+'atomic shared T'`) and `atomic shared N` (`'atomic shared T' would
+be written from several threads with no lock; write 'atomic shared
 T' to freeze it, or 'locked T' to change it under a lock`), `atomic N` of a
 class is Sema's `'atomic' holds a number, a 'bool' or a 'char', not 'N':
-an object crosses threads as 'atomic shared const N' (frozen) or 'locked
-N'`, and `shared const T` stays the single-thread read-only form, which
-still does not convert into `atomic shared const` (owner, 2026-11-03).
+an object crosses threads as 'atomic shared N' (frozen) or 'locked
+N'`, and `shared T` stays the single-thread read-only form, which
+still does not convert into `atomic shared` (owner, 2026-11-03).  (The mut
+model, owner 2026-11-03: `atomic shared T` is the frozen form, two words,
+`atomic` the crossing and `shared` the owners, immutability being the
+bare type's; `atomic const T` and `atomic shared const T` are `'const' is
+gone: a reference is immutable unless written 'mut T' ('shared mut T',
+'locked mut T')`, and `atomic shared mut T` is `'atomic shared mut T'
+would be written from several threads with no lock; write 'atomic shared
+T' to freeze it, or 'locked mut T' to change it under a lock`; `shared T`
+stays the single-thread immutable form and `shared mut T` the written
+one, neither converting into `atomic shared`, which a `T` or a `mut T`
+reaches by `move`.)
 
 ```pkn
 class Config { path: Str; hits: atomic int; }
 impl Config { fn rename(p: Str) { self.path = move p; } }
-let cfg: atomic shared const Config = Config("w.bin", 0);
-cfg.path = "x";     // error: cannot assign 'cfg.path': 'cfg' is 'atomic shared const', which never changes; a field that changes is 'atomic' or 'locked'
-cfg.rename("x");    // error: 'rename' is not a 'view fn'; through 'atomic shared const' reference 'cfg' only 'view fn's can be called
+let cfg: atomic shared Config = Config("w.bin", 0);
+cfg.path = "x";     // error: cannot assign 'cfg.path': 'cfg' is 'atomic shared', which never changes; a field that changes is 'atomic' or 'locked'
+cfg.rename("x");    // error: 'rename' is not a 'view fn'; through 'atomic shared' reference 'cfg' only 'view fn's can be called
 cfg.hits += 1;      // the cell changes, not 'cfg'
 ```
 
+(The mut model, owner 2026-11-03: `'cfg' is frozen (an 'atomic shared
+Config'); cannot assign to its field 'path'` and `'cfg' is frozen (an
+'atomic shared Config'); 'rename' is not a 'view fn'`.)
+
 **The object.**  The reference is the object's own pointer, and its count,
 in the header, is atomic, with no cell between them (decision 37).  A
-struct, tuple or fixed array given `atomic shared const` is boxed automatically:
+struct, tuple or fixed array given `atomic shared` is boxed automatically:
 one object of a header and the value, read through the reference, so a
 large table is shared without a copy (decision 37; the layout, and boxing
 Copyable values too, proposed; owner may change).  Every count of the object is atomic,
 and only where its type says so ([Counting](#counting)).  The prototype
 boxes nothing by itself: a struct, tuple or array takes no qualifier, and
-one is frozen by boxing it, `mem::Box(move v)` into an `atomic shared const
+one is frozen by boxing it, `mem::Box(move v)` into an `atomic shared
 mem::Box<T>` slot.  For that `mem::Box<T>` gained `view fn value() ->
 view T`, the read of a `const` or frozen box; `get()` returns `inout T`,
 which such a box cannot give, so through a `const` form it is `'bx' is
-'atomic shared const'; 'get' is not a 'view fn'` (prototype, 2026-11-03).
+'atomic shared'; 'get' is not a 'view fn'` (prototype, 2026-11-03).  (The
+mut model, owner 2026-11-03: `'bx' is frozen (an 'atomic shared
+Box<int>'); 'get' is not a 'view fn'`, and through a bare box `'bx' is
+immutable (a 'Box<int>'; write 'mut Box<int>' to change it); 'get' is not
+a 'view fn'`: `get()` needs a `mut` box.)
 
 **Freezing.**  The conversion walks the value once ([Runtime](#runtime)):
 every object's strong count must be 1 and its weak count 0; the root's
 stays 1, now atomic, and each object inside becomes `PAYKAN_REF_FROZEN`, a
 sentinel of its own beside the immortal one, so the thaw never touches None
 or Stdin (refining decision 33's "immortal value"; proposed; owner may
-change).  Otherwise the walk panics, `a value made 'atomic shared const' is still
+change).  Otherwise the walk panics, `a value made 'atomic shared' is still
 borrowed`, a backstop to the move-out check.  It stops at handles, other
-`atomic shared const` objects included, and skips immortals; a unique value is a
+`atomic shared` objects included, and skips immortals; a unique value is a
 tree, so each object costs a load and a store.
 
 **Reading.**  A copy of the reference is an atomic retain of the root.  A
@@ -1261,8 +1441,10 @@ acquire-release subtract, after every reader's last read) thaws the
 interior, each count back to 1, and runs the ordinary destroy.
 
 **Taking it back.**  `sync::take(move h)` is compiler-known, as
-`task::spawn` is: on an `atomic shared const T` it returns `res::Result<const T,
-err::Error>`, the value thawed, when `h` is the last reference (decision
+`task::spawn` is: on an `atomic shared T` it returns `res::Result<const T,
+err::Error>` (the mut model, owner 2026-11-03: `res::Result<T,
+err::Error>`, the bare immutable `T`; whether a thawed value may come back
+`mut` is the owner's), the value thawed, when `h` is the last reference (decision
 37), and on a `locked T` a `res::Result<T, err::Error>`, the cell's
 contents; otherwise it releases `h` and returns `Err(Busy)` (proposed; owner
 may change).  One acquire-release subtract decides: the call that brings
@@ -1270,14 +1452,14 @@ the count to zero takes the value, and every other gets `Busy`: of two
 racing takes on the last two references, exactly one gets it.
 
 **Swapping.**  v0.4 has no atomically swappable reference slots (decision
-37).  A value replaced now and then is an `atomic shared const` field of a
+37).  A value replaced now and then is an `atomic shared` field of a
 `locked` holder: a reader copies the reference under a short lock and reads
 it with none; lock-free slots can come later.
 
 ```pkn
 class Config { path: Str; }
-class Current { cfg: atomic shared const Config; }
-fn current(cur: locked Current) -> atomic shared const Config {
+class Current { cfg: atomic shared Config; }
+fn current(cur: locked Current) -> atomic shared Config {
   lock cur as c: view { return c.cfg; }               // one atomic retain under the lock
 }
 fn reload(cur: locked Current, p: Str) {
@@ -1322,9 +1504,9 @@ and handles inside values are this design's, proposed; owner may change):
   optionals, tuples, structs and fixed arrays of them, so an `err::Error`
   too), read only, unless a reduction;
 * a `view` or `inout` array or slice of plain elements;
-* an `atomic`, `atomic shared const` or `locked` local or parameter (an `atomic`
+* an `atomic`, `atomic shared` or `locked` local or parameter (an `atomic`
   array at any index), or a `sync::Channel` local for the try operations:
-  borrowing a handle changes no count, and an `atomic shared const` object's
+  borrowing a handle changes no count, and an `atomic shared` object's
   interior is frozen;
 * a reduction variable.
 
@@ -1332,7 +1514,7 @@ An outer handle is owned by the blocked parent, so the body takes no holds
 on it, and never assigns, moves or lends it `inout`.  An outer `atomic`
 changes only by its atomic operations and is never a reduction (`hits += 1`
 is an atomic add), and an atomic float sum is outside decision 28's
-reproducibility (proposed; owner may change).  A frozen `atomic shared const
+reproducibility (proposed; owner may change).  A frozen `atomic shared
 mem::Box<mem::Buffer<T>>` is such a handle, and reading it through
 `value()` and `at` is the prototype's route to data larger than a fixed
 array ([`Str` and the containers](#str-and-the-containers); prototype,
@@ -1350,16 +1532,18 @@ reduction's cost on 16 threads (benchmarks/README.md); the prototype
 warns and names the alternatives, a reduction on a plain variable or a
 rarer update (prototype, 2026-11-03).
 
-Unique, `const`, `shared` and `shared const` references, weak variables
+Unique, `const`, `shared` and `shared` references (the mut model: `T`,
+`mut T`, `shared T` and `shared mut T`), weak variables
 and function values are errors, since reading one may take a plain count
-from several threads.  That holds for the `const` forms too: a `view`
+from several threads.  That holds for the `const` forms (the immutable
+ones) too: a `view`
 callee or a `view fn`, compiled without knowing its root is `const`, holds
-plainly under it, so a value for a body to read is made `atomic shared const`, a
-walk for a `const T` (proposed; owner may change):
+plainly under it, so a value for a body to read is made `atomic shared`, a
+walk for a `const T` (a bare `T`) (proposed; owner may change):
 
 ```pkn
 parallel for i in 0..n { total += nodes.at(i).w; }
-// error: 'nodes' (a 'List<Node>') cannot be used in a 'parallel' loop body: an iteration uses only values, arrays of values, and 'atomic', 'atomic shared const' and 'locked' handles
+// error: 'nodes' (a 'List<Node>') cannot be used in a 'parallel' loop body: an iteration uses only values, arrays of values, and 'atomic', 'atomic shared' and 'locked' handles
 ```
 
 ### Writes and reductions
@@ -1486,13 +1670,13 @@ The runtime stays strict C11 (src/Runtime/CMakeLists.txt:20-26), and
   lvalues of the same size (proposed; owner may change).
 
 **Atomic counts.**  `Paykan_retain_atomic` and `Paykan_release_atomic`
-count `atomic shared const` objects, cells, channels, loops and task records, and
+count `atomic shared` objects, cells, channels, loops and task records, and
 nothing else.  Each first loads the count and returns at a sentinel, one
-compare as on the plain path, so an immortal None in an `atomic shared const Str?`
+compare as on the plain path, so an immortal None in an `atomic shared Str?`
 is never written; a live root's count never reaches one, as the retain
 panics at `PAYKAN_REF_MAX`, as `count_overflow` does
 (src/Runtime/Shared.c:34).  The release is an acquire-release subtract,
-since TSan does not model a lone fence; at 1 it thaws an `atomic shared const`
+since TSan does not model a lone fence; at 1 it thaws an `atomic shared`
 object's interior, then runs the destroy through the thread's own
 deferred-destroy state, with plain counts, as nothing else refers to the
 object.  Nothing weak refers to a handle, so the weak functions
@@ -1510,7 +1694,7 @@ its operations are runtime calls the LLVM backend may inline, with no new
 PIR op (proposed; owner may change).  The ABI version goes from 300 to 400
 (src/Runtime/Runtime.h:46).  Every publication (`spawnOn`, a channel send,
 an unlock) synchronises by release and acquire, so the plain writes that
-built an `atomic shared const` value happen before any other thread reads it.
+built an `atomic shared` value happen before any other thread reads it.
 
 Against decision 33's cell, the count on the object saves an allocation for
 a class value and a load per read through the reference; a copy is the same
@@ -1577,7 +1761,7 @@ restarts lazily for in-process JIT runs.
 (.github/workflows/ci.yml:158-215), with `PAYKAN_TSAN`
 (cmake/SanitizerSetup.cmake:63-68), runs the suite, C stress tests
 (concurrent chain drops, as #26 asks; handle count contention; frozen reads
-and `atomic shared const` copies against the last release; stdin from two loops) and generated code through
+and `atomic shared` copies against the last release; stdin from two loops) and generated code through
 the C path.  It does not block merges until green (proposed; owner may
 change).
 
@@ -1586,12 +1770,12 @@ change).
 | Piece | Where | Anchors |
 |---|---|---|
 | Grammar, frontend | the productions of Syntax, first in the grammar | docs/grammar.md:185-232, 358-400, 658-680 |
-| Qualified types | a canonical `QualifiedType`, a form and a `const` bit; unique is the bare type, and about 90 `ClassType` casts (`isa`, `dyn_cast`, `cast`, by grep over src/ and include/) and 57 `isRefType` calls see through it | include/ASTContext.h:179-196; include/AST.h:2443-2467; src/Sema/Sema.cpp:233-256 |
+| Qualified types | a canonical `QualifiedType`, a form and a `const` bit (the mut model: a `mut` bit); unique is the bare type, and about 90 `ClassType` casts (`isa`, `dyn_cast`, `cast`, by grep over src/ and include/) and 57 `isRefType` calls see through it | include/ASTContext.h:179-196; include/AST.h:2443-2467; src/Sema/Sema.cpp:233-256 |
 | Copies, conversions | checkAssignable, arguments, returns, literals, captures; `atomic` operands | src/Sema/Sema.cpp:343-366; src/Sema/SemaLambda.cpp:78 |
 | Moves, task handles | new SemaMoves.cpp | src/Sema/SemaClass.cpp:261-410 |
 | Exclusivity | `move` as a write; operand conflicts on owned paths | src/Sema/SemaParamModes.cpp:25-70, 350; SemaBorrows.cpp:302 |
-| Holds | borrowed roots keep BorrowedReads and SnapshotReads, except in a `const` region, whose storage nothing writes; holds through handles; type arms over borrowed subjects bind borrows; `join` Unknown | src/Lowering/LoweringHolds.cpp:62-152, 1750-1752 |
-| `const`, cells, send check | `const` access as `view` access, with its exceptions; `atomic` operators and lending rules, `locked` only in `lock`; `atomic shared const` boxing of value types; handle classes final; the send check in new SemaSend.cpp; the class flag | src/Sema/SemaViews.cpp:43-168 |
+| Holds | borrowed roots keep BorrowedReads and SnapshotReads, except in a `const` region (an immutable root's, in the mut model), whose storage nothing writes; holds through handles; type arms over borrowed subjects bind borrows; `join` Unknown | src/Lowering/LoweringHolds.cpp:62-152, 1750-1752 |
+| `const`, cells, send check | `const` access (the mut model: the access through a reference not written `mut`) as `view` access, with its exceptions; `atomic` operators and lending rules, `locked` only in `lock`; `atomic shared` boxing of value types; handle classes final; the send check in new SemaSend.cpp; the class flag | src/Sema/SemaViews.cpp:43-168 |
 | Generics | Copyable, conditional impls, archetypes, joined qualifiers | src/Sema/SemaTraits.cpp:68-100, 306-320; include/Sema.h:2004-2013 |
 | Summaries | par-safe, Waits, Joins, MovesOut: a call-graph fixpoint in Sema | src/Lowering/LoweringInternal.h:537-620 |
 | `parallel` verifier | new SemaPar.cpp | src/Sema/Sema.cpp:4423 |
@@ -1625,7 +1809,8 @@ writing (proposed; owner may change).  It uses the compiler as its oracle,
 as LET-1 did (scripts/let_check.py:1-40):
 
 1. Parse with the new grammar, renaming identifiers spelled like the new
-   keywords, `parallel` (decision 34) and `const` (decision 36) included,
+   keywords, `parallel` (decision 34) and `const` (decision 36; the mut
+   model, owner 2026-11-03: `mut` in its place) included,
    such as `shared` in samples/codegen/32_c_identifiers.pkn:47-56; no `.pkn`
    file in the repository spells `const` (by grep).
 2. Run Sema in a legacy mode where every unqualified reference is `shared`:
@@ -1642,8 +1827,10 @@ as LET-1 did (scripts/let_check.py:1-40):
 
 It prefers `shared` to inserted copies, so behaviour, in-place `concat`
 included, is unchanged.  v0.3 programs are single-threaded, so it never
-writes `atomic`, `atomic shared const` or `locked`, and it writes no `const`, a
-promise only the programmer can make (proposed; owner may change); the
+writes `atomic`, `atomic shared` or `locked`, and it writes no `const`, a
+promise only the programmer can make (proposed; owner may change; the mut
+model, owner 2026-11-03: it writes `mut` where the compiler reports a
+write through an immutable reference, and nowhere else); the
 drafts' spellings were never in a release, so nothing migrates from them.  The repository migrates
 the same way, bottom-up, with the diff reviewed: 449 `.pkn` files (154
 `self.f = x;` sites in 97 files), 329 docs blocks and about 1,690 programs
@@ -1673,14 +1860,14 @@ parameters; lambdas capture `self` only in a `shared fn`
 (docs/design/function-types.md:89-94); `Str(s)` always copies
 (docs/language/03-functions.md:283-284); the `let` rule
 (docs/language/02-basics.md:149-154) points to `const` for an object that
-never changes; and the thread-safety section
+never changes (the mut model: to `mut` for an object that changes); and the thread-safety section
 (docs/language/16-memory.md:716-722) is rewritten.
 
 ## Staging
 
 **v0.4** (decisions 14, 27 and 33-37): the runtime, pool, TSan and
 `parallel for`; async/await with timers, files, channels and joins; the
-qualifiers, `const` among them, with cells and `atomic shared const` objects for
+qualifiers, `const` among them (`mut`, in the mut model), with cells and `atomic shared` objects for
 decision 14 (c)'s sync types and shared objects; the send check and
 `paykan migrate`.
 
@@ -1689,26 +1876,26 @@ quarter chunk, M a half, L one, XL two to three.
 
 | Area | Pieces | Chunks |
 |---|---|---|
-| Ownership | syntax M; qualified types L; copies and `move` L; use after move M; owned paths and the move-out check M; exclusivity M; conversion M; `const` M; `const` reads M; weak S; generics L; lowering L; count savings M; PIR M; backends M; interchange and frontends M; `.pkm` M; stdlib L; docs L; tests L | 13-14 |
+| Ownership | syntax M; qualified types L; copies and `move` L; use after move M; owned paths and the move-out check M; exclusivity M; conversion M; `const` M (`mut`, in the mut model); `const` reads M; weak S; generics L; lowering L; count savings M; PIR M; backends M; interchange and frontends M; `.pkm` M; stdlib L; docs L; tests L | 13-14 |
 | Migration | the tool XL; the repository XL | 4-6 |
 | Runtime and `parallel` | thread safety M; pool M; stress tests M; TSan S; TSan for LLVM and JIT M; the `parallel` keyword S; interface bits S; summaries L; verifier L; lowering L; docs M | 6-7 |
 | Async | syntax M; typing L; spawn M; task handles M; lowering L; holds M; split L; runtime L; timers M; files M; `::task` S; tests and docs L | 8-9 |
-| Cells and channels | cells and handle counts M; `locked` and `lock` blocks L; `atomic` M; `atomic shared const`: the freeze M, object counts and the type-descriptor bit S, boxing value types S; `Channel` L | 4-5 |
+| Cells and channels | cells and handle counts M; `locked` and `lock` blocks L; `atomic` M; `atomic shared`: the freeze M, object counts and the type-descriptor bit S, boxing value types S; `Channel` L | 4-5 |
 | **Total** | | **35-41, about 37** |
 
 Decisions 33-35 took the first draft's 36 chunks to about 35: its
 cross-thread qualifier (M), user-object atomic counts (L) and attributes
 (M) went; the `parallel` keyword (S), the cells (M) and the freeze (M)
-came.  Decisions 36 and 37 add about 1.5: `const` (M), mostly Sema on
+came.  Decisions 36 and 37 add about 1.5: `const` (M; `mut` now), mostly Sema on
 `view`'s checks, and its hold-free reads (M), one lowering change; and for
-`atomic shared const`, the object counts (S) and the boxing of value types (S), on
+`atomic shared`, the object counts (S) and the boxing of value types (S), on
 the handle counts, type-descriptor bit and freeze already planned.  About
 37 is still about twice decision 14's 13-17, which predates decisions
 17-26: ownership adds about 18.
 
 Order (proposed; owner may change): (1) runtime thread safety, and the
 qualifier front end with the legacy mode as the default, so existing tests
-keep passing; (2) the send check, generics, `const` and the cells; (3)
+keep passing; (2) the send check, generics, `const` (`mut`, in the mut model) and the cells; (3)
 migration, flipping the default in one chunk; (4) `parallel for`; (5)
 async, then channels.
 
@@ -1749,7 +1936,7 @@ storage (decision 13), accelerators with their own reduction answer
 | 16 | `Shared<T>` | superseded by 17, then 33 |
 | 17 | Qualifiers (`thread_shared` revised by 33) | The qualifiers |
 | 18 | `move` | Copies and `move`; Use after move; Migration |
-| 19 | Frozen fields (revised by 33, then 37) | `atomic shared const` |
+| 19 | Frozen fields (revised by 33, then 37) | `atomic shared` |
 | 20 | Send check | The send check; What each qualifier may hold |
 | 21 | Types covered | `Str` and the containers; Lambdas; Migration |
 | 22 | Parameters | Parameters, borrows and exclusivity |
@@ -1763,11 +1950,11 @@ storage (decision 13), accelerators with their own reduction answer
 | 30 | Bounded channels | Channels |
 | 31 | Exit | Program exit |
 | 32 | Lambda captures | Lambdas |
-| 33 | `atomic`, `atomic view`, `locked` qualifiers (`atomic view` and its cell revised by 37) | The qualifiers; What each qualifier may hold; The send check; Weak references; Counting; Communicating; `atomic shared const`; What a body may use |
+| 33 | `atomic`, `atomic view`, `locked` qualifiers (`atomic view` and its cell revised by 37) | The qualifiers; What each qualifier may hold; The send check; Weak references; Counting; Communicating; `atomic shared`; What a body may use |
 | 34 | The `parallel` keyword | Data parallelism: `parallel for` |
 | 35 | Attributes (#171) in v0.5 | Attributes; Staging |
-| 36 | `const` and `shared const`, apart from `let` and `view` | The qualifiers; Syntax; `const`; Conversion by declared type; Parameters, borrows and exclusivity; Generics and `Copyable`; Methods and `self` |
-| 37 | `atomic shared const` in place of `atomic view`, counted on the object; no `atomic shared` | The qualifiers; `atomic shared const`; Values that hold unique references; Counting; Runtime |
+| 36 | `const` and `shared`, apart from `let` and `view` (the mut model, owner 2026-11-03: `const` is gone, `mut` in its place) | The qualifiers; Syntax; `const`; Conversion by declared type; Parameters, borrows and exclusivity; Generics and `Copyable`; Methods and `self` |
+| 37 | `atomic shared` in place of `atomic view`, counted on the object; no `atomic shared` | The qualifiers; `atomic shared`; Values that hold unique references; Counting; Runtime |
 
 ## Open questions
 
@@ -1779,14 +1966,16 @@ themselves.
 **The owner's defaults, kept.**
 
 1. **What may a `parallel` body use?**  Values (handles inside included),
-   borrowed arrays and slices, and `atomic`, `atomic shared const`, `locked` and
+   borrowed arrays and slices, and `atomic`, `atomic shared`, `locked` and
    channel locals and parameters, which count nothing (decision 33's
-   locals; the rest proposed); no `const` or `shared const` value
+   locals; the rest proposed); no `const` or `shared` value (the mut
+   model: no `T`, `mut T`, `shared T` or `shared mut T`)
    (question 105).
-2. **What may `locked` and `atomic shared const` hold?**  Answered by decisions 33
+2. **What may `locked` and `atomic shared` hold?**  Answered by decisions 33
    and 37's proposals: any `T` that passes the send check; no `const` form
-   holds a `task::Task` (question 100).
-3. **Is `self` borrowed?**  Yes; through the `const` forms only `view fn`s
+   (no immutable one, in the mut model) holds a `task::Task` (question 100).
+3. **Is `self` borrowed?**  Yes; through the `const` forms (the immutable
+   ones, in the mut model) only `view fn`s
    (decisions 36, 37).  `shared fn` (23) departs from this default.
 4. **Which atomic types are there?**  **Answered by decision 37.**  Numbers,
    `bool`, `char` and their fixed arrays, sequentially consistent (33's
@@ -1799,7 +1988,8 @@ themselves.
 **Ownership.**
 
 8. **May a declaration name only the qualifier?**  **Answered by decision
-   36.**  Yes: `let x: const = e;`, and `x: shared = e;` likewise.
+   36.**  Yes: `let x: const = e;`, and `x: shared = e;` likewise (the mut
+   model, owner 2026-11-03: `n: mut = Node(1)`; `const` is gone).
 9. **Is `move` before a temporary accepted?**  Yes, as decision 23 writes
     it; the alternative is an error.
 10. **May `move` end a Copyable value?**  Yes, so generic code can write
@@ -1809,7 +1999,8 @@ themselves.
     binding, to empty a `Result`.
 13. **Which qualifiers do borrows take?**  **Answered by decision 36.**
     `view` every form, `const` ones included, `inout` a unique or `shared`
-    one; a borrow is written with no qualifier at all (owner, 2026-11-02).
+    one (the mut model: a `mut` or `shared mut` one); a borrow is written
+    with no qualifier at all (owner, 2026-11-02).
 14. **May a plain binding copy a unique place?**  No; a temporary subject is
     owned by its binding.
 15. **What qualifier does a downcast binding have?**  Its subject's; writing
@@ -1822,7 +2013,8 @@ themselves.
     has no single point for stores inside a `lock` block.  It walks every
     type (question 90).
 19. **How do qualified `T`s substitute?**  A qualifier on `T` joins `T`'s
-    own: `const T` with `shared Node` is `shared const Node`, and on a plain
+    own: `const T` with `shared Node` is `shared Node` (the mut model:
+    `mut T` is the qualifier that joins, its rule the owner's), and on a plain
     value is the value; a join that is no qualifier is an error; `atomic T`
     and `locked T` take none.  The alternative forbids qualified arguments
     to qualified parameters.
@@ -1840,7 +2032,7 @@ themselves.
 25. **What does `Str(s)` of a `Str` do?**  Copies; the alternative keeps the
     identity with the argument's qualifier.
 26. **What is `err::Error.msg`?**  **Answered by decision 37.**  `atomic shared
-    const Str?`, so errors cross.
+    const Str?` (the mut model: `atomic shared Str?`), so errors cross.
 27. **How does a native return an alias?**  A `shared` or borrowed result,
     only the latter aliasing a `view` argument, or a runtime object that
     locks itself, as Stdin.
@@ -1933,7 +2125,7 @@ themselves.
 **Runtime.**
 
 70. **How are counts atomic in C?**  Runtime functions behind a target
-    assumption, for handles (`atomic shared const` objects included) and task
+    assumption, for handles (`atomic shared` objects included) and task
     records only; the alternative,
     `_Atomic int32_t` in the header, is to measure.  The sentinels are
     `INT32_MAX` (immortal) and one below (frozen), refining decision 33's one
@@ -1951,25 +2143,25 @@ themselves.
     `--diff` are proposed.
 77. **Is the legacy mode the default until the flip?**  Yes.
 78. **In what order?**  Runtime and front end; the send check, generics,
-    `const` and cells; migration; `parallel for`; async; channels.
+    `const` (`mut`, in the mut model) and cells; migration; `parallel for`; async; channels.
 79. **Is v0.4 about 37 chunks?**  Yes, decisions 36 and 37 adding about
-    1.5.  TSan for LLVM and the JIT, the count savings and the `const` reads
+    1.5.  TSan for LLVM and the JIT, the count savings and the `const` reads (an immutable root's)
     (about 1.5 chunks) can move to v0.5 without reversing a decision;
     moving async files would reverse decision 27.
 
 **Added by decisions 33-35.**
 
 80. **Do `atomic` and `locked` cover the whole type?**  Yes; `atomic
-    int[1024]` is one cell, read by element.  `atomic shared const` does too, but
-    leaves a trailing `?` outside, so `atomic shared const Str?` is an optional
+    int[1024]` is one cell, read by element.  `atomic shared` does too, but
+    leaves a trailing `?` outside, so `atomic shared Str?` is an optional
     reference.  A type takes one qualifier; a class holding a handle can be
     `locked`.
 81. **May `atomic` hold a reference?**  **Answered by decision 37.**  No: a
-    value replaced now and then is an `atomic shared const` field of a `locked`
+    value replaced now and then is an `atomic shared` field of a `locked`
     holder; lock-free reference slots can come later.
 82. **What does an `atomic` operand mean?**  The handle where one is bound,
     else a load; a later `=` stores, so an `atomic` variable is never
-    rebound, while `locked` and `atomic shared const` ones are.
+    rebound, while `locked` and `atomic shared` ones are.
 83. **What if `sync::take` gets a handle that is not the last?**  It
     releases it and returns `Err(Busy)`; one acquire-release subtract
     decides.  The alternative hands the handle back in the error, for a
@@ -1981,17 +2173,18 @@ themselves.
 85. **What does an error message cost?**  Its string, counted atomically,
     with nothing inside to freeze and no cell; `err::none()` makes none.
 86. **Which function values cross threads?**  None in v0.4; an `atomic shared
-    const` lambda written in place could come later.
+    const` lambda (`atomic shared`, in the mut model) written in place could come later.
 87. **Will `parallel` apply to other statements?**  Not in v0.4; perhaps
     with the dataflow layer.
-88. **Does `atomic shared const` take a value type?**  **Answered by decision
+88. **Does `atomic shared` take a value type?**  **Answered by decision
     37.**  A struct, tuple or fixed array, boxed automatically; Copyable
     ones too, so a large table is shared without a copy (proposed); a
     number, `bool` or `char` is an error.  The prototype boxes nothing by
     itself: a value takes no qualifier, and one is frozen through
     `mem::Box<T>` (prototype, 2026-11-03).
 89. **How do holds keep frozen objects alive?**  By holding the handle their
-    path passes through, unless an owned local, a `const` region or a
+    path passes through, unless an owned local, a `const` region (an
+    immutable root's) or a
     `parallel` body's parent holds it.
 
 **Added in review.**
@@ -2026,42 +2219,49 @@ themselves.
     `--track-heap` reports live cells at exit.
 99. **How is a task record counted?**  Atomically, by its task handle and
      its frame; no code holds two stripes at once.
-100. **May an `atomic shared const` hold a `task::Task`?**  No, nor may any
-     `const` value: it could never be decided; `locked` may hold one.
+100. **May an `atomic shared` hold a `task::Task`?**  No, nor may any
+     `const` value (any immutable one, in the mut model): it could never be decided; `locked` may hold one.
 
 **Added by decisions 36 and 37.**
 
-101. **May an `atomic shared const` become an `Obj`?**  Only an `atomic shared const
+101. **May an `atomic shared` become an `Obj`?**  Only an `atomic shared
      Obj`: an upcast keeps the qualifier, as a plain `Obj` would be counted
      plainly.  The alternative refuses the upcast.
-102. **May a weak reference refer to a `shared const`?**  Yes: it is a
+102. **May a weak reference refer to a `shared`?**  Yes: it is a
      `shared` object on one thread, and a cycle can pass through its
-     `shared` references; a load gives `shared const T?`.  Decision 37
+     `shared` references; a load gives `shared T?`.  Decision 37
      names only `shared`.
 103. **Are `shared` references inside a `const T` usable?**  Yes, as in a
-     `shared const T`, which decision 36 names: the reference is fixed, its
-     object may change.  The alternative makes them read-only.
-104. **Where do reads skip holds?**  Only inside a `const` region: fields of
+     `shared T`, which decision 36 names: the reference is fixed, its
+     object may change.  The alternative makes them read-only.  (The mut
+     model, owner 2026-11-03: a `shared mut` field is the object's own
+     form and keeps its writes under any root, a bare `T` included; a
+     `shared` field is immutable by its declaration.)
+104. **Where do reads skip holds?**  Only inside a `const` region (an immutable root's, in the mut model): fields of
      the `const` objects, of what they own and of the `const` objects their
      references name; not past a `shared` or weak reference or into a cell.
      A `view T` callee keeps its holds.
-105. **May a `parallel` body read a `const` or `shared const` value?**  No:
-     a `view` callee holds plainly under it; it is made `atomic shared const`.  The
+105. **May a `parallel` body read a `const` or `shared` value?**  No (nor a `T` or a `shared T` of the mut model):
+     a `view` callee holds plainly under it; it is made `atomic shared`.  The
      alternative allows field reads with no calls.
 106. **What is `const` on a struct?**  **Answered by the prototype,
      2026-11-03.**  An error: a struct, tuple or array takes no qualifier
-     at all, and one is shared or frozen through `mem::Box<T>`, an object.
+     at all, and one is shared or frozen through `mem::Box<T>`, an object
+     (the mut model, owner 2026-11-03: `mut` on one is `'mut' applies to
+     objects; 'Pair' is a value: its storage is rewritten by assignment,
+     which 'let' fixes`).
      This design's answer was that its references become `const` and the
      value read only, a non-`let` variable still assigned whole, with the
      alternative leaving its value fields assignable.
-107. **Can a `shared view fn` be called through `shared const`?**  No: its
+107. **Can a `shared view fn` be called through `shared`?**  No: its
      `self` could be stored as a `shared` reference and written through.
-     The alternative is a `shared const fn` receiver.
+     The alternative is a `shared fn` receiver.
 108. **Is the count on the object slower than a cell?**  Not for reads,
      which save a load; frequent cross-thread copies share a cache line
      with the object's first fields, measured with the benchmarks.
-109. **Can a function value be `const`?**  No, and one reached through a
-     `const` root is not called: a call may change what its captures own.
+109. **Can a function value be `const`?**  No (nor `mut`, in the
+     prototype's mut model, where it counts as a value), and one reached through a
+     `const` root (an immutable one) is not called: a call may change what its captures own.
      Callbacks there are `shared`.
 
 ## Diagnostics
@@ -2086,39 +2286,39 @@ Errors unless marked.  `12:9` stands for a source position.
 | `move` of a weak | `cannot move 'w': a 'weak' variable holds no strong reference` |
 | move while borrowed | `'l' is borrowed by 'view' local 'x' until 'x' is last used; it cannot be moved` |
 | qualified value | `'shared' qualifies a reference; 'int' is a value` |
-| qualified struct, tuple or array (prototype, 2026-11-03) | `'const' applies to objects; 'Pair' is a value: box it ('mem::Box<Pair>') to share what it holds` (also `'shared' qualifies a reference; 'Node[3]' is a value: box it ('mem::Box<Node[3]>') to share what it holds`, and `'atomic shared const'`) |
-| two qualifiers | `a type takes one qualifier: 'locked atomic shared const Config'`; `write 'shared const', not 'const shared'` |
+| qualified struct, tuple or array (prototype, 2026-11-03) | `'const' applies to objects; 'Pair' is a value: box it ('mem::Box<Pair>') to share what it holds` (also `'shared' qualifies a reference; 'Node[3]' is a value: box it ('mem::Box<Node[3]>') to share what it holds`, and `'atomic shared'`) (the mut model, owner 2026-11-03: `'mut' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
+| two qualifiers | `a type takes one qualifier: 'locked atomic shared Config'`; `write 'shared', not 'const shared'` (the mut model: `a type takes one qualifier: 'shared mut shared' is two`; `'mut shared' is spelled 'shared mut': the form first, then the writes`) |
 | `locked view` | `there is no 'locked view': read 'x' in 'lock x as v: view { }'` |
-| `locked const` | `there is no 'locked const': a value that never changes needs no lock; share it as 'atomic shared const'` |
-| `atomic shared` | `there is no 'atomic shared': across threads, share a value read only as 'atomic shared const', or one that changes as 'locked'` (the parser, owner, 2026-11-03: `'atomic shared T' would be written from several threads with no lock; write 'atomic shared const T' to freeze it, or 'locked T' to change it under a lock`) |
-| `atomic const` (owner, 2026-11-03) | `'atomic const' is 'atomic shared const': an object read from several threads has several owners; write 'atomic shared const T'` |
-| `const` on a value | `'const' applies to objects; 'int' is a value, which 'let' fixes` (also `'Point' holds no reference`) |
-| `const` declaration | `'const' is a qualifier: write 'let x: const = e;'` |
-| `const` function type | `'const' takes no function type: a call may change what its captures own` |
+| `locked const` | `there is no 'locked const': a value that never changes needs no lock; share it as 'atomic shared'` (the mut model, owner 2026-11-03: `'const' is gone: a reference is immutable unless written 'mut T' ('shared mut T', 'locked mut T')`; `locked T` alone is the warning `'locked T' locks an object nothing writes; 'atomic shared T' is read from every thread with no lock`, and `lock x as v: inout` on it `'x' is 'locked T', whose contents are never written; declare it 'locked mut T' for a 'lock ... as v: inout' block`) |
+| `atomic shared` | `there is no 'atomic shared': across threads, share a value read only as 'atomic shared', or one that changes as 'locked'` (the parser, owner, 2026-11-03: `'atomic shared T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked T' to change it under a lock`) (the mut model, owner 2026-11-03: `atomic shared T` is the frozen form; `atomic shared mut T` is `'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock`, and `atomic mut T` `an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'`) |
+| `atomic const` (owner, 2026-11-03) | `'atomic const' is 'atomic shared': an object read from several threads has several owners; write 'atomic shared T'` (the mut model: `'const' is gone: a reference is immutable unless written 'mut T' ('shared mut T', 'locked mut T')`) |
+| `const` on a value | `'const' applies to objects; 'int' is a value, which 'let' fixes` (also `'Point' holds no reference`) (the mut model: `'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
+| `const` declaration | `'const' is a qualifier: write 'let x: const = e;'` (the mut model: `const` anywhere is `'const' is gone: ...`, and `n: mut = e;` declares a mutable one) |
+| `const` function type | `'const' takes no function type: a call may change what its captures own` (the mut model, the prototype: `'mut' applies to objects; '() -> int' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
 | qualified handle class | `'sync::Channel' is a handle: it takes no qualifier` (also `'task::Loop'`) |
 | handle class to `Obj` | `'sync::Channel<int>' is a handle: it cannot become an 'Obj'` (also `'task::Loop'`) |
-| conversions | `no conversion from 'shared Node' to 'Node'`; `no conversion from 'shared Node' to 'atomic shared const Node': a shared object stays on its thread`; `no conversion from 'shared Node' to 'shared const Node': other references may still change it`; `no conversion from 'const Node' to 'Node': a 'const' object never changes; make a new one`; `no conversion from 'atomic shared const Config' to 'Config'`; `no conversion from 'atomic shared const Config' to 'Obj': write 'atomic shared const Obj'` |
-| borrow qualifier | `parameter 'n' is 'inout const': a borrow carries no qualifier; ... write 'inout T'` |
+| conversions | `no conversion from 'shared Node' to 'Node'`; `no conversion from 'shared Node' to 'atomic shared Node': a shared object stays on its thread`; `no conversion from 'shared Node' to 'shared Node': other references may still change it`; `no conversion from 'const Node' to 'Node': a 'const' object never changes; make a new one`; `no conversion from 'atomic shared Config' to 'Config'`; `no conversion from 'atomic shared Config' to 'Obj': write 'atomic shared Obj'` (the mut model, owner 2026-11-03: `cannot store a 'T' in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`; `cannot store a 'shared mut T' in variable 'v', a 'shared T': a 'shared' reference, a frozen object and a cell convert only as they are`, also from a `shared T` into a `T` or an `atomic shared T`, and from an `atomic shared T` into a `T`) |
+| borrow qualifier | `parameter 'n' is 'inout const': a borrow carries no qualifier; ... write 'inout T'` (the mut model: `'inout mut'` the same) |
 | read, later `inout` | `'s' is read by the left operand of '+'; a later operand cannot pass it to 'inout' parameter 'x' of 'shout'` |
 | read, later `move` | `'j' is read by the left operand of '+'; a later operand cannot move it` |
 | binding a unique place | `cannot bind 'n' by copy: 'x' is a unique 'Node'; bind 'n: view Node' or 'n: inout Node', or match 'move x'` |
-| binding qualifier | `'p' binds part of a 'shared Obj': its type is 'shared Node', not 'atomic shared const Node'` |
-| shared contents | `cannot make 'Settings' 'atomic shared const': field 'cache' is shared` (also `'locked'`; paths dotted); `'Obj' cannot be 'atomic shared const': it may be any class`; `a 'const' value cannot hold 'task::Task<err::Error>' (field 'worker'): it could never be decided; use 'locked'` |
-| cell type | `'atomic' holds a number, 'bool', 'char' or a fixed array of them; 'Node' is a reference: use 'locked Node' or 'atomic shared const Node'`; `'atomic shared const' shares an object; 'int' is a value: copy it` (the prototype: `'atomic' holds a number, a 'bool' or a 'char', not 'Node': an object crosses threads as 'atomic shared const Node' (frozen) or 'locked Node'`, 2026-11-03) |
+| binding qualifier | `'p' binds part of a 'shared Obj': its type is 'shared Node', not 'atomic shared Node'` |
+| shared contents | `cannot make 'Settings' 'atomic shared': field 'cache' is shared` (also `'locked'`; paths dotted); `'Obj' cannot be 'atomic shared': it may be any class`; `a 'const' value cannot hold 'task::Task<err::Error>' (field 'worker'): it could never be decided; use 'locked'` (the mut model: an immutable value; the prototype's `cannot make 'Node(...)' (a 'Node') 'atomic shared': field 'next' is 'shared mut Node': a 'shared' reference is aliased on its own thread`, also `'locked mut'`) |
+| cell type | `'atomic' holds a number, 'bool', 'char' or a fixed array of them; 'Node' is a reference: use 'locked Node' or 'atomic shared Node'`; `'atomic shared' shares an object; 'int' is a value: copy it` (the prototype: `'atomic' holds a number, a 'bool' or a 'char', not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked Node'`, 2026-11-03; the mut model: `'locked mut Node'`) |
 | atomic operations | `'hits' is 'atomic': 'hits = hits + 1' reads and writes it separately; write 'hits += 1'` (otherwise `use 'compareExchange' in a loop`); `'*=' is not an atomic operation on 'hits': use '+=', '-=', 'exchange' or 'compareExchange'`; `'seen' is an 'atomic bool[64]': it is read by element`; bitwise operators on an `atomic int` get today's `the bitwise operators take unsigned operands` |
 | lending an atomic | `'seen[3]' is an element of an 'atomic bool[64]': it has no handle and cannot be lent`; `'hits' is 'atomic': its value cannot be lent 'inout' or bound by address` |
-| through a `const` form | `cannot assign 'cfg.path': 'cfg' is 'atomic shared const', which never changes; a field that changes is 'atomic' or 'locked'` (also `'const'`, `'shared const'`); `cannot pass 'cfg.path' to 'inout' parameter 'p': 'cfg' is 'atomic shared const', which never changes`; `cannot move 'c.name' out: 'c' is 'const', which never changes`; `'rename' is not a 'view fn'; through 'atomic shared const' reference 'cfg' only 'view fn's can be called`; `'keep' is a 'shared view fn', whose 'self' could be stored and changed; through 'shared const' reference 's' only 'view fn's can be called`; `cannot call 'w.onClick': it is reached through 'const' 'w', and a call may change what its captures own; hold it 'shared'` |
+| through a `const` form | `cannot assign 'cfg.path': 'cfg' is 'atomic shared', which never changes; a field that changes is 'atomic' or 'locked'` (also `'const'`, `'shared'`); `cannot pass 'cfg.path' to 'inout' parameter 'p': 'cfg' is 'atomic shared', which never changes`; `cannot move 'c.name' out: 'c' is 'const', which never changes`; `'rename' is not a 'view fn'; through 'atomic shared' reference 'cfg' only 'view fn's can be called`; `'keep' is a 'shared view fn', whose 'self' could be stored and changed; through 'shared' reference 's' only 'view fn's can be called`; `cannot call 'w.onClick': it is reached through 'const' 'w', and a call may change what its captures own; hold it 'shared'` (the mut model, owner 2026-11-03: `'x' is immutable (a 'T'; write 'mut T' to change it); cannot assign to its field 'f'`, also `; 'm' is not a 'view fn'`, `; it cannot be passed to 'inout' parameter 'p'` and `; cannot assign to its elements`; `field 'f' is immutable (a 'shared T'; write 'shared mut T' to change it); cannot assign to its field 'g'`; `'x' is frozen (an 'atomic shared T'); cannot assign to its field 'f'`, also `; 'm' is not a 'view fn'`; a `let` variable keeps `'x' is declared with 'let' and cannot be passed to 'inout' parameter 'p'`) |
 | `locked` outside a lock block | `'st.counts' is 'locked': reach its contents in 'lock st.counts as c: view { }'` |
 | channel element | `'sync::Channel<shared Node>': a channel's values cross threads, and 'shared Node' cannot` |
 | send check | `cannot send 'Job': field 'cache' is shared` (`field 'a.b.cache'`; `field 'cache' of 'Job'`) |
 | sending a function value | `cannot send '() -> int': a function value's captures are not part of its type` |
 | sending `Obj` | `cannot send 'Obj': it may be any class` |
 | subclass flag | `class 'Button' cannot hold 'shared' field 'onClick': it extends 'Widget', which can be sent to another thread` |
-| weak to unique | `a weak reference refers to a 'shared' or 'shared const' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)` |
+| weak to unique | `a weak reference refers to a 'shared' or 'shared' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)` |
 | copy of `T` | `'T' is not 'Copyable': declare 'T: Copyable' to copy it` |
 | conditional method | `'get' needs 'T: Copyable', and 'Node' in 'List<Node>' is not Copyable` |
 | `impl Copyable` | `'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented` |
-| qualified `T` | `'shared T' with 'T' = 'int': 'shared' qualifies a reference; 'int' is a value`; `'locked T' with 'T' = 'atomic int': a type takes one qualifier`; `'const T' with 'T' = 'locked Job': there is no 'locked const'`; `'locked T' with 'T' = 'Job': field 'cache' is shared` |
+| qualified `T` | `'shared T' with 'T' = 'int': 'shared' qualifies a reference; 'int' is a value`; `'locked T' with 'T' = 'atomic int': a type takes one qualifier`; `'const T' with 'T' = 'locked Job': there is no 'locked const'` (the mut model: `const T` is `'const' is gone: ...`, and a `mut T` join is the owner's); `'locked T' with 'T' = 'Job': field 'cache' is shared` |
 | storing `self` | `cannot copy 'self': a method borrows its receiver; declare the method 'shared fn' to keep a reference to it` |
 | capturing `self` | `cannot capture 'self': a method borrows its receiver; declare the method 'shared fn' to keep a reference to it` |
 | `shared fn` call | `'add' is a 'shared fn': call it through a 'shared' reference ('root' is a unique 'Node')` |
@@ -2140,8 +2340,8 @@ Errors unless marked.  `12:9` stands for a source position.
 | spawned result | `a spawned function returns 'res::Result<T, err::Error>' or 'err::Error'; 'f' returns 'int'` |
 | async result that cannot cross (prototype, 2026-11-03) | `the result of 'async fn' 'give' (a 'shared Job') cannot cross to the task's awaiter: is 'shared Job': a 'shared' reference is aliased on its own thread` (also `field 'cache' is 'shared Cache': ...`; `is an 'Obj', which may be any class`) |
 | spawning a borrower | `cannot spawn 'f': parameter 'xs' is 'view'; a task owns its inputs (a 'parallel' loop may borrow)` |
-| spawned receiver | `cannot spawn 'w.run': the receiver of a spawned method is 'shared', 'shared const' or 'atomic shared const'` |
-| `spawnOn` receiver | `'task::spawnOn' runs 'w.run' on another thread: its receiver must be 'atomic shared const', and 'w' is a 'shared Worker'` |
+| spawned receiver | `cannot spawn 'w.run': the receiver of a spawned method is 'shared', 'shared' or 'atomic shared'` |
+| `spawnOn` receiver | `'task::spawnOn' runs 'w.run' on another thread: its receiver must be 'atomic shared', and 'w' is a 'shared Worker'` |
 | `inout` across a wait | `'self.n' is reached through 'self'; it cannot be borrowed 'inout' across an 'await': another task may change it there` (`through 'shared' reference 's'`, `through 'view' parameter 'h'`; `across a call that may 'join'`) |
 | `view` across a wait | `'s.meta' is reached through 'shared' reference 's' and is not Copyable; it cannot be lent to an awaited call: another task may change it there` |
 | warning: detached in ordinary `main` | `'t' is detached in an ordinary 'main': it runs only while 'main' waits in 'join()', and is cancelled when 'main' returns` |
@@ -2153,7 +2353,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | waiting call in a lock block | `'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it` (also `it blocks on input`) |
 | unresolvable call in a lock block | `'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve` |
 | `parallel` misplaced | `'parallel' applies only to 'for' statements` |
-| outer reference in `parallel` | `'nodes' (a 'List<Node>') cannot be used in a 'parallel' loop body: an iteration uses only values, arrays of values, and 'atomic', 'atomic shared const' and 'locked' handles` (for a `const` form, `; make it 'atomic shared const'`) |
+| outer reference in `parallel` | `'nodes' (a 'List<Node>') cannot be used in a 'parallel' loop body: an iteration uses only values, arrays of values, and 'atomic', 'atomic shared' and 'locked' handles` (for a `const` form, an immutable one in the mut model, `; make it 'atomic shared'`) |
 | outer handle in `parallel` | `'cfg' is a handle owned outside this 'parallel' loop: the body cannot assign, move or lend it 'inout'` |
 | warning: atomic changed every iteration (prototype, 2026-11-03) | `'hits' changes on every iteration of the 'parallel for': each atomic operation moves its cache line between cores, a thousand times a reduction's cost on 16 threads (benchmarks/README.md); count in a reduction (a plain variable of the enclosing function, '+='), or change it less often` |
 | write elsewhere | `'ys[i + 1]' is written at an index other than the loop's 'i': each iteration writes only its own elements` |
@@ -2164,9 +2364,17 @@ Errors unless marked.  `12:9` stands for a source position.
 | `break`, `return` | `'break' cannot leave a 'parallel' loop: every iteration runs` (also `'return'`) |
 | unsafe call | `'log' cannot be called in a 'parallel' loop body: it prints (through 'g')` |
 | unresolved virtual call | `'shape.area' may run an override from another module; a 'parallel' loop body calls only methods it can resolve` |
+| immutable reference (the mut model, owner 2026-11-03) | `'x' is immutable (a 'T'; write 'mut T' to change it); cannot assign to its field 'f'` (also `; 'm' is not a 'view fn'`, `; it cannot be passed to 'inout' parameter 'p'`, `; cannot assign to its elements`); `field 'f' is immutable (a 'shared T'; write 'shared mut T' to change it); cannot assign to its field 'g'`; `'x' is frozen (an 'atomic shared T'); cannot assign to its field 'f'` (also `; 'm' is not a 'view fn'`) |
+| gaining `mut` (the mut model) | `cannot store a 'T' in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`; `cannot store a 'shared mut T' in variable 'v', a 'shared T': a 'shared' reference, a frozen object and a cell convert only as they are` |
+| `mut` on a value (the mut model) | `'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes` |
+| `const` (the mut model) | `'const' is gone: a reference is immutable unless written 'mut T' ('shared mut T', 'locked mut T')` |
+| `mut` on a frozen object or a cell (the mut model) | `'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock`; `an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'` |
+| `mut` misplaced (the mut model) | `'mut shared' is spelled 'shared mut': the form first, then the writes`; `a type takes one qualifier: 'shared mut shared' is two` |
+| warning: `locked T` (the mut model) | `'locked T' locks an object nothing writes; 'atomic shared T' is read from every thread with no lock`; and `lock c as v: inout` on it, an error: `'c' is 'locked T', whose contents are never written; declare it 'locked mut T' for a 'lock ... as v: inout' block` |
+| `atomic` of an object (the mut model) | `'atomic' holds a number, a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic shared N' (frozen) or 'locked mut N'` |
 
 Run-time panics, printed after `paykan: `: `a value moved out of 'q.jobs'
-is still borrowed`, `a value made 'atomic shared const' is still borrowed`, `task
+is still borrowed`, `a value made 'atomic shared' is still borrowed`, `task
 handle dropped without join, cancel or detach`, `'join' called inside a
 task: use 'await'`, `a task cannot wait for itself`, `channel capacity 0`,
 `nested lock`, `'join' while holding a lock`.  At exit, on stderr: `paykan:

@@ -37,8 +37,8 @@ fn main() -> int {
   io::println(pick<Str>(False, "left", "right"));
   io::println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
   io::println(pick<(int, Str)>(False, (5, "five"), (6, "six")));
-  left = "left";
-  right = "right";
+  left: mut = "left";
+  right: mut = "right";
   swap<Str>(left, right);
   io::println(left + " " + right);
   yes = True;

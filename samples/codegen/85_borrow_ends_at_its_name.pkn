@@ -83,7 +83,7 @@ fn main() -> int {
   io::println(s + " " + Str(g(1)));
   // An `inout` arm's binding goes back to the subject after its last use,
   // before the statements that name another `r`.
-  let b = B(E::R(1));
+  let b: mut = B(E::R(1));
   match b.e {
     r: inout R {
       r.w += 100;

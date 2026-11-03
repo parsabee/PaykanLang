@@ -1073,7 +1073,7 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
 
 bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
   // A class's `__walk` (the prototype) is emitted for it too: the walk of
-  // its references that freezes an `atomic shared const` object.
+  // its references that freezes an `atomic shared` object.
   if (fn->getName() == names::kMethodWalk) {
     error(fn->getLocation(),
           "'__walk' is reserved for the compiler-generated walk and cannot "
@@ -1320,10 +1320,17 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     {
       ScopeGuard guard(*this);
       CurrentScope->declare(names::kSelf, ct);
+      // `self` is written in every method but a `view fn` (`__init__`
+      // builds it); an `inout` parameter is the borrow's writes.
+      CurrentScope->Quals[names::kSelf] =
+          ast::Qualifier{ast::QualForm::Unique, !method->isView()};
       for (size_t i = 0; i < method->getParams().size(); ++i) {
-        CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
-        CurrentScope->Quals[method->getParams()[i].getName()] =
-            method->getParams()[i].Qual;
+        const ast::Param &p = method->getParams()[i];
+        CurrentScope->declare(p.getName(), paramTys[i]);
+        ast::Qualifier q = p.Qual;
+        if (p.Mode == ast::ParamMode::Inout)
+          q.Mut = true;
+        CurrentScope->Quals[p.getName()] = q;
       }
       declareParamKinds(method);
       CurrentResultQual = method->getResultQual(); // the prototype
@@ -2409,6 +2416,11 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
                       InferenceConflict &conflict) {
   if (!pattern || !actual)
     return true;
+  // `mut T`, `shared T` & co. (the prototype): the form is the slot's, the
+  // type parameter is the plain type.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(pattern))
+    return unifyTypes(qt->getInnerType(), actual, typeParams, bindings,
+                      conflict);
 
   if (auto *ct = ast::dyn_cast<ast::ClassType>(pattern)) {
     // A type parameter binds to the argument type; a second occurrence must

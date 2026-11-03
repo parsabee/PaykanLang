@@ -49,10 +49,9 @@ bool Sema::checkParallelRead(const std::string &name, ast::Type *ty,
   // counted by the body.
   if (ast::Type *elem = bufferElementType(ty); elem && isPlainValue(elem))
     return true;
-  // A handle: a `locked` cell or an `atomic shared const` object.
+  // A handle: a `locked` cell or an `atomic shared` object.
   if (const ast::Qualifier q = qualifierOfVar(name);
-      q.Form == ast::QualForm::Locked ||
-      q.Form == ast::QualForm::AtomicSharedConst)
+      q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicShared)
     return true;
   ast::Type *elem = nullptr;
   if (auto *a = ast::dyn_cast<ast::ArrayType>(ty))
@@ -324,7 +323,7 @@ ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
 bool Sema::isCopyablePart(ast::Type *ty, ast::Qualifier q, std::string *why) {
   if (ty && ast::isRefType(ty))
     return q.Form == ast::QualForm::Shared ||
-           q.Form == ast::QualForm::AtomicSharedConst ||
+           q.Form == ast::QualForm::AtomicShared ||
            q.Form == ast::QualForm::Locked;
   return isCopyable(ty, why);
 }
@@ -488,8 +487,7 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
   if (q.Form == ast::QualForm::Shared)
     return at("is '" + qualifiedName(q, ty) +
               "': a 'shared' reference is aliased on its own thread");
-  if (q.Form == ast::QualForm::Locked ||
-      q.Form == ast::QualForm::AtomicSharedConst)
+  if (q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicShared)
     return ""; // a handle: its contents were checked when it was made
   auto *ct = ast::dyn_cast<ast::ClassType>(ty);
   if (!ct || ct == Ctx.getStrTy())
@@ -543,9 +541,9 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
                        ast::isa<ast::SubscriptExpr>(inner) ||
                        ast::isa<ast::TupleIndexExpr>(inner);
     const std::string text = placeText(inner);
-    // A handle (`locked`, `atomic shared const`) is copied; a `shared`
-    // reference never crosses; a unique or `const` one crosses by `move`, or as
-    // a temporary of the caller's.
+    // A handle (`locked`, `atomic shared`) is copied; a `shared`
+    // reference never crosses; a unique one (`mut` or not) crosses by `move`,
+    // or as a temporary of the caller's.
     if (ast::isRefType(ty)) {
       if (q.Form == ast::QualForm::Shared) {
         error(arg->getLocation(),
@@ -556,7 +554,7 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
         continue;
       }
       if (q.Form == ast::QualForm::Locked ||
-          q.Form == ast::QualForm::AtomicSharedConst)
+          q.Form == ast::QualForm::AtomicShared)
         continue; // a handle: another reference to the same cell or object
       if (place && !moved) {
         error(arg->getLocation(),
@@ -620,12 +618,12 @@ bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
     return true;
   // A borrow is written with no qualifier: it borrows the object whatever
   // its qualifier and counts nothing.  A `view` is read-only already, and
-  // an `inout` of a `const` object could not change it.
+  // an `inout` of an immutable object could not change it.
   const char *m = ast::paramModeName(mode);
   error(loc, what + " is '" + m + " " + q.spelling() +
                  "': a borrow carries no qualifier; a 'view' takes every "
                  "form of the object (read-only through it) and an 'inout' "
-                 "a unique or 'shared' one, with no retain or release; "
+                 "a 'mut' or 'shared mut' one, with no retain or release; "
                  "write '" +
                  m + " T'");
   return false;
@@ -643,7 +641,7 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     if (!ty || !ast::isRefType(ty))
       continue;
     // A `shared` object passes to a `view` or an `inout` as a unique one
-    // does, with no retain or release; a `const` one is frozen
+    // does, with no retain or release; an immutable one is frozen
     // (inoutPlaceError) and a cell is reached in a `lock` block.
     const ast::Qualifier q = qualifierOf(args[i]);
     (void)quals;
@@ -794,7 +792,7 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
   ast::Type *ty = resolveExprType(ma); // the root live, not moved, not lent
   if (!ty)
     return nullptr;
-  // Every link a unique field: a `shared` or `const` one is an alias, a
+  // Every link a unique field: a `shared` one is an alias, a
   // `weak` one no owner.
   for (const ast::Expr *x = ma;
        const auto *link = ast::dyn_cast<ast::MemberAccessExpr>(x);
@@ -807,7 +805,7 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
                      "': it is a 'weak' field, which owns nothing");
       return nullptr;
     }
-    if (!q.isUnique()) {
+    if (q.Form != ast::QualForm::Unique) {
       error(loc, "cannot move '" + placeText(link) + "': it is '" +
                      qualifiedName(q, link->getResolvedType()) +
                      "', not a unique part of '" + name + "'");
@@ -977,20 +975,37 @@ ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
     ast::Type *rt = ast::stripOptional(
         const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
     ast::Qualifier q;
-    if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt))
+    bool recvMut = recv.Mut;
+    if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt)) {
       q = ct->findFieldQualifier(ma->getFieldName());
-    else if (const auto *st = ast::dyn_cast<ast::StructType>(rt))
+    } else if (const auto *st = ast::dyn_cast<ast::StructType>(rt)) {
       q = st->findFieldQualifier(ma->getFieldName());
-    // A field reached through a `const` reference reads as `const`.
-    if (recv.isConst() &&
-        (q.Form == ast::QualForm::Unique || q.Form == ast::QualForm::Shared))
-      q.Const = true;
+      // A struct is a value: the objects it holds follow the variable
+      // that holds it (its `let`), or the object it is part of.
+      recvMut = valueRootWritable(ma->getReceiver());
+    }
+    // A unique field follows its root: written under a `mut` receiver,
+    // immutable under an immutable one.  A `shared` field is the object's
+    // own form, kept through any root (`shared mut` is written through
+    // every alias); a cell and a frozen field are what they are.
+    if (q.Form == ast::QualForm::Unique)
+      q.Mut = recvMut;
     return q;
   }
-  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
-    return qualifierOf(se->getArray()); // the elements carry the array's
-  if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
-    return qualifierOf(ti->getTuple());
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    // An element of a fixed-size array (a value) follows the variable that
+    // holds the array; a slice's its array's writability (`inout T[]`).
+    ast::Qualifier q = qualifierOf(se->getArray());
+    if (q.Form == ast::QualForm::Unique)
+      q.Mut = valueRootWritable(se->getArray());
+    return q;
+  }
+  if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+    ast::Qualifier q = qualifierOf(ti->getTuple());
+    if (q.Form == ast::QualForm::Unique)
+      q.Mut = valueRootWritable(ti->getTuple());
+    return q;
+  }
   if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
     if (const FunctionSig *sig = lookupFunction(ce->getCalleeName()))
       return sig->ResultQual;
@@ -1020,7 +1035,7 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
     return true;
   // A struct, a tuple or an array is a value wherever it is, whatever it
   // holds: it takes no qualifier.  One to share, or to freeze for every
-  // thread, goes in a `mem::Box<T>`, an object (`atomic shared const
+  // thread, goes in a `mem::Box<T>`, an object (`atomic shared
   // mem::Box<Buffer<float>>`).
   const bool ref = ast::isRefType(inner) || ast::isa<ast::AtomicType>(inner);
   const std::string value =
@@ -1029,31 +1044,41 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
                                   ">') to share what it holds"
                             : "");
   switch (q.Form) {
-  case ast::QualForm::Unique: // `const`
+  case ast::QualForm::Unique: // `mut`
     if (!ref) {
-      error(loc, "'const' applies to objects; " + value +
-                     (sharesStorage(inner) ? "" : ", which 'let' fixes"));
+      error(loc, "'mut' applies to objects; '" + typeName(inner) +
+                     "' is a value: its storage is rewritten by assignment, "
+                     "which 'let' fixes");
       return false;
     }
     return true;
   case ast::QualForm::Shared:
     if (!ref) {
-      error(loc, "'shared' qualifies a reference; " + value);
+      error(loc, std::string("'") + q.spelling() + "' qualifies a reference; " +
+                     value);
       return false;
     }
     return true;
-  case ast::QualForm::AtomicSharedConst:
+  case ast::QualForm::AtomicShared:
     if (!ref) {
-      error(loc, "'atomic shared const' qualifies a reference; " + value);
+      error(loc, "'atomic shared' qualifies a reference; " + value);
       return false;
     }
     return true;
   case ast::QualForm::Locked:
     if (!ast::isRefType(inner)) {
-      error(loc, "'locked' holds an object in the prototype, not a '" +
+      error(loc, std::string("'") + q.spelling() +
+                     "' holds an object in the prototype, not a '" +
                      typeName(inner) + "' (wrap the value in a class)");
       return false;
     }
+    // The lock buys the writes: without `mut` it locks what nothing
+    // writes, which a frozen object gives with no lock.
+    if (!q.Mut)
+      warning(loc, "'locked " + typeName(inner) +
+                       "' locks an object nothing writes; 'atomic shared " +
+                       typeName(inner) +
+                       "' is read from every thread with no lock");
     return true;
   }
   return true;
@@ -1063,6 +1088,13 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                               const std::string &what,
                               ast::SourceLocation loc) {
   ast::Type *ty = src ? src->getResolvedType() : nullptr;
+  // A value (a function value too) copies: the forms are of references,
+  // so it skips the conversions below, but not the copy rule, which sees
+  // the unique references it holds.
+  const bool value = ty && !ast::isa<ast::PoisonType>(ty) &&
+                     !ast::isRefType(ast::stripOptional(ty)) &&
+                     !ast::isa<ast::AtomicType>(ty) &&
+                     !ast::isa<ast::TaskType>(ty);
   // A task handle read from a variable into an owning slot (a result,
   // another variable) leaves with it: the variable is spent, as by
   // `await` (the prototype's typestate, checkTasksAwaited).
@@ -1088,22 +1120,29 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                      ast::isa<ast::SubscriptExpr>(inner) ||
                      ast::isa<ast::TupleIndexExpr>(inner);
   const ast::Qualifier sq = qualifierOf(src);
-  // The conversions: a unique value into any form, a `const` one into the
-  // other `const` forms, a handle or a `shared` reference only as it is.
-  bool ok = sq.isUnique() || sq == dst;
-  if (!ok && sq.Form == ast::QualForm::Unique && sq.Const)
-    ok = dst.isConst() && dst.Form != ast::QualForm::Locked;
+  // The conversions: a unique reference flows into any form, and gains
+  // `mut` only by `move` (or as a temporary, which nobody else holds); a
+  // `shared` reference, a frozen object and a cell convert only as they
+  // are.
+  bool ok = value || sq == dst;
+  if (!ok && sq.Form == ast::QualForm::Unique)
+    ok = sq.Mut || !dst.Mut || moved || !place;
   if (!ok) {
-    error(loc, "cannot store a '" + qualifiedName(sq, ty) + "' in " + what +
-                   ", a '" + qualifiedName(dst, ty) +
-                   "': a reference converts only from unique, or from "
-                   "'const' into the other 'const' forms");
+    auto article = [](const std::string &s) {
+      return std::string(!s.empty() && s[0] == 'a' ? "an '" : "a '") + s + "'";
+    };
+    error(loc, "cannot store " + article(qualifiedName(sq, ty)) + " in " +
+                   what + ", " + article(qualifiedName(dst, ty)) + ": " +
+                   (sq.Form == ast::QualForm::Unique
+                        ? "a reference gains 'mut' only by 'move'"
+                        : "a 'shared' reference, a frozen object and a cell "
+                          "convert only as they are"));
     return false;
   }
-  // A unique (or `const`) value that becomes a cell, or a frozen object,
+  // A unique value (`mut` or not) that becomes a cell, or a frozen object,
   // is made into one at this use: the send check runs on what it holds.
-  if (sq.Form == ast::QualForm::Unique && dst.Form != ast::QualForm::Unique &&
-      dst.Form != ast::QualForm::Shared) {
+  if (!value && sq.Form == ast::QualForm::Unique &&
+      dst.Form != ast::QualForm::Unique && dst.Form != ast::QualForm::Shared) {
     if (std::string why = uncrossable(ty, sq, ""); !why.empty()) {
       error(loc, "cannot make '" + placeText(inner) + "' (a '" +
                      qualifiedName(sq, ty) + "') '" + dst.spelling() +
@@ -1125,52 +1164,151 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
     else
       msg += ": '" + typeName(ty) + "' holds unique " + part;
     if (ast::isa<ast::Identifier>(inner))
-      msg +=
-          "; write 'move " + text + "' to transfer it" +
-          (ast::isRefType(ty)
-               ? ", or declare it '" +
-                     qualifiedName(
-                         ast::Qualifier{ast::QualForm::Shared, sq.Const}, ty) +
-                     "'"
-               : std::string());
+      msg += "; write 'move " + text + "' to transfer it" +
+             (ast::isRefType(ty)
+                  ? ", or declare it '" +
+                        qualifiedName(
+                            ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty) +
+                        "'"
+                  : std::string());
     else
-      msg +=
-          "; a field or element leaves by 'mem::replace' or 'mem::take'" +
-          (ast::isRefType(ty) ? ", or is declared 'shared " + typeName(ty) + "'"
-                              : std::string());
+      msg += "; a field or element leaves by 'mem::replace' or 'mem::take'" +
+             (ast::isRefType(ty)
+                  ? ", or is declared '" +
+                        qualifiedName(
+                            ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty) +
+                        "'"
+                  : std::string());
     error(loc, msg);
     return false;
   }
   return true;
 }
 
-std::string Sema::constPlace(const ast::Expr *e) {
+/// Why @p what (a variable, a field) cannot be written: its form @p q, of
+/// an object of type @p ty, is immutable, with the form that would allow it.
+static std::string immutableText(const std::string &what,
+                                 const ast::Qualifier &q,
+                                 const std::string &ty) {
+  switch (q.Form) {
+  case ast::QualForm::Unique:
+    return what + " is immutable (a '" + ty + "'; write 'mut " + ty +
+           "' to change it)";
+  case ast::QualForm::Shared:
+    return what + " is immutable (a 'shared " + ty + "'; write 'shared mut " +
+           ty + "' to change it)";
+  case ast::QualForm::AtomicShared:
+    return what + " is frozen (an 'atomic shared " + ty + "')";
+  case ast::QualForm::Locked:
+    return what + " is 'locked " + ty +
+           "', whose contents are never written; declare it 'locked mut " + ty +
+           "' to change them in a 'lock' block";
+  }
+  return "";
+}
+
+bool Sema::valueRootWritable(const ast::Expr *e) {
+  // Through the value's links (a struct's field, an array's or a tuple's
+  // element) to what holds the value: a variable, writable unless `let`
+  // (or a borrow, a loop's copy, a capture), or an object, writable when
+  // `mut`.
   for (const ast::Expr *p = e;;) {
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(p)) {
+      if (id->isFunctionRef())
+        return false;
+      ast::Type *ty =
+          CurrentScope ? CurrentScope->lookup(id->getName()) : nullptr;
+      if (ty && ast::isRefType(ast::stripOptional(ty)))
+        return qualifierOfVar(id->getName()).Mut;
+      switch (varKind(id->getName())) {
+      case VarKind::Plain:
+      case VarKind::Inout:
+        return true;
+      default:
+        return false;
+      }
+    }
     if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p)) {
       ast::Type *rt = ast::stripOptional(
           const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
-      ast::Qualifier q;
-      if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt))
-        q = ct->findFieldQualifier(ma->getFieldName());
-      else if (const auto *st = ast::dyn_cast<ast::StructType>(rt))
-        q = st->findFieldQualifier(ma->getFieldName());
-      if (q.isConst())
-        return "field '" + ma->getFieldName() + "' is '" + q.spelling() + "'";
+      if (rt && ast::isa<ast::ClassType>(rt))
+        return qualifierOf(ma->getReceiver()).Mut;
       p = ma->getReceiver();
     } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p)) {
+      ast::Type *at =
+          const_cast<ast::Expr *>(se->getArray())->getResolvedType();
+      if (at && ast::isa<ast::SliceType>(at))
+        return varKind(placeRoot(se->getArray())
+                           ? placeRoot(se->getArray())->getName()
+                           : "") == VarKind::Inout;
       p = se->getArray();
     } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p)) {
       p = ti->getTuple();
     } else {
-      break;
+      return false; // a temporary: written by nobody
     }
   }
-  if (const auto *id = ast::dyn_cast<ast::Identifier>(placeBase(e))) {
-    const ast::Qualifier q = qualifierOfVar(id->getName());
-    if (q.isConst())
-      return "'" + id->getName() + "' is '" + q.spelling() + "'";
+}
+
+std::string Sema::constPlace(const ast::Expr *e) {
+  // The place as reached (qualifierOf: a unique field follows its root, a
+  // `shared` one reads immutable under an immutable root).  A value (a
+  // struct, an array, a tuple, a number) is written as its `let` allows,
+  // and so are the objects it holds.  A unique link that is immutable is
+  // so because of its root, which is what to change, as is a `shared mut`
+  // field read under an immutable root: the walk reports the first link
+  // that is immutable by its own declaration, else the root.  A `locked`
+  // cell's contents are reached in a `lock` block (checkNotLocked).
+  bool throughObject = false; // an object reached from the value
+  for (const ast::Expr *p = e;;) {
+    ast::Type *ty = const_cast<ast::Expr *>(p)->getResolvedType();
+    const bool ref = ty && ast::isRefType(ast::stripOptional(ty));
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(p)) {
+      if (!ref) {
+        // The value's own storage is `let`'s business (letValueRoot); the
+        // objects it holds follow it too.
+        if (throughObject && varKind(id->getName()) == VarKind::Let)
+          return "'" + id->getName() +
+                 "' is declared with 'let', and so are the objects it holds; "
+                 "drop 'let' to change them";
+        return "";
+      }
+      const ast::Qualifier q = qualifierOfVar(id->getName());
+      if (q.Form == ast::QualForm::Locked)
+        return "";
+      return q.isConst()
+                 ? immutableText("'" + id->getName() + "'", q, typeName(ty))
+                 : "";
+    }
+    const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p);
+    if (ref) {
+      throughObject = true;
+      const ast::Qualifier q = qualifierOf(p);
+      if (!q.isConst() || q.Form == ast::QualForm::Locked)
+        return "";
+      if (ma && q.Form != ast::QualForm::Unique) {
+        // Immutable by its own declaration, or only under its root?
+        ast::Type *rt = ast::stripOptional(
+            const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
+        ast::Qualifier declared;
+        if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt))
+          declared = ct->findFieldQualifier(ma->getFieldName());
+        else if (const auto *st = ast::dyn_cast<ast::StructType>(rt))
+          declared = st->findFieldQualifier(ma->getFieldName());
+        if (!declared.Mut)
+          return immutableText("field '" + ma->getFieldName() + "'", q,
+                               typeName(ty));
+      }
+    }
+    if (ma)
+      p = ma->getReceiver();
+    else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+      p = se->getArray();
+    else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p))
+      p = ti->getTuple();
+    else
+      return "";
   }
-  return "";
 }
 
 bool Sema::checkNotLocked(const ast::Expr *place, ast::SourceLocation loc) {

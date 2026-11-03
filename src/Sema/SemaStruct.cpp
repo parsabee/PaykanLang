@@ -814,8 +814,14 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
       // (frozenPlace), the caller's variable, field or element to change
       // in any other method, as an `inout` parameter is.
       CurrentScope->declare(names::kSelf, st);
-      for (size_t i = 0; i < method->getParams().size(); ++i)
-        CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+      for (size_t i = 0; i < method->getParams().size(); ++i) {
+        const ast::Param &p = method->getParams()[i];
+        CurrentScope->declare(p.getName(), paramTys[i]);
+        ast::Qualifier q = p.Qual;
+        if (p.Mode == ast::ParamMode::Inout)
+          q.Mut = true; // the borrow's writes
+        CurrentScope->Quals[p.getName()] = q;
+      }
       declareParamKinds(method);
 
       if (method->getName() != names::kMethodInit) {

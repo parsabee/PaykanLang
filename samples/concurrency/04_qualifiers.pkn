@@ -1,11 +1,19 @@
 // The concurrency prototype: the qualifiers on places
-// (docs/design/concurrency.md).  A unique reference, a `const` one, a
-// `shared` one and a `shared const` one; the conversions between them; a
-// `view` parameter taking every form; a `shared` field read as `shared`.
+// (docs/design/concurrency.md).  The bare type is the cheapest form, a
+// unique reference nothing writes; every qualifier adds something: `mut`
+// writes through the owner, `shared` several owners, `shared mut` several
+// owners with writes, `atomic shared` an object frozen for every thread,
+// `locked mut` an object written under a lock.  The conversions between
+// them; a `view` parameter taking every form; a `shared mut` field read
+// under a `mut` root and under an immutable one.
 // expect-stdout: a #1
 // expect-stdout: a #1
+// expect-stdout: bb #22
 // expect-stdout: s 22
 // expect-stdout: 44
+// expect-stdout: f #5
+// expect-stdout: l #66
+// expect-leaks: the frozen object and the locked cell are immortal in the prototype
 
 import ::io;
 
@@ -15,7 +23,7 @@ class Node {
 }
 class Pair {
   left: Node;
-  right: shared Node;
+  right: shared mut Node;
 }
 
 fn describe(n: view Node) -> Str {
@@ -23,20 +31,39 @@ fn describe(n: view Node) -> Str {
 }
 
 fn main() -> int {
-  let a = Node(1, "a");                 // unique
-  let c: const Node = move a;           // const from a moved unique
-  io::println(describe(c));             // a view parameter accepts every form
-  let d: shared const Node = c;         // a const converts into the other const forms
+  let a = Node(1, "a");                 // the bare type: unique, immutable
+  io::println(describe(a));             // a view parameter accepts every form
+  let d: shared Node = move a;          // several owners, none of them writing
   io::println(describe(d));
 
-  let s: shared Node = Node(2, "s");    // shared: aliases on this thread
-  let t = s;                            // t is shared too
+  let b: mut Node = Node(2, "b");       // `mut`: writes through the owner
+  b.id = 22;
+  let k: Node = move b;                 // a `mut Node` goes into a `Node` as it is...
+  let w: mut Node = move k;             // ...and a `Node` gains `mut` only by `move`
+  w.name = "bb";
+  io::println(describe(w));
+
+  let s: shared mut Node = Node(2, "s");   // shared mut: aliases on this thread, each writing
+  let t = s;                               // t is shared mut too
   t.id = 22;
   io::println(s.name + " " + Str(s.id));
 
-  let p = Pair(Node(3, "l"), Node(4, "r"));
-  let r = p.right;                      // a shared field reads as shared
+  let p: mut = Pair(Node(3, "l"), Node(4, "r"));
+  let r = p.right;                      // a `shared mut` field keeps its writes under a `mut` root
   r.id = 44;
   io::println(Str(p.right.id));
+  let q = Pair(Node(3, "l"), Node(4, "r"));
+  let ro = q.right;                     // under an immutable root it reads as `shared Node`
+
+  let f: atomic shared Node = Node(5, "f");   // frozen for every thread: from a temporary or by `move`
+  io::println(describe(f));
+
+  let l: locked mut Node = Node(6, "l");      // written under its lock, in an `inout` block
+  lock l as c: inout {
+    c.id = 66;
+  }
+  lock l as v: view {
+    io::println(describe(v));
+  }
   return 0;
 }

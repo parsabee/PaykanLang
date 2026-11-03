@@ -22,7 +22,7 @@ impl Stats {
 }
 
 fn main() -> int {
-  let l: Logger = Logger();
+  let l: mut Logger = Logger();
   l.print("first");
   io::print("second\n");
   let s: Stats = Stats();

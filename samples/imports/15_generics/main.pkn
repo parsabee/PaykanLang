@@ -25,7 +25,7 @@ fn wrap<T>(x: T) -> box::Box<T> {
 fn main() -> int {
   let a = box::Box<int>(5);       // explicit type argument
   let b = box::Box("five");       // inferred: Box<Str>
-  let c: box::Box<int> = counter::start();
+  let c: mut box::Box<int> = counter::start();
   c.set(c.get() + a.get() + box::one().get());
   io::println(Str(c.get()) + " " + b.get() + " " + a.tag());
 

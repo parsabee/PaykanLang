@@ -31,8 +31,8 @@ fn same(l: view collections::LinkedList<int>,
 }
 
 fn main() -> int {
-  rng = Rng(42);
-  l = collections::LinkedList<int>();
+  rng: mut = Rng(42);
+  l: mut = collections::LinkedList<int>();
   model = collections::List<int>();
   ok: bool = True;
   step: int = 0;

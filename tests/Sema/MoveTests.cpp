@@ -29,10 +29,10 @@ void expectErrors(const SemaResult &r,
 } // namespace
 
 // `move x` ends x: every later use is an error naming the move, at the use
-// (a read, a field write, an `inout` argument, a `view` of it, a second
-// move, a read after `y = move x`).  A `let` local and a by-value parameter
-// move like a plain variable; `return move j` and a move into a call's
-// argument are fine.
+// (a read, a field write and an `inout` argument of a `mut` variable, a
+// `view` of it, a second move, a read after `y = move x`).  A `let` local
+// and a by-value parameter move like a plain variable; `return move j` and
+// a move into a call's argument are fine.
 TEST(Move, UseAfterMove) {
   auto r = semaCheck(R"(class Job {
   name: Str;
@@ -45,10 +45,10 @@ fn main() -> int {
   let a = Job("a");
   n = keep(move a);
   n = n + a.name.len();
-  b = Job("b");
+  b: mut = Job("b");
   keep(move b);
   b.name = "x";
-  c = Job("c");
+  c: mut = Job("c");
   keep(move c);
   grab(c);
   d = Job("d");
@@ -400,10 +400,11 @@ fn keep2() -> Job { return Job("k"); })");
 
 // A move is a write for exclusivity: in one call it cannot share storage
 // with what the call borrows, a `view` argument before it (the variable, or
-// a field of it), the receiver of a method (a `view fn`'s too), or an
-// `inout` argument, which the prototype's message counts the move as.  A
-// move before a `view` of the same variable is a use after the move.
-// Another variable beside it is fine.
+// a field of it), the receiver of a method (a `view fn`'s too; the receiver
+// of a plain method is a `mut` variable, as the call needs), or an `inout`
+// argument, which the prototype's message counts the move as.  A move
+// before a `view` of the same variable is a use after the move.  Another
+// variable beside it is fine.
 TEST(Move, AMoveBesideABorrowInOneCall) {
   auto r = semaCheck(R"(class Job {
   name: Str;
@@ -427,11 +428,11 @@ fn main() -> int {
   n = n + lookH(b, move b);
   let c = Holder(Job("c"));
   n = n + lookJ(c.job, move c);
-  let d = Job("d");
+  let d: mut Job = Job("d");
   n = n + d.take(move d);
   let e = Job("e");
   n = n + e.peek(move e);
-  f = Job("f");
+  f: mut = Job("f");
   n = n + grab(f, move f);
   let g = Job("g");
   n = n + look2(move g, g);
@@ -522,13 +523,13 @@ fn main() -> int {
 }
 
 // What `move x.f` refuses: the variable is used after it (the field left,
-// the holder ended); a `shared`, `const` or `weak` field is not a unique
-// part of the variable (anywhere on the chain), nor is a value field (an
-// `int` of a class or a struct), and a field of `self`, of a `view` or
-// `inout` parameter, of a captured or `weak` variable, or of a temporary is
-// not a field of an owned variable, with the `mem::replace` hint where a
-// variable roots it.  A `view` local reading the variable blocks the move
-// as it blocks any write.
+// the holder ended); a `shared`, frozen (`atomic shared`) or `weak` field
+// is not a unique part of the variable (anywhere on the chain), nor is a
+// value field (an `int` of a class or a struct), and a field of `self`, of
+// a `view` or `inout` parameter, of a captured or `weak` variable, or of a
+// temporary is not a field of an owned variable, with the `mem::replace`
+// hint where a variable roots it.  A `view` local reading the variable
+// blocks the move as it blocks any write.
 TEST(Move, PartialMovesRefused) {
   auto r = semaCheck(R"(class Job {
   name: Str;
@@ -540,7 +541,7 @@ class Inner {
 class Holder {
   job: Job;
   other: shared Job;
-  fixed: const Job;
+  fixed: atomic shared Job;
   weak back: Job?;
   n: int;
   inner: Inner;
@@ -600,8 +601,8 @@ fn main() -> int {
                     "after the move"),
         std::string(":32:16: error: cannot move 'b.other': it is 'shared "
                     "Job', not a unique part of 'b'"),
-        std::string(":34:16: error: cannot move 'c.fixed': it is 'const Job', "
-                    "not a unique part of 'c'"),
+        std::string(":34:16: error: cannot move 'c.fixed': it is 'atomic "
+                    "shared Job', not a unique part of 'c'"),
         std::string(":36:17: error: cannot move 'd.back': it is a 'weak' "
                     "field, which owns nothing"),
         ":38:11: error: cannot move 'e.n" + kValue,

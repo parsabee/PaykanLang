@@ -157,26 +157,27 @@ class Box<T: ValueType> { ... }
 `Box<T>(v)`, or `Box(v)` with `T` inferred, holds one value of a
 [`ValueType`](../language/06-traits.md#valuetype) (`int`, `float`, `bool`, `char`, a sized
 number, an enum, a tuple, a struct or a function value) in an object, so the value can be
-shared: `Box` is a class, so assigning a box shares it, and a change through one name shows
-through every other. A `Str` or a class is not a `ValueType` (`'Str' does not implement
+shared: `Box` is a class, so assigning a box shares it, and a change through a `mut` name
+shows through every other. A `Str` or a class is not a `ValueType` (`'Str' does not implement
 trait 'ValueType', which 'memory::Box' requires of 'T'`): it is shared by reference already.
 
 | Method | Does |
 |--------|------|
 | `Box<T>(v: T)` | A box holding `v` |
 | `fn get() -> inout T` | The value's storage |
-| `view fn value() -> view T` | The value, read only: the read of a `view`, `const` or `atomic shared const` box |
+| `view fn value() -> view T` | The value, read only: the read of any box, a plain, `view` or frozen (`atomic shared`) one |
 
 `get()` returns `inout T`, the value's storage: read it (`pair.get().1`), pass it to an
 `inout` parameter, assign to one of its fields (`pt.get().x = 5` for a struct), or assign
 through an `inout` local, which borrows the box until its last use. The call itself is not
 a place to assign to (`b.get() = 5` is `left-hand side of '=' must be an identifier, field
-access, or subscript`). `get` is not a `view fn`, so a
-`view` box cannot be read through it, nor a `const` or `atomic shared const` one (`'b' is 'const';
-'get' is not a 'view fn'` for `let b: const mem::Box<P> = ...; b.get()`). `value()` is one,
-and reads such a box: a `view T`, which cannot be assigned
-([Concurrency](../language/19-concurrency.md#values-take-no-qualifier-membox) reads a `const`
-box through it, and [`atomic shared const`](../language/19-concurrency.md#atomic-shared-const-frozen-objects)
+access, or subscript`). `get` is not a `view fn`, so it needs a `mut` box: a plain one is
+not read through it (`'b' is immutable (a 'Box<int>'; write 'mut Box<int>' to change it);
+'get' is not a 'view fn'` for `let b = mem::Box(0); b.get()`), nor is a `view` of one or a
+frozen `atomic shared` one. `value()` is a `view fn`, and reads any box: a `view T`, which
+cannot be assigned
+([Concurrency](../language/19-concurrency.md#values-take-no-qualifier-membox) reads a plain
+box through it, and [`atomic shared`](../language/19-concurrency.md#atomic-shared-frozen-objects)
 a frozen one).
 
 ```pkn
@@ -187,15 +188,15 @@ import ::memory;
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let hits = memory::Box(0);
-  let alias = hits;
+  let hits: mut = memory::Box(0);
+  let alias: memory::Box<int> = hits;   // the same box, read through value()
   bump(hits.get());
-  n: inout int = alias.get();
+  n: inout int = hits.get();
   n = n * 10;
-  let pair = memory::Box((1, "one"));
+  let pair: mut = memory::Box((1, "one"));
   p: inout (int, Str) = pair.get();
   p = (2, "two");
-  io::println(Str(hits.get()) + " " + pair.get().1);
+  io::println(Str(alias.value()) + " " + pair.get().1);
   return 0;
 }
 ```

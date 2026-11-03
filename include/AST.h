@@ -198,24 +198,32 @@ public:
 // -- Reference qualifiers (docs/design/concurrency.md, "The qualifiers")
 
 /// How a reference is held and shared (the concurrency prototype): unique
-/// (unwritten), `shared` (aliases on one thread), `atomic shared const`
-/// (counted atomically, frozen, shared read-only across threads) or `locked` (a
-/// cell reached only in `lock` blocks); `const` makes a unique or shared one
-/// read-only.  A qualifier belongs to a place (a variable, parameter, field
-/// or result): the type it qualifies stays the plain type.
-enum class QualForm : uint8_t { Unique, Shared, AtomicSharedConst, Locked };
+/// (unwritten, immutable), `mut` (written through its owner), `shared`
+/// (aliases on one thread, immutable; `shared mut`, written through any),
+/// `atomic shared` (counted atomically, frozen, read by every thread) or
+/// `locked mut` (a cell written in `lock` blocks; `locked` alone locks what
+/// nothing writes).  The bare type is the cheapest form; every word buys one
+/// thing at one cost.  A qualifier belongs to a place (a variable, parameter,
+/// field or result): the type it qualifies stays the plain type.
+enum class QualForm : uint8_t { Unique, Shared, AtomicShared, Locked };
 
+/// The form of a reference (docs/design/concurrency.md): the bare type is
+/// unique and immutable, the cheapest form; `mut` adds writes through the
+/// owner, `shared` several owners (`shared mut`, writes through any of
+/// them), `atomic shared` an object frozen for every thread, `locked mut`
+/// an object written under a lock (`locked` alone locks what nothing
+/// writes).  A value takes none: `let` decides its storage.
 struct Qualifier {
   QualForm Form = QualForm::Unique;
-  bool Const = false; // `const T`, `shared const T`
+  bool Mut = false; // `mut T`, `shared mut T`, `locked mut T`
 
-  bool isUnique() const { return Form == QualForm::Unique && !Const; }
-  /// Read-only through this reference: `const`, `shared const`, `atomic shared
-  /// const`.
-  bool isConst() const { return Const || Form == QualForm::AtomicSharedConst; }
+  /// The bare type: unique, immutable.
+  bool isUnique() const { return Form == QualForm::Unique && !Mut; }
+  /// Read-only through this reference: every form without `mut`.
+  bool isConst() const { return !Mut; }
   bool operator==(const Qualifier &) const = default;
-  /// The spelling: "", "const", "shared", "shared const", "atomic shared const"
-  /// or "locked".
+  /// The spelling: "", "mut", "shared", "shared mut", "atomic shared",
+  /// "locked" or "locked mut".
   const char *spelling() const;
 };
 
@@ -2028,7 +2036,7 @@ public:
 };
 
 /// A qualified type as written (the concurrency prototype): `const T`,
-/// `shared T`, `shared const T`, `atomic shared const T`, `locked T`, or, in a
+/// `shared T`, `shared T`, `atomic shared T`, `locked T`, or, in a
 /// declaration, the qualifier alone (`x: shared = e;`, Inner null).  Sema
 /// resolves it to the inner type and records the qualifier on the place.
 class QualifiedType : public Type {

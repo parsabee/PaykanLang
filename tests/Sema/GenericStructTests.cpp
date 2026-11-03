@@ -117,7 +117,7 @@ fn main() -> int {
   f: Pair<Str, int> = p.flipped();
   b = Box(Pair(3, 4));                    // inferred from __init__
   b.set(Pair(5, 6));
-  h = Holder(9);
+  h: mut = Holder(9);
   h.p.a = 10;
   bs: Box<int>[2] = [Box(1), Box(2)];
   bs[1].v = 7;

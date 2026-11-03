@@ -10,7 +10,7 @@ import ::io;
 import shapes::lib;
 
 fn main() -> int {
-  let c: lib::Cell = lib::Cell(7);
+  let c: mut lib::Cell = lib::Cell(7);
   let d: lib::Cell = lib::Cell(4);
 
   let p: lib::Pair = c.pairWith(d);     // method taking and returning module classes

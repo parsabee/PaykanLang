@@ -209,13 +209,15 @@ struct Project {
   }
   ~Project() { fs::remove_all(Dir); }
   void writeBase(const std::string &value, const std::string &extra = "") {
-    writeFile(Dir / "base.pkn", "enum Kind { Odd, Even }\n"
-                                "class Cell { v: int;\n"
-                                "  fn twice() -> int { return self.v * 2; } }\n"
-                                "impl Cell {\n"
-                                "  fn __init__(v: int) { self.v = v; } }\n"
-                                "fn base() -> int { return " +
-                                    value + "; }\n" + extra);
+    writeFile(Dir / "base.pkn",
+              "enum Kind { Odd, Even }\n"
+              "class Cell { v: int;\n"
+              "  view fn twice() -> int { return self.v * 2; } "
+              "}\n"
+              "impl Cell {\n"
+              "  fn __init__(v: int) { self.v = v; } }\n"
+              "fn base() -> int { return " +
+                  value + "; }\n" + extra);
   }
   fs::path cache() const { return Dir / ".paykan_cache"; }
   fs::path entry(const std::string &module) const {
@@ -727,26 +729,27 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
   fs::remove_all(dir);
   writeFile(dir / "lib/slices.pkn",
             "class C { a: int[3]; }\n"
-            "fn reset(c: C) -> int { c.a = [9, 9, 9]; return 0; }\n"
+            "fn reset(c: mut C) -> int { c.a = [9, 9, 9]; return 0; }\n"
             "fn total(xs: view int[], x: int) -> int => xs[0];\n"
-            "fn plain(xs: view int[], c: C) -> int => total(xs, reset(c));\n"
+            "fn plain(xs: view int[], c: mut C) -> int => total(xs, "
+            "reset(c));\n"
             "fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
-            "fn generic<T>(xs: view T[], c: C) -> int => first(xs, "
+            "fn generic<T>(xs: view T[], c: mut C) -> int => first(xs, "
             "reset(c));\n");
   writeFile(dir / "lib/other.pkn",
             "import lib::slices;\n"
-            "fn more(c: slices::C) -> int => slices::generic(c.a, c);\n");
+            "fn more(c: mut slices::C) -> int => slices::generic(c.a, c);\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::slices;\nimport lib::other;\n"
             "fn main() -> int {\n"
-            "  let c = slices::C([1, 2, 3]);\n"
+            "  let c: mut = slices::C([1, 2, 3]);\n"
             "  let n = slices::plain(c.a, c);\n"
             "  io::println(Str(n) + \" \" + Str(slices::generic(c.a, c) + "
             "other::more(c)));\n"
             "  return 0;\n}\n");
   writeFile(dir / "plain.pkn", "import ::io;\nimport lib::slices;\n"
                                "fn main() -> int {\n"
-                               "  let c = slices::C([1, 2, 3]);\n"
+                               "  let c: mut = slices::C([1, 2, 3]);\n"
                                "  io::println(Str(slices::plain(c.a, c)));\n"
                                "  return 0;\n}\n");
   auto in = [&](const std::string &args) {
@@ -756,19 +759,20 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
                              "slice 'xs': they are copied to the heap before "
                              "the call to ";
   const std::string plain =
-      "lib/slices.pkn:4:48: warning: 'reset'" + copied +
+      "lib/slices.pkn:4:52: warning: 'reset'" + copied +
       "'total'\n"
       "  3 | fn total(xs: view int[], x: int) -> int => xs[0];\n"
-      "  4 | fn plain(xs: view int[], c: C) -> int => total(xs, reset(c));\n"
-      "    |                                                ^~\n"
+      "  4 | fn plain(xs: view int[], c: mut C) -> int => total(xs, "
+      "reset(c));\n"
+      "    |                                                    ^~\n"
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n";
   const std::string generic =
-      "lib/slices.pkn:6:51: warning: 'reset'" + copied + "'first<int>'\n";
+      "lib/slices.pkn:6:55: warning: 'reset'" + copied + "'first<int>'\n";
   const std::string genericLines =
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
-      "  6 | fn generic<T>(xs: view T[], c: C) -> int => first(xs, "
+      "  6 | fn generic<T>(xs: view T[], c: mut C) -> int => first(xs, "
       "reset(c));\n"
-      "    |                                                   ^~\n";
+      "    |                                                       ^~\n";
   // Built from source: both; from the cache entries, the instantiation
   // `main` makes, whose template comes from the entry.
   auto r = in("main.pkn");
@@ -813,21 +817,21 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
   fs::remove_all(dir);
   writeFile(dir / "lib/sl/inner.pkn",
             "class C { a: int[3]; }\n"
-            "fn wipe(c: C) -> int { c.a = [0, 0, 0]; return 0; }\n"
+            "fn wipe(c: mut C) -> int { c.a = [0, 0, 0]; return 0; }\n"
             "fn total(xs: view int[], x: int) -> int => xs[0] + x;\n");
   writeFile(dir / "lib/sl.pkn",
             "import lib::sl::inner as q;\n"
             "fn own(xs: view int[], x: int) -> int => xs[0] + x;\n"
-            "fn plain(xs: view int[], c: q::C) -> int => q::total(xs, "
+            "fn plain(xs: view int[], c: mut q::C) -> int => q::total(xs, "
             "q::wipe(c));\n"
-            "fn gen<T>(xs: view int[], c: q::C, t: T) -> int => q::total(xs, "
-            "q::wipe(c));\n"
-            "fn mine<T>(xs: view int[], c: q::C, t: T) -> int => own(xs, "
+            "fn gen<T>(xs: view int[], c: mut q::C, t: T) -> int => "
+            "q::total(xs, q::wipe(c));\n"
+            "fn mine<T>(xs: view int[], c: mut q::C, t: T) -> int => own(xs, "
             "q::wipe(c));\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::sl;\nimport lib::sl::inner;\n"
             "fn main() -> int {\n"
-            "  let c = inner::C([1, 2, 3]);\n"
+            "  let c: mut = inner::C([1, 2, 3]);\n"
             "  let a = sl::plain(c.a, c);\n"
             "  c.a = [1, 2, 3];\n"
             "  let b = sl::gen(c.a, c, 1);\n"
@@ -841,24 +845,26 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
   const std::string copied = " in a later argument may write the elements of "
                              "slice 'xs': they are copied to the heap before "
                              "the call to ";
-  const std::string line3 = "fn plain(xs: view int[], c: q::C) -> int => "
+  const std::string line3 = "fn plain(xs: view int[], c: mut q::C) -> int => "
                             "q::total(xs, q::wipe(c));\n";
-  const std::string line4 = "fn gen<T>(xs: view int[], c: q::C, t: T) -> int "
-                            "=> q::total(xs, q::wipe(c));\n";
-  const std::string line5 = "fn mine<T>(xs: view int[], c: q::C, t: T) -> int "
-                            "=> own(xs, q::wipe(c));\n";
+  const std::string line4 =
+      "fn gen<T>(xs: view int[], c: mut q::C, t: T) -> int "
+      "=> q::total(xs, q::wipe(c));\n";
+  const std::string line5 =
+      "fn mine<T>(xs: view int[], c: mut q::C, t: T) -> int "
+      "=> own(xs, q::wipe(c));\n";
   const std::string plain =
-      "lib/sl.pkn:3:54: warning: 'q::wipe'" + copied + "'q::total'\n" +
+      "lib/sl.pkn:3:58: warning: 'q::wipe'" + copied + "'q::total'\n" +
       "  2 | fn own(xs: view int[], x: int) -> int => xs[0] + x;\n" + "  3 | " +
-      line3 + "    | " + std::string(53, ' ') + "^~\n" + "  4 | " + line4;
-  const std::string gen = "lib/sl.pkn:4:61: warning: 'lib::sl::inner::wipe'" +
+      line3 + "    | " + std::string(57, ' ') + "^~\n" + "  4 | " + line4;
+  const std::string gen = "lib/sl.pkn:4:65: warning: 'lib::sl::inner::wipe'" +
                           copied + "'lib::sl::inner::total'\n";
   const std::string genLines = "  3 | " + line3 + "  4 | " + line4 + "    | " +
-                               std::string(60, ' ') + "^~\n" + "  5 | " + line5;
+                               std::string(64, ' ') + "^~\n" + "  5 | " + line5;
   const std::string mine =
-      "lib/sl.pkn:5:57: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
+      "lib/sl.pkn:5:61: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
   const std::string mineLines = "  4 | " + line4 + "  5 | " + line5 + "    | " +
-                                std::string(56, ' ') + "^~\n";
+                                std::string(60, ' ') + "^~\n";
   auto r = in("main.pkn");
   EXPECT_EQ(r.exitCode, 0) << r.out;
   EXPECT_EQ(r.out, plain + gen + genLines + mine + mineLines + "1 1 1\n");
@@ -1700,7 +1706,7 @@ struct ModesProject {
               "class Counter { n: int;\n"
               "  fn add(k: view int) -> int { self.n = self.n + k;\n"
               "    return self.n; }\n"
-              "  fn take(to: inout int) { to = to + self.n; } }\n"
+              "  view fn take(to: inout int) { to = to + self.n; } }\n"
               "impl Counter {\n"
               "  fn __init__(start: view int) { self.n = start; } }\n"
               "class Cell { v: int; }\n"
@@ -1714,11 +1720,11 @@ struct ModesProject {
         "class Fast : base::Counter {\n"
         "  fn add(k: view int) -> int { self.n = self.n + 10 * k;\n"
         "    return self.n; }\n"
-        "  fn take(to: inout int) { to = to * 100; } }\n"
+        "  view fn take(to: inout int) { to = to * 100; } }\n"
         "impl Fast {\n"
         "  fn __init__(s: view int) { __super__(s); } }\n"
         "fn main() -> int {\n"
-        "  c: base::Counter = Fast(1);\n"
+        "  c: mut base::Counter = Fast(1);\n"
         "  plain = base::Counter(5);\n"
         "  k = 2;\n"
         "  base::bump(k);\n"
@@ -1787,7 +1793,7 @@ TEST(Pkm, ParamModesAcrossModules) {
        {"func twice(view int) -> int", "func bump(inout int) -> void",
         "func Counter(view int) -> Counter", "func Cell(inout int) -> Cell",
         "method add(view int) -> int flags 0x0",
-        "method take(inout int) -> void flags 0x0",
+        "method take(inout int) -> void flags 0x2",
         "method __init__(view int) -> void flags 0x0"})
     EXPECT_TRUE(contains(dump.out, sig)) << sig << "\n" << dump.out;
   auto manifest = p.paykan("pkm dump --section=manifest base.pkm");
@@ -1866,7 +1872,7 @@ TEST(Pkm, PureVirtualMethodsAcrossModules) {
                               "    return self.side * self.side; }\n"
                               "}\n"
                               "fn main() -> int {\n"
-                              "  s: base::Shape = Square(\"sq\", 3.0);\n"
+                              "  s: mut base::Shape = Square(\"sq\", 3.0);\n"
                               "  s.grow();\n"
                               "  io::println(s.report());\n"
                               "  return 0;\n}\n");
@@ -2031,7 +2037,7 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
             "  return if a.len() > b.len() then a else b; }\n");
   writeFile(dir / "main.pkn", "import ::io; import base;\n"
                               "fn main() -> int {\n"
-                              "  b = base::Box();\n"
+                              "  b: mut = base::Box();\n"
                               "  n: inout = b.count();\n"
                               "  n = n + 2;\n"
                               "  k = b.count();\n"
@@ -2077,7 +2083,7 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
                              "  fn x() -> inout int { return self.v.x; } }\n");
   writeFile(dir / "usegen.pkn", "import ::io; import gen;\n"
                                 "fn main() -> int {\n"
-                                "  w = gen::Wrap<gen::P>(gen::P(1));\n"
+                                "  w: mut = gen::Wrap<gen::P>(gen::P(1));\n"
                                 "  x: inout = w.x();\n"
                                 "  x = x + 4;\n"
                                 "  io::println(Str(w.v.x));\n"
@@ -2394,7 +2400,7 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
             "native fn width(s: view Str) -> int = \"pk_lent_width\";\n"
             "class Node { name: Str; }\n"
             "class Holder { n: Node?; }\n"
-            "fn stash(h: Holder, n: Node) { h.n = n; }\n"
+            "fn stash(h: mut Holder, n: Node) { h.n = n; }\n"
             "fn named(n: Node) -> Str { return n.name; }\n");
   writeFile(dir / "lib.c", "#include <stdint.h>\n"
                            "int64_t pk_lent_width(void *s) { return s ? 7 : 0; "
@@ -2407,7 +2413,7 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
       "fn main() -> int {\n"
       "  s = \"abc\" + \"def\";\n"
       "  n = lib::Node(s);\n"
-      "  h = lib::Holder(None);\n"
+      "  h: mut = lib::Holder(None);\n"
       "  lib::stash(h, n);\n"
       "  l = c::List<lib::Node>();\n"
       "  l.push(n);\n"
@@ -2520,15 +2526,15 @@ TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
       "import cells;\n"
       "class Holder { slot: cells::Slot<Str>; }\n"
       "fn reads(c: cells::Cell<Str>) -> Str => c.v + Str(c.size());\n"
-      "fn replaces(c: cells::Cell<Str>) -> Str =>\n"
+      "fn replaces(c: mut cells::Cell<Str>) -> Str =>\n"
       "  c.v + Str(c.put(\"new\" + \"!\"));\n"
       "fn readsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.size());\n"
-      "fn setsSlot(h: Holder) -> Str =>\n"
+      "fn setsSlot(h: mut Holder) -> Str =>\n"
       "  h.slot.v + Str(h.slot.set(\"other\" + \"?\"));\n"
       "fn main() -> int {\n"
-      "  let c = cells::cellOf(\"old\" + \"?\");\n"
+      "  let c: mut = cells::cellOf(\"old\" + \"?\");\n"
       "  io::println(reads(c) + \" \" + replaces(c) + \" \" + reads(c));\n"
-      "  let h = Holder(cells::slotOf(\"first\" + \".\"));\n"
+      "  let h: mut = Holder(cells::slotOf(\"first\" + \".\"));\n"
       "  io::println(readsSlot(h) + \" \" + setsSlot(h) + \" \" +\n"
       "              readsSlot(h));\n"
       "  return 0;\n"
@@ -2545,7 +2551,7 @@ TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
             "  return b.s + Str(c.size());\n"
             "}\n"
             "fn stored(b: Box) -> Str {\n"
-            "  let c = labels::labelled(\"x\");\n"
+            "  let c: mut = labels::labelled(\"x\");\n"
             "  return b.s + Str(c.put(\"y\"));\n"
             "}\n"
             "fn main() -> int {\n"
@@ -3085,8 +3091,8 @@ TEST(Pkm, FunctionTypesAcrossModules) {
             "import ::io; import ops;\n"
             "fn main() -> int {\n"
             "  t = ops::twice(ops::square);\n"
-            "  b = ops::Button(\"b\", fn(l: Str) -> Str { return l + \"!\"; "
-            "});\n"
+            "  b: mut = ops::Button(\"b\", fn(l: Str) -> Str { return l + "
+            "\"!\"; });\n"
             "  n = ops::each([1, 2, 3], fn(x: view int, acc: inout int) { acc "
             "= acc + x; });\n"
             "  io::println(Str(t(3)) + \" \" + b.click() + \" \" + Str(n));\n"
@@ -3130,13 +3136,13 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
             "fn _helper(n: int) -> int { return n + 1; }\n"
             "enum _Mode { A, B }\n"
             "class Pub { __n: int; v: int; _w: int;\n"
-            "  fn get() -> int { return _helper(self.__n); }\n"
+            "  view fn get() -> int { return _helper(self.__n); }\n"
             "  view fn _twice() -> int { return self._w * 2; } }\n"
             "impl Pub { static fn __mk() -> Pub { return Pub(1, 2, 3); }\n"
             "  static fn _make() -> Pub { return Pub(0, 0, 3); }\n"
             "  static fn mk() -> Pub { return Pub::__mk(); } }\n"
             "class Gen<T> { __v: T;\n"
-            "  fn get() -> T {\n"
+            "  view fn get() -> T {\n"
             "    return self.__v + _helper(0) + Pub::_make()._w - 3; } }\n"
             "impl Gen<T> { fn __init__(v: T) { self.__v = v; } }\n"
             "class _GenHidden<T> { v: T; }\n"
@@ -3314,20 +3320,20 @@ TEST(Pkm, WeakFieldsAcrossModules) {
             "  weak parent: Node?;\n"
             "  first: Node?;\n"
             "  next: Node?;\n"
-            "  fn add(child: Node) {\n"
+            "  fn add(child: mut Node) {\n"
             "    child.parent = self; child.next = self.first; self.first = "
             "child; }\n"
-            "  fn path() -> Str {\n"
+            "  view fn path() -> Str {\n"
             "    match self.parent { p: Node { return p.path() + \"/\" + "
-            "self.name; } None { return self.name; } } }\n"
+            "self.name; } None { return self.name.toString(); } } }\n"
             "}\n"
             "impl Node { fn __init__(name: Str) { self.name = name; "
             "self.parent = None; self.first = None; self.next = None; } }\n");
   writeFile(dir / "main.pkn",
             "import ::io; import tree;\n"
             "fn main() -> int {\n"
-            "  root = tree::Node(\"root\");\n"
-            "  a = tree::Node(\"a\");\n"
+            "  root: mut = tree::Node(\"root\");\n"
+            "  a: mut = tree::Node(\"a\");\n"
             "  root.add(a);\n"
             "  a.parent = root;\n"
             "  weak w = root;\n"

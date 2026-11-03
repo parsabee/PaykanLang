@@ -160,12 +160,12 @@ TEST(Generics, InstantiationAsFieldParamReturnAndArray) {
         self.ps = [Pair<Str, int>("a", 1), Pair<Str, int>("b", 2)];
       }
     }
-    fn unwrap(b: Box<int>) -> int { return b.get(); }
-    fn nest(b: Box<Box<int>>) -> int { return b.get().get(); }
+    fn unwrap(b: mut Box<int>) -> int { return b.get(); }
+    fn nest(b: mut Box<Box<int>>) -> int { return b.get().get(); }
     fn total(bs: view Box<int>[]) -> int { return bs[0].v + bs[1].v; }
   )",
                               R"(
-    h: Holder = Holder();
+    h: mut Holder = Holder();
     n: int = unwrap(h.get());
     m: int = nest(Box<Box<int>>(h.get()));
     arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
@@ -180,7 +180,7 @@ TEST(Generics, MatchOnInstantiationArms) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
     fn describe(o: Obj) -> Str {
       match o {
-        b: Box<int> { return Str<int>(b.get()); }
+        b: Box<int> { return Str<int>(b.v); }
         Box<Str> { return "str"; }
         _ { return "other"; }
       }
@@ -202,25 +202,26 @@ TEST(Generics, ArmNamingAnOptionalTypeArgument) {
       match x { v: T { return v == d; } None { return False; } }
     }
     fn put<T>(x: inout T?, d: T) {
-      match x { v: inout T { v = d; } None { } }
+      match x { v: inout T { v = move d; } None { } }
     }
   )",
-                               R"(a: Node? = Node(1);
+                               R"(a: mut Node? = Node(1);
     b = same<Node?>(a, None);
     put<Node?>(a, None);
     c: int? = 3;
     put<int?>(c, None);)"));
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
-  auto bad = semaCheck(withMain(R"(
+  auto bad =
+      semaCheck(withMain(R"(
     class Animal { n: int; }
     impl Animal { fn __init__(n: int) { self.n = n; } }
     class Dog : Animal {}
     impl Dog { fn __init__(n: int) { __super__(n); } }
     fn swapIn<T>(a: inout Animal, d: T) {
-      match a { v: inout T { v = d; } _ { } }
+      match a { v: inout T { v = move d; } _ { } }
     }
   )",
-                                "a: Animal = Dog(1); swapIn<Dog?>(a, None);"));
+                         "a: mut Animal = Dog(1); swapIn<Dog?>(a, None);"));
   EXPECT_FALSE(bad.Ok);
   EXPECT_TRUE(has(bad.Diagnostics,
                   "cannot use optional 'Dog?' as 'Dog' without unwrapping"))
@@ -242,13 +243,13 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
       fn __init__(v: T) { self.v = v; self.next = None; }
     }
   )",
-                              "a = Node<int>(1); a.link(Node<int>(2));"));
+                              "a: mut = Node<int>(1); a.link(Node<int>(2));"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Generics, GenericClassWithConcreteSuperclass) {
   auto r = semaCheck(withMain(R"(
-    class Base { n: int; fn num() -> int { return self.n; } }
+    class Base { n: int; view fn num() -> int { return self.n; } }
     impl Base { fn __init__(n: int) { self.n = n; } }
     class Wrap<T> : Base {
       v: T;
@@ -340,7 +341,7 @@ TEST(Generics, ErrorInsideInstantiationNamesIt) {
   auto r = semaCheck(withMain(R"(
     class Adder<T> {
       v: T;
-      fn twice() -> T { return self.v + self.v; }
+      view fn twice() -> T { return self.v + self.v; }
     }
 
     impl Adder<T> {
@@ -359,7 +360,7 @@ TEST(Generics, ErrorInsideInstantiationNamesIt) {
   auto r2 = semaCheck(withMain(R"(
     class Adder<T> {
       v: T;
-      fn twice() -> T { return self.v + self.v; }
+      view fn twice() -> T { return self.v + self.v; }
     }
 
     impl Adder<T> {
@@ -460,17 +461,18 @@ TEST(Generics, ATypeParameterNamesNoFieldParameterOrLocal) {
                 "variable",
                 ":4:18: error: 'U' is a type name and cannot be used as a "
                 "parameter name"});
-  auto renamed = semaCheck(
-      "class R<T> { v: T; }\n"
-      "impl R<U> {\n"
-      "  fn x(T: int) -> int { T = T + 1; return T; }\n"
-      "  static fn s(T: int) -> int { return T; }\n"
-      "}\n"
-      "struct Q<T> { v: T; }\nimpl Q<U> { fn x(T: int) -> int { return T; } }\n"
-      "fn main() -> int {\n"
-      "  r = R<int>(1); q = Q<int>(2);\n"
-      "  return r.x(1) + R<int>::s(2) + q.x(3);\n"
-      "}\n");
+  auto renamed =
+      semaCheck("class R<T> { v: T; }\n"
+                "impl R<U> {\n"
+                "  view fn x(T: int) -> int { T = T + 1; return T; }\n"
+                "  static fn s(T: int) -> int { return T; }\n"
+                "}\n"
+                "struct Q<T> { v: T; }\n"
+                "impl Q<U> { view fn x(T: int) -> int { return T; } }\n"
+                "fn main() -> int {\n"
+                "  r = R<int>(1); q = Q<int>(2);\n"
+                "  return r.x(1) + R<int>::s(2) + q.x(3);\n"
+                "}\n");
   EXPECT_TRUE(renamed.Ok) << renamed.Diagnostics;
   // A template's declarations are checked with its own type parameters,
   // not those of the generic body instantiating it: `g<int>` and
@@ -685,7 +687,7 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
        "2:20: error: instantiating 'A<((((((int, int, int), (int, int, int), "
        "(int, int, int)), (...' inside an instantiation of 'A" +
            limit + "4374); a generic class"},
-      {"class C<T> {\n  v: T;\n  fn grow() -> int {\n"
+      {"class C<T> {\n  v: T;\n  view fn grow() -> int {\n"
        "    let d = C<(T, T, T)>((self.v, self.v, self.v));\n"
        "    return d.grow();\n  }\n}\n"
        "fn main() -> int { let c = C<int>(1); return c.grow(); }\n",
@@ -749,7 +751,7 @@ TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
 TEST(Generics, InferenceFromSliceAndBoxParams) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
     fn first<T>(xs: view T[]) -> view T { return xs[0]; }
-    fn unbox<T>(b: Box<T>) -> T { return b.get(); }
+    fn unbox<T>(b: mut Box<T>) -> T { return b.get(); }
     fn pick<A, B>(a: A, b: B) -> B { return b; }
   )",
                               R"(
@@ -824,7 +826,7 @@ TEST(Generics, InferenceAmbiguous) {
 }
 
 TEST(Generics, ConstructorArgumentInference) {
-  auto r = semaCheck(withMain(kBox, "b = Box(5); n: int = b.get(); "
+  auto r = semaCheck(withMain(kBox, "b: mut = Box(5); n: int = b.get(); "
                                     "c: Box<Str> = Box(\"s\");"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
@@ -1268,7 +1270,7 @@ TEST(GenericsTypes, TupleAndOptionalBodiesInstantiate) {
       }
     }
     fn main() -> int {
-      q = Pair<Str, int>("a", 1);
+      q: mut = Pair<Str, int>("a", 1);
       s: (int, Str) = q.swap();
       k: Str = q.first();
       n: Node = orElse(Slot<Node>().get(), Node(0));
@@ -1336,7 +1338,7 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
       fn __init__() { }
     }
     fn main() -> int {
-      b = Slot<int>();
+      b: mut = Slot<int>();
       b.put(3);
       match b.get() { n: int { x: int = n + 1; } None { } }
       return 0;
@@ -1373,7 +1375,7 @@ TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
                                   "class Node {}\n"
                                   "impl Node { fn __init__() { } }\n",
                               R"(
-    a: Box<(int, Str)> = Box<(int, Str)>((1, "a"));
+    a: mut Box<(int, Str)> = Box<(int, Str)>((1, "a"));
     t: (int, Str) = a.get();
     n: Node? = None;
     b: Box<Node?> = Box<Node?>(n);
@@ -1402,7 +1404,7 @@ fn main() -> int {
   s: Str = lib::mkPair().first();
   n: int = lib::mkBoxPair().get().b;
   x, y = lib::mkBoxes();
-  k: Str = x.first();
+  k: Str = x.a;
   return n;
 }
 )");
@@ -1430,8 +1432,8 @@ static const char *const kBoxWithStatics = R"(
 
 TEST(Generics, StaticFnOfAnInstantiation) {
   auto r = check(withMain(kBoxWithStatics, R"(
-    b = Box<int>::of(1);
-    s: Box<Str> = Box<Str>::of("s");
+    b: mut = Box<int>::of(1);
+    s: mut Box<Str> = Box<Str>::of("s");
     t = Box<int>::pair(2);
     n = t.0.get() + t.1.get() + b.get();
     io::println(s.get() + Str(n));

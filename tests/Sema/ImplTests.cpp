@@ -38,9 +38,9 @@ class B : A {}
 impl B { fn __init__() { __super__(2); } }
 impl B { view fn plus(k: int) -> int { return self.doubled() + k; } }
 fn main() -> int {
-  a = A::make();
+  a: mut = A::make();
   a.bump();
-  b = B();
+  b: mut = B();
   b.bump();
   return a.twice() + b.plus(1);
 }
@@ -157,7 +157,7 @@ fn label<T: Named>(x: view T) -> Str { return x.name(); }
 class Holder { b: Box<Str>; }
 impl Holder { fn __init__() { self.b = Box("s"); } }
 fn main() -> int {
-  b = Box(1);
+  b: mut = Box(1);
   b.set(b.get() + 1);
   h = Holder();
   io::println(label(b) + label(h.b));

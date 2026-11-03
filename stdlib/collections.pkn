@@ -248,7 +248,7 @@ fn listOf<T>(xs: view T[]) -> List<T> {
 // string so far for each element.  `out` is a string of its own (each use
 // of a literal is a new one), so the appends change no other.
 fn listToString<T: Show>(xs: view List<T>) -> Str {
-  let out: Str = "[";
+  let out: mut Str = "[";
   i: unsigned = 0;
   while i < xs.len() {
     if i > 0 { out.concat(", "); }
@@ -439,7 +439,7 @@ impl LinkedList<T> {
   }
 
   // Take node `n` out of the chain.
-  fn __unlink(n: _Node<T>) {
+  fn __unlink(n: mut _Node<T>) {
     match n.prev {
       p: _Node<T> { p.next = n.next; }
       None { self.__head = n.next; }
@@ -654,8 +654,8 @@ impl _Table<K, V> {
   fn remove(k: view K) -> bool {
     let h: int = k.hash();
     let b: unsigned = _bucket(h, self.__buckets.len());
-    prev: _Entry<K, V>? = None;
-    cur: _Entry<K, V>? = self.__buckets.get(b);
+    prev: mut _Entry<K, V>? = None;
+    cur: mut _Entry<K, V>? = self.__buckets.get(b);
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -756,8 +756,9 @@ impl _Table<K, V> {
 
   // The entry of key `k`, whose hash is `h`, or None: for put(), which
   // changes it, and for get().
-  fn __find(k: view K, h: int) -> _Entry<K, V>? {
-    cur: _Entry<K, V>? = self.__buckets.get(_bucket(h, self.__buckets.len()));
+  fn __find(k: view K, h: int) -> mut _Entry<K, V>? {
+    cur: mut _Entry<K, V>? =
+        self.__buckets.get(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -778,7 +779,7 @@ impl _Table<K, V> {
     self.__buckets = _buffer<_Entry<K, V>?>(n);
     i: unsigned = 0;
     while i < old.len() {
-      cur: _Entry<K, V>? = old.get(i);
+      cur: mut _Entry<K, V>? = old.get(i);
       while cur != None {
         match cur {
           e: _Entry<K, V> {

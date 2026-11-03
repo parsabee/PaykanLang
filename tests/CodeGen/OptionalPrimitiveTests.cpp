@@ -235,7 +235,7 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
       fn __init__() { }
     }
     fn main() -> int {
-      r = Reading();
+      r: mut = Reading();
       io::println(r.value); io::println(r.ok); io::println(r.tag); io::println(r.count);
       r.value = 2.5; r.ok = True; r.tag = 'k';
       r.bump(); r.bump(); r.bump();
@@ -268,7 +268,7 @@ TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
       e: int?;
     }
     fn main() -> int {
-      m = Mixed(True, -1, 'x', None, 2.5, 'y', "str", 7);
+      m: mut = Mixed(True, -1, 'x', None, 2.5, 'y', "str", 7);
       io::println(m.a); io::println(Str(m.n)); io::println(m.b); io::println(m.c);
       io::println(m.f); io::println(m.d); io::println(m.s); io::println(m.e);
       m.c = False; m.b = None; m.n = 9;
@@ -385,14 +385,14 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
       match o { n: view int { return Str<int>(n); } None { return "None"; } }
     }
     class Base {
-      fn pick(c: bool) -> char? { return None; }
+      view fn pick(c: bool) -> char? { return None; }
     }
 
     impl Base {
       fn __init__() { }
     }
     class Derived : Base {
-      fn pick(c: bool) -> char? { if (c) { return 'd'; } return None; }
+      view fn pick(c: bool) -> char? { if (c) { return 'd'; } return None; }
     }
 
     impl Derived {
@@ -404,7 +404,7 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
       x: int? = None;
       bump(x); bump(x);
       io::println(show(x));
-      b = Box2();
+      b: mut = Box2();
       bump(b.n);
       io::println(show(b.n));
       y: inout = b.n;
@@ -449,11 +449,11 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
     fn wrap<T>(x: T) -> T? { return x; }
     fn orElse<T>(o: T?, d: T) -> T { match o { v: T { return v; } None { return d; } } }
     fn main() -> int {
-      c = Cell<int?>(None);
+      c: mut = Cell<int?>(None);
       io::println(c.get());
       c.v = 8;
       io::println(c.get());
-      s = Slot<float>();
+      s: mut = Slot<float>();
       io::println(s.take());
       s.put(2);
       io::println(s.take());
@@ -576,7 +576,7 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
       fn __init__() { self.s = [None, None, None]; }
     }
     fn main() -> int {
-      st = Stack<int>(0);
+      st: mut = Stack<int>(0);
       i = 0;
       while (i < 8) { st.push(i * 10); i = i + 1; }
       total = 0;
@@ -585,7 +585,7 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
         match st.pop() { n: int { total = total + n; } None { going = False; } }
       }
       io::println(Str<int>(total));
-      sl = Slots<float>();
+      sl: mut = Slots<float>();
       sl.put(1, 2.5);
       io::println(sl.get(0)); io::println(sl.get(1));
       return 0;

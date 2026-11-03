@@ -65,12 +65,12 @@ fn main() -> int {
   io::println(Str(empty.len()));  // 0
 
   io::println("=== method: concat() (in-place mutation) ===");
-  let a: Str = "hello";
+  let a: mut Str = "hello";
   let b: Str = " world";
   a.concat(b);
   io::println(a);               // hello world
   // concat more
-  let a2: Str = "hello";
+  let a2: mut Str = "hello";
   a2.concat(" !!");
   io::println(a2);              // hello !!
 

@@ -298,7 +298,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The qualifier of variable @p name (unique when it has none).
   ast::Qualifier qualifierOfVar(std::string_view name) const;
   /// The qualifier of the reference @p e reads: its place's (a variable's,
-  /// a field's, through a `const` receiver), a call's result's; unique for
+  /// a field's, through an immutable receiver), a call's result's; unique for
   /// a temporary.
   ast::Qualifier qualifierOf(const ast::Expr *e);
   /// Whether @p q may qualify a value of type @p inner (an error names why
@@ -311,9 +311,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// and the copy rule under --strict-ownership.
   bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                           const std::string &what, ast::SourceLocation loc);
-  /// Why the place @p e cannot change through a `const` reference or field
+  /// Why the place @p e cannot change through an immutable reference or field
   /// on its way; "" when it can.
   std::string constPlace(const ast::Expr *e);
+  /// Whether the objects a value at @p e holds may be written: the value's
+  /// variable is not `let` (nor a borrow, a loop's copy or a capture), or
+  /// the object it is part of is `mut`.
+  bool valueRootWritable(const ast::Expr *e);
   /// Whether a value of @p ty read from a place is copied (the design's
   /// Copyable): a number, bool, char, an enum of Copyable payloads, a
   /// tuple, struct, fixed array or optional of Copyable parts, an `atomic`
@@ -321,7 +325,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// When not, @p why (if given) names the move-only part.
   bool isCopyable(ast::Type *ty, std::string *why = nullptr);
   /// isCopyable of a part held with qualifier @p q: a `shared` reference
-  /// or a handle copies, a unique or `const` one does not.
+  /// or a handle copies, a unique one (`mut` or not) does not.
   bool isCopyablePart(ast::Type *ty, ast::Qualifier q,
                       std::string *why = nullptr);
   /// Why a value of @p ty, held with qualifier @p q, cannot cross to
@@ -339,7 +343,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                              const std::string &callee);
   /// A qualifier written on a borrow (a `view` or `inout` parameter,
   /// result or local) is an error: a borrow takes the object whatever its
-  /// qualifier, a `view` is read-only already, and an `inout` of a `const`
+  /// qualifier, a `view` is read-only already, and an `inout` of an immutable
   /// object could not change it (owner, 2026-11-02).
   bool checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                             const std::string &what, ast::SourceLocation loc);

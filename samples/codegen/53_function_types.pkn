@@ -99,7 +99,7 @@ fn main() -> int {
   })));
 
   // Fields of a class and of a struct; elements of an array and a tuple.
-  let btn = Button("ok", fn(l: Str) -> Str { return l + "!"; });
+  let btn: mut = Button("ok", fn(l: Str) -> Str { return l + "!"; });
   let op = Op("plus", plus);
   let fs: ((int) -> int)[2] = [sq, h];
   let t: ((int, int) -> int, Str) = (plus, "t");
@@ -107,7 +107,7 @@ fn main() -> int {
       + Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
 
   // A method's lambda shares its object.
-  let c = Counter(1);
+  let c: mut = Counter(1);
   let get = c.make();
   let add = c.adder();
   add(41);

@@ -90,7 +90,7 @@ TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
       "a.x = 3;",                              // member assignment
       "a[1] = 2;",                             // subscript assignment
       "xs = [1]; xs[0] = a;",                  // assigned into an array
-      "pp = P(1); pp.x = a;",                  // assigned into a field
+      "pp: mut = P(1); pp.x = a;",             // assigned into a field
       "t = (a, 1); io::println(t.0);",         // tuple element
       "u = [a, a]; io::println(Str(u[1]));",   // array element
       "s = Str(a); io::println(s);",           // inferred conversion

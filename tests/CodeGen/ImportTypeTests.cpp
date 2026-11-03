@@ -32,7 +32,7 @@ TEST(Module, MethodReturnsModuleLocalClass) {
   writeTempFile(tmpDir.string(), "lib.pkn", R"(
 class A { v: int; }
 impl A { fn __init__() { self.v = 7; } }
-class B { fn make() -> A { return A(); } }
+class B { view fn make() -> A { return A(); } }
 impl B { fn __init__() {} }
 fn mk() -> A { return A(); }
 )");
@@ -65,8 +65,8 @@ impl Item { fn __init__(v: int) { self.v = v; } }
 class Bag {
   kind: Kind;
   first: Item;
-  fn items() -> Item[3] { return [Item(1), Item(2), Item(3)]; }
-  fn kindOf() -> Kind { return self.kind; }
+  view fn items() -> Item[3] { return [Item(1), Item(2), Item(3)]; }
+  view fn kindOf() -> Kind { return self.kind; }
 }
 
 impl Bag {
@@ -106,7 +106,7 @@ TEST(Module, TransitiveClassFlowsThroughSignature) {
   std::filesystem::create_directories(tmpDir);
 
   writeTempFile(tmpDir.string(), "leaf.pkn", R"(
-class Thing { v: int; fn twice() -> int { return self.v + self.v; } }
+class Thing { v: int; view fn twice() -> int { return self.v + self.v; } }
 impl Thing { fn __init__(v: int) { self.v = v; } }
 )");
   writeTempFile(tmpDir.string(), "mid.pkn", R"(
@@ -122,7 +122,7 @@ impl Wrap {
 )");
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
 import mid;
-fn main() -> int { w: mid::Wrap = mid::Wrap(); t = w.get(); return t.twice(); }
+fn main() -> int { w: mut mid::Wrap = mid::Wrap(); t = w.get(); return t.twice(); }
 )");
 
   auto r = compileAndRunFile(mainPath);

@@ -111,7 +111,7 @@ fn main() -> int {
     for j in i..3 { p = p + Str(i) + Str(j) + " "; }
   }
   let by = -3;
-  let counter = Counter(0);
+  let counter: mut = Counter(0);
   counter.addUpTo(3);
   io::println(p + "| " + times("ab", 3) + " | " + seq(10, 0, by) + "| "
       + Str(counter.n));

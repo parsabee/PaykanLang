@@ -112,6 +112,7 @@ constexpr Keyword kKeywords[] = {
     {"const", Tok::KwConst},
     {"locked", Tok::KwLocked},
     {"lock", Tok::KwLock},
+    {"mut", Tok::KwMut},
 };
 
 // The table spells the grammar's keywords, frontend::kKeywords, each once
@@ -206,6 +207,8 @@ const char *describe(Tok k) {
     return "'locked'";
   case Tok::KwLock:
     return "'lock'";
+  case Tok::KwMut:
+    return "'mut'";
   case Tok::Underscore:
     return "'_'";
   case Tok::Assign:
@@ -388,6 +391,8 @@ const char *tokenKindName(Tok k) {
     return "KW_LOCKED";
   case Tok::KwLock:
     return "KW_LOCK";
+  case Tok::KwMut:
+    return "KW_MUT";
   case Tok::Underscore:
     return "UNDERSCORE";
   case Tok::Assign:

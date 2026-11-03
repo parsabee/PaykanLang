@@ -1654,8 +1654,8 @@ TEST(Driver, EmitMLIRPrintsEachStage) {
 // call: no vtable is accessed through a pointer to another type (#62).
 TEST(Driver, EmitCVTablesArePaykanMethodArrays) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("class A { fn f() -> int { return 1; } }"
-                      "class B : A { fn f() -> int { return 2; } }"
+  auto src = writeTmp("class A { view fn f() -> int { return 1; } }"
+                      "class B : A { view fn f() -> int { return 2; } }"
                       "fn g(a: A) -> int { return a.f(); }"
                       "fn main() -> int { return g(B()); }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
@@ -1683,7 +1683,7 @@ TEST(Driver, EmitCVTablesArePaykanMethodArrays) {
 TEST(Driver, EmitCOmitsUnusedEntities) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
-      "class K { fn seven() -> int { return 7; } }"
+      "class K { view fn seven() -> int { return 7; } }"
       "fn side() -> int { s = \"side\"; return s.len(); }"
       "fn main() -> int { side(); k = K(); x: int = if True then 1 else 2;"
       "  return k.seven() + x; }");
@@ -4446,28 +4446,28 @@ TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
          "fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + "
          "x;\n"
          "\n"
-         "fn reset(c: Counts) -> int {\n"
+         "fn reset(c: mut Counts) -> int {\n"
          "  c.xs = [0, 0, 0];\n"
          "  return 0;\n"
          "}\n"
          "\n"
-         "fn sum(xs: view int[], c: Counts) -> int => total(xs, reset(c)); "
-         "// xs as passed\n"
+         "fn sum(xs: view int[], c: mut Counts) -> int => total(xs, "
+         "reset(c)); // xs as passed\n"
          "\n"
          "fn main() -> int {\n"
-         "  let c = Counts([1, 2, 3]);\n"
+         "  let c: mut = Counts([1, 2, 3]);\n"
          "  io::println(Str(sum(c.xs, c)) + \" \" + Str(sum(c.xs, c)));\n"
          "  return 0;\n"
          "}\n";
   const std::string warning =
       src +
-      ":14:51: warning: 'reset' in a later argument may write the elements "
+      ":14:55: warning: 'reset' in a later argument may write the elements "
       "of slice 'xs': they are copied to the heap before the call to "
       "'total'\n"
       " 13 | \n"
-      " 14 | fn sum(xs: view int[], c: Counts) -> int => total(xs, reset(c)); "
-      "// xs as passed\n"
-      "    |                                                   ^~\n"
+      " 14 | fn sum(xs: view int[], c: mut Counts) -> int => total(xs, "
+      "reset(c)); // xs as passed\n"
+      "    |                                                       ^~\n"
       " 15 | \n";
   const std::string exe = (dir / "counts").string();
   const std::string pkm = (dir / "counts.pkm").string();

@@ -355,8 +355,8 @@ TEST(Class, MemberNamedLikeBuiltinOk) {
   auto r = semaCheck(withClasses(R"(import ::io;
     class Logger {
       open: int;
-      fn print(msg: Str) { io::println(msg); }
-      fn StrInt(n: int) -> Str { return "n"; }
+      view fn print(msg: Str) { io::println(msg); }
+      view fn StrInt(n: int) -> Str { return "n"; }
     }
 
     impl Logger {
@@ -594,8 +594,8 @@ TEST(Class, MatchBindingInScope) {
   auto r = semaCheck(R"(
     class Dog { name: Str; }
     fn main() -> int {
-      x: Obj = Dog("");
-      match x { d: Dog { d.name = "Rex"; } _ {} }
+      x: mut Obj = Dog("");
+      match x { d: inout Dog { d.name = "Rex"; } _ {} }
       return 0;
     }
   )");
@@ -1734,11 +1734,12 @@ TEST(ClassRecovery, BuiltinNameClassDoesNotHideOtherClasses) {
 }
 
 TEST(ClassRecovery, NameTakenByEnumReportsEachClassOnce) {
-  auto r = semaCheck(withClasses("enum Color { Red }\n"
-                                 "class Color { }\n"
-                                 "class Color { }\n"
-                                 "class Fine { fn m() -> int { return 1; } }",
-                                 "c = Color();\nf = Fine();\nreturn f.m();"));
+  auto r =
+      semaCheck(withClasses("enum Color { Red }\n"
+                            "class Color { }\n"
+                            "class Color { }\n"
+                            "class Fine { view fn m() -> int { return 1; } }",
+                            "c = Color();\nf = Fine();\nreturn f.m();"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("class 'Color' conflicts with an enum"),
             std::string::npos)
@@ -1756,11 +1757,11 @@ TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
       "class C : Missing { y: int; }\n"
       "impl C { fn __init__() { self.y = 1; } }\n"
       "class D : C {\n"
-      "  fn get() -> int { return self.y + self.z; } }\n"
+      "  view fn get() -> int { return self.y + self.z; } }\n"
       "impl D { fn __init__() { __super__(); } }\n"
       "class Ok {}\n"
       "impl Ok { fn __init__() { } }",
-      "c = C();\nc.y = 4;\nd = D();\nn = d.inherited();\no = Ok();\n"
+      "c: mut = C();\nc.y = 4;\nd = D();\nn = d.inherited();\no = Ok();\n"
       "return d.get();"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("superclass 'Missing' of class 'C' is not "
@@ -1833,7 +1834,7 @@ TEST(ClassRecovery, ASuperclassThatIsNoClassSaysWhatItIs) {
 TEST(ClassRecovery, BadMemberTypeIsReportedOnce) {
   auto r = semaCheck(
       withClasses("class A { x: Nope;\n"
-                  "          fn get() -> int { return self.x; } }\n"
+                  "          view fn get() -> int { return self.x; } }\n"
                   "impl A { fn __init__(v: int) { self.x = v; } }\n"
                   "class B : A {}\n"
                   "impl B { fn __init__() { __super__(1); } }\n"
@@ -1854,11 +1855,12 @@ TEST(ClassRecovery, BadMemberTypeIsReportedOnce) {
 }
 
 TEST(ClassRecovery, InheritanceCycleIsReportedOnce) {
-  auto r = semaCheck(withClasses("class P : Q { }\n"
-                                 "class Q : P { fn f() -> int { return 1; } }\n"
-                                 "class R : R { }",
-                                 "q = Q();\np = P();\nr = R();\n"
-                                 "return q.f() + p.f();"));
+  auto r =
+      semaCheck(withClasses("class P : Q { }\n"
+                            "class Q : P { view fn f() -> int { return 1; } }\n"
+                            "class R : R { }",
+                            "q = Q();\np = P();\nr = R();\n"
+                            "return q.f() + p.f();"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("cyclic inheritance involving class 'P'"),
             std::string::npos)

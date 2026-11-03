@@ -19,7 +19,7 @@ class Stats {
 }
 
 // Every worker sees the same frozen Stats; its atomic fields are cells.
-async fn record(st: atomic shared const Stats, id: int, n: int) -> int {
+async fn record(st: atomic shared Stats, id: int, n: int) -> int {
   for i in 0..n {
     st.served += 1;
     st.bytes += 0.5;
@@ -66,7 +66,7 @@ fn main() -> int {
   io::println("n " + Str(n) + ", m " + Str(m) + ", k " + Str(k));
 
   // fields: a class holds cells; a frozen object's cells still change
-  let st: atomic shared const = Stats("s", 0, 0.0, False);
+  let st: atomic shared = Stats("s", 0, 0.0, False);
   let t1 = record(st, 1, 1000);
   let t2 = record(st, 2, 1000);
   let t3 = record(st, 3, 1000);

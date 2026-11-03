@@ -65,6 +65,7 @@ enum class Tok : uint8_t {
   KwShared,
   KwConst,
   KwLocked,
+  KwMut,
   KwLock,
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators

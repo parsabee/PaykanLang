@@ -13,11 +13,35 @@ samples/concurrency/README.md.
 
 ### Added
 
-- The keywords `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `const`, `locked`
-  and `lock` (docs/grammar.md).
-- Qualifiers on a reference, as a variable's, a parameter's, a field's or a result's type:
-  unique (unwritten), `const`, `shared`, `shared const`, `atomic`, `atomic shared const` and
-  `locked`. A borrow (`view`, `inout`) takes none.
+- The keywords `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `mut`, `locked`
+  and `lock` (docs/grammar.md); `const` is reserved and rejected wherever it is written
+  (`'const' is gone: a reference is immutable unless written 'mut T' ('shared mut T',
+  'locked mut T')`).
+- Qualifiers on a reference, as a variable's, a parameter's, a field's or a result's type.
+  The bare type is unique and immutable, the cheapest form, with zero overhead: through it
+  there is no field assignment, no call of a method that is not a `view fn` and no passing to
+  an `inout` parameter (`'x' is immutable (a 'T'; write 'mut T' to change it); cannot assign
+  to its field 'f'`). Every word added buys one thing at one cost: `mut T` writes through the
+  owner; `shared T` several owners on one thread, immutable, and `shared mut T` several owners
+  with writes; `atomic shared T` an object frozen for every thread; `locked mut T` an object
+  written under a lock, in `lock c as v: inout { }` (`locked T` alone is accepted with a
+  warning: it locks what nothing writes); `atomic T` the cell of a number, `bool` or `char`.
+  `self` is mutable in every method but a `view fn`; a unique field follows its root and is
+  never written `mut`, while a `shared mut` field keeps its writes through any root; an
+  object held in a struct, a tuple or an array follows the variable's `let` (`'p' is
+  declared with 'let', and so are the objects it holds; drop 'let' to change them`); a
+  `match` binding is a copy of its subject in the subject's form. `mut T` flows
+  into `T`; `T` gains `mut` only by `move` or straight from a temporary (`cannot store a 'T'
+  in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`); `shared T` and
+  `shared mut T`, a frozen object and a cell convert only as they are. The rejected
+  spellings: `const` in any position (`'const' is gone: a reference is immutable unless
+  written 'mut T' ('shared mut T', 'locked mut T')`), `mut` on a value (`'mut' applies to
+  objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes`),
+  `atomic shared mut T` (freeze it as `atomic shared T`, or change it as `locked mut T`),
+  `atomic mut T` (a cell changes by its operations), `mut shared T` and `mut locked T`
+  (`'mut shared' is spelled 'shared mut': the form first, then the writes`), and a second
+  qualifier. A borrow (`view`, `inout`) takes none: `inout` is the borrow's writes, and it
+  takes a `mut` or `shared mut` reference.
 - `move x` and `move x.f`, the explicit transfer: `x` ends at the move, and a later read is an
   error naming it (or "may have been moved" after a branch that moved it on one path).
 - `async fn` and `await`: calling an `async fn` starts a task and `await` gives its result;
@@ -26,15 +50,17 @@ samples/concurrency/README.md.
   every path before its scope ends: the design's task-handle check, with `await` its one operation.
 - `parallel for i in a..b { }` on LLVM's OpenMP runtime (`libomp`): at most 256 chunks handed
   out one at a time, with reductions (`+=`, `-=`, `*=`) folded in chunk order.
-- `locked T` cells and `lock cell as c: inout|view { }` blocks: an object behind a mutex,
-  reached only inside a `lock` block.
+- `locked mut T` cells and `lock cell as c: inout|view { }` blocks: an object behind a mutex,
+  reached only inside a `lock` block; a `locked T` is read in `: view` blocks only, and a
+  `: inout` block on it says to declare it `locked mut T`.
 - `atomic T` cells of a number type, `bool` or `char`: a read is a load, `=` a store, `+=` and
   `-=` one atomic operation; `exchange(v)` and `compareExchange(expected, desired) -> bool`.
-- `atomic shared const T`: an object frozen with everything it holds by `__walk`, the
+- `atomic shared T`: an object frozen with everything it holds by `__walk`, the
   compiler-generated walk of a class's references in a slot of every vtable (*Changed*); read
-  with no count; `atomic const T` and `atomic shared T` are parse errors naming the full spelling.
+  with no count, and immutable as every bare type is; `atomic shared mut T` is a parse error
+  pointing to `atomic shared T` (frozen) or `locked mut T` (changed under a lock).
 - The send check, at an async call's arguments, an `async fn`'s result and every conversion to
-  `atomic shared const` or `locked`: a `shared` or `weak` part, a function value or an `Obj`
+  `atomic shared` or `locked`: a `shared` or `weak` part, a function value or an `Obj`
   cannot cross.
 - The built-in trait `Copyable` (docs/language/06-traits.md): structural, never implemented;
   numbers, `bool`, `char`, enums, `shared` references, handles and values of such parts.
@@ -47,7 +73,8 @@ samples/concurrency/README.md.
 - The mlir backend's `pir.async_call`, `pir.await` and `pir.parallel` ops: `async.func`,
   `async.call`, `async.await` and `scf.parallel` then OpenMP on the LLVM path; in order on the C path.
 - `mem::Box<T>::value()` (docs/stdlib/memory.md), a `view fn` reading the value: the way into a
-  `view`, `const` or `atomic shared const` box, since `get()` is not one.
+  `view`, an immutable (bare `Box<T>`) or an `atomic shared` box, since `get()` returns an
+  `inout T` and needs a `mut` box.
 - A `mem::Buffer<T>` of numbers in a `parallel for` body: one of the enclosing function read at
   any index and written at the loop's variable (`set`); one frozen in a box read through `value()`.
 - The lowering emits a number buffer's `at`, `get` and `len` in place, a bounds check and a load,

@@ -115,7 +115,7 @@ fn main() -> int {
       [("a", (1, None)), ("b", (nb, Node(4)))];
   io::println(nested[0].toString() + " " + nested[1].toString());
 
-  let s = Slot();
+  let s: mut = Slot();
   s.p = (None, 7);
   io::println(s.p);
 

@@ -159,7 +159,7 @@ fn main() -> int {
 
   // 7. Enum field in a class, mutated via a method.
   io::println("== class field ==");
-  let p: Player = Player(Direction::North);
+  let p: mut Player = Player(Direction::North);
   io::println(p.report());                       // North
   p.turnAround();
   io::println(p.report());                       // South

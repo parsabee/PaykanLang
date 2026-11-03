@@ -1350,7 +1350,7 @@ private:
     }
     // The concurrency prototype: `atomic T`, a task's type (never written
     // by a program, kept for an AST that has one), and a qualified type
-    // (`shared const Node`; `shared` alone where the type is inferred).
+    // (`shared Node`; `shared` alone where the type is inferred).
     if (e.Text == "atomic-type" || e.Text == "task-type") {
       Type *inner = nullptr;
       {
@@ -1368,21 +1368,23 @@ private:
       if (!spelling)
         return nullptr;
       Qualifier qual;
-      if (*spelling == "const")
+      if (*spelling == "mut")
         qual = {QualForm::Unique, true};
       else if (*spelling == "shared")
         qual = {QualForm::Shared, false};
-      else if (*spelling == "shared const")
+      else if (*spelling == "shared mut")
         qual = {QualForm::Shared, true};
-      else if (*spelling == "atomic shared const")
-        qual = {QualForm::AtomicSharedConst, false};
+      else if (*spelling == "atomic shared")
+        qual = {QualForm::AtomicShared, false};
       else if (*spelling == "locked")
         qual = {QualForm::Locked, false};
+      else if (*spelling == "locked mut")
+        qual = {QualForm::Locked, true};
       else
         return fail(e,
                     "unknown qualifier \"" + *spelling +
-                        "\" (const, shared, shared const, atomic shared const, "
-                        "locked)"),
+                        "\" (mut, shared, shared mut, atomic shared, locked, "
+                        "locked mut)"),
                nullptr;
       Type *inner = nullptr;
       if (!f.atEnd()) {

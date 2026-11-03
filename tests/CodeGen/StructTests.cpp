@@ -85,7 +85,7 @@ TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
       o = Outer(r, 5);
       o.r.name = "o";
       io::println(o.r.name + " " + r.name + " " + Str(o.r.node == r.node));
-      h = Holder(mk(4), [mk(5), mk(6)]);
+      h: mut = Holder(mk(4), [mk(5), mk(6)]);
       h.r.name = "h";
       h.rs[1].name = "h6";
       io::println(h.r.name + " " + h.rs[0].name + " " + h.rs[1].name);
@@ -177,7 +177,7 @@ TEST(Struct, MethodsChangeTheReceiverInPlace) {
       c = Counter::named("a");
       c.tick();
       c.tickTwice();
-      b = Box(c);                 // a copy in the field
+      b: mut = Box(c);            // a copy in the field
       b.c.tick();
       cs: Counter[2] = [c, c];
       cs[1].tick();
@@ -227,12 +227,12 @@ TEST(Struct, ImplBlocksTraitsAndGenerics) {
     fn main() -> int {
       p = Point(1, 2);
       p.shift(1);
-      h = Holder(p);
+      h: mut = Holder(p);
       h.p.y = 3;
       io::println(show(p) + " " + greet(p) + " " + Str(hashOf(p)) + " " + Str(p.hash() == Point(2, 3).hash()));
       pair = twice(p);
       m = Point::origin().moved(2);
-      b = Box(Point(1, 2));
+      b: mut = Box(Point(1, 2));
       b.set(Point(3, 4));
       q: Point = b.get();
       io::println(show(q) + " " + show(b.get()) + " " + Str(pick(True, Point(1, 1), Point(2, 2)).sum()));
@@ -337,7 +337,7 @@ TEST(Struct, GenericStructsInstantiateLikeClasses) {
       b = Box(Pair(3, 4));
       b.set(Pair(5, 6));
       io::println(Str(sumInts(b.get())) + " " + Str(b.hash()) + " " + show(mkBox("s")));
-      h = Holder(9);
+      h: mut = Holder(9);
       h.p.a = 10;
       bs: Box<int>[2] = [Box(1), Box(2)];
       bs[1].v = 7;

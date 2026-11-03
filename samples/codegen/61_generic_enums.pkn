@@ -115,7 +115,7 @@ fn main() -> int {
   }
 
   let slot = Slot("answer", Maybe::Just(42));
-  let reg = Registry(Maybe::Nothing);
+  let reg: mut = Registry(Maybe::Nothing);
   reg.last = map(slot.value, fn(v: view int) => Str(v));
   io::println(slot.toString() + " " + reg.last.toString() + " "
       + Str(reg.last == Maybe::Just("42")));

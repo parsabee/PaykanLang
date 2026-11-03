@@ -1,28 +1,45 @@
+// The bare type is a unique reference nothing writes; `mut` adds the
+// writes, and a reference gains it only by `move`.  Each line marked
+// `error` is rejected by Sema.
 import ::io;
 
 class Node {
   id: int;
   name: Str;
 }
+class Bag {
+  items: int[4];
+  fn clear() { self.items = [0; 4]; }
+}
 struct Pair {
   left: Node;
   n: int;
 }
 
-fn change(n: Node) {
+fn change(n: inout Node) {
   n.id = 0;
 }
 
 fn main() -> int {
-  let s: shared Node = Node(1, "s");
-  let u: Node = s;                      // error: shared into unique
-  let c: const Node = Node(2, "c");
-  c.id = 5;                             // error: const field assignment
-  change(c);                            // error: const into a unique parameter
-  let sc: shared const Node = Node(3, "sc");
-  sc.name = "x";                        // error: const
-  let k: const int = 1;                 // error: const applies to objects
-  let w: shared int = 2;                // error: shared qualifies a reference
-  let p: atomic shared const Pair = Pair(Node(4, "p"), 1);   // error: a struct is a value: box it
+  let c = Node(1, "c");                 // the bare type: immutable
+  c.id = 5;                             // error: cannot assign to a field through it
+  c.name.concat("!");                   // error: `concat` writes the string: not a `view fn`
+  n: Node = Node(2, "n");
+  change(n);                            // error: an `inout` parameter writes; `n` is immutable
+  let g = Bag([1, 2, 3, 4]);
+  g.items[0] = 9;                       // error: cannot assign to its elements
+  g.clear();                            // error: `clear` is not a `view fn`
+  let m: mut Node = c;                  // error: a reference gains `mut` only by `move`
+  let w: mut Node = move c;             // fine: moved in
+  w.id = 7;
+  let s: shared Node = Node(3, "s");
+  let sm: shared mut Node = s;          // error: `shared` and `shared mut` convert only as they are
+  let sm2: shared mut Node = Node(4, "sm");
+  let s2: shared Node = sm2;            // error: nor the other way
+  let u: Node = s;                      // error: a `shared` reference never becomes unique
+  let k: mut int = 1;                   // error: `mut` applies to objects; `let` fixes a value
+  let v: mut Pair = Pair(Node(5, "p"), 1);   // error: a struct is a value too
+  let f: shared int = 2;                // error: `shared` qualifies a reference
+  let p: atomic shared Pair = Pair(Node(6, "q"), 1);   // error: a struct is a value: box it
   return 0;
 }

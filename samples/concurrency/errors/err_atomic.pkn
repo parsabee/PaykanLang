@@ -13,7 +13,7 @@ fn main() -> int {
   hits *= 2;                              // error: not an atomic operation
   let x = hits.load();                    // error: no method
   let s: atomic Str = "a";                // error: not a number: a Str is an object
-  let o: atomic Box = Box(1);             // error: an object crosses threads as 'atomic shared const Box' or 'locked Box'
+  let o: atomic Box = Box(1);             // error: an object crosses threads as 'atomic shared Box' or 'locked mut Box'
   let b = Box(0);
   b.n = b.n + 1;                          // fine: the parser rewrites it to "b.n += 1"
   b.n.compareExchange(1);                 // error: argument count

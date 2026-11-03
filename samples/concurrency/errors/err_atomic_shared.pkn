@@ -1,0 +1,25 @@
+// An `atomic shared` object is frozen for every thread: nothing writes it,
+// and it never converts back into a form that could.  Each line marked
+// `error` is rejected by Sema.
+import ::io;
+
+class Limits {
+  lo: int;
+  hi: int;
+}
+class Config {
+  name: Str;
+  limits: Limits;
+  fn rename(n: Str) { self.name = n; }
+}
+
+fn main() -> int {
+  let cfg: atomic shared Config = Config("demo", Limits(0, 100));
+  cfg.limits.hi = 5;                 // error: frozen, through a field
+  cfg.name = "x";                    // error: frozen
+  cfg.rename("y");                   // error: `rename` is not a `view fn`
+  let u: Config = cfg;               // error: none back
+  let m: mut Config = cfg;           // error: not into `mut` either
+  let k: atomic shared int = 1;      // error: qualifies a reference
+  return 0;
+}

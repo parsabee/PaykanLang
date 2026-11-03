@@ -100,7 +100,7 @@ inline constexpr const char *kMethodEquals = "equals";
 inline constexpr const char *kMethodExchange = "exchange";
 inline constexpr const char *kMethodCompareExchange = "compareExchange";
 /// The walk every class has after `equals` (the concurrency prototype):
-/// freezes what the object holds, for `atomic shared const`.
+/// freezes what the object holds, for `atomic shared`.
 inline constexpr const char *kMethodWalk = "__walk";
 
 // Traits
@@ -191,7 +191,7 @@ inline constexpr const char *kPaykanObjectDestroy = "PaykanObject_destroy";
 inline constexpr const char *kPaykanObjectToString = "PaykanObject_toString";
 inline constexpr const char *kPaykanObjectEquals = "PaykanObject_equals";
 inline constexpr const char *kPaykanObjectWalk = "PaykanObject_walk";
-// The concurrency prototype's freeze (`atomic shared const`): an object and
+// The concurrency prototype's freeze (`atomic shared`): an object and
 // what it holds become immortal, counted nowhere.
 inline constexpr const char *kPaykanFreeze = "Paykan_freeze";
 inline constexpr const char *kPaykanFreezeMem = "Paykan_freeze_mem";

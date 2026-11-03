@@ -3,7 +3,7 @@
 // Sema tests: the concurrency prototype's checks (docs/design/concurrency.md;
 // src/Sema/SemaConcurrency.cpp and the visitors in Sema.cpp that call it):
 // `async fn` and `await`, the send check, `Copyable`, `parallel for`
-// bodies, `atomic` places and `locked` cells.  The programs of
+// bodies, `atomic` places and `locked mut` cells.  The programs of
 // samples/concurrency are the map; each diagnostic's text is the compiler's.
 
 #include "TestUtils.h"
@@ -222,18 +222,18 @@ fn main() -> int {
 
 // What crosses: a moved unique reference, a temporary (`move` before one
 // does nothing), a class whose reference field is a handle, a cell's
-// handle and the handles of an `atomic shared const` object and a `locked`
+// handle and the handles of an `atomic shared` object and a `locked mut`
 // cell, each copied into any number of tasks, and a `Str` temporary.
 TEST(Concurrency, HandlesAndTemporariesCrossToATask) {
   auto r = semaCheck(R"(class Cache { hits: atomic int; }
-class Job { name: Str; cache: atomic shared const Cache; }
+class Job { name: Str; cache: atomic shared Cache; }
 class Node { id: int; }
 class Counts { total: int; }
 async fn consume(n: Node) -> int { return n.id; }
 async fn run(j: Job, x: int) -> int { j.cache.hits += 1; return j.name.len() + x; }
 async fn cell(c: atomic int) -> int { return c; }
-async fn frozen(n: atomic shared const Node) -> int { return n.id; }
-async fn guarded(c: locked Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn frozen(n: atomic shared Node) -> int { return n.id; }
+async fn guarded(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn opt(n: Node?) -> int { return 1; }
 async fn name(s: Str) -> int { return s.len(); }
 fn main() -> int {
@@ -241,15 +241,15 @@ fn main() -> int {
   let t1 = consume(move b);
   let t2 = consume(Node(3));
   let t3 = consume(move Node(4));
-  let shared_cache: atomic shared const Cache = Cache(0);
+  let shared_cache: atomic shared Cache = Cache(0);
   let t4 = run(Job("job", shared_cache), 3);
   let k: atomic int = 0;
   let t5 = cell(k);
   let t6 = cell(k);
-  let fr: atomic shared const Node = Node(5);
+  let fr: atomic shared Node = Node(5);
   let t7 = frozen(fr);
   let t8 = frozen(fr);
-  let lk: locked Counts = Counts(0);
+  let lk: locked mut Counts = Counts(0);
   let t9 = guarded(lk);
   let t10 = guarded(lk);
   let o = Node(6);
@@ -264,11 +264,11 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
-// At a conversion to `atomic shared const` or `locked`, the object is frozen or
-// made a cell with everything it holds, so the send check runs on its
+// At a conversion to `atomic shared` or `locked mut`, the object is frozen
+// or made a cell with everything it holds, so the send check runs on its
 // fields, named by path.  A unique value converts, moved or a temporary,
-// and a `const` one into `atomic shared const`.
-TEST(Concurrency, SendCheckAtAConversionToAtomicSharedConstOrLocked) {
+// `mut` or not.
+TEST(Concurrency, SendCheckAtAConversionToAtomicSharedOrLocked) {
   auto r = semaCheck(R"(class Cache { hits: int; }
 class Job { name: Str; cache: shared Cache; }
 class Holder { job: Job; }
@@ -276,16 +276,16 @@ class Fun { f: () -> int; }
 class Any { o: Obj; }
 class Node { id: int; }
 fn main() -> int {
-  let k: atomic shared const Holder = Holder(Job("k", Cache(2)));
-  let l: locked Holder = Holder(Job("l", Cache(3)));
-  let m: locked Fun = Fun(fn() => 1);
-  let a: atomic shared const Any = Any(Node(0));
+  let k: atomic shared Holder = Holder(Job("k", Cache(2)));
+  let l: locked mut Holder = Holder(Job("l", Cache(3)));
+  let m: locked mut Fun = Fun(fn() => 1);
+  let a: atomic shared Any = Any(Node(0));
   let n = Node(1);
-  let f: atomic shared const Node = move n;
-  let g: locked Node = Node(2);
-  let h: atomic shared const Node = Node(3);
-  let c: const Node = Node(4);
-  let v: atomic shared const Node = c;
+  let f: atomic shared Node = move n;
+  let g: locked mut Node = Node(2);
+  let h: atomic shared Node = Node(3);
+  let c: mut Node = Node(4);
+  let v: atomic shared Node = move c;
   return f.id + h.id + v.id;
 })");
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
@@ -295,15 +295,15 @@ fn main() -> int {
   expectErrors(
       r,
       {(":8:3: error: cannot make 'Holder(...)' (a 'Holder') 'atomic "
-        "shared const': " +
+        "shared': " +
         shared)
            .c_str(),
-       (":9:3: error: cannot make 'Holder(...)' (a 'Holder') 'locked': " +
+       (":9:3: error: cannot make 'Holder(...)' (a 'Holder') 'locked mut': " +
         shared)
            .c_str(),
-       ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked': field 'f' "
-       "is a function value, whose captures are not known",
-       ":11:3: error: cannot make 'Any(...)' (a 'Any') 'atomic shared const': "
+       ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked mut': field "
+       "'f' is a function value, whose captures are not known",
+       ":11:3: error: cannot make 'Any(...)' (a 'Any') 'atomic shared': "
        "field 'o' is an 'Obj', which may be any class"});
   expectCleanLines(r, {":12:", ":13:", ":14:", ":15:", ":16:", ":17:"});
 }
@@ -370,7 +370,7 @@ fn main() -> int {
 // -- `parallel for`
 
 // A body reads the enclosing function's values, arrays of values, `atomic`
-// variables and handles (an `atomic shared const` object's fields, a `locked`
+// variables and handles (an `atomic shared` object's fields, a `locked mut`
 // cell under a `lock`), declares what it likes, changes an outer number by
 // a reduction (`+=`, `-=`, `*=`, under an `if`, a `match` or an inner loop
 // too), bumps an atomic, and writes an `inout` or outer array at the loop's
@@ -397,9 +397,9 @@ fn main() -> int {
   xs = [0.0; 100];
   ys = [0.0; 100];
   let hits: atomic int = 0;
-  let cfg: atomic shared const Config = Config(0, 50);
-  let counts: locked Counts = Counts(0);
-  let st: atomic shared const Stats = Stats(0);
+  let cfg: atomic shared Config = Config(0, 50);
+  let counts: locked mut Counts = Counts(0);
+  let st: atomic shared Stats = Stats(0);
   total = 0;
   prod = 1;
   parallel for i in 0..n {
@@ -499,7 +499,7 @@ fn main() -> int {
   expectCleanLines(r, {":15:", ":17:", ":18:", ":25:"});
 }
 
-// An `atomic` variable of the enclosing function (an `atomic shared const`
+// An `atomic` variable of the enclosing function (an `atomic shared`
 // object's field too) changed by a statement of the body itself changes on
 // every iteration, which bounces its cache line between cores: a warning,
 // not an error, and none for a change under an `if`, a `match` or an inner
@@ -508,7 +508,7 @@ TEST(Concurrency, AnAtomicChangedEveryIterationWarns) {
   auto r = semaCheck(R"(class Stats { served: atomic int; }
 fn main() -> int {
   let hits: atomic int = 0;
-  let st: atomic shared const Stats = Stats(0);
+  let st: atomic shared Stats = Stats(0);
   parallel for i in 0..100 {
     hits += 1;
     st.served += 1;
@@ -549,7 +549,7 @@ fn main() -> int {
 // `self.f = p` in `__init__`) is a handle to the same cell, so a handle
 // passes to an `atomic` parameter and comes back from an `atomic` result;
 // any other value makes a new cell.  The `atomic` fields of an
-// `atomic shared const` object still change, in a task or a parallel body.
+// `atomic shared` object still change, in a task or a parallel body.
 TEST(Concurrency, AtomicPlaces) {
   auto r = semaCheck(
       R"(class Stats { name: Str; served: atomic int; bytes: atomic float; done: atomic bool; }
@@ -559,7 +559,7 @@ impl Stats {
   }
 }
 class Box { n: atomic int; }
-async fn record(st: atomic shared const Stats, id: int, n: int) -> int {
+async fn record(st: atomic shared Stats, id: int, n: int) -> int {
   for i in 0..n { st.served += 1; st.bytes += 0.5; }
   return id;
 }
@@ -587,7 +587,7 @@ fn main() -> int {
   let k2 = same(k);
   k2 -= 1;
   let shared_n: atomic int = 1;
-  let st: atomic shared const Stats = Stats("s", shared_n);
+  let st: atomic shared Stats = Stats("s", shared_n);
   let t1 = record(st, 1, 10);
   let ids = await t1;
   st.done = True;
@@ -659,8 +659,8 @@ fn main() -> int {
                 (":7:3: error: 'hits" + separately).c_str(),
                 (":8:3: error: 'hits" + separately).c_str(),
                 ":9:3: error: 'atomic' holds a number, a 'bool' or a 'char', "
-                "not 'Str': an object crosses threads as 'atomic shared const "
-                "Str' (frozen) or 'locked Str'",
+                "not 'Str': an object crosses threads as 'atomic shared "
+                "Str' (frozen) or 'locked mut Str'",
                 (":11:3" + bnReads).c_str(), (":12:3" + bnReads).c_str(),
                 (":13:3" + bnReads).c_str(), (":14:3" + hitsReads).c_str(),
                 (":15:3" + hitsReads).c_str(), (":16:3" + hitsReads).c_str(),
@@ -711,27 +711,27 @@ fn main() -> int {
 
 // -- `locked`
 
-// A `locked` cell is made where a unique object flows into a `locked` slot
-// (a variable, a parameter, a field, a result); its handle copies into
-// tasks, variables and parallel bodies, and its contents are reached in a
-// `lock` block: `inout` to change them, `view` to read.
+// A `locked mut` cell is made where a unique object flows into a `locked
+// mut` slot (a variable, a parameter, a field, a result); its handle copies
+// into tasks, variables and parallel bodies, and its contents are reached
+// in a `lock` block: `inout` to change them, `view` to read.
 TEST(Concurrency, LockedCells) {
   auto r = semaCheck(R"(class Counts { hits: int[16]; total: int; }
-class Holder { cell: locked Counts; }
-async fn record(counts: locked Counts, id: int, n: int) -> int {
+class Holder { cell: locked mut Counts; }
+async fn record(counts: locked mut Counts, id: int, n: int) -> int {
   for i in 0..n {
     lock counts as c: inout { c.hits[(id + i) % 16] += 1; c.total += 1; }
   }
   return id;
 }
-fn total(counts: locked Counts) -> int {
+fn total(counts: locked mut Counts) -> int {
   sum = 0;
   lock counts as v: view { for i in 0..16 { sum += v.hits[i]; } sum += v.total; }
   return sum;
 }
-fn make() -> locked Counts { return Counts([0; 16], 0); }
+fn make() -> locked mut Counts { return Counts([0; 16], 0); }
 fn main() -> int {
-  let counts: locked Counts = Counts([0; 16], 0);
+  let counts: locked mut Counts = Counts([0; 16], 0);
   let a = record(counts, 1, 10);
   let b = record(counts, 2, 10);
   let ids = await a + await b;
@@ -750,8 +750,8 @@ fn main() -> int {
 // borrow of the cell by a `view` or `inout` parameter, the handle in a
 // unique slot; inside a `lock` block, a write through a `view` binding,
 // `await`, another `lock`, a `parallel for`, `return`, `break` and
-// `continue`; a `lock` of what is not `locked`; and a `locked` value (the
-// prototype locks objects).
+// `continue`; a `lock` of what is not `locked`; and a `locked mut` value
+// (the prototype locks objects).
 TEST(Concurrency, LockedRules) {
   auto r = semaCheck(R"(class Counts { hits: int[16]; total: int; }
 async fn ping(n: int) -> int { return n; }
@@ -759,7 +759,7 @@ fn look(c: view Counts) -> int { return c.total; }
 fn change(c: inout Counts) { c.total = 1; }
 fn take(c: Counts) -> int { return c.total; }
 fn main() -> int {
-  let counts: locked Counts = Counts([0; 16], 0);
+  let counts: locked mut Counts = Counts([0; 16], 0);
   let t = counts.total;
   let h = counts.hits[0];
   counts.total += 1;
@@ -780,7 +780,7 @@ fn main() -> int {
   for i in 0..2 { lock counts as c: inout { continue; } }
   let n = 3;
   lock n as m: inout { }
-  let k: locked int = 1;
+  let k: locked mut int = 1;
   let o = Counts([0; 16], 0);
   lock o as m: inout { }
   return 0;
@@ -800,9 +800,9 @@ fn main() -> int {
           (":10:3" + reach).c_str(), (":11:3" + reach).c_str(),
           (":12:8" + borrowed + "view' parameter 'c' of 'look'").c_str(),
           (":13:10" + borrowed + "inout' parameter 'c' of 'change'").c_str(),
-          ":14:8: error: cannot store a 'locked Counts' in parameter 1 of "
-          "'take', a 'Counts': a reference converts only from unique, or from "
-          "'const' into the other 'const' forms",
+          ":14:8: error: cannot store a 'locked mut Counts' in parameter 1 of "
+          "'take', a 'Counts': a 'shared' reference, a frozen object and a "
+          "cell convert only as they are",
           ":16:5: error: 'c' is a 'view' local; cannot assign to its field "
           "'total'",
           ":17:5: error: 'c' is a 'view' local; cannot assign to its elements",
@@ -814,9 +814,77 @@ fn main() -> int {
           ":24:45: error: 'break' cannot leave a 'lock' block",
           ":25:45: error: 'continue' cannot leave a 'lock' block",
           (":27:8: error: 'n" + notLocked).c_str(),
-          ":28:3: error: 'locked' holds an object in the prototype, not a "
+          ":28:3: error: 'locked mut' holds an object in the prototype, not a "
           "'int' (wrap the value in a class)",
           (":30:8: error: 'o" + notLocked).c_str()});
+}
+
+// The lock buys the writes: `locked T` without `mut` locks an object
+// nothing writes, which `atomic shared T` gives with no lock, so each
+// declaration of one (a variable, a field, a parameter, a result) is a
+// warning, not an error.  Its contents are still read in a `lock ... as v:
+// view` block; a `lock ... as v: inout` block, or a write outside any
+// block, is refused, naming the `locked mut T` to declare; and the two
+// forms of cell convert into neither.
+TEST(Concurrency, ALockedCellWithoutMutWarns) {
+  auto r = semaCheck(R"(class Counts { hits: int[16]; total: int; }
+class Holder { cell: locked Counts; }
+fn read(c: locked Counts) -> int { n = 0; lock c as v: view { n = v.total; } return n; }
+fn give() -> locked Counts { return Counts([0; 16], 0); }
+fn main() -> int {
+  let counts: locked Counts = Counts([0; 16], 0);
+  lock counts as c: inout { c.total += 1; }
+  counts.total += 1;
+  let h = Holder(give());
+  lock h.cell as c: inout { c.total = 1; }
+  let other = counts;
+  lock other as c: inout { }
+  let m: locked mut Counts = Counts([0; 16], 0);
+  let k: locked Counts = m;
+  let j: locked mut Counts = counts;
+  return read(counts) + read(h.cell);
+})");
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+  const std::string warns =
+      ": warning: 'locked Counts' locks an object nothing writes; 'atomic "
+      "shared Counts' is read from every thread with no lock";
+  for (const std::string &diag :
+       {":2:16" + warns, ":3:9" + warns, ":4:1" + warns, ":6:3" + warns,
+        ":14:3" + warns})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(countWarnings(r), 5u) << r.Diagnostics;
+  const std::string never =
+      "' is 'locked Counts', whose contents are never written; declare it "
+      "'locked mut Counts' ";
+  const std::string asTheyAre =
+      "': a 'shared' reference, a frozen object and a cell convert only as "
+      "they are";
+  expectErrors(
+      r, {(":7:18: error: 'counts" + never +
+           "for a 'lock ... as c: inout' "
+           "block")
+              .c_str(),
+          (std::string(":8:3: error: 'counts' is 'locked': reach its contents "
+                       "in 'lock counts as c: view { }' (or 'inout')"))
+              .c_str(),
+          (":10:18: error: 'h.cell" + never +
+           "for a 'lock ... as c: inout' "
+           "block")
+              .c_str(),
+          (":12:17: error: 'other" + never +
+           "for a 'lock ... as c: inout' "
+           "block")
+              .c_str(),
+          (":14:3: error: cannot store a 'locked mut Counts' in variable 'k', "
+           "a 'locked Counts" +
+           asTheyAre)
+              .c_str(),
+          (":15:3: error: cannot store a 'locked Counts' in variable 'j', a "
+           "'locked mut Counts" +
+           asTheyAre)
+              .c_str()});
+  expectCleanLines(r, {":16:"});
 }
 
 // -- Heap buffers of the enclosing function

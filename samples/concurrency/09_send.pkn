@@ -15,7 +15,7 @@ class Cache {
 }
 class Job {
   name: Str;
-  cache: atomic shared const Cache;
+  cache: atomic shared Cache;
 }   // a handle inside: crossable
 class Named {
   tag: Str;
@@ -40,10 +40,10 @@ fn show(n: view Job) -> int {
 }   // a view takes every form
 fn mark(n: inout Job) {
   n.name = n.name + "!";
-}        // an inout takes a unique or shared object
+}        // an inout takes a `mut` or `shared mut` object
 
 fn main() -> int {
-  let shared_cache: atomic shared const Cache = Cache(0);
+  let shared_cache: atomic shared Cache = Cache(0);
   let t = run(Job("job", shared_cache), 3, move Named("tag", 4));   // a temporary may be `move`d
   let nm = Named("tt", 1);
   let u = run(Job("j", shared_cache), 3, move nm);                   // nm moved
@@ -52,10 +52,10 @@ fn main() -> int {
   let p = Point(1, 2);
   let pair = twice(p);
   io::println(Str(pair.0.x + pair.1.y));
-  let c: const Job = Job("cc", shared_cache);
+  let c: Job = Job("cc", shared_cache);          // the bare type: a view takes it
   io::println(Str(show(c)));
-  s: shared Job = Job("s", shared_cache);
-  mark(s);                                   // no retain or release for the borrow
+  s: shared mut Job = Job("s", shared_cache);
+  mark(s);                                   // an inout takes it, with no retain or release
   io::println(s.name + " " + Str(show(s)));
   return 0;
 }

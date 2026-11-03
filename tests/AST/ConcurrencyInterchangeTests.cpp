@@ -4,9 +4,9 @@
 // The AST interchange format (paykan/ast/Interchange.h) for the nodes of
 // the concurrency prototype (docs/design/concurrency.md,
 // samples/concurrency/README.md): an `async fn`, a `parallel for`, a `lock`
-// block, the qualifiers on a place's type (`const`, `shared`, `shared
-// const`, `atomic shared const`, `locked`, and `x: shared = e` with the type
-// inferred), `atomic T`, and the `move` and `await` operators.  As
+// block, the qualifiers on a place's type (`mut`, `shared`, `shared mut`,
+// `atomic shared`, `locked`, `locked mut`, and `x: shared = e` with the
+// type inferred), `atomic T`, and the `move` and `await` operators.  As
 // InterchangeTests.cpp does for the rest of the language:
 //   - each round-trips: the recursive-descent frontend's AST, written and
 //     read back, is the same AST (its --dump-ast text, and its interchange
@@ -358,60 +358,62 @@ TEST(ConcurrencyInterchange, LockBlocks) {
 }
 
 // A qualified type is `(qualified-type LOC "spelling" TYPE)`, the
-// qualifier spelled as written (`const`, `shared`, `shared const`,
-// `atomic shared const`, `locked`) and the type it qualifies: on a
+// qualifier spelled as written (`mut`, `shared`, `shared mut`, `atomic
+// shared`, `locked`, `locked mut`) and the type it qualifies: on a
 // parameter, a field, a local and a result alike.  It is a type, not a
-// `(qual ...)` mode.
+// `(qual ...)` mode; the bare type, unique and immutable, is unwritten.
 TEST(ConcurrencyInterchange, QualifiedTypes) {
   parser::ParserDriver driver("recursive-descent");
-  ast::TranslationUnit *tu = parseProgram(
-      driver,
-      "class Pair {\n"
-      "  left: const Node;\n"
-      "  right: shared Node;\n"
-      "  cfg: atomic shared const Node;\n"
-      "  cell: locked Node;\n"
-      "}\n"
-      "fn f(a: const Node, b: shared Node, c: shared const Node, "
-      "d: atomic shared const Node, e: locked Node) -> locked Node {\n"
-      "  let x: const Node = a;\n"
-      "  let y: shared const Node = c;\n"
-      "  return e;\n"
-      "}\n"
-      "fn g(n: shared Node) -> shared const Node { return n; }\n",
-      "qualified");
+  ast::TranslationUnit *tu =
+      parseProgram(driver,
+                   "class Pair {\n"
+                   "  left: mut Node;\n"
+                   "  right: shared Node;\n"
+                   "  cfg: atomic shared Node;\n"
+                   "  cell: locked mut Node;\n"
+                   "}\n"
+                   "fn f(a: mut Node, b: shared Node, c: shared mut Node, "
+                   "d: atomic shared Node, e: locked Node, g: locked mut Node) "
+                   "-> locked mut Node {\n"
+                   "  let x: mut Node = a;\n"
+                   "  let y: shared mut Node = c;\n"
+                   "  return g;\n"
+                   "}\n"
+                   "fn h(n: shared Node) -> shared mut Node { return n; }\n",
+                   "qualified");
   ASSERT_NE(tu, nullptr);
   const std::string text = write(*tu);
   const std::string one = flat(text);
   for (const char *form :
-       {"(var @2:3-2:19 \"left\" (qualified-type @2:9-2:19 \"const\" "
-        "(named-type @2:15-2:19 \"Node\")) _)",
+       {"(var @2:3-2:17 \"left\" (qualified-type @2:9-2:17 \"mut\" "
+        "(named-type @2:13-2:17 \"Node\")) _)",
         "(var @3:3-3:21 \"right\" (qualified-type @3:10-3:21 \"shared\" "
         "(named-type @3:17-3:21 \"Node\")) _)",
-        "(var @4:3-4:32 \"cfg\" (qualified-type @4:8-4:32 \"atomic shared "
-        "const\" "
-        "(named-type @4:28-4:32 \"Node\")) _)",
-        "(var @5:3-5:20 \"cell\" (qualified-type @5:9-5:20 \"locked\" "
-        "(named-type @5:16-5:20 \"Node\")) _)",
-        "(param @7:6-7:19 \"a\" (qualified-type @7:9-7:19 \"const\" "
-        "(named-type @7:15-7:19 \"Node\")))",
-        "(param @7:21-7:35 \"b\" (qualified-type @7:24-7:35 \"shared\" "
-        "(named-type @7:31-7:35 \"Node\")))",
-        "(param @7:37-7:57 \"c\" (qualified-type @7:40-7:57 \"shared const\" "
-        "(named-type @7:53-7:57 \"Node\")))",
-        "(param @7:59-7:86 \"d\" (qualified-type @7:62-7:86 \"atomic shared "
-        "const\" "
-        "(named-type @7:82-7:86 \"Node\")))",
+        "(var @4:3-4:26 \"cfg\" (qualified-type @4:8-4:26 \"atomic shared\" "
+        "(named-type @4:22-4:26 \"Node\")) _)",
+        "(var @5:3-5:24 \"cell\" (qualified-type @5:9-5:24 \"locked mut\" "
+        "(named-type @5:20-5:24 \"Node\")) _)",
+        "(param @7:6-7:17 \"a\" (qualified-type @7:9-7:17 \"mut\" "
+        "(named-type @7:13-7:17 \"Node\")))",
+        "(param @7:19-7:33 \"b\" (qualified-type @7:22-7:33 \"shared\" "
+        "(named-type @7:29-7:33 \"Node\")))",
+        "(param @7:35-7:53 \"c\" (qualified-type @7:38-7:53 \"shared mut\" "
+        "(named-type @7:49-7:53 \"Node\")))",
+        "(param @7:55-7:76 \"d\" (qualified-type @7:58-7:76 \"atomic shared\" "
+        "(named-type @7:72-7:76 \"Node\")))",
+        "(param @7:78-7:92 \"e\" (qualified-type @7:81-7:92 \"locked\" "
+        "(named-type @7:88-7:92 \"Node\")))",
         // The result's, where the return type goes.
-        "(param @7:88-7:102 \"e\" (qualified-type @7:91-7:102 \"locked\" "
-        "(named-type @7:98-7:102 \"Node\")))) (qualified-type @7:107-7:118 "
-        "\"locked\" (named-type @7:114-7:118 \"Node\")) (block @7:120-7:120",
-        "(var @8:3-8:24 \"x\" (qualified-type @8:10-8:20 \"const\" "
-        "(named-type @8:16-8:20 \"Node\")) (ident @8:23-8:24 \"a\") (let))",
-        "(var @9:3-9:31 \"y\" (qualified-type @9:10-9:27 \"shared const\" "
-        "(named-type @9:23-9:27 \"Node\")) (ident @9:30-9:31 \"c\") (let))",
-        "(qualified-type @12:25-12:42 \"shared const\" (named-type "
-        "@12:38-12:42 \"Node\")) (block @12:44-12:44"})
+        "(param @7:94-7:112 \"g\" (qualified-type @7:97-7:112 \"locked mut\" "
+        "(named-type @7:108-7:112 \"Node\")))) (qualified-type @7:117-7:132 "
+        "\"locked mut\" (named-type @7:128-7:132 \"Node\")) (block "
+        "@7:134-7:134",
+        "(var @8:3-8:22 \"x\" (qualified-type @8:10-8:18 \"mut\" "
+        "(named-type @8:14-8:18 \"Node\")) (ident @8:21-8:22 \"a\") (let))",
+        "(var @9:3-9:29 \"y\" (qualified-type @9:10-9:25 \"shared mut\" "
+        "(named-type @9:21-9:25 \"Node\")) (ident @9:28-9:29 \"c\") (let))",
+        "(qualified-type @12:25-12:40 \"shared mut\" (named-type "
+        "@12:36-12:40 \"Node\")) (block @12:42-12:42"})
     EXPECT_NE(one.find(form), std::string::npos) << form << "\n" << text;
   ast::ASTContext ctx;
   std::string error;
@@ -420,42 +422,45 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
   // Each reads back to its qualifier, on the class type it qualifies.
   struct Expected {
     ast::QualForm Form;
-    bool Const;
+    bool Mut;
     const char *Spelling;
   };
   const Expected params[] = {
-      {ast::QualForm::Unique, true, "const"},
+      {ast::QualForm::Unique, true, "mut"},
       {ast::QualForm::Shared, false, "shared"},
-      {ast::QualForm::Shared, true, "shared const"},
-      {ast::QualForm::AtomicSharedConst, false, "atomic shared const"},
-      {ast::QualForm::Locked, false, "locked"}};
+      {ast::QualForm::Shared, true, "shared mut"},
+      {ast::QualForm::AtomicShared, false, "atomic shared"},
+      {ast::QualForm::Locked, false, "locked"},
+      {ast::QualForm::Locked, true, "locked mut"}};
   auto *f = back->getFuncDecls()[0];
-  ASSERT_EQ(f->getParams().size(), 5u);
-  for (size_t i = 0; i < 5; ++i) {
+  ASSERT_EQ(f->getParams().size(), 6u);
+  for (size_t i = 0; i < 6; ++i) {
     auto *qt = ast::cast<ast::QualifiedType>(f->getParams()[i].ParamType);
     EXPECT_EQ(qt->getQualifier().Form, params[i].Form) << i;
-    EXPECT_EQ(qt->getQualifier().Const, params[i].Const) << i;
+    EXPECT_EQ(qt->getQualifier().Mut, params[i].Mut) << i;
     EXPECT_STREQ(qt->getQualifier().spelling(), params[i].Spelling) << i;
     EXPECT_EQ(ast::cast<ast::ClassType>(qt->getInnerType())->getName(), "Node")
         << i;
   }
   auto *result = ast::cast<ast::QualifiedType>(f->getReturnType());
   EXPECT_EQ(result->getQualifier().Form, ast::QualForm::Locked);
+  EXPECT_TRUE(result->getQualifier().Mut);
   const auto &fields = back->getClassDecls()[0]->getFields();
   ASSERT_EQ(fields.size(), 4u);
   EXPECT_STREQ(ast::cast<ast::QualifiedType>(fields[2]->getType())
                    ->getQualifier()
                    .spelling(),
-               "atomic shared const");
+               "atomic shared");
   const std::string d = dump(back);
-  EXPECT_NE(d.find("QualifiedType <7:107-7:118> 'locked'\n"), std::string::npos)
+  EXPECT_NE(d.find("QualifiedType <7:117-7:132> 'locked mut'\n"),
+            std::string::npos)
       << d;
   EXPECT_EQ(d, dump(tu));
   EXPECT_EQ(write(*back), text);
 
   // Without locations, each spelling reads.
-  for (const char *spelling :
-       {"const", "shared", "shared const", "atomic shared const", "locked"}) {
+  for (const char *spelling : {"mut", "shared", "shared mut", "atomic shared",
+                               "locked", "locked mut"}) {
     ast::TranslationUnit *hand =
         read(paramOf("(qualified-type \"" + std::string(spelling) +
                      "\" (named-type \"Node\"))"),
@@ -471,8 +476,7 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
     const char *Error;
   };
   const char *const kForms =
-      "(const, shared, shared const, atomic shared const, "
-      "locked)";
+      "(mut, shared, shared mut, atomic shared, locked, locked mut)";
   for (const Case &c :
        {Case{"(qualified-type \"mutable\" (named-type \"Node\"))",
              "unknown qualifier \"mutable\" "},
@@ -481,19 +485,33 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
              "unknown qualifier \"\" "},
         Case{"(qualified-type \"atomic\" (named-type \"int\"))",
              "unknown qualifier \"atomic\" "},
-        // The frozen form is spelled in full, `atomic shared const`: the
-        // short spellings the parser rejects are unknown here too.
+        // `const` is gone, from every form it was written in.
+        Case{"(qualified-type \"const\" (named-type \"Node\"))",
+             "unknown qualifier \"const\" "},
+        Case{"(qualified-type \"shared const\" (named-type \"Node\"))",
+             "unknown qualifier \"shared const\" "},
+        Case{"(qualified-type \"atomic shared const\" (named-type "
+             "\"Node\"))",
+             "unknown qualifier \"atomic shared const\" "},
         Case{"(qualified-type \"atomic const\" (named-type \"Node\"))",
              "unknown qualifier \"atomic const\" "},
-        Case{"(qualified-type \"atomic shared\" (named-type \"Node\"))",
-             "unknown qualifier \"atomic shared\" "},
-        // As written: one space, in this order, in lower case.
-        Case{"(qualified-type \"const shared\" (named-type \"Node\"))",
-             "unknown qualifier \"const shared\" "},
-        Case{"(qualified-type \"shared  const\" (named-type \"Node\"))",
-             "unknown qualifier \"shared  const\" "},
+        // The forms the parser rejects are unknown here too: a frozen
+        // object and a cell take no `mut`.
+        Case{"(qualified-type \"atomic shared mut\" (named-type \"Node\"))",
+             "unknown qualifier \"atomic shared mut\" "},
+        Case{"(qualified-type \"atomic mut\" (named-type \"int\"))",
+             "unknown qualifier \"atomic mut\" "},
+        // As written: the form first, one space, in lower case.
+        Case{"(qualified-type \"mut shared\" (named-type \"Node\"))",
+             "unknown qualifier \"mut shared\" "},
+        Case{"(qualified-type \"mut locked\" (named-type \"Node\"))",
+             "unknown qualifier \"mut locked\" "},
+        Case{"(qualified-type \"shared  mut\" (named-type \"Node\"))",
+             "unknown qualifier \"shared  mut\" "},
         Case{"(qualified-type \"Shared\" (named-type \"Node\"))",
              "unknown qualifier \"Shared\" "},
+        Case{"(qualified-type \"Mut\" (named-type \"Node\"))",
+             "unknown qualifier \"Mut\" "},
         Case{"(qualified-type shared (named-type \"Node\"))",
              "expected a string: the qualifier"},
         Case{"(qualified-type)",
@@ -506,10 +524,13 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
              "unexpected field in (qualified-type ...)"},
         // A qualifier is not a parameter's mode.
         Case{"(named-type \"Node\") (qual shared)",
+             "expected (qual view) or (qual inout)"},
+        Case{"(named-type \"Node\") (qual mut)",
              "expected (qual view) or (qual inout)"}})
     expectRejected(paramOf(c.Type), c.Error);
   for (const char *spelling :
-       {"mutable", "", "atomic", "atomic const", "atomic shared"})
+       {"mutable", "", "atomic", "const", "shared const", "atomic shared const",
+        "atomic shared mut", "mut shared"})
     expectRejected(paramOf("(qualified-type \"" + std::string(spelling) +
                            "\" (named-type \"Node\"))"),
                    kForms);
@@ -522,10 +543,11 @@ TEST(ConcurrencyInterchange, InferredQualifiedLocals) {
   ast::TranslationUnit *tu = parseProgram(driver,
                                           "fn f(b: shared Node) {\n"
                                           "  y: shared = b;\n"
-                                          "  z: shared const = b;\n"
-                                          "  w: const = b;\n"
-                                          "  v: atomic shared const = b;\n"
+                                          "  z: shared mut = b;\n"
+                                          "  w: mut = b;\n"
+                                          "  v: atomic shared = b;\n"
                                           "  u: locked = b;\n"
+                                          "  t: locked mut = b;\n"
                                           "}\n",
                                           "inferred");
   ASSERT_NE(tu, nullptr);
@@ -537,22 +559,23 @@ TEST(ConcurrencyInterchange, InferredQualifiedLocals) {
   for (const char *form :
        {"(var @2:3-2:16 \"y\" (qualified-type @2:6-2:12 \"shared\") (ident "
         "@2:15-2:16 \"b\"))",
-        "(var @3:3-3:22 \"z\" (qualified-type @3:6-3:18 \"shared const\") "
-        "(ident @3:21-3:22 \"b\"))",
-        "(var @4:3-4:15 \"w\" (qualified-type @4:6-4:11 \"const\") (ident "
-        "@4:14-4:15 \"b\"))",
-        "(var @5:3-5:29 \"v\" (qualified-type @5:6-5:25 \"atomic shared "
-        "const\") "
-        "(ident @5:28-5:29 \"b\"))",
+        "(var @3:3-3:20 \"z\" (qualified-type @3:6-3:16 \"shared mut\") "
+        "(ident @3:19-3:20 \"b\"))",
+        "(var @4:3-4:13 \"w\" (qualified-type @4:6-4:9 \"mut\") (ident "
+        "@4:12-4:13 \"b\"))",
+        "(var @5:3-5:23 \"v\" (qualified-type @5:6-5:19 \"atomic shared\") "
+        "(ident @5:22-5:23 \"b\"))",
         "(var @6:3-6:16 \"u\" (qualified-type @6:6-6:12 \"locked\") (ident "
-        "@6:15-6:16 \"b\"))"})
+        "@6:15-6:16 \"b\"))",
+        "(var @7:3-7:20 \"t\" (qualified-type @7:6-7:16 \"locked mut\") "
+        "(ident @7:19-7:20 \"b\"))"})
     EXPECT_NE(one.find(form), std::string::npos) << form << "\n" << text;
   ast::ASTContext ctx;
   std::string error;
   ast::TranslationUnit *back = read(text, ctx, error);
   ASSERT_NE(back, nullptr) << error;
   const auto &stmts = back->getFuncDecls()[0]->getBody()->getStatements();
-  ASSERT_EQ(stmts.size(), 5u);
+  ASSERT_EQ(stmts.size(), 6u);
   for (size_t i = 0; i < stmts.size(); ++i) {
     auto *var =
         ast::cast<ast::VarDecl>(ast::cast<ast::DeclStmt>(stmts[i])->getDecl());
@@ -564,21 +587,28 @@ TEST(ConcurrencyInterchange, InferredQualifiedLocals) {
   EXPECT_NE(d.find("VarDecl <2:3-2:16> 'y' type\n"), std::string::npos) << d;
   EXPECT_NE(d.find("QualifiedType <2:6-2:12> 'shared'\n"), std::string::npos)
       << d;
+  EXPECT_NE(d.find("QualifiedType <4:6-4:9> 'mut'\n"), std::string::npos) << d;
   EXPECT_EQ(d, dump(tu));
   EXPECT_EQ(write(*back), text);
 
   // Without a location.
   ast::TranslationUnit *hand =
-      read(fnOf("(decl (var \"y\" (qualified-type \"shared\") (ident \"b\")))"),
+      read(fnOf("(decl (var \"y\" (qualified-type \"shared\") (ident \"b\"))) "
+                "(decl (var \"w\" (qualified-type \"mut\") (ident \"b\")))"),
            ctx, error);
   ASSERT_NE(hand, nullptr) << error;
+  const auto &handStmts = hand->getFuncDecls()[0]->getBody()->getStatements();
+  ASSERT_EQ(handStmts.size(), 2u);
   auto *var = ast::cast<ast::VarDecl>(
-      ast::cast<ast::DeclStmt>(
-          hand->getFuncDecls()[0]->getBody()->getStatements()[0])
-          ->getDecl());
+      ast::cast<ast::DeclStmt>(handStmts[0])->getDecl());
   auto *qt = ast::cast<ast::QualifiedType>(var->getType());
   EXPECT_EQ(qt->getQualifier().Form, ast::QualForm::Shared);
   EXPECT_EQ(qt->getInnerType(), nullptr);
+  auto *mut = ast::cast<ast::QualifiedType>(
+      ast::cast<ast::VarDecl>(ast::cast<ast::DeclStmt>(handStmts[1])->getDecl())
+          ->getType());
+  EXPECT_EQ(mut->getQualifier(), (ast::Qualifier{ast::QualForm::Unique, true}));
+  EXPECT_EQ(mut->getInnerType(), nullptr);
 }
 
 // `atomic T` is `(atomic-type LOC TYPE)`, on a field, a parameter, a local

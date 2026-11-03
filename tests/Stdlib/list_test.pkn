@@ -131,7 +131,7 @@ fn main() -> int {
   // the first.  100,000 elements take time linear in the text, where putting
   // it together with `+` copied it per element.
   let none = collections::List<int>();
-  let first = collections::listToString(none);
+  let first: mut = collections::listToString(none);
   let second = collections::listToString(none);
   first.concat("!");
   io::println(first + " " + second);

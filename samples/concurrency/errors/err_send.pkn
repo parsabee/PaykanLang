@@ -33,11 +33,11 @@ fn twice<T: Copyable>(x: T) -> (T, T) {
 }
 fn grow(n: inout Job) { }
 fn grab(n: inout shared Job) { }                  // error: a borrow carries no qualifier
-fn hold(n: inout const Job) { }                   // error: a borrow carries no qualifier
+fn hold(n: inout mut Job) { }                     // error: a borrow carries no qualifier
 fn show(n: view Job) -> int {
   return n.name.len();
 }
-fn peek(n: view const Job) -> int => n.name.len();   // error: a borrow carries no qualifier
+fn peek(n: view mut Job) -> int => n.name.len();     // error: a borrow carries no qualifier
 
 fn main() -> int {
   let j = Job("j", Cache(0));
@@ -48,9 +48,9 @@ fn main() -> int {
   let o = any(move h);                  // error: field 'job.cache' is shared
   let f = fn() => 3;
   let c = call(move f);                 // (reported at the declaration of 'call')
-  let k: atomic shared const Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
-  s: shared Job = Job("s", Cache(3));
-  grow(s);                              // fine: a shared object passes to inout, with no retain or release
+  let k: atomic shared Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
+  s: shared mut Job = Job("s", Cache(3));
+  grow(s);                              // fine: a shared mut object passes to inout, with no retain or release
   show(s);                              // fine: a view takes every form
   let d = twice(Named("d", 2));         // error: 'Named' is not Copyable
   return 0;

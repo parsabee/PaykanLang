@@ -416,7 +416,7 @@ TEST(Tuple, AsFieldParamReturnAndArrayElement) {
   auto r = semaCheck(R"(
     class Holder {
       pair: (int, Str);
-      fn first() -> int { return self.pair.0; }
+      view fn first() -> int { return self.pair.0; }
       fn get() -> (int, Str) { return self.pair; }
     }
 
@@ -425,7 +425,7 @@ TEST(Tuple, AsFieldParamReturnAndArrayElement) {
     }
     fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }
     fn main() -> int {
-      h: Holder = Holder((1, "a"));
+      h: mut Holder = Holder((1, "a"));
       q, r = h.get();
       pairs: (int, Str)[2] = [(1, "a"), (2, "b")];
       pairs[1] = h.pair;
@@ -528,7 +528,7 @@ TEST(Tuple, ViewHoldingReferencesCannotBeStored) {
                            "(\"b\", Node())];\n";
   for (const char *stmt :
        {"k = first(refs);", "k: (Str, Node) = first(refs);",
-        "h = H();\nh.t = first(refs);", "s: Str = first(refs).0;"}) {
+        "h: mut = H();\nh.t = first(refs);", "s: Str = first(refs).0;"}) {
     std::string body = refs;
     body += stmt;
     auto r = semaCheck(decls + wrapMain(body));
@@ -607,7 +607,7 @@ fn take(p: (Pt, (int, Str))) -> int { return p.0.x; }
 import geo;
 fn main() -> int {
   q, r = geo::divmod(7, 2);
-  b: geo::Bag = geo::Bag();
+  b: mut geo::Bag = geo::Bag();
   n, s = b.get();
   ps: (int, Str)[1] = geo::pairs();
   t: (geo::Pt, (int, Str)) = b.nested();

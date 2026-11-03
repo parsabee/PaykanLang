@@ -104,13 +104,13 @@ std::optional<int64_t> ForStmt::constantStep() const {
 const char *Qualifier::spelling() const {
   switch (Form) {
   case QualForm::Unique:
-    return Const ? "const" : "";
+    return Mut ? "mut" : "";
   case QualForm::Shared:
-    return Const ? "shared const" : "shared";
-  case QualForm::AtomicSharedConst:
-    return "atomic shared const";
+    return Mut ? "shared mut" : "shared";
+  case QualForm::AtomicShared:
+    return "atomic shared";
   case QualForm::Locked:
-    return "locked";
+    return Mut ? "locked mut" : "locked";
   }
   return "";
 }

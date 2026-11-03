@@ -59,10 +59,10 @@ None
   parameter it is passed to, is the same container and can change it (`ys = xs;
   ys.push(2);` adds to `xs` too); a `view` of one calls only its `view fn`s; and it is not
   an `Obj`: where one is needed, put the container in a
-  [`Box`](memory.md) (with `import ::memory as mem;`, `b = mem::Box(xs);`), an object
-  whose `get()` is the container itself (`b.get().push(1);`), and its own
-  `toString()` is a struct's, which shows its private field. `listToString` prints a list's
-  elements. A `LinkedList` is a class, with a class's rules.
+  [`Box`](memory.md) (with `import ::memory as mem;`, `let b: mut = mem::Box(xs);`), an
+  object whose `get()`, through a `mut` box, is the container itself (`b.get().push(1);`),
+  and its own `toString()` is a struct's, which shows its private field. `listToString`
+  prints a list's elements. A `LinkedList` is a class, with a class's rules.
 - **A container holds its own reference to each element**, whether the method that stores
   it takes the element by value (`pushFront(v: T)`, `put(k: K, v: V)`) or lent
   (`push(v: view T)`): an object element is shared with the container, and a value element
@@ -78,13 +78,14 @@ None
     'view'; cannot assign to its field 'n'`).
   - It hands over a copy the caller keeps (`-> T`): the `get` of `List`, `HashMap`,
     `Stack`, `Queue` and the priority queues, `HashMap`'s `getOr`, and `LinkedList`'s
-    `getFront` and `getBack`. The copy is stored, returned and changed like any value of
-    `T`: a value element (an `int`, a tuple, a struct) is the caller's alone, and an object
-    element is shared with the container, so a change through the copy shows in the
-    container, and the object stays the caller's after the container lets it go. Since a
-    copy of an object could change an element, these are not `view fn`s, and a `view` of a
-    container cannot call them (`'xs' is a 'view' parameter; 'get' is not a 'view fn'`):
-    a `view` of a container changes nothing in it.
+    `getFront` and `getBack`. The copy is stored and returned like any value of `T`: a
+    value element (an `int`, a tuple, a struct) is the caller's alone, and an object
+    element is shared with the container, read through the plain `T` the copy is, or
+    changed through a `mut` one taken straight from the call (`n: mut = xs.get(0);`), which
+    shows in the container; the object stays the caller's after the container lets it go.
+    Since a copy of an object could change an element, these are not `view fn`s, and a
+    `view` of a container cannot call them (`'xs' is a 'view' parameter; 'get' is not a
+    'view fn'`): a `view` of a container changes nothing in it.
 
   A method that takes an element out (`pop`, `removeAt`, `dequeue`, `popFront`, ...)
   returns it, and a new list (`copy()`, `toList()`, `keys()`) holds its own references.
@@ -316,7 +317,7 @@ an `unsigned`, and a character outside ASCII is more than one (`"é"` is two).
 feed (`char(11)`, `char(12)`). Each takes its strings as `view`s, so a variable, a field
 or an element read with `at` is passed as it is, and returns new ones: a result is a
 string of its own, or a `List<Str>` of them, never one of the arguments, so a `concat` on
-it changes nothing else.
+it (held in a `mut Str`) changes nothing else.
 
 ```pkn
 import ::io;

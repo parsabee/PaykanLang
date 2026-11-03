@@ -16,7 +16,7 @@ Each program times its own loop with a monotonic clock
 `native fn`), repeats it, and prints one line, `name k=v ... ns_min=N
 ns_mean=M check=C`.  A parallel body reads fixed-size arrays (at most
 16384 elements), so the array kernels go round a 128 KB array that lives
-in L2; and it reads a frozen heap buffer in a box (`atomic shared const
+in L2; and it reads a frozen heap buffer in a box (`atomic shared
 mem::Box<mem::Buffer<T>>`: a buffer is a struct, a value, and takes no
 qualifier of its own), which the `_buf` kernels use for data larger than
 any cache.
@@ -25,7 +25,7 @@ any cache.
 |---|---|---|
 | `sum.pkn` | `s += xs[i % 16384]` over n iterations | a reduction streaming a cache-resident array: one load per iteration |
 | `dot.pkn` | `s += xs[i % 16384] * ys[i % 16384]` | two loads and a multiply-add per iteration |
-| `sum_buf.pkn` | `s += xs.value().at(i)` over a frozen `atomic shared const mem::Box<mem::Buffer<float>>` of n elements | a reduction over a boxed heap buffer, 512 MB by default: data larger than any array, read with no counts; an element read is a bounds check and a load |
+| `sum_buf.pkn` | `s += xs.value().at(i)` over a frozen `atomic shared mem::Box<mem::Buffer<float>>` of n elements | a reduction over a boxed heap buffer, 512 MB by default: data larger than any array, read with no counts; an element read is a bounds check and a load |
 | `dot_buf.pkn` | the same over two boxed buffers | two element reads and a multiply-add per iteration |
 | `saxpy_buf.pkn` | `ys.set(i, a * xs.value().at(i) + ys.at(i))`, `ys` a buffer of the enclosing function | a store per element through the memory module's `set` (a call that checks the index and returns an error value) |
 | `compute.pkn` | `work` dependent multiply-adds per element, then `s += x` | compute bound: ideal scaling, and the performance/efficiency core mix |

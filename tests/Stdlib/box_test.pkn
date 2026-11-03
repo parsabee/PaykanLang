@@ -23,8 +23,8 @@ fn next(l: Light) -> Light {
 
 fn main() -> int {
   // Two names, one box: a change through either shows through both.
-  total = memory::Box(0);
-  alias = total;
+  total: mut = memory::Box(0);
+  alias: mut = total;
   bump(total.get());
   bump(alias.get());
   n: inout int = alias.get();
@@ -32,23 +32,23 @@ fn main() -> int {
   io::println(Str(total.get()) + " " + Str(alias.get()));
 
   // Objects that share one box share its value.
-  a = Counter(total);
+  a: mut = Counter(total);
   b = Counter(total);
   bump(a.hits.get());
-  io::println(Str(b.hits.get()) + " " + Str(total.get()));
+  io::println(Str(b.hits.value()) + " " + Str(total.get()));
 
-  f = memory::Box(1.5);
+  f: mut = memory::Box(1.5);
   x: inout float = f.get();
   x = x * 3.0;
-  c = memory::Box('a');
+  c: mut = memory::Box('a');
   ch: inout char = c.get();
   ch = 'z';
-  flag = memory::Box(False);
+  flag: mut = memory::Box(False);
   on: inout bool = flag.get();
   on = !on;
   io::println(Str(f.get()) + " " + Str(c.get()) + " " + Str(flag.get()));
 
-  light = memory::Box(Light::Red);
+  light: mut = memory::Box(Light::Red);
   i: int = 0;
   while i < 4 {
     l: inout Light = light.get();
@@ -58,8 +58,8 @@ fn main() -> int {
   io::println(Str(light.get() == Light::Green));
 
   // A tuple: read in place, replaced whole.
-  pair = memory::Box((1, "one"));
-  pairAlias = pair;
+  pair: mut = memory::Box((1, "one"));
+  pairAlias: mut = pair;
   io::println(Str(pair.get().0) + pair.get().1);
   p: inout (int, Str) = pairAlias.get();
   p = (2, "two");

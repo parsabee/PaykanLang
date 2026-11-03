@@ -21,16 +21,18 @@ class Entry {
   // Link `e` at the end of the chain that starts here.
   fn append(e: Entry) {
     match self.next {
-      n: Entry { n.append(e); }
+      n: inout Entry { n.append(e); }
       None { self.next = e; }
     }
   }
 
   // Unlink the entry after this one whose key is `key`. Returns True if there
-  // was one.
+  // was one.  The `inout` binding borrows `after`, a `mut` copy of the
+  // reference, so `self.next` stays writable while it is held.
   fn unlink(key: Str) -> bool {
-    match self.next {
-      n: Entry {
+    after: mut Entry? = self.next;
+    match after {
+      n: inout Entry {
         if n.key.equals(key) {
           self.next = n.next;
           return True;
@@ -77,16 +79,19 @@ class HashMap {
   }
 
   // The entry stored under `key`, or None when the key is absent.  Not a
-  // `view fn`: the entry it returns can be changed (insert does).
-  fn lookup(key: Str) -> Entry? {
-    cur: Entry? = self.buckets[self.indexFor(key)];
+  // `view fn`, and a `mut` result: the entry it returns can be changed
+  // (insert does).  `e` borrows `cur` until its last use, so the next entry
+  // is read before `cur` moves on.
+  fn lookup(key: Str) -> mut Entry? {
+    cur: mut Entry? = self.buckets[self.indexFor(key)];
     while cur != None {
       match cur {
-        e: Entry {
+        e: inout Entry {
           if e.key.equals(key) {
             return e;
           }
-          cur = e.next;
+          let after = e.next;
+          cur = after;
         }
         None { }
       }
@@ -97,16 +102,18 @@ class HashMap {
   // Update the entry in place or append a new one. Returns True if a NEW key
   // was added.
   fn insert(key: Str, value: float) -> bool {
-    match self.lookup(key) {
-      e: Entry {
+    found: mut Entry? = self.lookup(key);
+    match found {
+      e: inout Entry {
         e.value = value; // update in place (Entry is a reference type)
         return False;
       }
       None {
         let b: int = self.indexFor(key);
-        match self.buckets[b] {
-          first: Entry {
-            first.append(Entry(key, value));
+        first: mut Entry? = self.buckets[b];
+        match first {
+          f: inout Entry {
+            f.append(Entry(key, value));
           }
           None {
             self.buckets[b] = Entry(key, value);
@@ -126,11 +133,12 @@ class HashMap {
   // Delete a key. Returns True if it was present.
   fn remove(key: Str) -> bool {
     let b: int = self.indexFor(key);
-    match self.buckets[b] {
-      first: Entry {
-        if first.key.equals(key) {
-          self.buckets[b] = first.next; // the chain now starts at the second
-        } elif !first.unlink(key) {
+    first: mut Entry? = self.buckets[b];
+    match first {
+      f: inout Entry {
+        if f.key.equals(key) {
+          self.buckets[b] = f.next; // the chain now starts at the second
+        } elif !f.unlink(key) {
           return False;
         }
         self.size = self.size - 1;

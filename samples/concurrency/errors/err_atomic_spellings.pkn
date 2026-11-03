@@ -1,7 +1,9 @@
-// The frozen, thread-crossing object is spelled in full, `atomic shared
-// const T`: `atomic` (the reference crosses threads), `shared` (it has
-// several owners) and `const` (nothing writes it).  A spelling that leaves
-// a word out is a parse error, so this file gets no Sema errors.
+// The spellings the parser refuses.  `const` is gone: the bare type is
+// immutable, and `mut` adds the writes (`mut T`, `shared mut T`, `locked
+// mut T`), the form first, then the writes.  A frozen object (`atomic
+// shared T`) and a cell (`atomic T`) take no `mut`.  Every line marked
+// `error` is a parse error, reported in one run, so this file gets no
+// Sema errors.
 import ::io;
 
 class Node {
@@ -9,7 +11,13 @@ class Node {
 }
 
 fn main() -> int {
-  let a: atomic const Node = Node(1);       // error: 'atomic const' is 'atomic shared const'
-  let b: atomic shared Node = Node(2);      // error: 'atomic shared' would be written with no lock: freeze it or lock it
+  let a: const Node = Node(1);                // error: 'const' is gone
+  let b: shared const Node = Node(2);         // error: 'const' is gone: write 'shared Node'
+  let c: atomic shared const Node = Node(3);  // error: 'const' is gone: write 'atomic shared Node'
+  let d: atomic shared mut Node = Node(4);    // error: written from several threads with no lock
+  let e: atomic mut Node = Node(5);           // error: a cell takes no 'mut'
+  let f: mut shared Node = Node(6);           // error: spelled 'shared mut'
+  let g: mut locked Node = Node(7);           // error: spelled 'locked mut'
+  let h: shared mut shared Node = Node(8);    // error: a type takes one qualifier
   return 0;
 }

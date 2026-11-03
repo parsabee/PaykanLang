@@ -26,7 +26,7 @@ impl Pair<A, B> {
 }
 
 fn main() -> int {
-  let p = Pair<Str, int>("answer", 42);
+  let p: mut = Pair<Str, int>("answer", 42);
   let q = p.swap();                 // Pair<int, Str>
   io::println(q.second + " = " + Str(q.first));
 
@@ -151,7 +151,10 @@ note: in instantiation of 'Doubler<bool>' requested here
 `Stack<Task>`, and since nothing about a stack depends on what it holds, `Stack<T>` is
 generic. It keeps its items in a `T?[8]` with a count, so its empty slots are `None`.
 `push` returns `False` when the stack is full, and `pop` returns `T?`, `None` when the stack
-is empty:
+is empty. `push` stores its item with `move`: the slot it fills is the stack's to change, a
+`mut T`, and a reference becomes `mut` only by `move`
+([Memory](16-memory.md#ownership-transfers)); for an `int` the move is a copy. `TaskList.add`
+stores its task the same way:
 
 ```pkn
 import ::io;
@@ -162,7 +165,7 @@ class Stack<T> {
 
   fn push(x: T) -> bool {
     if self.count == self.items.len() { return False; }
-    self.items[self.count] = x;
+    self.items[self.count] = move x;
     self.count = self.count + 1;
     return True;
   }
@@ -200,7 +203,7 @@ class TaskList {
 
   fn add(t: Task) -> bool {
     if self.count == self.tasks.len() { return False; }
-    self.tasks[self.count] = t;
+    self.tasks[self.count] = move t;
     self.count = self.count + 1;
     return True;
   }
@@ -247,7 +250,7 @@ impl TaskList {
 }
 
 fn main() -> int {
-  let list = TaskList();
+  let list: mut = TaskList();
   list.add(Task("buy milk"));
   list.add(Task("fix the leak"));
   list.add(Task("call mum"));
@@ -259,7 +262,7 @@ fn main() -> int {
   list.undo();
   list.undo();
 
-  let numbers = Stack<int>();   // the same Stack, for ints
+  let numbers: mut = Stack<int>();   // the same Stack, for ints
   numbers.push(1);
   numbers.push(2);
   let size = numbers.size();
@@ -524,11 +527,11 @@ impl Slot<T> {
 }
 
 fn main() -> int {
-  let a = Slot<int>();
+  let a: mut = Slot<int>();
   a.put(3);
-  let b = Slot<(int, Str)>();
+  let b: mut = Slot<(int, Str)>();
   b.put((1, "one"));
-  let c = Slot<Color>();
+  let c: mut = Slot<Color>();
   c.put(Color::Green);
   let d = Slot<int?>();            // its v is an int?, not an int??
   io::println(a.v.toString() + " " + b.v.toString() + " " + d.v.toString());

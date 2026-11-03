@@ -160,7 +160,7 @@ enum {
                              //   PaykanShared *other, uint64_t owned)
   PAYKAN_SLOT_WALK = 3,      // void (*)(PaykanObject *self): freezes what
                              //   the object holds (the prototype's
-                             //   `atomic shared const`, Paykan_freeze)
+                             //   `atomic shared`, Paykan_freeze)
   PAYKAN_OBJECT_SLOTS = 4,
   // String
   PAYKAN_SLOT_STRING_LENGTH = 4, // int64_t (*)(PaykanObject *self)
@@ -208,7 +208,7 @@ static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
 PaykanObject *PaykanObject_new(void);
 /// The walk of an object holding no references: nothing (the prototype).
 void PaykanObject_walk(PaykanObject *self);
-/// `atomic shared const` (the concurrency prototype): freezes @p obj and,
+/// `atomic shared` (the concurrency prototype): freezes @p obj and,
 /// through its walk slot, everything it holds: their counts become
 /// PAYKAN_REF_MAX, immortal, so any thread reads them with no count.  The
 /// design counts the root atomically and thaws it; the prototype never frees

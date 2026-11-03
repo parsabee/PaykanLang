@@ -15,8 +15,8 @@ fn main(args: view Str[]) -> int {
     let ea = a.set(unsigned<int>(i), float<int>(i % 7));
     let eb = b.set(unsigned<int>(i), float<int>(i % 5));
   }
-  let xs: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move a);
-  let ys: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move b);
+  let xs: atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move a);
+  let ys: atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move b);
   best = 0;
   total = 0;
   s = 0.0;

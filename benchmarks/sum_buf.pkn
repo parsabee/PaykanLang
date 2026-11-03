@@ -1,6 +1,6 @@
 // A reduction over a heap buffer: the design's route to data larger than
 // a fixed-size array.  A buffer is a struct, a value, so it goes in a
-// `mem::Box`, an object, which is frozen (`atomic shared const`) with the buffer
+// `mem::Box`, an object, which is frozen (`atomic shared`) with the buffer
 // and its elements: every thread then reads it with no reference counting.
 // An element read (`xs.value().at(i)`) is emitted in place by the lowering:
 // a bounds check and a load, no call and no count.
@@ -15,7 +15,7 @@ fn main(args: view Str[]) -> int {
   b = mem::Buffer<float>();
   let grown = b.grow(unsigned(n));
   for i in 0..n { let e = b.set(unsigned(i), float(i % 7)); }
-  let xs: atomic shared const = mem::Box(move b);   // boxed, then frozen
+  let xs: atomic shared = mem::Box(move b);   // boxed, then frozen
   best = 0;
   total = 0;
   s = 0.0;

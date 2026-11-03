@@ -162,7 +162,7 @@ TEST(FixedArray, Fields) {
     class Box<T> { xs: T[2]; }
     fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
     fn main() -> int {
-      g = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
+      g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
       g.cells[0] = [7, 8, 9];
       g.tags = [g.tags[1], "c"];
       b = Box<int>([1, 2]);
@@ -248,7 +248,8 @@ TEST(FixedArray, ASliceTypeSuggestsALengthOnlyWhereAnArrayWouldDo) {
 }
 
 // An element is a reference like any other: a view of the array is a view
-// of its elements, and an element is not an `inout` place yet.
+// of its elements, the objects of a `let` array are fixed with it, and an
+// element is not an `inout` place yet.
 TEST(FixedArray, ElementsOfReferenceTypes) {
   auto r = semaCheck(R"(
     class P { x: int; }
@@ -258,7 +259,7 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
       ps: P[2] = [P(1), P(2)];
       ps[1].x = ps[0].x;
       let fixed: P[1] = [P(3)];
-      fixed[0].x = 4;
+      ps[0].x = fixed[0].x;
       os: Str?[2] = [None, ss[0]];
       ts: (int, Str)[1] = [(1, "one")];
       grid: Str[2][2] = [[ss[0], ss[1]], names()];
@@ -266,6 +267,11 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectError("class P { x: int; }\n"
+              "fn main() -> int { let ps: P[1] = [P(3)]; ps[0].x = 4; return "
+              "ps[0].x; }",
+              "'ps' is declared with 'let', and so are the objects it holds; "
+              "drop 'let' to change them; cannot assign to 'ps[0].x'");
   expectError("class P { x: int; }\n"
               "fn f(ps: view P[2]) { ps[0].x = 1; }\n"
               "fn main() -> int { return 0; }",

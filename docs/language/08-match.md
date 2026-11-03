@@ -219,7 +219,7 @@ impl Task {
 
 fn main() -> int {
   let a = Task("water the plants", parsePriority("low"));
-  let b = Task("fix the leak", parsePriority("!"));
+  let b: mut = Task("fix the leak", parsePriority("!"));
   let c = Task("read a book", parsePriority("whenever"));
   b.complete();
   io::println(a);
@@ -379,6 +379,12 @@ match x {
 A binding is an ordinary reference to the matched object: it can be passed to functions,
 stored into fields or array slots, and assigned to variables that outlive the `match`; the
 object's lifetime is managed by ARC like any other reference (see [Memory](16-memory.md)).
+It takes no qualifier and is a copy of the subject in the subject's form: under a bare
+subject it reads the object and calls its `view fn` methods (`'d' is immutable (a 'Dog';
+write 'mut Dog' to change it); 'tick' is not a 'view fn'`), and under a `mut` one it
+changes the object as the subject does. To change it with no copy, match on a `mut`
+variable or field with an `inout` binding
+([Borrowing the subject](#borrowing-the-subject)).
 
 The binding is scoped to its arm body. Redeclaring the binding name inside the same body is an
 error:
@@ -437,7 +443,7 @@ class Dog : Animal {}
 impl Dog { fn __init__(n: int) { __super__(n); } }
 
 fn main() -> int {
-  a: Animal = Dog(1);
+  a: mut Animal = Dog(1);
   match a {
     d: inout Dog { d = Dog(d.n + 1); }   // a now holds the new Dog
     _ { }
@@ -454,9 +460,12 @@ Output:
 ```
 
 - The subject must be a place an `inout` argument could be: a variable, a field or a call's
-  `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), not another
-  expression (`'inout' arm 'd' needs a variable or a field to match on`), `self`, a `let`
-  local or a `view` (`'v' is a 'view' parameter; it cannot be bound by 'inout' arm 'd'`).
+  `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), holding a `mut`
+  object when it holds one (`a: mut Animal` above), not another expression (`'inout' arm
+  'd' needs a variable or a field to match on`), `self`, a `let` local, an object that is
+  not `mut` (`'a' is immutable (a 'Animal'; write 'mut Animal' to change it); it cannot be
+  bound by 'inout' arm 'd'`) or a `view` (`'v' is a 'view' parameter; it cannot be bound by
+  'inout' arm 'd'`).
   While the binding is live, what the call borrowed (its receiver, its `inout` arguments)
   is borrowed by it.
 - The subject's storage is found once, when the `match` starts, and the binding's value is

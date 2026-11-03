@@ -37,7 +37,7 @@ fn main() -> int {
   s += "b" + "c";
   io::println(Str(n) + " " + Str(k) + " " + Str(b) + " " + Str(f) + " " + s);
 
-  let p = P(1, "p");
+  let p: mut = P(1, "p");
   p.bump(40);
   p.x += 1;
   p.s += "!";

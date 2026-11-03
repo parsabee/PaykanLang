@@ -168,6 +168,11 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
     lc.Node->addCapture(Ctx.intern(name), ty, weak);
     lc.Boundary->declare(name, ty);
     lc.Boundary->Kinds[name] = weak ? VarKind::CapturedWeak : VarKind::Captured;
+    // The capture keeps the variable's form (the prototype): a `mut`
+    // object stays writable through it, though the capture itself is a
+    // read-only copy.
+    if (auto q = owner->Quals.find(name); q != owner->Quals.end())
+      lc.Boundary->Quals[name] = q->second;
     owner = lc.Boundary;
   }
   return true;
@@ -263,6 +268,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
       if (p.Mode != ast::ParamMode::Value)
         CurrentScope->Kinds[p.getName()] =
             p.Mode == ast::ParamMode::View ? VarKind::View : VarKind::Inout;
+      ast::Qualifier q = p.Qual;
+      if (p.Mode == ast::ParamMode::Inout)
+        q.Mut = true; // the borrow's writes
+      CurrentScope->Quals[p.getName()] = q;
     }
     CurrentResult = {ast::ParamMode::Value, nullptr, CurrentScope};
     bodyOk = visitBody(node->getBody()->getStatements());

@@ -789,9 +789,9 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       msg += "'";
       if (ast::isRefType(inner)) {
         // An object crosses threads frozen or behind a lock.
-        msg += ": an object crosses threads as 'atomic shared const ";
+        msg += ": an object crosses threads as 'atomic shared ";
         msg += typeName(inner);
-        msg += "' (frozen) or 'locked ";
+        msg += "' (frozen) or 'locked mut ";
         msg += typeName(inner);
         msg += "'";
       } else {
@@ -1184,6 +1184,7 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
       msg = inoutPlaceError(subject, "bound by " + what);
     if (msg.empty()) {
       CurrentScope->Kinds[name] = VarKind::Inout;
+      CurrentScope->Quals[name] = ast::Qualifier{ast::QualForm::Unique, true};
       return true;
     }
     error(subject->getLocation(), msg);
@@ -1194,6 +1195,10 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     else if (MatchSubjectIsView) {
       CurrentScope->Kinds[name] = VarKind::ViewBinding;
       CurrentScope->ViewSubjects[name] = subject;
+    } else {
+      // A plain binding is a copy of the subject's reference and keeps its
+      // form (the prototype): a `mut` subject's object stays writable.
+      CurrentScope->Quals[name] = qualifierOf(subject);
     }
     return true;
   }
@@ -4861,7 +4866,8 @@ bool Sema::visitLockStmt(ast::LockStmt *node) {
   LockOperand = false;
   if (!cellTy)
     return false;
-  if (qualifierOf(node->getCell()).Form != ast::QualForm::Locked) {
+  const ast::Qualifier cellQ = qualifierOf(node->getCell());
+  if (cellQ.Form != ast::QualForm::Locked) {
     error(node->getCell()->getLocation(),
           "'" + placeText(node->getCell()) +
               "' is not 'locked': a 'lock' block takes a 'locked' variable, "
@@ -4872,9 +4878,21 @@ bool Sema::visitLockStmt(ast::LockStmt *node) {
   if (!checkBinderName(b->getName(), b->getLocation()) ||
       !checkNotSelf(b->getName(), b->getLocation()))
     return false;
+  // The lock buys the writes: an `inout` block takes a `locked mut` cell.
+  if (b->getMode() == ast::ParamMode::Inout && !cellQ.Mut) {
+    error(b->getLocation(),
+          "'" + placeText(node->getCell()) + "' is 'locked " +
+              typeName(cellTy) +
+              "', whose contents are never written; declare it 'locked mut " +
+              typeName(cellTy) + "' for a 'lock ... as " + b->getName() +
+              ": inout' block");
+    return false;
+  }
   b->setType(cellTy);
   ScopeGuard guard(*this);
   CurrentScope->declare(b->getName(), cellTy);
+  CurrentScope->Quals[b->getName()] = ast::Qualifier{
+      ast::QualForm::Unique, b->getMode() == ast::ParamMode::Inout};
   CurrentScope->Kinds[b->getName()] = b->getMode() == ast::ParamMode::View
                                           ? VarKind::ViewLocal
                                           : VarKind::Inout;
@@ -5399,9 +5417,12 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i) {
-      CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
-      CurrentScope->Quals[node->getParams()[i].getName()] =
-          node->getParams()[i].Qual;
+      const ast::Param &p = node->getParams()[i];
+      CurrentScope->declare(p.getName(), paramTypes[i]);
+      ast::Qualifier q = p.Qual;
+      if (p.Mode == ast::ParamMode::Inout)
+        q.Mut = true; // the borrow's writes
+      CurrentScope->Quals[p.getName()] = q;
     }
     declareParamKinds(node);
     // The concurrency prototype: the function's own moves, task handles,
@@ -5649,10 +5670,14 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   // `x: shared = e;`, written alone with the type inferred.
   ast::Qualifier qual;
   bool qualified = false;
+  // Whether the qualifier stands alone (`x: shared = e;`): an annotation
+  // with a type has its qualifier checked as the type resolves.
+  bool bareQual = false;
   if (auto *qt = ast::dyn_cast<ast::QualifiedType>(node->getType());
       qt && !qt->getInnerType()) {
     qual = qt->getQualifier();
     qualified = true;
+    bareQual = true;
     node->setType(nullptr);
     // As an annotation's qualifier is checked below: a borrow carries none.
     if (!checkBorrowQualifier(qual, node->getMode(),
@@ -5824,16 +5849,19 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
-    if (!qual.isUnique() &&
-        !checkQualifierApplies(qual, declTy, node->getLocation())) {
+    if (bareQual && !checkQualifierApplies(qual, declTy, node->getLocation())) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
-    qual = ast::Qualifier{};
+    // A weak variable holds nothing: what it views is written as its
+    // owner's form allows (the prototype), so it takes the initializer's.
+    qual = node->isWeak() && node->getInitExpr()
+               ? qualifierOf(node->getInitExpr())
+               : ast::Qualifier{};
   } else if (!qualified && node->getInitExpr()) {
     qual = qualifierOf(node->getInitExpr());
   }
-  if (!checkQualifierApplies(qual, declTy, node->getLocation())) {
+  if (bareQual && !checkQualifierApplies(qual, declTy, node->getLocation())) {
     declarePoisoned(CurrentScope, node->getName());
     return false;
   }
@@ -5843,6 +5871,9 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
                           "variable '" + node->getName() + "'",
                           node->getLocation()))
     viewOk = false;
+  // An `inout` local is the borrow's writes.
+  if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy))
+    qual.Mut = true;
   node->setQualifier(qual);
 
   // Register the variable in the current scope.  An inferred type (`let x =
@@ -6002,14 +6033,19 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   // An `atomic` field (the prototype) is a cell: the assignment is one
   // atomic operation on it, through any receiver that reaches the field
-  // (a `const` or `atomic shared const` object's cells are usable).
+  // (an immutable or a frozen object's cells are usable).
   if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldTy))
     return checkAtomicMemberAssign(node, at);
 
-  if (!checkChangeable(node->getReceiver(),
-                       "cannot assign to its field '" + node->getFieldName() +
-                           "'",
-                       node->getLocation()))
+  const bool path = ast::isa<ast::MemberAccessExpr>(node->getReceiver()) ||
+                    ast::isa<ast::SubscriptExpr>(node->getReceiver()) ||
+                    ast::isa<ast::TupleIndexExpr>(node->getReceiver());
+  if (!checkChangeable(
+          node->getReceiver(),
+          path ? "cannot assign to '" + placeText(node->getReceiver()) + "." +
+                     node->getFieldName() + "'"
+               : "cannot assign to its field '" + node->getFieldName() + "'",
+          node->getLocation()))
     return false;
 
   // The copy of the target in a compound assignment's value would report
@@ -6115,8 +6151,9 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(elemTy) + "'");
     return false;
   }
-  // The elements carry the array's qualifier (the prototype).
-  if (!checkQualifiedFlow(qualifierOf(node->getArray()), node->getValue(),
+  // An element is a bare reference (an array of references takes no
+  // qualifier); the array's writability is checked above.
+  if (!checkQualifiedFlow(ast::Qualifier{}, node->getValue(),
                           "an element of '" + placeText(node->getArray()) + "'",
                           node->getLocation()))
     return false;

@@ -364,7 +364,7 @@ fn main() -> int { return foo::val(); }
 static const char *const kPointModule =
     "class Point {\n"
     "  x: int; y: int;\n"
-    "  fn getX() -> int { return self.x; }\n"
+    "  view fn getX() -> int { return self.x; }\n"
     "}\n"
     "impl Point {\n"
     "  fn __init__(x: int, y: int) { self.x = x; self.y = y; }\n"
@@ -419,7 +419,7 @@ TEST(Module, QualifiedTypeFieldOk) {
 import geometry::point;
 class Box {
   origin: point::Point;
-  fn x() -> int { return self.origin.getX(); }
+  view fn x() -> int { return self.origin.getX(); }
 }
 
 impl Box {
@@ -608,7 +608,7 @@ TEST(Module, EnumAsClassFieldTypeIdentityOk) {
 import pal::color;
 class Widget {
   tint: color::Color;
-  fn tintName() -> Str { return color::name(self.tint); }
+  view fn tintName() -> Str { return color::name(self.tint); }
 }
 
 impl Widget {

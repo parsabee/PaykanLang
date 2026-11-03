@@ -69,8 +69,8 @@ copied around like a number. A struct can be generic, like a class
 - Construction: `Point(1, 2)` takes the fields in declaration order, or the parameters
   of an `__init__` declared in an `impl` block, which must assign every field.
 - Fields: `p.x` reads a field, `p.x = v` assigns it **in place**, in the variable, field
-  or array element that holds the struct.  Chains work: `line.a.x = 0`, `shape.at.y`,
-  `ps[1].x = 2`.
+  or array element that holds the struct (the field of an object through a `mut` reference
+  to it).  Chains work: `line.a.x = 0`, `shape.at.y`, `ps[1].x = 2`.
 - A struct is a **value held in place**, like a tuple: `q = p` copies it, and passing
   or returning one copies it.  A copy of a struct holding an object names the same
   object.  A struct is not an `Obj`.
@@ -205,8 +205,8 @@ fn main() -> int {
   p.x = 5;                         // in place
   l = Line(p, Point(3, 4));
   l.a.y = 0;                       // a field of a field
-  let s = Shape(Point(0, 0));
-  s.at.x = 7;                      // a struct field of an object
+  let s: mut = Shape(Point(0, 0));
+  s.at.x = 7;                      // a struct field of a mut object
   ps: Point[2] = [p, l.b];
   ps[1].x = 9;                     // an element's field
   let t = (p, "p");
@@ -226,6 +226,9 @@ The field is assigned where the struct is **changeable**:
 - not in a `let` variable, whose fields are part of its value (`'a' is declared with
   'let'; its fields are part of its value and cannot be assigned`), nor in a `let`
   variable's struct field or array element;
+- not in an object the reference to it only reads: a struct field of an object is assigned
+  through a `mut` reference, as `s` is a `mut Shape` above (`'s' is immutable (a 'Shape';
+  write 'mut Shape' to change it); cannot assign to its field 'x'`);
 - not through a `view` (`'a' is a 'view' parameter; cannot assign to its field 'x'`),
   nor in a `view fn`'s `self` (`'self' is read-only in 'view fn bad'; cannot assign to
   its field 'x'`), nor while a `view` local of the variable is live (`'c' is viewed by
@@ -402,8 +405,8 @@ fn main() -> int {
   c.tick();
   c.tickTwice();                   // a method calling methods on self
   bump(c.slot());                  // an inout result: c.n
-  let b = Box(c);                  // a copy in the field
-  b.c.tick();                      // the field's struct
+  let b: mut = Box(c);             // a copy in the field
+  b.c.tick();                      // the field's struct, through a mut Box
   d = c;                           // a copy
   d.n = 9;
   v: view = c;
@@ -420,10 +423,11 @@ Output:
 4 5 9 False a
 ```
 
-The receiver of a method call is any expression of the struct type: a variable, a field, an
-array element, a call's result or a temporary (a temporary that a method changes is dropped
-with the statement).  `__init__`, `static fn`s and the method names are the struct's;
-`toString` is built in and cannot be declared (`struct 'A' already has a method
+The receiver of a method call is any expression of the struct type: a variable, a field (a
+field of an object through a `mut` reference, for a method that changes it: `b.c.tick()`
+above), an array element, a call's result or a temporary (a temporary that a method changes
+is dropped with the statement).  `__init__`, `static fn`s and the method names are the
+struct's; `toString` is built in and cannot be declared (`struct 'A' already has a method
 'toString'`), and `equals` is not a method of a struct (`no method 'equals' on type 'A'`:
 compare with `==`).  A method's parameter `other: view Self` names the struct itself.
 
@@ -677,6 +681,7 @@ Point(x: 4, y: 2) 6 True
 | Duplicate method | two `fn m()` across `impl` blocks; `fn toString()` |
 | A method named `destroy` | `fn destroy()` or `static fn destroy()` in an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in struct 'P' (a struct has none)` |
 | `let` field assignment | `let a = A(1); a.x = 2;` |
+| Field of a struct in an object that is not `mut` | `let s = Shape(Point(0, 0)); s.at.x = 7;`: `'s' is immutable (a 'Shape'; write 'mut Shape' to change it); cannot assign to its field 'x'` |
 | `view` field assignment | `fn f(a: view A) { a.x = 1; }`; in a `view fn` |
 | Field of a struct in a tuple | `t.1.x = 3` |
 | Field of a temporary as `inout` | `bump(mk().x)` |

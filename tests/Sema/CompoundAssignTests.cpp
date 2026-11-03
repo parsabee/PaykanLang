@@ -26,8 +26,8 @@ std::string inMain(const std::string &stmts) {
          "  xs = [1];\n"
          "  us: unsigned[1] = [1];\n"
          "  bs: u8[1] = [1];\n"
-         "  p = P(1, 1);\n"
-         "  h = H([1, 2]);\n"
+         "  p: mut = P(1, 1);\n"
+         "  h: mut = H([1, 2]);\n"
          "  " +
          stmts +
          "\n"

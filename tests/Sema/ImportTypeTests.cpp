@@ -77,11 +77,11 @@ static const char *const kShapesModule =
     "impl Zeta { fn __init__() { self.v = 7; } }\n"
     "class Alpha {\n"
     "  kind: Kind;\n"
-    "  fn make() -> Zeta { return Zeta(); }\n"
-    "  fn take(z: Zeta) -> int { return z.v; }\n"
-    "  fn kindOf() -> Kind { return self.kind; }\n"
-    "  fn many() -> Zeta[2] { return [Zeta(), Zeta()]; }\n"
-    "  fn count(zs: view Zeta[]) -> int { return zs.len(); }\n"
+    "  view fn make() -> Zeta { return Zeta(); }\n"
+    "  view fn take(z: Zeta) -> int { return z.v; }\n"
+    "  view fn kindOf() -> Kind { return self.kind; }\n"
+    "  view fn many() -> Zeta[2] { return [Zeta(), Zeta()]; }\n"
+    "  view fn count(zs: view Zeta[]) -> int { return zs.len(); }\n"
     "}\n"
     "impl Alpha {\n"
     "  fn __init__() { self.kind = Kind::Round; }\n"
@@ -135,7 +135,7 @@ TEST(Module, MethodReturnsChainedModuleLocalClassOk) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import shapes;
 fn main() -> int {
-  m: shapes::Mid = shapes::Mid();
+  m: mut shapes::Mid = shapes::Mid();
   z: shapes::Zeta = m.alpha().make();
   return z.v;
 }
@@ -192,7 +192,7 @@ fn main() -> int {
 
 static const char *const kLeafModule =
     "class Thing { v: int; "
-    "fn val() -> int { return self.v; } }\n"
+    "view fn val() -> int { return self.v; } }\n"
     "impl Thing { fn __init__(v: int) { self.v = v; } }\n"
     "enum Mode { Fast, Slow }\n"
     "fn made() -> Thing { return Thing(5); }\n";
@@ -204,7 +204,7 @@ static const char *const kMidModule =
     "  mode: leaf::Mode;\n"
     "  fn get() -> leaf::Thing { return self.t; }\n"
     "  fn put(t: leaf::Thing) -> int { self.t = t; return t.val(); }\n"
-    "  fn getMode() -> leaf::Mode { return self.mode; }\n"
+    "  view fn getMode() -> leaf::Mode { return self.mode; }\n"
     "}\n"
     "impl Wrap {\n"
     "  fn __init__() { self.t = leaf::Thing(9); self.mode = leaf::Mode::Fast; "
@@ -220,7 +220,7 @@ TEST(Module, TransitiveTypeFlowsThroughSignaturesOk) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import mid;
 fn main() -> int {
-  w: mid::Wrap = mid::Wrap();
+  w: mut mid::Wrap = mid::Wrap();
   t = w.get();            // leaf's Thing, reached through mid's signature
   u = mid::make();
   m = w.getMode();
@@ -240,7 +240,7 @@ TEST(Module, TransitiveTypeNotNameableThroughMiddleErr) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import mid;
 fn main() -> int {
-  w: mid::Wrap = mid::Wrap();
+  w: mut mid::Wrap = mid::Wrap();
   t: mid::Thing = w.get();   // names are not re-exported
   return t.val();
 }
@@ -278,7 +278,7 @@ TEST(Module, TransitiveTypeIdentityWithDirectImportOk) {
     writeFile(tmp, "mid.pkn", kMidModule);
     auto main = writeFile(tmp, "main.pkn", std::string(order) + R"(
 fn main() -> int {
-  w: mid::Wrap = mid::Wrap();
+  w: mut mid::Wrap = mid::Wrap();
   t: leaf::Thing = w.get();
   m: leaf::Mode = w.getMode();
   n: int = w.put(leaf::Thing(3));
