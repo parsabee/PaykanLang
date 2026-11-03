@@ -1,0 +1,37 @@
+import ::io;
+
+class Cache { hits: int; }
+class Job { name: Str; cache: shared Cache; }
+class Holder { job: Job; }
+class Named { tag: Str; n: int; }
+struct Point { x: int; y: int; }
+
+impl Copyable for Named {}                        // error: Copyable is built in
+
+async fn run(j: Job) -> int { return j.name.len(); }
+async fn take(nm: Named) -> int { return nm.n; }
+async fn plot(p: Point) -> int { return p.x; }   // error: a value held in memory
+async fn any(o: Obj) -> int { return 1; }
+async fn call(f: () -> int) -> int { return f(); }
+async fn give() -> shared Job { return Job("x", Cache(0)); }   // error: result cannot cross
+
+fn twice<T: Copyable>(x: T) -> (T, T) { return (x, x); }
+fn grow(n: inout Job) { }
+fn show(n: view const Job) -> int { return n.name.len(); }
+
+fn main() -> int {
+  let j = Job("j", Cache(0));
+  let t = run(move j);                  // error: field 'cache' is shared
+  let nm = Named("t", 1);
+  let u = take(nm);                     // error: cannot copy a unique Named
+  let h = Holder(Job("h", Cache(1)));
+  let o = any(move h);                  // error: field 'job.cache' is shared
+  let f = fn() => 3;
+  let c = call(move f);                 // error: a function value
+  let k: atomic const Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
+  let s: shared Job = Job("s", Cache(3));
+  grow(s);                              // error: inout takes exactly a 'Job'
+  show(s);                              // error: view const takes an object that never changes
+  let d = twice(Named("d", 2));         // error: 'Named' is not Copyable
+  return 0;
+}

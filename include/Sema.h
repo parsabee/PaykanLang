@@ -314,6 +314,29 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Why the place @p e cannot change through a `const` reference or field
   /// on its way; "" when it can.
   std::string constPlace(const ast::Expr *e);
+  /// Whether a value of @p ty read from a place is copied (the design's
+  /// Copyable): a number, bool, char, an enum of Copyable payloads, a
+  /// tuple, struct, fixed array or optional of Copyable parts, an `atomic`
+  /// handle.  A reference, `Str`, a function value and a task are not.
+  /// When not, @p why (if given) names the move-only part.
+  bool isCopyable(ast::Type *ty, std::string *why = nullptr);
+  /// isCopyable of a part held with qualifier @p q: a `shared` reference
+  /// or a handle copies, a unique or `const` one does not.
+  bool isCopyablePart(ast::Type *ty, ast::Qualifier q,
+                      std::string *why = nullptr);
+  /// Why a value of @p ty, held with qualifier @p q, cannot cross to
+  /// another thread (the design's send check): a `shared` or `weak` part, a
+  /// function value, an `Obj`; "" when it can.  @p path names the part
+  /// looked at ("" for the value itself).
+  std::string uncrossable(ast::Type *ty, ast::Qualifier q,
+                          const std::string &path);
+  /// The borrowing parameters' qualifiers: an `inout` parameter takes
+  /// exactly its qualifier, a `view const` one an object that never
+  /// changes, and no borrow reaches a `locked` cell.
+  bool checkBorrowQualifiers(const ast::ParamModes &modes,
+                             const std::vector<ast::Qualifier> &quals,
+                             const std::vector<ast::Expr *> &args,
+                             const std::string &callee);
   /// Error (and false) when @p place is `locked`: its contents are reached
   /// only in a `lock` block.
   bool checkNotLocked(const ast::Expr *place, ast::SourceLocation loc);

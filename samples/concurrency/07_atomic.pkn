@@ -1,0 +1,63 @@
+import ::io;
+
+class Stats { name: Str; served: atomic int; bytes: atomic float; done: atomic bool; }
+
+// Every worker sees the same frozen Stats; its atomic fields are cells.
+async fn record(st: atomic const Stats, id: int, n: int) -> int {
+  for i in 0..n {
+    st.served += 1;
+    st.bytes += 0.5;
+  }
+  return id;
+}
+
+fn bump(c: atomic int, by: int) { c += by; }   // a handle parameter
+
+fn fresh(v: int) -> atomic int { return v; }   // a value: a new cell
+
+fn main() -> int {
+  // Every number type, bool and char
+  let a: atomic i8 = 120;
+  a += 10;                          // wraps like i8 arithmetic
+  let u: atomic u8 = 250;
+  u += 10;
+  let f: atomic f32 = 1.5;
+  f += 0.25;
+  let b: atomic bool = False;
+  let was = b.exchange(True);
+  let c: atomic char = 'a';
+  let old = c.exchange('b');
+  io::println("i8 " + Str(a) + ", u8 " + Str(u) + ", f32 " + Str(f) +
+              ", bool " + Str(b) + " (was " + Str(was) + "), char " + Str(c) +
+              " (was " + Str(old) + ")");
+
+  // exchange and compareExchange on a variable
+  let n: atomic int = 5;
+  let swapped = n.compareExchange(5, 9);   // True: 5 -> 9
+  let missed = n.compareExchange(5, 1);    // False: it holds 9
+  io::println("n " + Str(n) + " " + Str(swapped) + " " + Str(missed));
+
+  // handles: a copy of an atomic place is another handle to its cell
+  let m = n;
+  m += 1;
+  bump(n, 10);
+  let k = fresh(3);
+  k += 1;
+  io::println("n " + Str(n) + ", m " + Str(m) + ", k " + Str(k));
+
+  // fields: a class holds cells; a frozen object's cells still change
+  let st: atomic const Stats = Stats("s", 0, 0.0, False);
+  let t1 = record(st, 1, 1000);
+  let t2 = record(st, 2, 1000);
+  let t3 = record(st, 3, 1000);
+  let ids = await t1 + await t2 + await t3;
+  st.done = True;
+  let h = st.served;                        // a handle to the field's cell
+  h += 1;
+  io::println(st.name + " served " + Str(st.served) + ", bytes " + Str(st.bytes) +
+              ", done " + Str(st.done) + ", ids " + Str(ids));
+  // a parallel loop over a frozen object's cells
+  parallel for i in 0..100 { st.served -= 1; }
+  io::println("served " + Str(st.served) + " " + Str(st.served.compareExchange(2901, 0)) + " " + Str(st.served));
+  return 0;
+}

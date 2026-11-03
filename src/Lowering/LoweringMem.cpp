@@ -341,6 +341,12 @@ ast::Expr *ModuleLowering::memValueVisitsFirst(ast::Expr *e) {
 }
 
 Val ModuleLowering::emitMemAddress(ast::Expr *e) {
+  // `move v` of a value held in memory (the prototype): the value where it
+  // is; Sema has ended `v`, whose teardown still drops its own references
+  // (a copy of the bytes retains the references among them).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    return emitMemAddress(u->getOperand());
   MemValue v = emitMemValue(e);
   // The temporary is what emitMemValue built: a tuple or a struct made the
   // present value of its optional is the optional (memTypeOf), whose

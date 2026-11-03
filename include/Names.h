@@ -111,6 +111,12 @@ inline constexpr const char *kTraitHashable =
 /// No methods: the types held in place and copied whole, which a class
 /// cannot implement.
 inline constexpr const char *kTraitValueType = "ValueType";
+/// No methods: the types a read from a place copies (the concurrency
+/// prototype, docs/design/concurrency.md "Copies and `move`"): a number,
+/// bool, char, an enum of Copyable payloads, a tuple, struct, fixed array
+/// or optional of Copyable parts, an `atomic` handle.  Structural, never
+/// implemented.
+inline constexpr const char *kTraitCopyable = "Copyable";
 inline constexpr const char *kMethodHash = "hash";
 /// The built-in traits an `impl ... for` block gives a class or a struct, so
 /// the conformances a module interface records (pkm IMPL,

@@ -1,0 +1,25 @@
+import ::io;
+
+class Node { id: int; name: Str; }
+class Pair { left: Node; right: shared Node; }
+
+fn describe(n: view Node) -> Str { return n.name + " #" + Str(n.id); }
+
+fn main() -> int {
+  let a = Node(1, "a");                 // unique
+  let c: const Node = move a;           // const from a moved unique
+  io::println(describe(c));             // a view parameter accepts every form
+  let d: shared const Node = c;         // a const converts into the other const forms
+  io::println(describe(d));
+
+  let s: shared Node = Node(2, "s");    // shared: aliases on this thread
+  let t = s;                            // t is shared too
+  t.id = 22;
+  io::println(s.name + " " + Str(s.id));
+
+  let p = Pair(Node(3, "l"), Node(4, "r"));
+  let r = p.right;                      // a shared field reads as shared
+  r.id = 44;
+  io::println(Str(p.right.id));
+  return 0;
+}

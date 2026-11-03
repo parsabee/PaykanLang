@@ -1,0 +1,17 @@
+import ::io;
+
+class Box { n: atomic int; }
+struct P { c: atomic int; }               // error: a struct cannot hold a cell
+
+fn main() -> int {
+  let hits: atomic int = 0;
+  hits = hits * 2 + 1;                    // error: reads and writes separately
+  hits *= 2;                              // error: not an atomic operation
+  let x = hits.load();                    // error: no method
+  let s: atomic Str = "a";                // error: not a number
+  let b = Box(0);
+  b.n = b.n + 1;                          // error: reads and writes separately
+  b.n.compareExchange(1);                 // error: argument count
+  hits += 1.5;                            // error: type
+  return 0;
+}

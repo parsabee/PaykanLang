@@ -98,6 +98,9 @@ void Sema::registerBuiltinTraits() {
   values.push_back(Ctx.getBoolTy());
   values.push_back(Ctx.getCharTy());
   builtin(names::kTraitValueType, nullptr, nullptr, values);
+  // Copyable (the concurrency prototype) by what a type holds: the scalars
+  // here, and every aggregate of Copyable parts (traitImplOwner).
+  builtin(names::kTraitCopyable, nullptr, nullptr, values);
 }
 
 bool Sema::declareTraits(ast::TranslationUnit *tu) {
@@ -293,6 +296,9 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
   };
+  // Copyable by structure (the concurrency prototype).
+  if (isBuiltinTrait(names::kTraitCopyable))
+    return isCopyable(ty) ? ty : nullptr;
   // An optional shows "None" or its value's text, a tuple its elements, a
   // struct its fields and an enum its variant and its fields (the builtin
   // `Show`), when each of them has a text.  Before the struct case.
@@ -412,6 +418,14 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
   const std::string trait = traitRefName(*tr);
   const std::string kind = typeKindWord(ty);
   const std::string name = typeName(ty);
+  // Copyable follows from what a type holds (the concurrency prototype).
+  if (tr->Trait->IsBuiltin &&
+      tr->Trait->Decl->getName() == names::kTraitCopyable) {
+    error(im->getLocation(),
+          "'Copyable' is built in: a type is Copyable by what it holds, and "
+          "cannot be implemented");
+    return false;
+  }
   // A class is an object, shared by reference: never a ValueType.  (A
   // struct is one already: reported below as implemented.)
   if (ast::isa<ast::ClassType>(ty) && tr->Trait->IsBuiltin &&
@@ -613,6 +627,14 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
         if (tr->Trait->IsBuiltin &&
             tr->Trait->Decl->getName() == names::kTraitShow)
           why = noTextReason(args[i]);
+        else if (tr->Trait->IsBuiltin &&
+                 tr->Trait->Decl->getName() == names::kTraitCopyable) {
+          std::string part;
+          isCopyable(args[i], &part);
+          why = part.empty() ? "a reference, a 'Str', a function value or a "
+                               "task is move-only"
+                             : "it holds move-only " + part;
+        }
         error(loc, "'" + typeName(args[i]) + "' does not implement trait '" +
                        traitRefName(*tr) + "', which '" + displayName(name) +
                        "' requires of '" + *params[i] + "'" +

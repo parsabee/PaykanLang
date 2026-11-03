@@ -2745,6 +2745,10 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                     callee + "'",
                                 node->getArguments()[i]->getLocation()))
         return nullptr;
+  // A borrow takes the qualifier its parameter says (the prototype).
+  if (!sig->IsBuiltin && !S.checkBorrowQualifiers(sig->Modes, sig->ParamQuals,
+                                                  node->getArguments(), callee))
+    return nullptr;
   S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
                    callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
@@ -2969,6 +2973,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                                   node->getMethodName() + "'",
                               node->getArguments()[i]->getLocation()))
       return nullptr;
+  // A borrow takes the qualifier its parameter says (the prototype).
+  if (!S.checkBorrowQualifiers(method->getParamModes(), method->getParamQuals(),
+                               node->getArguments(), node->getMethodName()))
+    return nullptr;
   S.checkInoutArgs(node, method->getParamModes(), paramTys,
                    node->getArguments(), node->getMethodName(),
                    node->getReceiver(), method);
@@ -3152,6 +3160,14 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     S.checkAssignable(elemTy, elemTys[i], node->getElements()[i]);
     S.checkViewNotStored(node->getElements()[i], elemTys[i]);
   }
+  // `[v; n]` copies its value n times (the copy rule, --strict-ownership).
+  if (std::string part; node->isRepeat() && node->getLength() > 1 &&
+                        S.StrictOwnership && !S.isCopyable(elemTy, &part)) {
+    S.error(node->getLocation(), "'[v; n]' copies its value: '" +
+                                     typeName(elemTy) + "' is not Copyable" +
+                                     (part.empty() ? "" : " (" + part + ")"));
+    return nullptr;
+  }
   node->setResolvedType(fixed);
   return fixed;
 }
@@ -3176,6 +3192,14 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
             "array literal has " + std::to_string(node->getLength()) +
                 " element(s), but '" + typeName(fixed) + "' has " +
                 std::to_string(fixed->getLength()));
+    return nullptr;
+  }
+  // `[v; n]` copies its value n times (the copy rule, --strict-ownership).
+  if (std::string part; node->isRepeat() && node->getLength() > 1 &&
+                        S.StrictOwnership && !S.isCopyable(elemTy, &part)) {
+    S.error(node->getLocation(), "'[v; n]' copies its value: '" +
+                                     typeName(elemTy) + "' is not Copyable" +
+                                     (part.empty() ? "" : " (" + part + ")"));
     return nullptr;
   }
   bool ok = true;
@@ -5055,6 +5079,32 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName());
       return false;
     }
+    // Its result crosses back to the awaiting thread: the send check.
+    if (std::string why = uncrossable(retTy, node->getResultQual(), "");
+        !why.empty()) {
+      error(node->getLocation(),
+            "the result of 'async fn' '" + node->getName() + "' (a '" +
+                qualifiedName(node->getResultQual(), retTy) +
+                "') cannot cross to the task's "
+                "awaiter: " +
+                why);
+      ErroneousNames.insert(node->getName());
+      return false;
+    }
+    // A value held in memory is passed by its address, which the task
+    // would read after the caller's frame moved on: not in the prototype.
+    for (size_t i = 0; i < paramTypes.size(); ++i)
+      if (ast::isMemType(paramTypes[i])) {
+        const ast::Param &p = node->getParams()[i];
+        error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +
+                         node->getName() + "' has type '" +
+                         typeName(paramTypes[i]) +
+                         "', a value held in memory: the prototype passes "
+                         "numbers, references and handles to a task (hold "
+                         "the value in a class)");
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
     for (const ast::Param &p : node->getParams())
       if (p.Mode != ast::ParamMode::Value) {
         error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +

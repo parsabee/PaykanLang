@@ -368,6 +368,9 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
       L.B.ptrStore(addr, Val::null(Type::Box));
       return box;
     }
+    // `move` before a temporary: the temporary, owned already.
+    if (!ast::isa<ast::Identifier>(node->getOperand()))
+      return visit(node->getOperand());
     auto *id = ast::cast<ast::Identifier>(node->getOperand());
     if (L.holdsBox(id->getName())) {
       Val box = L.loadVarBox(id->getName());
