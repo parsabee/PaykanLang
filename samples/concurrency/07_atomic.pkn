@@ -57,7 +57,7 @@ fn main() -> int {
   io::println(st.name + " served " + Str(st.served) + ", bytes " + Str(st.bytes) +
               ", done " + Str(st.done) + ", ids " + Str(ids));
   // a parallel loop over a frozen object's cells
-  parallel for i in 0..100 { st.served -= 1; }
-  io::println("served " + Str(st.served) + " " + Str(st.served.compareExchange(2901, 0)) + " " + Str(st.served));
+  parallel for i in 0..100 { if i % 2 == 0 { st.served -= 1; } }
+  io::println("served " + Str(st.served) + " " + Str(st.served.compareExchange(2951, 0)) + " " + Str(st.served));
   return 0;
 }

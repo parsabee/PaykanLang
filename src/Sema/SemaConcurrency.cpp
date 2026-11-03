@@ -911,7 +911,7 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
   // holds: it takes no qualifier.  One to share, or to freeze for every
   // thread, goes in a `mem::Box<T>`, an object (`atomic const
   // mem::Box<Buffer<float>>`).
-  const bool ref = ast::isRefType(inner);
+  const bool ref = ast::isRefType(inner) || ast::isa<ast::AtomicType>(inner);
   const std::string value =
       "'" + typeName(inner) + "' is a value" +
       (sharesStorage(inner) ? ": box it ('mem::Box<" + typeName(inner) +
