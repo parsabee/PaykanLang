@@ -542,6 +542,40 @@ struct InlineAllocaScopesPass
   }
 };
 
+// -- The schedule of a parallel loop's chunks
+//
+// convert-scf-to-openmp leaves a worksharing loop's schedule to the
+// runtime's default, static: every thread takes the same number of the
+// loop's 256 chunks, so a thread on a slow core (an efficiency core of a
+// hybrid CPU) sets the loop's time (benchmarks/README.md).  A dynamic
+// schedule hands the chunks out as threads come free.  The result is the
+// same whichever thread runs a chunk: each chunk's partials are its own,
+// folded in chunk order afterwards (PIRToStandard.cpp, lowerParallel).
+struct DynamicSchedulePass
+    : public PassWrapper<DynamicSchedulePass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(DynamicSchedulePass)
+
+  StringRef getArgument() const override { return "pir-dynamic-schedule"; }
+  StringRef getDescription() const override {
+    return "Schedule a parallel loop's chunks dynamically, one at a time";
+  }
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<omp::OpenMPDialect, arith::ArithDialect>();
+  }
+
+  void runOnOperation() override {
+    getOperation().walk([&](omp::WsloopOp op) {
+      if (op.getScheduleKind())
+        return;
+      OpBuilder b(op);
+      Value one =
+          arith::ConstantIntOp::create(b, op.getLoc(), b.getI64Type(), 1);
+      op.setScheduleKind(omp::ClauseScheduleKind::Dynamic);
+      op.getScheduleChunkMutable().assign(one);
+    });
+  }
+};
+
 // -- Dead code the conversions leave
 //
 // The coroutine lowering of an async function (the concurrency prototype)
@@ -863,6 +897,7 @@ void addLLVMDialectPasses(PassManager &pm) {
   // lowers the scf around an await to cf itself, as a suspension point
   // splits blocks); then the rest of scf becomes cf.
   pm.addPass(createConvertSCFToOpenMPPass());
+  pm.addPass(std::make_unique<DynamicSchedulePass>());
   pm.addPass(std::make_unique<InlineAllocaScopesPass>());
   pm.addPass(createAsyncFuncToAsyncRuntimePass());
   pm.addPass(createAsyncToAsyncRuntimePass());

@@ -19,5 +19,11 @@ fn main() -> int {
   parallel for i in 0..1 {
     total = nodes[i].id;        // error: not a reduction; nodes is a reference
   }
+  let xs = [0.0; 4];
+  ys = [0.0; 4];
+  ys[0] = 1.0;
+  parallel for i in 0..4 {
+    ys[3 - i] = xs[i];          // error: written at an index other than the loop's variable
+  }
   return await t2;
 }

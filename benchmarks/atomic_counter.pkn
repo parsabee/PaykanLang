@@ -1,0 +1,32 @@
+// True sharing: every thread adds to one atomic cell every `stride`
+// iterations.  The cache line of the cell bounces between cores; the cost
+// is the coherence traffic, and it grows with the number of threads.
+//   atomic_counter <n> <reps> <stride>
+import ::io;
+import bench;
+
+fn main(args: view Str[]) -> int {
+  let n = bench::arg(args, 1, 4194304);
+  let reps = bench::arg(args, 2, 5);
+  let stride = bench::arg(args, 3, 1);
+  let hits: atomic int = 0;
+  best = 0; total = 0; last = 0;
+  let c0 = bench::cpu();
+  let w0 = bench::now();
+  for r in 0..reps {
+    hits = 0;
+    let t0 = bench::now();
+    parallel for i in 0..n {
+      if i % stride == 0 { hits += 1; }
+    }
+    let dt = bench::now() - t0;
+    total += dt;
+    if best == 0 || dt < best { best = dt; }
+    last = hits;
+  }
+  let cpu = bench::cpu() - c0;
+  let wall = bench::now() - w0;
+  io::println("atomic_counter n=" + Str(n) + " reps=" + Str(reps) + " stride=" + Str(stride) +
+              " ns_min=" + Str(best) + " ns_mean=" + Str(total / reps) + " wall_ns=" + Str(wall) + " cpu_ns=" + Str(cpu) + " check=" + Str(last));
+  return 0;
+}

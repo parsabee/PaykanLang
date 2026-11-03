@@ -1,0 +1,29 @@
+// A reduction that streams a cache-resident float array (the prototype's
+// parallel bodies read fixed-size arrays, at most 16384 elements, so the
+// loop goes round the array: n reads of 128 KB that live in L2).
+//   sum <n> <reps>
+import ::io;
+import bench;
+
+fn main(args: view Str[]) -> int {
+  let n = bench::arg(args, 1, 16777216);
+  let reps = bench::arg(args, 2, 5);
+  xs = [0.0; 16384];
+  for i in 0..16384 { xs[i] = float<int>(i % 7); }
+  best = 0; total = 0; s = 0.0;
+  let c0 = bench::cpu();
+  let w0 = bench::now();
+  for r in 0..reps {
+    let t0 = bench::now();
+    s = 0.0;
+    parallel for i in 0..n { s += xs[i % 16384]; }
+    let dt = bench::now() - t0;
+    total += dt;
+    if best == 0 || dt < best { best = dt; }
+  }
+  let cpu = bench::cpu() - c0;
+  let wall = bench::now() - w0;
+  io::println("sum n=" + Str(n) + " reps=" + Str(reps) + " ns_min=" + Str(best) +
+              " ns_mean=" + Str(total / reps) + " wall_ns=" + Str(wall) + " cpu_ns=" + Str(cpu) + " check=" + Str(s));
+  return 0;
+}

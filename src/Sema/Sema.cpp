@@ -5961,6 +5961,29 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   } else if (idxTy && fixed && !checkFixedIndex(fixed, node->getIndex())) {
     return false;
   }
+  // A `parallel for` body (the prototype) writes an array of the enclosing
+  // function at the loop's variable only (its first index, for an array of
+  // arrays): no two iterations then write one element.
+  if (!ParallelStack.empty()) {
+    const ast::Expr *arr = node->getArray();
+    const ast::Expr *first = node->getIndex();
+    while (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(arr)) {
+      first = se->getIndex();
+      arr = se->getArray();
+    }
+    const auto *root = ast::dyn_cast<ast::Identifier>(arr);
+    const auto *idx = ast::dyn_cast<ast::Identifier>(first);
+    const std::string &var = ParallelStack.back().Loop->getVar()->getName();
+    if (root && isOuterScope(CurrentScope->findOwner(root->getName())) &&
+        (!idx || idx->getName() != var)) {
+      error(first->getLocation(),
+            "'" + root->getName() +
+                "' is written in a 'parallel for' body at an index other "
+                "than the loop's variable '" +
+                var + "': two iterations could write one element");
+      return false;
+    }
+  }
   // An error in the array or the index, as a read of them reports it.
   const bool targetFailed =
       Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;

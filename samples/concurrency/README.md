@@ -109,7 +109,9 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   own partial, the partials folded in chunk order afterwards (the design's
   reproducible reduction).  The LLVM path then runs
   `convert-scf-to-openmp` (the chunks become an `omp.parallel` /
-  `omp.wsloop`), `async-func-to-async-runtime`, `async-to-async-runtime`
+  `omp.wsloop`, scheduled dynamically one chunk at a time: on a hybrid
+  CPU a static split lets an efficiency core set the loop's time,
+  `benchmarks/README.md`), `async-func-to-async-runtime`, `async-to-async-runtime`
   and `convert-async-to-llvm`, and translates OpenMP to LLVM IR.  The C
   path (`--emit-c`) lowers the same ops sequentially: a task is the
   function's result carried in a pointer, a parallel loop a plain loop.
