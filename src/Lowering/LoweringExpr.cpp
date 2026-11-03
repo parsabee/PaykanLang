@@ -221,12 +221,10 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
   // An `atomic` variable (the prototype): its handle, or its value read
   // atomically.
-  if (astTy && ast::isa<ast::AtomicType>(astTy)) {
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(astTy)) {
     if (node->isAtomicHandle())
       return val;
-    return L.callRuntime(kPaykanAtomicLoad,
-                         {L.emitSharedGet(val, node->getName() + ".obj")},
-                         node->getName());
+    return L.emitAtomicLoad(at->getInnerType(), val, node->getName());
   }
   // A read its statement may replace the variable's value under
   // (noteHeldReads): the box, with a reference of its own, a fresh +1 one
@@ -1189,6 +1187,9 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // `obj.cb(args)` with `cb` a field of function type.
   if (node->isFieldCall())
     return emitFieldCall(node);
+  // `x.exchange(v)` / `x.compareExchange(e, d)` on an `atomic` place.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(recvResolved))
+    return emitAtomicMethodCall(node, at);
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
   if (ast::dyn_cast<ast::SliceType>(recvResolved))
@@ -1231,6 +1232,35 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       ast::dyn_cast<ast::BuiltinType>(recvResolved))
     return emitShowCall(node);
   return emitClassMethodCall(node, wantAddress);
+}
+
+// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an `atomic`
+// place (the prototype): the receiver is the place's handle, its cell.
+Val ModuleLowering::ExprEmitter::emitAtomicMethodCall(ast::MethodCallExpr *node,
+                                                      ast::AtomicType *at) {
+  Val cell = visit(node->getReceiver());
+  if (!cell)
+    return Val();
+  Val obj = L.emitSharedGet(cell, "cell.obj");
+  ast::Type *inner = at->getInnerType();
+  const bool isFloat =
+      ast::BuiltinType::isFloatKind(ModuleLowering::builtinKind(inner));
+  std::vector<Val> args{obj};
+  for (ast::Expr *arg : node->getArguments()) {
+    Val v = visit(arg);
+    if (!v)
+      return Val();
+    args.push_back(L.atomicToRaw(inner, v));
+  }
+  if (node->getMethodName() == kMethodExchange) {
+    Val old = L.callRuntime(
+        isFloat ? kPaykanAtomicFExchange : kPaykanAtomicExchange, args, "old");
+    return L.atomicFromRaw(inner, old, "old");
+  }
+  Val swapped = L.callRuntime(isFloat ? kPaykanAtomicFCompareExchange
+                                      : kPaykanAtomicCompareExchange,
+                              args, "swapped");
+  return L.B.cast(swapped, Type::Bool, "swapped.bool");
 }
 
 // `obj.cb(args)` with `cb` a field of function type: the field's closure,

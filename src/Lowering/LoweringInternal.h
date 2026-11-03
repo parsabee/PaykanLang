@@ -433,6 +433,34 @@ private:
   Val emitParallelFor(ast::ForStmt *node);
   /// An assignment to an `atomic` variable: a store or an atomic add.
   Val emitAtomicAssign(ast::AssignStmt *node);
+  /// An assignment to the `atomic` field of the object @p objPtr (of class
+  /// @p ct): a store, an atomic add, or the cell of a handle; false after
+  /// an error.
+  bool emitAtomicFieldAssign(ast::MemberAssignStmt *node, ast::AtomicType *at,
+                             ast::ClassType *ct, const Val &objPtr);
+  /// Whether @p e is an `atomic` place read as its handle (Sema's
+  /// AtomicHandle on an identifier or a member access).
+  static bool isAtomicHandleExpr(const ast::Expr *e);
+  /// A new cell of the `atomic` type holding @p inner, with the value @p v.
+  Val emitAtomicNew(ast::Type *inner, const Val &v, const std::string &name);
+  /// The value of the cell @p cell (a box) holding @p inner, read atomically
+  /// and in the type's canonical form.
+  Val emitAtomicLoad(ast::Type *inner, const Val &cell,
+                     const std::string &name);
+  /// Stores @p v in the cell atomically.
+  void emitAtomicStore(ast::Type *inner, const Val &cell, const Val &v);
+  /// Adds @p v (or its negation) to the cell atomically; the value found,
+  /// as emitAtomicLoad gives it.
+  Val emitAtomicAdd(ast::Type *inner, const Val &cell, const Val &v,
+                    bool negate, const std::string &name);
+  /// @p v, of the value type held in a cell, as the cell's 64 bits: an
+  /// integer, a bool or a char as an i64, a float as an f64.
+  Val atomicToRaw(ast::Type *inner, const Val &v);
+  /// The cell's 64 bits @p raw as a value of @p inner.
+  Val atomicFromRaw(ast::Type *inner, const Val &raw, const std::string &name);
+  /// Set while an `__init__` body is emitted (emitInitBody): an assignment
+  /// to an `atomic` field finds no cell on the field's first value.
+  bool InInitBody = false;
   /// The program's `main` for an `async fn main` (@p task): starts the task
   /// and awaits its result.
   void emitAsyncMainEntry(const pir::Function &task);
@@ -931,6 +959,9 @@ private:
     /// `toString()`, a tuple's, a struct's, an enum's or a builtin type's,
     /// and a class's method.
     Val emitFieldCall(ast::MethodCallExpr *node);
+    /// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an
+    /// `atomic` place (the prototype).
+    Val emitAtomicMethodCall(ast::MethodCallExpr *node, ast::AtomicType *at);
     Val emitHashCall(ast::MethodCallExpr *node);
     Val emitStrParseCall(ast::MethodCallExpr *node,
                          ast::BuiltinType::Kind target);

@@ -344,6 +344,14 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 }
 
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
+  // A value into a slot of an `atomic` type (the prototype): the slot takes
+  // a new cell holding it (an `atomic` place's handle is passed as it is).
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(dst);
+      at && srcTy && !ast::isa<ast::AtomicType>(srcTy) &&
+      isAssignable(at->getInnerType(), srcTy)) {
+    src->setNewAtomicCell(at);
+    return true;
+  }
   // `None` into an optional slot: statically the literal is `Obj` (a design
   // decision — see docs/language/12-optionals.md), but in this position it
   // denotes the absent `T?` value.  Record that contextual type on the
@@ -768,14 +776,17 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   }
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
-  // `atomic T` (the concurrency prototype): T is `int`.
+  // `atomic T` (the concurrency prototype): T is a number, `bool` or
+  // `char` (the design's fixed arrays of them are not in the prototype).
   if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
     ast::Type *inner = resolveType(at->getInnerType(), loc, context);
     if (!inner)
       return nullptr;
-    if (inner != Ctx.getIntTy()) {
-      error(loc, "'atomic' holds an 'int' in the prototype, not '" +
-                     typeName(inner) + "'");
+    auto *bt = ast::dyn_cast<ast::BuiltinType>(inner);
+    if (!bt || bt->getTypeKind() == ast::BuiltinType::Void) {
+      error(loc, "'atomic' holds a number, a 'bool' or a 'char', not '" +
+                     typeName(inner) +
+                     "' (the prototype has no atomic arrays)");
       return nullptr;
     }
     return Ctx.getAtomicType(inner);
@@ -2033,8 +2044,15 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
   std::vector<ast::Expr *> links;
   for (ast::Expr *x = operand; ast::chainOperand(x); x = ast::chainOperand(x))
     links.push_back(x);
-  for (auto it = links.rbegin(); it != links.rend(); ++it)
+  for (auto it = links.rbegin(); it != links.rend(); ++it) {
+    // The link that takes this one: a method call on an `atomic` place
+    // takes its handle (the prototype).
+    ast::Expr *outer = std::next(it) == links.rend() ? e : *std::next(it);
+    S.WantAtomicHandle =
+        ast::isa<ast::MethodCallExpr>(outer) && Sema::isPlaceChain(*it);
     ChainTypes[*it] = visit(*it);
+    S.WantAtomicHandle = false;
+  }
 }
 
 namespace {
@@ -2493,10 +2511,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         expectedArgs = init->getParamTypes();
   std::vector<ast::Type *> argTypes;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
-    // An `atomic` parameter takes the variable's handle (the prototype).
+    // An `atomic` parameter takes an `atomic` place's handle (the
+    // prototype); any other value makes a new cell (checkAssignable).
     S.WantAtomicHandle = i < expectedArgs.size() &&
                          ast::isa<ast::AtomicType>(expectedArgs[i]) &&
-                         ast::isa<ast::Identifier>(node->getArguments()[i]);
+                         Sema::isPlaceChain(node->getArguments()[i]);
     auto *ty =
         visitExpecting(node->getArguments()[i],
                        i < expectedArgs.size() ? expectedArgs[i] : nullptr);
@@ -2737,10 +2756,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
-  // Resolve receiver type.
+  // Resolve receiver type.  A method call on an `atomic` place (the
+  // prototype) takes its handle, not its value.
+  S.WantAtomicHandle = Sema::isPlaceChain(node->getReceiver());
   auto *recvTy = visit(node->getReceiver());
+  S.WantAtomicHandle = false;
   if (!recvTy)
     return nullptr;
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(recvTy))
+    return S.checkAtomicMethodCall(node, at);
   if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
     return nullptr;
 
@@ -2919,7 +2943,12 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    // An `atomic` parameter takes an `atomic` place's handle (the
+    // prototype); any other value makes a new cell (checkAssignable).
+    S.WantAtomicHandle =
+        ast::isa<ast::AtomicType>(paramTys[i]) && Sema::isPlaceChain(argExpr);
     auto *argTy = visitExpecting(argExpr, paramTys[i]);
+    S.WantAtomicHandle = false;
     if (!argTy)
       continue;
     if (!S.checkAssignable(paramTys[i], argTy, argExpr) &&
@@ -3019,6 +3048,17 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
     if (!S.checkMemberAccess(S.fieldOwner(ct, node->getFieldName()),
                              node->getFieldName(), node->getLocation()))
       return nullptr;
+    // An `atomic` field (the prototype): its handle where one is wanted,
+    // otherwise its value, read atomically.
+    if (auto *at = ast::dyn_cast<ast::AtomicType>(fty)) {
+      if (std::exchange(S.WantAtomicHandle, false)) {
+        node->setAtomicHandle(true);
+        node->setResolvedType(at);
+        return at;
+      }
+      node->setResolvedType(at->getInnerType());
+      return at->getInnerType();
+    }
     node->setResolvedType(fty);
     return fty;
   }
@@ -4487,7 +4527,13 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     return false;
   }
   if (node->getReturnValue()) {
+    // An `atomic` result (the prototype) takes an `atomic` place's handle;
+    // any other value makes a new cell (checkAssignable).
+    WantAtomicHandle = CurrentReturnType &&
+                       ast::isa<ast::AtomicType>(CurrentReturnType) &&
+                       isPlaceChain(node->getReturnValue());
     auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
+    WantAtomicHandle = false;
     if (!valTy)
       return false;
     // A function that returns nothing returns no value, not one of `void`
@@ -5460,12 +5506,11 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     // An `atomic` variable (the prototype) starts as a new cell holding
     // the value, or as another handle to an `atomic` variable's cell.
     ast::Type *expectedInit = declTy;
-    if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy)) {
-      auto *id = ast::dyn_cast<ast::Identifier>(node->getInitExpr());
-      ast::Type *idTy = id ? CurrentScope->lookup(id->getName()) : nullptr;
-      if (idTy && ast::isa<ast::AtomicType>(idTy))
-        WantAtomicHandle = true;
-      else
+    if (!declTy || ast::isa<ast::AtomicType>(declTy)) {
+      // An `atomic` variable, field or parameter named as the initializer
+      // (`let j = k`, `let n: atomic int = st.hits`): its handle.
+      WantAtomicHandle = isPlaceChain(node->getInitExpr());
+      if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy))
         expectedInit = at->getInnerType();
     }
     auto *initTy = resolveExprType(node->getInitExpr(), expectedInit);
@@ -5751,6 +5796,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                            node->getFieldName(), node->getLocation()))
       return false;
   }
+
+  // An `atomic` field (the prototype) is a cell: the assignment is one
+  // atomic operation on it, through any receiver that reaches the field
+  // (a `const` or `atomic const` object's cells are usable).
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldTy))
+    return checkAtomicMemberAssign(node, at);
 
   if (!checkChangeable(node->getReceiver(),
                        "cannot assign to its field '" + node->getFieldName() +

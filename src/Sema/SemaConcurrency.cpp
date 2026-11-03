@@ -96,42 +96,196 @@ bool Sema::checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy) {
   return true;
 }
 
-bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
-  const std::string &name = node->getVarName();
-  ast::Expr *value = node->getValue();
+// -- Atomic places (the prototype): a variable or a class field of an
+// `atomic` type is a cell, and an assignment to it one atomic operation.
+
+bool Sema::isPlaceChain(const ast::Expr *e) {
+  if (ast::isa<ast::Identifier>(e))
+    return true;
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return isPlaceChain(ma->getReceiver());
+  return false;
+}
+
+bool Sema::samePlace(const ast::Expr *a, const ast::Expr *b) {
+  const auto *ia = ast::dyn_cast<ast::Identifier>(a);
+  const auto *ib = ast::dyn_cast<ast::Identifier>(b);
+  if (ia || ib)
+    return ia && ib && ia->getName() == ib->getName();
+  const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(a);
+  const auto *mb = ast::dyn_cast<ast::MemberAccessExpr>(b);
+  return ma && mb && ma->getFieldName() == mb->getFieldName() &&
+         samePlace(ma->getReceiver(), mb->getReceiver());
+}
+
+/// Whether @p e reads @p place: a walk of the operators, accesses and calls
+/// of an expression (any read of an atomic place on the right of an `=` to
+/// it would read and write the cell separately).
+bool Sema::readsPlace(const ast::Expr *e, const ast::Expr *place) {
+  if (!e)
+    return false;
+  if (samePlace(e, place))
+    return true;
+  if (const auto *be = ast::dyn_cast<ast::BinaryExpr>(e))
+    return readsPlace(be->getLHS(), place) || readsPlace(be->getRHS(), place);
+  if (const auto *ue = ast::dyn_cast<ast::UnaryExpr>(e))
+    return readsPlace(ue->getOperand(), place);
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return readsPlace(te->getCondition(), place) ||
+           readsPlace(te->getTrueExpr(), place) ||
+           readsPlace(te->getFalseExpr(), place);
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return readsPlace(ma->getReceiver(), place);
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return readsPlace(se->getArray(), place) ||
+           readsPlace(se->getIndex(), place);
+  if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    for (const ast::Expr *arg : ce->getArguments())
+      if (readsPlace(arg, place))
+        return true;
+    return false;
+  }
+  if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    if (readsPlace(mc->getReceiver(), place))
+      return true;
+    for (const ast::Expr *arg : mc->getArguments())
+      if (readsPlace(arg, place))
+        return true;
+  }
+  return false;
+}
+
+std::optional<ast::AssignStmt::AtomicKind>
+Sema::checkAtomicValue(const ast::Expr *place, ast::Expr *value,
+                       ast::AtomicType *at, ast::SourceLocation loc,
+                       ast::Type *valTy) {
+  using K = ast::AssignStmt::AtomicKind;
+  const std::string what = placeText(place);
   ast::Type *inner = at->getInnerType();
-  // `x += e` and `x -= e`: one atomic add.
-  if (auto *be = ast::dyn_cast<ast::BinaryExpr>(value)) {
-    auto *lhs = ast::dyn_cast<ast::Identifier>(be->getLHS());
+  // `x += e` and `x -= e` (the parser's `x = x + e`): one atomic add.  The
+  // other compound operators would read and write the cell separately.
+  if (auto *be = ast::dyn_cast<ast::BinaryExpr>(value);
+      be && samePlace(be->getLHS(), place)) {
     const bool add = be->getOpcode() == ast::BinaryOpcode::Add;
     const bool sub = be->getOpcode() == ast::BinaryOpcode::Sub;
-    if (lhs && lhs->getName() == name && (add || sub)) {
-      ast::Type *rhsTy = resolveExprType(be->getRHS(), inner);
-      if (!rhsTy)
-        return false;
-      if (!checkAssignable(inner, rhsTy, be->getRHS())) {
-        error(node->getLocation(), "cannot add a '" + typeName(rhsTy) +
-                                       "' to '" + name + "', an '" +
-                                       typeName(at) + "'");
+    if (!add && !sub) {
+      error(loc, "'" + what +
+                     "' is 'atomic': this operator reads and writes "
+                     "it separately; its atomic operations are '+=', '-=', "
+                     "'exchange' and 'compareExchange'");
+      return std::nullopt;
+    }
+    ast::Type *rhsTy = resolveExprType(be->getRHS(), inner);
+    if (!rhsTy)
+      return std::nullopt;
+    if (!checkAssignable(inner, rhsTy, be->getRHS())) {
+      error(loc, "cannot add a '" + typeName(rhsTy) + "' to '" + what +
+                     "', an '" + typeName(at) + "'");
+      return std::nullopt;
+    }
+    be->getLHS()->setResolvedType(inner); // the parser's copy: never read
+    be->setResolvedType(inner);
+    return add ? K::Add : K::Sub;
+  }
+  if (readsPlace(value, place)) {
+    error(loc, "'" + what + "' is 'atomic': '" + what +
+                   " = ...' reads and writes it separately; write '" + what +
+                   " += e', or use 'exchange' or 'compareExchange'");
+    return std::nullopt;
+  }
+  if (!valTy)
+    valTy = resolveExprType(value, inner);
+  if (!valTy)
+    return std::nullopt;
+  if (!checkAssignable(inner, valTy, value)) {
+    error(loc, "cannot store a '" + typeName(valTy) + "' in '" + what +
+                   "', an '" + typeName(at) + "'");
+    return std::nullopt;
+  }
+  return K::Store;
+}
+
+bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
+  auto kind = checkAtomicValue(node->getLHS(), node->getValue(), at,
+                               node->getLocation());
+  if (!kind)
+    return false;
+  node->setAtomicKind(*kind);
+  return true;
+}
+
+bool Sema::checkAtomicMemberAssign(ast::MemberAssignStmt *node,
+                                   ast::AtomicType *at) {
+  using K = ast::AssignStmt::AtomicKind;
+  ast::Expr *value = node->getValue();
+  ast::Type *valTy = nullptr;
+  // `self.f = p` in `__init__`, `p` an `atomic` place: the field takes its
+  // cell (the default `__init__` is all such).
+  const auto *recv = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+  const bool inInit = recv && recv->getName() == names::kSelf &&
+                      CurrentClassCtx &&
+                      CurrentClassCtx->MethodName == names::kMethodInit;
+  if (inInit && isPlaceChain(value)) {
+    WantAtomicHandle = true;
+    valTy = resolveExprType(value, at->getInnerType());
+    WantAtomicHandle = false;
+    if (!valTy)
+      return false;
+    if (ast::isa<ast::AtomicType>(valTy)) {
+      if (valTy != at) {
+        error(node->getLocation(),
+              "cannot give field '" + node->getFieldName() + "', an '" +
+                  typeName(at) + "', the cell of an '" + typeName(valTy) + "'");
         return false;
       }
-      lhs->setResolvedType(inner);
-      be->setResolvedType(inner);
-      node->setAtomicKind(add ? ast::AssignStmt::AtomicKind::Add
-                              : ast::AssignStmt::AtomicKind::Sub);
+      node->setAtomicKind(K::Cell);
       return true;
     }
   }
-  ast::Type *valTy = resolveExprType(value, inner);
-  if (!valTy)
+  // Synthetic member access of the field: the place the value goes to.
+  ast::MemberAccessExpr place(node->getLocation(), node->getReceiver(),
+                              node->getFieldName());
+  auto kind = checkAtomicValue(&place, value, at, node->getLocation(), valTy);
+  if (!kind)
     return false;
-  if (!checkAssignable(inner, valTy, value)) {
-    error(node->getLocation(), "cannot store a '" + typeName(valTy) + "' in '" +
-                                   name + "', an '" + typeName(at) + "'");
-    return false;
-  }
-  node->setAtomicKind(ast::AssignStmt::AtomicKind::Store);
+  node->setAtomicKind(*kind);
   return true;
+}
+
+ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
+                                       ast::AtomicType *at) {
+  const std::string &m = node->getMethodName();
+  ast::Type *inner = at->getInnerType();
+  const bool exchange = m == names::kMethodExchange;
+  const bool compare = m == names::kMethodCompareExchange;
+  if (!exchange && !compare) {
+    error(node->getLocation(), "'" + typeName(at) + "' has no method '" + m +
+                                   "': an atomic place has 'exchange(v)' and "
+                                   "'compareExchange(expected, desired)'");
+    return nullptr;
+  }
+  const size_t want = exchange ? 1 : 2;
+  if (node->getNumArguments() != want) {
+    error(node->getLocation(), "method '" + m + "' expects " +
+                                   std::to_string(want) + " argument(s), got " +
+                                   std::to_string(node->getNumArguments()));
+    return nullptr;
+  }
+  for (size_t i = 0; i < want; ++i) {
+    ast::Expr *arg = node->getArguments()[i];
+    ast::Type *ty = resolveExprType(arg, inner);
+    if (!ty)
+      return nullptr;
+    if (!checkAssignable(inner, ty, arg)) {
+      error(arg->getLocation(), "argument " + std::to_string(i + 1) + " of '" +
+                                    m + "' has type '" + typeName(ty) +
+                                    "', expected '" + typeName(inner) + "'");
+      return nullptr;
+    }
+  }
+  ast::Type *result = exchange ? inner : Ctx.getBoolTy();
+  node->setResolvedType(result);
+  return result;
 }
 
 bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {

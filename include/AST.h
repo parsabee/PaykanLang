@@ -241,12 +241,19 @@ class Expr : public ASTNode {
   // slot (the concurrency prototype): the lowering makes a cell of it, or
   // freezes it, at this use.
   QualForm Materialize = QualForm::Unique;
+  // Set by Sema when a value flows into a slot of an `atomic` type (a
+  // parameter, a result): the slot's type; the lowering makes a new cell
+  // holding the value at this use.
+  Type *NewAtomicCell = nullptr;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   void setMaterialize(QualForm form) { Materialize = form; }
   QualForm getMaterialize() const { return Materialize; }
+
+  void setNewAtomicCell(Type *atomicTy) { NewAtomicCell = atomicTy; }
+  Type *getNewAtomicCell() const { return NewAtomicCell; }
 
   void setResolvedType(Type *ty) { ResolvedType = ty; }
   Type *getResolvedType() const { return ResolvedType; }
@@ -620,9 +627,10 @@ class Identifier;
 // Assignment statement
 class AssignStmt : public Stmt {
 public:
-  /// What an assignment to an `atomic` variable does (the prototype): a
-  /// store of the value, or `x += e` / `x -= e` as one atomic add.
-  enum class AtomicKind : uint8_t { None, Store, Add, Sub };
+  /// What an assignment to an `atomic` variable or field does (the
+  /// prototype): a store of the value, `x += e` / `x -= e` as one atomic
+  /// add, or, for a field in `__init__`, the cell of an `atomic` handle.
+  enum class AtomicKind : uint8_t { None, Store, Add, Sub, Cell };
 
 private:
   Identifier *LHS; // preserves source location of the target variable
@@ -797,6 +805,8 @@ private:
   const std::string *FieldName; // points into ASTContext::StringPool (stable)
   Expr *Value;
   bool CompletesInit = false; // set by Sema (see completesInit)
+  // Set by Sema on an assignment to an `atomic` field (the prototype).
+  AssignStmt::AtomicKind Atomic = AssignStmt::AtomicKind::None;
 
 public:
   MemberAssignStmt(SourceLocation loc, Expr *receiver,
@@ -813,6 +823,8 @@ public:
   /// "Every field before self").
   bool completesInit() const { return CompletesInit; }
   void setCompletesInit(bool completes) { CompletesInit = completes; }
+  AssignStmt::AtomicKind getAtomicKind() const { return Atomic; }
+  void setAtomicKind(AssignStmt::AtomicKind k) { Atomic = k; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAssignStmt;
@@ -1287,6 +1299,10 @@ class MemberAccessExpr : public Expr {
 private:
   Expr *Receiver;
   const std::string *FieldName; // points into ASTContext::StringPool (stable)
+  // Set by Sema when an `atomic` field is read as its handle (passed to an
+  // `atomic` parameter, the receiver of `exchange`), not as its value (the
+  // prototype).
+  bool AtomicHandle = false;
 
 public:
   MemberAccessExpr(SourceLocation loc, Expr *receiver,
@@ -1296,6 +1312,8 @@ public:
 
   Expr *getReceiver() const { return Receiver; }
   const std::string &getFieldName() const { return *FieldName; }
+  bool isAtomicHandle() const { return AtomicHandle; }
+  void setAtomicHandle(bool handle) { AtomicHandle = handle; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAccessExpr;

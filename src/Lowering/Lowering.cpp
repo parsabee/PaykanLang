@@ -19,6 +19,7 @@
 namespace paykan::lowering {
 
 using namespace names;
+using pir::CmpPred;
 using pir::Type;
 
 // -- Constructor
@@ -1158,8 +1159,9 @@ Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
     if (B.function() && B.function()->Sig.Ret == Type::Ptr) {
       val = emitPlaceAddress(retExpr); // an `inout` result
     } else if (CurrentFuncReturnASTType &&
-               ast::isRefType(CurrentFuncReturnASTType)) {
-      val = emitAsShared(retExpr);
+               (ast::isRefType(CurrentFuncReturnASTType) ||
+                ast::isa<ast::AtomicType>(CurrentFuncReturnASTType))) {
+      val = emitAsShared(retExpr); // a handle, or a new cell
     } else {
       val = emitExpr(retExpr);
       if (B.function())
@@ -1481,13 +1483,13 @@ Val ModuleLowering::visitLockStmt(ast::LockStmt *node) {
 Val ModuleLowering::emitAtomicAssign(ast::AssignStmt *node) {
   using K = ast::AssignStmt::AtomicKind;
   const std::string &name = node->getVarName();
+  auto *at = ast::cast<ast::AtomicType>(CurrentScope->lookupASTType(name));
   Val cell = B.load(CurrentScope->lookup(name), name + ".cell");
-  Val obj = emitSharedGet(cell, name + ".obj");
   if (node->getAtomicKind() == K::Store) {
     Val v = emitExpr(node->getValue());
     if (!v)
       return Val();
-    callRuntime(names::kPaykanAtomicStore, {obj, coerceTo(v, Type::I64)});
+    emitAtomicStore(at->getInnerType(), cell, v);
     return Val();
   }
   // `x += e` / `x -= e`: one atomic add of e, or of -e.
@@ -1495,11 +1497,156 @@ Val ModuleLowering::emitAtomicAssign(ast::AssignStmt *node) {
   Val v = emitExpr(be->getRHS());
   if (!v)
     return Val();
-  v = coerceTo(v, Type::I64);
-  if (node->getAtomicKind() == K::Sub)
-    v = B.unary(pir::Opcode::Neg, v, "neg");
-  callRuntime(names::kPaykanAtomicAdd, {obj, v}, name + ".old");
+  emitAtomicAdd(at->getInnerType(), cell, v, node->getAtomicKind() == K::Sub,
+                name + ".old");
   return Val();
+}
+
+bool ModuleLowering::emitAtomicFieldAssign(ast::MemberAssignStmt *node,
+                                           ast::AtomicType *at,
+                                           ast::ClassType *ct,
+                                           const Val &objPtr) {
+  using K = ast::AssignStmt::AtomicKind;
+  const std::string &field = node->getFieldName();
+  ast::Type *inner = at->getInnerType();
+  // `self.f = p` in `__init__`: the field takes p's cell (never counted).
+  if (node->getAtomicKind() == K::Cell) {
+    Val box = emitExpr(node->getValue());
+    if (!box)
+      return false;
+    B.fieldStore(objPtr, ct->getName(), field, box);
+    return true;
+  }
+  if (node->getAtomicKind() == K::Store) {
+    Val v = emitExpr(node->getValue());
+    if (!v)
+      return false;
+    Val cell =
+        B.fieldLoad(objPtr, ct->getName(), field, Type::Box, field + ".cell");
+    if (!InInitBody) {
+      emitAtomicStore(inner, cell, v);
+      return true;
+    }
+    // In `__init__` the field's first value makes its cell (`new` zeroed
+    // the slot); a later one stores into it.
+    Val isNull = B.cmp(CmpPred::Eq, cell, Val::null(Type::Box), "no.cell");
+    pir::If *s = B.openIf(isNull, true);
+    B.enter(*s->Then);
+    Val fresh = emitAtomicNew(inner, v, field + ".cell");
+    B.fieldStore(objPtr, ct->getName(), field, fresh);
+    B.leave();
+    B.enter(*s->Else);
+    emitAtomicStore(inner, cell, v);
+    B.leave();
+    return true;
+  }
+  // `o.f += e` / `o.f -= e`: one atomic add of e, or of -e.
+  auto *be = ast::cast<ast::BinaryExpr>(node->getValue());
+  Val v = emitExpr(be->getRHS());
+  if (!v)
+    return false;
+  Val cell =
+      B.fieldLoad(objPtr, ct->getName(), field, Type::Box, field + ".cell");
+  emitAtomicAdd(inner, cell, v, node->getAtomicKind() == K::Sub,
+                field + ".old");
+  return true;
+}
+
+// static
+bool ModuleLowering::isAtomicHandleExpr(const ast::Expr *e) {
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return id->isAtomicHandle();
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return ma->isAtomicHandle();
+  return false;
+}
+
+/// The runtime's kind of the cell holding a value of the builtin kind @p k
+/// (PaykanAtomicKind in src/Runtime/Runtime.h).
+static int64_t atomicCellKind(ast::BuiltinType::Kind k) {
+  using BK = ast::BuiltinType;
+  switch (k) {
+  case BK::Float:
+    return 16;
+  case BK::F32:
+    return 17;
+  case BK::F16:
+    return 18;
+  case BK::U64:
+    return 1;
+  case BK::Bool:
+    return 2;
+  case BK::Char:
+    return 3;
+  default:
+    return 0;
+  }
+}
+
+Val ModuleLowering::atomicToRaw(ast::Type *inner, const Val &v) {
+  if (ast::BuiltinType::isFloatKind(builtinKind(inner)))
+    return coerceTo(v, Type::F64);
+  Val x = v;
+  if (x.Ty == Type::Char)
+    x = B.cast(x, Type::I64, "char.ext");
+  return coerceTo(x, Type::I64);
+}
+
+Val ModuleLowering::atomicFromRaw(ast::Type *inner, const Val &raw,
+                                  const std::string &name) {
+  const ast::BuiltinType::Kind k = builtinKind(inner);
+  if (ast::BuiltinType::isFloatKind(k))
+    return raw; // stored rounded to its kind
+  if (k == ast::BuiltinType::Bool)
+    return B.cast(raw, Type::Bool, name + ".bool");
+  if (k == ast::BuiltinType::Char)
+    return B.cast(raw, Type::Char, name + ".char");
+  // A narrow integer's adds drift past its range in the cell: its reads
+  // wrap it back (docs/design/sized-types.md).
+  return canonicalize(raw, inner);
+}
+
+Val ModuleLowering::emitAtomicNew(ast::Type *inner, const Val &v,
+                                  const std::string &name) {
+  const ast::BuiltinType::Kind k = builtinKind(inner);
+  const Val kind = Val::i64(atomicCellKind(k));
+  if (ast::BuiltinType::isFloatKind(k))
+    return callRuntime(names::kPaykanAtomicFNew, {atomicToRaw(inner, v), kind},
+                       name);
+  return callRuntime(names::kPaykanAtomicNew, {atomicToRaw(inner, v), kind},
+                     name);
+}
+
+Val ModuleLowering::emitAtomicLoad(ast::Type *inner, const Val &cell,
+                                   const std::string &name) {
+  Val obj = emitSharedGet(cell, name + ".obj");
+  const bool isFloat = ast::BuiltinType::isFloatKind(builtinKind(inner));
+  Val raw = callRuntime(isFloat ? names::kPaykanAtomicFLoad
+                                : names::kPaykanAtomicLoad,
+                        {obj}, name);
+  return atomicFromRaw(inner, raw, name);
+}
+
+void ModuleLowering::emitAtomicStore(ast::Type *inner, const Val &cell,
+                                     const Val &v) {
+  Val obj = emitSharedGet(cell, "cell.obj");
+  const bool isFloat = ast::BuiltinType::isFloatKind(builtinKind(inner));
+  callRuntime(isFloat ? names::kPaykanAtomicFStore : names::kPaykanAtomicStore,
+              {obj, atomicToRaw(inner, v)});
+}
+
+Val ModuleLowering::emitAtomicAdd(ast::Type *inner, const Val &cell,
+                                  const Val &v, bool negate,
+                                  const std::string &name) {
+  Val obj = emitSharedGet(cell, "cell.obj");
+  const bool isFloat = ast::BuiltinType::isFloatKind(builtinKind(inner));
+  Val delta = atomicToRaw(inner, v);
+  if (negate)
+    delta = B.unary(pir::Opcode::Neg, delta, "neg");
+  Val old =
+      callRuntime(isFloat ? names::kPaykanAtomicFAdd : names::kPaykanAtomicAdd,
+                  {obj, delta}, name);
+  return atomicFromRaw(inner, old, name);
 }
 
 Val ModuleLowering::visitBreakStmt(ast::BreakStmt *) {
@@ -1551,15 +1698,13 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   // An `atomic` variable (the prototype): a cell, held as a box; the
   // initializer is its first value, or an `atomic` variable whose cell it
   // shares.
-  if (ast::isa<ast::AtomicType>(declTy)) {
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy)) {
+    // A handle (a place's, a call's result): the cell itself.
     Val cell;
-    auto *handle = ast::dyn_cast<ast::Identifier>(node->getInitExpr());
-    if (handle && handle->isAtomicHandle())
-      cell = emitExpr(handle);
-    else
-      cell = callRuntime(names::kPaykanAtomicNew,
-                         {coerceTo(emitExpr(node->getInitExpr()), Type::I64)},
-                         node->getName() + ".cell");
+    if (ast::isa<ast::AtomicType>(node->getInitExpr()->getResolvedType()))
+      cell = emitExpr(node->getInitExpr());
+    else if (Val v = emitExpr(node->getInitExpr()))
+      cell = emitAtomicNew(at->getInnerType(), v, node->getName() + ".cell");
     if (!cell)
       return Val();
     pir::LocalId local = B.addLocal(node->getName(), Type::Box);
@@ -2140,6 +2285,12 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
+  // A value flowing into a slot of an `atomic` type (the prototype): a new
+  // cell holding it.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(expr->getNewAtomicCell())) {
+    Val v = emitExpr(expr);
+    return v ? emitAtomicNew(at->getInnerType(), v, "cell") : v;
+  }
   // A unique value flowing into a `locked` slot (the prototype): a new
   // cell holding it (the cell takes the +1 box).
   if (expr->getMaterialize() == ast::QualForm::Locked) {
@@ -2197,8 +2348,8 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
 }
 
 Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
-  // An `atomic` variable's handle (the prototype): its cell, never counted.
-  if (auto *h = ast::dyn_cast<ast::Identifier>(expr); h && h->isAtomicHandle())
+  // An `atomic` place's handle (the prototype): its cell, never counted.
+  if (isAtomicHandleExpr(expr))
     return emitExpr(expr);
   // Owned identifier: retain + return the existing box.  The copy of an
   // argument may be lent (docs/pir.md §6) unless a later part of the

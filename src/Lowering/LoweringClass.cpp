@@ -332,8 +332,10 @@ void ModuleLowering::emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
     FirstFieldStores.insert(ma);
     selfUsable = selfUsable || ma->completesInit();
   }
+  const bool outerInit = std::exchange(InInitBody, true);
   for (size_t i = first; i < stmts.size(); ++i)
     visit(stmts[i]);
+  InInitBody = outerInit;
   FirstFieldStores.clear();
 }
 
@@ -531,7 +533,11 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
 
-  if (ast::isMemType(fieldASTTy)) {
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldASTTy)) {
+    // An `atomic` field (the prototype): one operation on its cell.
+    if (!emitAtomicFieldAssign(node, at, ct, objPtr))
+      return Val();
+  } else if (ast::isMemType(fieldASTTy)) {
     emitMemAssign(B.fieldAddr(objPtr, ct->getName(), node->getFieldName(),
                               node->getFieldName() + ".addr"),
                   node->getValue());
@@ -622,6 +628,16 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   getOrCreateClass(ct);
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
+  // An `atomic` field (the prototype): its cell as a handle, or its value.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldASTTy)) {
+    Val cell = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
+                           Type::Box, node->getFieldName() + ".cell");
+    Val out = node->isAtomicHandle() ? cell
+                                     : emitAtomicLoad(at->getInnerType(), cell,
+                                                      node->getFieldName());
+    releaseIfOwned(recv.Owned);
+    return out;
+  }
   const bool weak = ct->isWeakField(node->getFieldName());
   Type fieldTy = weak ? Type::Weak : toPIRType(fieldASTTy);
   if (fieldTy == Type::Void)

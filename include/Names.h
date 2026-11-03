@@ -96,6 +96,9 @@ inline constexpr const char *kMethodToString = "toString";
 /// Str's parse into an `int`, and an `unsigned`'s value as an `int?`.
 inline constexpr const char *kMethodToInt = "toInt";
 inline constexpr const char *kMethodEquals = "equals";
+/// An `atomic` place's operations (the concurrency prototype).
+inline constexpr const char *kMethodExchange = "exchange";
+inline constexpr const char *kMethodCompareExchange = "compareExchange";
 /// The walk every class has after `equals` (the concurrency prototype):
 /// freezes what the object holds, for `atomic const`.
 inline constexpr const char *kMethodWalk = "__walk";
@@ -266,6 +269,17 @@ inline constexpr const char *kPaykanAtomicNew = "PaykanAtomic_new";
 inline constexpr const char *kPaykanAtomicLoad = "PaykanAtomic_load";
 inline constexpr const char *kPaykanAtomicStore = "PaykanAtomic_store";
 inline constexpr const char *kPaykanAtomicAdd = "PaykanAtomic_add";
+inline constexpr const char *kPaykanAtomicExchange = "PaykanAtomic_exchange";
+inline constexpr const char *kPaykanAtomicCompareExchange =
+    "PaykanAtomic_compare_exchange";
+// The same cell holding a float's bits.
+inline constexpr const char *kPaykanAtomicFNew = "PaykanAtomic_fnew";
+inline constexpr const char *kPaykanAtomicFLoad = "PaykanAtomic_fload";
+inline constexpr const char *kPaykanAtomicFStore = "PaykanAtomic_fstore";
+inline constexpr const char *kPaykanAtomicFAdd = "PaykanAtomic_fadd";
+inline constexpr const char *kPaykanAtomicFExchange = "PaykanAtomic_fexchange";
+inline constexpr const char *kPaykanAtomicFCompareExchange =
+    "PaykanAtomic_fcompare_exchange";
 // The prototype's `locked` cell (src/Runtime/Locked.c).
 inline constexpr const char *kPaykanLockedNew = "PaykanLocked_new";
 inline constexpr const char *kPaykanLockedLock = "PaykanLocked_lock";
@@ -448,6 +462,14 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanAtomicLoad,
     kPaykanAtomicStore,
     kPaykanAtomicAdd,
+    kPaykanAtomicExchange,
+    kPaykanAtomicCompareExchange,
+    kPaykanAtomicFNew,
+    kPaykanAtomicFLoad,
+    kPaykanAtomicFStore,
+    kPaykanAtomicFAdd,
+    kPaykanAtomicFExchange,
+    kPaykanAtomicFCompareExchange,
     kPaykanLockedNew,
     kPaykanLockedLock,
     kPaykanLockedUnlock,

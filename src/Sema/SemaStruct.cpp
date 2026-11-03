@@ -245,6 +245,16 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
       continue;
     }
     const ast::Qualifier fieldQual = takeQualifier(); // the prototype
+    // A struct is a value, copied whole: a cell inside it would be shared
+    // by every copy (the prototype keeps cells in classes).
+    if (ast::isa<ast::AtomicType>(fty)) {
+      error(field->getLocation(),
+            context.str() + " has type '" + typeName(fty) +
+                "': a struct cannot hold an 'atomic' field in the prototype "
+                "(hold the cell in a class)");
+      ok = false;
+      continue;
+    }
     if (holdsFixedArray(fty)) {
       error(field->getLocation(),
             context.str() + " has type '" + typeName(fty) +

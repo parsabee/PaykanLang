@@ -689,21 +689,48 @@ int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
 
 // -- Atomic cell (the concurrency prototype, docs/design/concurrency.md)
 //
-// `atomic int`: one heap cell holding an int64 that any thread reads and
-// changes by atomic operations; a copy of the variable is another handle to
-// the cell.  The prototype never counts a cell: it is immortal (its strong
-// count is PAYKAN_REF_MAX, which retains and releases leave alone), so a
-// handle crosses threads with no atomic count.  The design counts cells
-// atomically.
+// `atomic T`, T a number, `bool` or `char`: one heap cell holding 64 bits
+// (an integer, or a double's bits) that any thread reads and changes by
+// atomic operations; a copy of the variable is another handle to the cell.
+// The prototype never counts a cell: it is immortal (its strong count is
+// PAYKAN_REF_MAX, which retains and releases leave alone), so a handle
+// crosses threads with no atomic count.  The design counts cells
+// atomically.  All operations are sequentially consistent.
 
-/// A new cell holding @p value, as an owned box.
-PaykanShared *PaykanAtomic_new(int64_t value);
+/// The kind of value a cell holds, for its text and a float's rounding.
+enum PaykanAtomicKind {
+  PAYKAN_ATOMIC_INT = 0,
+  PAYKAN_ATOMIC_UINT = 1,
+  PAYKAN_ATOMIC_BOOL = 2,
+  PAYKAN_ATOMIC_CHAR = 3,
+  PAYKAN_ATOMIC_F64 = 16, // this and above: a double's bits
+  PAYKAN_ATOMIC_F32 = 17,
+  PAYKAN_ATOMIC_F16 = 18,
+};
+
+/// A new cell holding the integer @p value, as an owned box.
+PaykanShared *PaykanAtomic_new(int64_t value, int64_t kind);
 /// The cell's value, read atomically.
 int64_t PaykanAtomic_load(PaykanObject *cell);
 /// Stores @p value in the cell atomically.
 void PaykanAtomic_store(PaykanObject *cell, int64_t value);
 /// Adds @p delta to the cell's value atomically; the value found.
 int64_t PaykanAtomic_add(PaykanObject *cell, int64_t delta);
+/// Stores @p value; the value found.
+int64_t PaykanAtomic_exchange(PaykanObject *cell, int64_t value);
+/// Stores @p desired when the cell holds @p expected; whether it did.
+int64_t PaykanAtomic_compare_exchange(PaykanObject *cell, int64_t expected,
+                                      int64_t desired);
+/// The same on a cell holding a float, rounded to its kind (f32, f16) on
+/// every store; a compare is of the bits.  `fadd` is a compare-and-swap
+/// loop.
+PaykanShared *PaykanAtomic_fnew(double value, int64_t kind);
+double PaykanAtomic_fload(PaykanObject *cell);
+void PaykanAtomic_fstore(PaykanObject *cell, double value);
+double PaykanAtomic_fadd(PaykanObject *cell, double delta);
+double PaykanAtomic_fexchange(PaykanObject *cell, double value);
+int64_t PaykanAtomic_fcompare_exchange(PaykanObject *cell, double expected,
+                                       double desired);
 
 // -- Locked cell (the concurrency prototype, docs/design/concurrency.md)
 //

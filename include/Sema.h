@@ -349,6 +349,28 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// An assignment to an `atomic` variable: a store, or `x += e` / `x -= e`
   /// as one atomic add.
   bool checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at);
+  /// An assignment to an `atomic` field: a store, an atomic add, or, in
+  /// `__init__`, the cell of an `atomic` handle.
+  bool checkAtomicMemberAssign(ast::MemberAssignStmt *node,
+                               ast::AtomicType *at);
+  /// The value assigned to the `atomic` place @p place: the operation it
+  /// is, or nullopt after an error.  @p valTy is the value's type when it
+  /// was resolved already.
+  std::optional<ast::AssignStmt::AtomicKind>
+  checkAtomicValue(const ast::Expr *place, ast::Expr *value,
+                   ast::AtomicType *at, ast::SourceLocation loc,
+                   ast::Type *valTy = nullptr);
+  /// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an
+  /// `atomic` place: the result's type, or nullptr after an error.
+  ast::Type *checkAtomicMethodCall(ast::MethodCallExpr *node,
+                                   ast::AtomicType *at);
+  /// A variable, or a field reached through variables and fields only.
+  static bool isPlaceChain(const ast::Expr *e);
+  /// Whether @p a and @p b name the same place (isPlaceChain).
+  static bool samePlace(const ast::Expr *a, const ast::Expr *b);
+  /// Whether @p e reads @p place: a walk of the operators, accesses and
+  /// calls of an expression.
+  static bool readsPlace(const ast::Expr *e, const ast::Expr *place);
   /// The send check of an async call: every reference argument is moved
   /// or a temporary, and never `shared`.
   bool checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig);
