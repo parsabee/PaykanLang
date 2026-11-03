@@ -198,23 +198,24 @@ public:
 // -- Reference qualifiers (docs/design/concurrency.md, "The qualifiers")
 
 /// How a reference is held and shared (the concurrency prototype): unique
-/// (unwritten), `shared` (aliases on one thread), `atomic const` (counted
-/// atomically, frozen, shared read-only across threads) or `locked` (a cell
-/// reached only in `lock` blocks); `const` makes a unique or shared one
+/// (unwritten), `shared` (aliases on one thread), `atomic shared const`
+/// (counted atomically, frozen, shared read-only across threads) or `locked` (a
+/// cell reached only in `lock` blocks); `const` makes a unique or shared one
 /// read-only.  A qualifier belongs to a place (a variable, parameter, field
 /// or result): the type it qualifies stays the plain type.
-enum class QualForm : uint8_t { Unique, Shared, AtomicConst, Locked };
+enum class QualForm : uint8_t { Unique, Shared, AtomicSharedConst, Locked };
 
 struct Qualifier {
   QualForm Form = QualForm::Unique;
   bool Const = false; // `const T`, `shared const T`
 
   bool isUnique() const { return Form == QualForm::Unique && !Const; }
-  /// Read-only through this reference: `const`, `shared const`, `atomic const`.
-  bool isConst() const { return Const || Form == QualForm::AtomicConst; }
+  /// Read-only through this reference: `const`, `shared const`, `atomic shared
+  /// const`.
+  bool isConst() const { return Const || Form == QualForm::AtomicSharedConst; }
   bool operator==(const Qualifier &) const = default;
-  /// The spelling: "", "const", "shared", "shared const", "atomic const" or
-  /// "locked".
+  /// The spelling: "", "const", "shared", "shared const", "atomic shared const"
+  /// or "locked".
   const char *spelling() const;
 };
 
@@ -237,9 +238,9 @@ class Expr : public ASTNode {
   // reads it where it is for the whole call (a value held in memory is
   // passed by its address and not copied).
   bool ViewedByCall = false;
-  // Set by Sema when a unique value flows into a `locked` or `atomic const`
-  // slot (the concurrency prototype): the lowering makes a cell of it, or
-  // freezes it, at this use.
+  // Set by Sema when a unique value flows into a `locked` or `atomic shared
+  // const` slot (the concurrency prototype): the lowering makes a cell of it,
+  // or freezes it, at this use.
   QualForm Materialize = QualForm::Unique;
   // Set by Sema when a value flows into a slot of an `atomic` type (a
   // parameter, a result): the slot's type; the lowering makes a new cell
@@ -2027,7 +2028,7 @@ public:
 };
 
 /// A qualified type as written (the concurrency prototype): `const T`,
-/// `shared T`, `shared const T`, `atomic const T`, `locked T`, or, in a
+/// `shared T`, `shared const T`, `atomic shared const T`, `locked T`, or, in a
 /// declaration, the qualifier alone (`x: shared = e;`, Inner null).  Sema
 /// resolves it to the inner type and records the qualifier on the place.
 class QualifiedType : public Type {

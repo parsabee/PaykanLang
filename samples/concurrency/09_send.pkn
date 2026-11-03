@@ -15,7 +15,7 @@ class Cache {
 }
 class Job {
   name: Str;
-  cache: atomic const Cache;
+  cache: atomic shared const Cache;
 }   // a handle inside: crossable
 class Named {
   tag: Str;
@@ -43,7 +43,7 @@ fn mark(n: inout Job) {
 }        // an inout takes a unique or shared object
 
 fn main() -> int {
-  let shared_cache: atomic const Cache = Cache(0);
+  let shared_cache: atomic shared const Cache = Cache(0);
   let t = run(Job("job", shared_cache), 3, move Named("tag", 4));   // a temporary may be `move`d
   let nm = Named("tt", 1);
   let u = run(Job("j", shared_cache), 3, move nm);                   // nm moved

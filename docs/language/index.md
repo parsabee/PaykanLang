@@ -63,7 +63,7 @@ managed by automatic reference counting: there is no garbage collector.
 18. [Appendix: a calculator](18-appendix-calculator.md): a complete multi-module program,
     walked through.
 19. [Concurrency and ownership](19-concurrency.md): the qualifiers on references (unique,
-    `const`, `shared`, `atomic`, `locked`, `atomic const`), `move`, tasks with `async fn` and
+    `const`, `shared`, `atomic`, `locked`, `atomic shared const`), `move`, tasks with `async fn` and
     `await`, the send check, `parallel for`, `lock` blocks, atomic cells, frozen objects,
     `Copyable` and `--strict-ownership`.
 

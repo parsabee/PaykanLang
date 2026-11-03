@@ -1,4 +1,4 @@
-// The concurrency prototype: an `atomic const` object
+// The concurrency prototype: an `atomic shared const` object
 // (docs/design/concurrency.md).  A unique value flowing into such a slot is
 // frozen with everything it holds; the handle copies into every task, and
 // reads inside count nothing.
@@ -19,13 +19,13 @@ class Config {
 }
 
 // A frozen configuration, shared read-only by every task: no counts inside.
-async fn score(cfg: atomic const Config, x: int) -> int {
+async fn score(cfg: atomic shared const Config, x: int) -> int {
   if x < cfg.limits.lo || x > cfg.limits.hi { return 0; }
   return x * cfg.name.len() + int(cfg.weights[x % 4]);
 }
 
 async fn main() -> int {
-  let cfg: atomic const Config =
+  let cfg: atomic shared const Config =
       Config("demo", Limits(0, 100), [1.0, 2.0, 3.0, 4.0]);
   let a = score(cfg, 7);          // the handle is copied into each task
   let b = score(cfg, 8);

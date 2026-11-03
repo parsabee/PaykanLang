@@ -1073,7 +1073,7 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
 
 bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
   // A class's `__walk` (the prototype) is emitted for it too: the walk of
-  // its references that freezes an `atomic const` object.
+  // its references that freezes an `atomic shared const` object.
   if (fn->getName() == names::kMethodWalk) {
     error(fn->getLocation(),
           "'__walk' is reserved for the compiler-generated walk and cannot "

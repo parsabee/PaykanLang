@@ -107,8 +107,8 @@ const char *Qualifier::spelling() const {
     return Const ? "const" : "";
   case QualForm::Shared:
     return Const ? "shared const" : "shared";
-  case QualForm::AtomicConst:
-    return "atomic const";
+  case QualForm::AtomicSharedConst:
+    return "atomic shared const";
   case QualForm::Locked:
     return "locked";
   }

@@ -23,6 +23,6 @@ fn main() -> int {
   sc.name = "x";                        // error: const
   let k: const int = 1;                 // error: const applies to objects
   let w: shared int = 2;                // error: shared qualifies a reference
-  let p: atomic const Pair = Pair(Node(4, "p"), 1);   // error: a struct is a value: box it
+  let p: atomic shared const Pair = Pair(Node(4, "p"), 1);   // error: a struct is a value: box it
   return 0;
 }

@@ -1,0 +1,15 @@
+// The frozen, thread-crossing object is spelled in full, `atomic shared
+// const T`: `atomic` (the reference crosses threads), `shared` (it has
+// several owners) and `const` (nothing writes it).  A spelling that leaves
+// a word out is a parse error, so this file gets no Sema errors.
+import ::io;
+
+class Node {
+  id: int;
+}
+
+fn main() -> int {
+  let a: atomic const Node = Node(1);       // error: 'atomic const' is 'atomic shared const'
+  let b: atomic shared Node = Node(2);      // error: 'atomic shared' would be written with no lock: freeze it or lock it
+  return 0;
+}

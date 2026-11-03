@@ -784,9 +784,20 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       return nullptr;
     auto *bt = ast::dyn_cast<ast::BuiltinType>(inner);
     if (!bt || bt->getTypeKind() == ast::BuiltinType::Void) {
-      error(loc, "'atomic' holds a number, a 'bool' or a 'char', not '" +
-                     typeName(inner) +
-                     "' (the prototype has no atomic arrays)");
+      std::string msg = "'atomic' holds a number, a 'bool' or a 'char', not '";
+      msg += typeName(inner);
+      msg += "'";
+      if (ast::isRefType(inner)) {
+        // An object crosses threads frozen or behind a lock.
+        msg += ": an object crosses threads as 'atomic shared const ";
+        msg += typeName(inner);
+        msg += "' (frozen) or 'locked ";
+        msg += typeName(inner);
+        msg += "'";
+      } else {
+        msg += " (the prototype has no atomic arrays)";
+      }
+      error(loc, msg);
       return nullptr;
     }
     return Ctx.getAtomicType(inner);
@@ -5991,7 +6002,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   // An `atomic` field (the prototype) is a cell: the assignment is one
   // atomic operation on it, through any receiver that reaches the field
-  // (a `const` or `atomic const` object's cells are usable).
+  // (a `const` or `atomic shared const` object's cells are usable).
   if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldTy))
     return checkAtomicMemberAssign(node, at);
 

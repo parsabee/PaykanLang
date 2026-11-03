@@ -109,7 +109,7 @@ You use a built-in trait every time you print: `io::println` is declared
   enum, every tuple, every struct and every function type (see [ValueType](#valuetype)).
 - The built-in trait `Copyable` has no methods and is never implemented: a type is
   Copyable by what it holds. A number, `bool`, `char`, an enum, a `shared` reference and an
-  `atomic`, `atomic const` or `locked` handle are, and so are a struct, a tuple, a
+  `atomic`, `atomic shared const` or `locked` handle are, and so are a struct, a tuple, a
   fixed-size array and an optional of such parts; a unique reference, a `Str`, a function
   value and a task are not. `T: Copyable` bounds a template (see [Copyable](#copyable)).
 - `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
@@ -314,7 +314,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 `Copyable` is a built-in trait with no methods, of the types a program may copy freely
 ([Concurrency](19-concurrency.md#copyable)). It is structural: a type is Copyable by what it
 holds, and no `impl` block gives it. A number, `bool`, `char`, an enum, a `shared` reference
-and an `atomic`, `atomic const` or `locked` handle are Copyable, and so are a struct, a
+and an `atomic`, `atomic shared const` or `locked` handle are Copyable, and so are a struct, a
 tuple, a fixed-size array and an optional whose every part is (a struct's `shared` field
 counts). A unique reference, a `Str`, a function value and a task are not: they are
 move-only, and reach another owner by [`move`](19-concurrency.md#move-an-explicit-transfer).

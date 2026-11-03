@@ -222,17 +222,17 @@ fn main() -> int {
 
 // What crosses: a moved unique reference, a temporary (`move` before one
 // does nothing), a class whose reference field is a handle, a cell's
-// handle and the handles of an `atomic const` object and a `locked` cell,
-// each copied into any number of tasks, and a `Str` temporary.
+// handle and the handles of an `atomic shared const` object and a `locked`
+// cell, each copied into any number of tasks, and a `Str` temporary.
 TEST(Concurrency, HandlesAndTemporariesCrossToATask) {
   auto r = semaCheck(R"(class Cache { hits: atomic int; }
-class Job { name: Str; cache: atomic const Cache; }
+class Job { name: Str; cache: atomic shared const Cache; }
 class Node { id: int; }
 class Counts { total: int; }
 async fn consume(n: Node) -> int { return n.id; }
 async fn run(j: Job, x: int) -> int { j.cache.hits += 1; return j.name.len() + x; }
 async fn cell(c: atomic int) -> int { return c; }
-async fn frozen(n: atomic const Node) -> int { return n.id; }
+async fn frozen(n: atomic shared const Node) -> int { return n.id; }
 async fn guarded(c: locked Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn opt(n: Node?) -> int { return 1; }
 async fn name(s: Str) -> int { return s.len(); }
@@ -241,12 +241,12 @@ fn main() -> int {
   let t1 = consume(move b);
   let t2 = consume(Node(3));
   let t3 = consume(move Node(4));
-  let shared_cache: atomic const Cache = Cache(0);
+  let shared_cache: atomic shared const Cache = Cache(0);
   let t4 = run(Job("job", shared_cache), 3);
   let k: atomic int = 0;
   let t5 = cell(k);
   let t6 = cell(k);
-  let fr: atomic const Node = Node(5);
+  let fr: atomic shared const Node = Node(5);
   let t7 = frozen(fr);
   let t8 = frozen(fr);
   let lk: locked Counts = Counts(0);
@@ -264,11 +264,11 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
-// At a conversion to `atomic const` or `locked`, the object is frozen or
+// At a conversion to `atomic shared const` or `locked`, the object is frozen or
 // made a cell with everything it holds, so the send check runs on its
 // fields, named by path.  A unique value converts, moved or a temporary,
-// and a `const` one into `atomic const`.
-TEST(Concurrency, SendCheckAtAConversionToAtomicConstOrLocked) {
+// and a `const` one into `atomic shared const`.
+TEST(Concurrency, SendCheckAtAConversionToAtomicSharedConstOrLocked) {
   auto r = semaCheck(R"(class Cache { hits: int; }
 class Job { name: Str; cache: shared Cache; }
 class Holder { job: Job; }
@@ -276,16 +276,16 @@ class Fun { f: () -> int; }
 class Any { o: Obj; }
 class Node { id: int; }
 fn main() -> int {
-  let k: atomic const Holder = Holder(Job("k", Cache(2)));
+  let k: atomic shared const Holder = Holder(Job("k", Cache(2)));
   let l: locked Holder = Holder(Job("l", Cache(3)));
   let m: locked Fun = Fun(fn() => 1);
-  let a: atomic const Any = Any(Node(0));
+  let a: atomic shared const Any = Any(Node(0));
   let n = Node(1);
-  let f: atomic const Node = move n;
+  let f: atomic shared const Node = move n;
   let g: locked Node = Node(2);
-  let h: atomic const Node = Node(3);
+  let h: atomic shared const Node = Node(3);
   let c: const Node = Node(4);
-  let v: atomic const Node = c;
+  let v: atomic shared const Node = c;
   return f.id + h.id + v.id;
 })");
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
@@ -293,17 +293,18 @@ fn main() -> int {
       "field 'job.cache' is 'shared Cache': a 'shared' reference is aliased "
       "on its own thread";
   expectErrors(
-      r, {(":8:3: error: cannot make 'Holder(...)' (a 'Holder') 'atomic "
-           "const': " +
-           shared)
-              .c_str(),
-          (":9:3: error: cannot make 'Holder(...)' (a 'Holder') 'locked': " +
-           shared)
-              .c_str(),
-          ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked': field 'f' "
-          "is a function value, whose captures are not known",
-          ":11:3: error: cannot make 'Any(...)' (a 'Any') 'atomic const': "
-          "field 'o' is an 'Obj', which may be any class"});
+      r,
+      {(":8:3: error: cannot make 'Holder(...)' (a 'Holder') 'atomic "
+        "shared const': " +
+        shared)
+           .c_str(),
+       (":9:3: error: cannot make 'Holder(...)' (a 'Holder') 'locked': " +
+        shared)
+           .c_str(),
+       ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked': field 'f' "
+       "is a function value, whose captures are not known",
+       ":11:3: error: cannot make 'Any(...)' (a 'Any') 'atomic shared const': "
+       "field 'o' is an 'Obj', which may be any class"});
   expectCleanLines(r, {":12:", ":13:", ":14:", ":15:", ":16:", ":17:"});
 }
 
@@ -369,7 +370,7 @@ fn main() -> int {
 // -- `parallel for`
 
 // A body reads the enclosing function's values, arrays of values, `atomic`
-// variables and handles (an `atomic const` object's fields, a `locked`
+// variables and handles (an `atomic shared const` object's fields, a `locked`
 // cell under a `lock`), declares what it likes, changes an outer number by
 // a reduction (`+=`, `-=`, `*=`, under an `if`, a `match` or an inner loop
 // too), bumps an atomic, and writes an `inout` or outer array at the loop's
@@ -396,9 +397,9 @@ fn main() -> int {
   xs = [0.0; 100];
   ys = [0.0; 100];
   let hits: atomic int = 0;
-  let cfg: atomic const Config = Config(0, 50);
+  let cfg: atomic shared const Config = Config(0, 50);
   let counts: locked Counts = Counts(0);
-  let st: atomic const Stats = Stats(0);
+  let st: atomic shared const Stats = Stats(0);
   total = 0;
   prod = 1;
   parallel for i in 0..n {
@@ -498,7 +499,7 @@ fn main() -> int {
   expectCleanLines(r, {":15:", ":17:", ":18:", ":25:"});
 }
 
-// An `atomic` variable of the enclosing function (an `atomic const`
+// An `atomic` variable of the enclosing function (an `atomic shared const`
 // object's field too) changed by a statement of the body itself changes on
 // every iteration, which bounces its cache line between cores: a warning,
 // not an error, and none for a change under an `if`, a `match` or an inner
@@ -507,7 +508,7 @@ TEST(Concurrency, AnAtomicChangedEveryIterationWarns) {
   auto r = semaCheck(R"(class Stats { served: atomic int; }
 fn main() -> int {
   let hits: atomic int = 0;
-  let st: atomic const Stats = Stats(0);
+  let st: atomic shared const Stats = Stats(0);
   parallel for i in 0..100 {
     hits += 1;
     st.served += 1;
@@ -547,8 +548,8 @@ fn main() -> int {
 // a `bool`.  A copy of the place (`let m = n`, an argument, a result,
 // `self.f = p` in `__init__`) is a handle to the same cell, so a handle
 // passes to an `atomic` parameter and comes back from an `atomic` result;
-// any other value makes a new cell.  The `atomic` fields of an `atomic
-// const` object still change, in a task or a parallel body.
+// any other value makes a new cell.  The `atomic` fields of an
+// `atomic shared const` object still change, in a task or a parallel body.
 TEST(Concurrency, AtomicPlaces) {
   auto r = semaCheck(
       R"(class Stats { name: Str; served: atomic int; bytes: atomic float; done: atomic bool; }
@@ -558,7 +559,7 @@ impl Stats {
   }
 }
 class Box { n: atomic int; }
-async fn record(st: atomic const Stats, id: int, n: int) -> int {
+async fn record(st: atomic shared const Stats, id: int, n: int) -> int {
   for i in 0..n { st.served += 1; st.bytes += 0.5; }
   return id;
 }
@@ -586,7 +587,7 @@ fn main() -> int {
   let k2 = same(k);
   k2 -= 1;
   let shared_n: atomic int = 1;
-  let st: atomic const Stats = Stats("s", shared_n);
+  let st: atomic shared const Stats = Stats("s", shared_n);
   let t1 = record(st, 1, 10);
   let ids = await t1;
   st.done = True;
@@ -658,8 +659,8 @@ fn main() -> int {
                 (":7:3: error: 'hits" + separately).c_str(),
                 (":8:3: error: 'hits" + separately).c_str(),
                 ":9:3: error: 'atomic' holds a number, a 'bool' or a 'char', "
-                "not "
-                "'Str' (the prototype has no atomic arrays)",
+                "not 'Str': an object crosses threads as 'atomic shared const "
+                "Str' (frozen) or 'locked Str'",
                 (":11:3" + bnReads).c_str(), (":12:3" + bnReads).c_str(),
                 (":13:3" + bnReads).c_str(), (":14:3" + hitsReads).c_str(),
                 (":15:3" + hitsReads).c_str(), (":16:3" + hitsReads).c_str(),

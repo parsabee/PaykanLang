@@ -2347,8 +2347,15 @@ Type *Parser::parsePrimaryType() {
 }
 
 // typeAnnotation ::= qualifier? primaryType suffixes
-// qualifier      ::= "const" | "shared" "const"? | "atomic" "const" | "locked"
+// qualifier      ::= "const" | "shared" "const"? | "atomic" "shared" "const"
+//                  | "locked"
 //                  | "atomic"                     -- a cell of a number
+//
+// `atomic` says the reference crosses threads, `shared` that it has several
+// owners (one on each thread at least), `const` that nothing writes it: an
+// object crosses frozen, as `atomic shared const`, or behind a lock, as
+// `locked`.  The two spellings that leave a word out are errors naming the
+// whole one.
 //
 // A qualifier (docs/design/concurrency.md) covers the whole type.  In a
 // declaration it may stand alone, with the type inferred (`x: shared =
@@ -2364,10 +2371,22 @@ Type *Parser::parseTypeAnnotation() {
     qual.Const = accept(Tok::KwConst);
   } else if (accept(Tok::KwLocked)) {
     qual.Form = QualForm::Locked;
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwShared &&
+             kind(2) == Tok::KwConst) {
+    consume();
+    consume();
+    consume();
+    qual.Form = QualForm::AtomicSharedConst;
   } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwConst) {
-    consume();
-    consume();
-    qual.Form = QualForm::AtomicConst;
+    error(cur().Loc, "'atomic const' is 'atomic shared const': an object read "
+                     "from several threads has several owners; write 'atomic "
+                     "shared const T'");
+    return nullptr;
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwShared) {
+    error(cur().Loc, "'atomic shared T' would be written from several threads "
+                     "with no lock; write 'atomic shared const T' to freeze "
+                     "it, or 'locked T' to change it under a lock");
+    return nullptr;
   } else if (accept(Tok::KwAtomic)) {
     // `atomic T`: a cell holding a number.
     Type *inner = parseTypeAnnotation();

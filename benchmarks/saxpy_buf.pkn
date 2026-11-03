@@ -19,7 +19,7 @@ fn main(args: view Str[]) -> int {
     let ea = a.set(unsigned<int>(i), float<int>(i % 7));
     let ey = ys.set(unsigned<int>(i), 1.0);
   }
-  let xs: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move a);
+  let xs: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move a);
   let k = 0.5;
   best = 0;
   total = 0;

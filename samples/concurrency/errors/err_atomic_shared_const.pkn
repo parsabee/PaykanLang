@@ -10,10 +10,10 @@ class Config {
 }
 
 fn main() -> int {
-  let cfg: atomic const Config = Config("demo", Limits(0, 100));
-  cfg.limits.hi = 5;                 // error: const through atomic const
+  let cfg: atomic shared const Config = Config("demo", Limits(0, 100));
+  cfg.limits.hi = 5;                 // error: const through atomic shared const
   cfg.name = "x";                    // error: const
   let u: Config = cfg;               // error: none back
-  let k: atomic const int = 1;       // error: qualifies a reference
+  let k: atomic shared const int = 1;       // error: qualifies a reference
   return 0;
 }

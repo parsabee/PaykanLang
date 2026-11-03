@@ -331,7 +331,7 @@ typeAnnotation ::= qualifier plainType
                  | qualifier                    -- alone: the type is inferred (§6)
                  | "atomic" typeAnnotation      -- a cell holding a number
                  | plainType
-qualifier      ::= "const" | "shared" "const"? | "atomic" "const" | "locked"
+qualifier      ::= "const" | "shared" "const"? | "atomic" "shared" "const" | "locked"
 plainType      ::= primaryType ( "[" "]" | "[" ( INT | "_" ) "]" | "?" )*
 primaryType    ::= IDENT
                  | modulePath "::" IDENT
@@ -387,10 +387,10 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 - A qualifier ([design/concurrency.md](design/concurrency.md), the
   concurrency prototype) says how the place of that type holds its object:
   `const T` (one owner, read-only), `shared T` and `shared const T`
-  (aliases on one thread), `atomic const T` (frozen, shared across threads)
+  (aliases on one thread), `atomic shared const T` (frozen, shared across threads)
   and `locked T` (a cell reached in `lock` blocks, §6).  It is a
   `QualifiedType` node (the `Qualifier` and the inner type) around the
-  whole annotation, suffixes included: `shared N?` and `atomic const Str?`
+  whole annotation, suffixes included: `shared N?` and `atomic shared const Str?`
   are a `QualifiedType` over an `OptionalType`, and `shared N[3]` one over
   a `FixedArrayType`, which Sema rejects as it does a qualifier on any
   value type (`'shared' qualifies a reference; 'N[3]' is a value: box it
@@ -399,19 +399,33 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   value, which 'let' fixes`).  A type takes one qualifier: a second one, or
   `atomic`, after it is a syntax error at the second (`a type takes one
   qualifier: 'const shared' is two`, `... 'shared atomic' is two`, `...
-  'locked atomic' is two` for `locked atomic const C`).  A qualifier parses
-  wherever a type does, a parameter's, a field's, a result's, a type
-  argument and a `match` binding's included; which places take which is
-  Sema's (a borrow takes none, §4; the prototype reads `List<shared N>` as
-  `List<N>` and does not act on a `match` binding's).
+  'locked atomic' is two` for `locked atomic shared const C`).  `atomic
+  shared const` is one qualifier of three words, so a qualifier after it
+  is the second: `atomic shared const shared N` is `a type takes one
+  qualifier: 'atomic shared const shared' is two`, at the second `shared`.
+  A qualifier parses wherever a type does, a parameter's, a field's, a
+  result's, a type argument and a `match` binding's included; which places
+  take which is Sema's (a borrow takes none, §4; the prototype reads
+  `List<shared N>` as `List<N>` and does not act on a `match` binding's).
 - `atomic T` is a cell holding a number, which the variable or field of
   that type names; a copy of it is another handle to the same cell.  It is
   an `AtomicType` node over `T`, which at parse time is any annotation
-  (`atomic int?`, `atomic shared N` and `atomic atomic int` parse); Sema
-  holds `T` to a number type, `bool` or `char` (`'atomic' holds a number,
-  a 'bool' or a 'char', not 'int?' (the prototype has no atomic arrays)`).
-  `atomic` directly followed by `const` is the qualifier `atomic const`,
-  never a cell.
+  that does not start with `shared` or `const` (`atomic int?` and `atomic
+  atomic int` parse); Sema holds `T` to a number type, `bool` or `char`
+  (`'atomic' holds a number, a 'bool' or a 'char', not 'int?' (the
+  prototype has no atomic arrays)`, and for a class `'atomic' holds a
+  number, a 'bool' or a 'char', not 'N': an object crosses threads as
+  'atomic shared const N' (frozen) or 'locked N'`).  `atomic` followed by
+  `shared const` is the qualifier `atomic shared const`, never a cell: each
+  of its words says one thing (`atomic`, the reference crosses threads;
+  `shared`, the object has several owners; `const`, nothing writes it),
+  and the two spellings that leave a word out are syntax errors at the
+  `atomic`, each naming the whole qualifier.  `atomic const N` is `'atomic
+  const' is 'atomic shared const': an object read from several threads has
+  several owners; write 'atomic shared const T'`, and `atomic shared N` is
+  `'atomic shared T' would be written from several threads with no lock;
+  write 'atomic shared const T' to freeze it, or 'locked T' to change it
+  under a lock`.
 - A qualifier alone (`x: shared = e;`, `let c: const = e;`, §6) is a
   `QualifiedType` with no inner type: the type is the initializer's, which
   Sema infers.  The recursive-descent frontend reads the bare qualifier
@@ -517,7 +531,7 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
 - `x: shared = e;` and `let c: const = e;` declare a local with a
   qualifier and no type (a `QualifiedType` with no inner type, §5): the
   type is the initializer's, which Sema infers, as for a borrow.  Every
-  qualifier has the form (`y: shared const = e;`, `z: atomic const = e;`,
+  qualifier has the form (`y: shared const = e;`, `z: atomic shared const = e;`,
   `w: locked = e;`); `atomic` alone has not (`x: atomic = 0;` is
   `unexpected '='; expected a type`).
 - A condition is not parenthesised (`if x > 0 {`, `while i < n {`); it ends
@@ -909,4 +923,6 @@ specification does not. Every frontend must reject them (the
   space or a newline between its two tokens (`a > > b`, `x > >= 1;`), a
   `>>>` (`a >>> b`), and a chain of shifts (`a << b << c`).
 - A run of qualifiers on one type, or `atomic` after one (§5): `const
-  shared N`, `shared atomic int`, `locked atomic const C`.
+  shared N`, `shared atomic int`, `locked atomic shared const C`; and the two
+  spellings of `atomic shared const` that leave a word out: `atomic const
+  N`, `atomic shared N`.

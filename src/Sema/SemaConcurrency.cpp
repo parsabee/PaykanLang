@@ -49,9 +49,10 @@ bool Sema::checkParallelRead(const std::string &name, ast::Type *ty,
   // counted by the body.
   if (ast::Type *elem = bufferElementType(ty); elem && isPlainValue(elem))
     return true;
-  // A handle: a `locked` cell or an `atomic const` object.
+  // A handle: a `locked` cell or an `atomic shared const` object.
   if (const ast::Qualifier q = qualifierOfVar(name);
-      q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicConst)
+      q.Form == ast::QualForm::Locked ||
+      q.Form == ast::QualForm::AtomicSharedConst)
     return true;
   ast::Type *elem = nullptr;
   if (auto *a = ast::dyn_cast<ast::ArrayType>(ty))
@@ -323,7 +324,7 @@ ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
 bool Sema::isCopyablePart(ast::Type *ty, ast::Qualifier q, std::string *why) {
   if (ty && ast::isRefType(ty))
     return q.Form == ast::QualForm::Shared ||
-           q.Form == ast::QualForm::AtomicConst ||
+           q.Form == ast::QualForm::AtomicSharedConst ||
            q.Form == ast::QualForm::Locked;
   return isCopyable(ty, why);
 }
@@ -487,7 +488,8 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
   if (q.Form == ast::QualForm::Shared)
     return at("is '" + qualifiedName(q, ty) +
               "': a 'shared' reference is aliased on its own thread");
-  if (q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicConst)
+  if (q.Form == ast::QualForm::Locked ||
+      q.Form == ast::QualForm::AtomicSharedConst)
     return ""; // a handle: its contents were checked when it was made
   auto *ct = ast::dyn_cast<ast::ClassType>(ty);
   if (!ct || ct == Ctx.getStrTy())
@@ -541,9 +543,9 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
                        ast::isa<ast::SubscriptExpr>(inner) ||
                        ast::isa<ast::TupleIndexExpr>(inner);
     const std::string text = placeText(inner);
-    // A handle (`locked`, `atomic const`) is copied; a `shared` reference
-    // never crosses; a unique or `const` one crosses by `move`, or as a
-    // temporary of the caller's.
+    // A handle (`locked`, `atomic shared const`) is copied; a `shared`
+    // reference never crosses; a unique or `const` one crosses by `move`, or as
+    // a temporary of the caller's.
     if (ast::isRefType(ty)) {
       if (q.Form == ast::QualForm::Shared) {
         error(arg->getLocation(),
@@ -554,7 +556,7 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
         continue;
       }
       if (q.Form == ast::QualForm::Locked ||
-          q.Form == ast::QualForm::AtomicConst)
+          q.Form == ast::QualForm::AtomicSharedConst)
         continue; // a handle: another reference to the same cell or object
       if (place && !moved) {
         error(arg->getLocation(),
@@ -1018,7 +1020,7 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
     return true;
   // A struct, a tuple or an array is a value wherever it is, whatever it
   // holds: it takes no qualifier.  One to share, or to freeze for every
-  // thread, goes in a `mem::Box<T>`, an object (`atomic const
+  // thread, goes in a `mem::Box<T>`, an object (`atomic shared const
   // mem::Box<Buffer<float>>`).
   const bool ref = ast::isRefType(inner) || ast::isa<ast::AtomicType>(inner);
   const std::string value =
@@ -1040,9 +1042,9 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
       return false;
     }
     return true;
-  case ast::QualForm::AtomicConst:
+  case ast::QualForm::AtomicSharedConst:
     if (!ref) {
-      error(loc, "'atomic const' qualifies a reference; " + value);
+      error(loc, "'atomic shared const' qualifies a reference; " + value);
       return false;
     }
     return true;

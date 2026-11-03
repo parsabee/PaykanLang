@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // Sema tests: the qualifiers of the concurrency prototype on places (unique,
-// `const`, `shared`, `shared const`, `atomic const`, `locked`), the
+// `const`, `shared`, `shared const`, `atomic shared const`, `locked`), the
 // conversions between them, and the copy rule of --strict-ownership
 // (docs/design/concurrency.md, "Ownership"; samples/concurrency/README.md).
 
@@ -66,19 +66,23 @@ std::string noQualifierOnBorrow(const std::string &what,
 
 // The declared type converts, in every slot the same way: a unique value
 // (new, or moved) flows into every form, a `const` one into the other
-// `const` forms (`shared const`, `atomic const`), and a `shared` reference,
-// a `shared const` one and a handle (`atomic const`, `locked`) only into
-// their own form, as a copy.  Each of the 36 pairs, in a variable.
+// `const` forms (`shared const`, `atomic shared const`), and a `shared`
+// reference, a `shared const` one and a handle (`atomic shared const`,
+// `locked`) only into their own form, as a copy.  Each of the 36 pairs, in a
+// variable.
 TEST(Qualifier, ConversionsBetweenForms) {
   struct From {
     const char *Qual; // "" is unique
     const char *Expr;
   };
-  const From froms[] = {{"", "move a"},         {"const", "c"},
-                        {"shared", "s"},        {"shared const", "sc"},
-                        {"atomic const", "ac"}, {"locked", "l"}};
+  const From froms[] = {{"", "move a"},
+                        {"const", "c"},
+                        {"shared", "s"},
+                        {"shared const", "sc"},
+                        {"atomic shared const", "ac"},
+                        {"locked", "l"}};
   const char *const intos[] = {
-      "", "const", "shared", "shared const", "atomic const", "locked"};
+      "", "const", "shared", "shared const", "atomic shared const", "locked"};
   auto typeOf = [](const std::string &qual) {
     return qual.empty() ? std::string("Node") : qual + " Node";
   };
@@ -86,8 +90,8 @@ TEST(Qualifier, ConversionsBetweenForms) {
     for (const char *into : intos) {
       const std::string fromQ = from.Qual, intoQ = into;
       const bool flows = fromQ.empty() || fromQ == intoQ ||
-                         (fromQ == "const" &&
-                          (intoQ == "shared const" || intoQ == "atomic const"));
+                         (fromQ == "const" && (intoQ == "shared const" ||
+                                               intoQ == "atomic shared const"));
       const std::string decl =
           "let x: " + typeOf(intoQ) + " = " + from.Expr + ";";
       auto r = semaCheck(R"(class Node { id: int; }
@@ -96,7 +100,7 @@ fn main() -> int {
   let c: const Node = Node(2);
   let s: shared Node = Node(3);
   let sc: shared const Node = Node(4);
-  let ac: atomic const Node = Node(5);
+  let ac: atomic shared const Node = Node(5);
   let l: locked Node = Node(6);
   )" + decl + R"(
   return 0;
@@ -114,24 +118,24 @@ fn main() -> int {
 
   // A declaration writes the qualifier with its type, or alone with the
   // type inferred (`x: shared = e`, `let y: const = e`); a `const` moves
-  // into `atomic const` as it does into `shared const`.
+  // into `atomic shared const` as it does into `shared const`.
   auto ok = semaCheck(R"(class Node { id: int; }
 fn main() -> int {
   let a = Node(1);
   let c: const Node = move a;
   let sc: shared const Node = c;
-  let ac: atomic const Node = c;
+  let ac: atomic shared const Node = c;
   let c2: const Node = c;
   let s: shared Node = Node(2);
   let s2: shared Node = s;
   let sc2: shared const Node = sc;
-  let ac2: atomic const Node = ac;
+  let ac2: atomic shared const Node = ac;
   let l: locked Node = Node(3);
   let l2: locked Node = l;
   let b = Node(4);
   let bs: shared Node = move b;
   let d = Node(5);
-  let da: atomic const Node = move d;
+  let da: atomic shared const Node = move d;
   let e = Node(6);
   let el: locked Node = move e;
   x: shared = Node(7);
@@ -147,22 +151,22 @@ fn main() -> int {
 // message; a temporary is unique and goes anywhere.
 TEST(Qualifier, ConversionsAtParametersFieldsAndResults) {
   auto r = semaCheck(R"(class Node { id: int; }
-class Holder { u: Node; c: const Node; s: shared Node; sc: shared const Node; ac: atomic const Node; l: locked Node; }
+class Holder { u: Node; c: const Node; s: shared Node; sc: shared const Node; ac: atomic shared const Node; l: locked Node; }
 fn uniq(n: Node) -> int { return n.id; }
 fn cst(n: const Node) -> int { return n.id; }
 fn shr(n: shared Node) -> int { return n.id; }
 fn shc(n: shared const Node) -> int { return n.id; }
-fn atc(n: atomic const Node) -> int { return n.id; }
+fn atc(n: atomic shared const Node) -> int { return n.id; }
 fn lck(n: locked Node) -> int { return 0; }
 fn giveU(s: shared Node) -> Node { return s; }
 fn giveC(s: shared Node) -> const Node { return s; }
 fn giveS(c: const Node) -> shared Node { return c; }
 fn giveSC(c: const Node) -> shared const Node { return c; }
-fn giveAC(c: const Node) -> atomic const Node { return c; }
+fn giveAC(c: const Node) -> atomic shared const Node { return c; }
 fn main() -> int {
   let c: const Node = Node(1);
   let s: shared Node = Node(2);
-  let ac: atomic const Node = Node(3);
+  let ac: atomic shared const Node = Node(3);
   let l: locked Node = Node(4);
   let h = Holder(Node(0), Node(0), Node(0), Node(0), Node(0), Node(0));
   n = uniq(Node(0)) + cst(Node(0)) + shr(Node(0)) + shc(Node(0)) + atc(Node(0)) + lck(Node(0));
@@ -181,7 +185,7 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 16u) << r.Diagnostics;
   const std::string u = "Node", c = "const Node", s = "shared Node",
-                    ac = "atomic const Node", l = "locked Node";
+                    ac = "atomic shared const Node", l = "locked Node";
   expectErrors(
       r, {(":9:36: " + cannotStore(s, "the result", u)).c_str(),
           (":10:42: " + cannotStore(s, "the result", c)).c_str(),
@@ -212,7 +216,8 @@ fn main() -> int {
 // argument of anything it holds; a `view fn` and a `view` argument are
 // fine.  What it holds reads as `const` (a unique field), as `shared const`
 // (a `shared` field), and so cannot become unique again.  `shared const`
-// and `atomic const` are `const` the same way, the message naming the form.
+// and `atomic shared const` are `const` the same way, the message naming the
+// form.
 TEST(Qualifier, ConstPlaces) {
   auto r = semaCheck(R"(class Inner { x: int; }
 class Node {
@@ -248,7 +253,7 @@ fn main() -> int {
   sc.id = 1;
   sc.tick();
   sc.inner.x = 3;
-  let cfg: atomic const Config = Config("demo", Limits(0, 100));
+  let cfg: atomic shared const Config = Config("demo", Limits(0, 100));
   cfg.limits.hi = 5;
   cfg.limits.widen();
   cfg.name = "x";
@@ -280,10 +285,13 @@ fn main() -> int {
        ":32:3: error: 'sc' is 'shared const'; cannot assign to its field 'id'",
        ":33:3: error: 'sc' is 'shared const'; 'tick' is not a 'view fn'",
        ":34:3: error: 'sc' is 'shared const'; cannot assign to its field 'x'",
-       ":36:3: error: 'cfg' is 'atomic const'; cannot assign to its field "
+       ":36:3: error: 'cfg' is 'atomic shared const'; cannot assign to its "
+       "field "
        "'hi'",
-       ":37:3: error: 'cfg' is 'atomic const'; 'widen' is not a 'view fn'",
-       ":38:3: error: 'cfg' is 'atomic const'; cannot assign to its field "
+       ":37:3: error: 'cfg' is 'atomic shared const'; 'widen' is not a 'view "
+       "fn'",
+       ":38:3: error: 'cfg' is 'atomic shared const'; cannot assign to its "
+       "field "
        "'name'",
        ":40:3: error: 'lim' is 'const'; cannot assign to its field 'hi'"});
   // A `const` copy of what it holds, a `view fn`, a `view` argument and a
@@ -297,10 +305,11 @@ fn main() -> int {
 
 // A value (`int`, `bool`, a struct, a tuple, a fixed array) takes no
 // qualifier, wherever it is declared: a variable, a parameter, a field or
-// a result.  `const` on a value is what `let` does; `shared` and `atomic
-// const` qualify a reference; the prototype's `locked` holds an object.  A
-// value that holds a reference gets the hint to box it.  A `Str`, an
-// optional reference and a `mem::Box` are references and take every form.
+// a result.  `const` on a value is what `let` does; `shared` and
+// `atomic shared const` qualify a reference; the prototype's `locked` holds
+// an object.  A value that holds a reference gets the hint to box it.  A
+// `Str`, an optional reference and a `mem::Box` are references and take
+// every form.
 TEST(Qualifier, ValuesTakeNoQualifier) {
   auto r = semaCheck(R"(class Node { id: int; }
 struct P { x: int; }
@@ -313,18 +322,18 @@ fn main() -> int {
   let k: const int = 1;
   let w: shared int = 2;
   let b: shared bool = True;
-  let ac: atomic const int = 1;
-  let p: atomic const P = P(1);
+  let ac: atomic shared const int = 1;
+  let p: atomic shared const P = P(1);
   let sp: shared P = P(1);
   let cp: const P = P(1);
   let t: shared (int, int) = (1, 2);
-  let ta: atomic const (int, int) = (1, 2);
+  let ta: atomic shared const (int, int) = (1, 2);
   let arr: const int[2] = [1, 2];
-  let aa: atomic const int[2] = [1, 2];
+  let aa: atomic shared const int[2] = [1, 2];
   let l: locked int = 1;
   let lp: locked P = P(1);
   let lt: locked (int, int) = (1, 2);
-  let bp: atomic const Pair = Pair(Node(4), 1);
+  let bp: atomic shared const Pair = Pair(Node(4), 1);
   let na: shared Node[2] = [Node(1), Node(2)];
   let ct: const (int, Node) = (1, Node(2));
   return 0;
@@ -333,7 +342,8 @@ fn main() -> int {
   const std::string kConst = "error: 'const' applies to objects; '";
   const std::string kLet = "' is a value, which 'let' fixes";
   const std::string kShared = "error: 'shared' qualifies a reference; '";
-  const std::string kAtomic = "error: 'atomic const' qualifies a reference; '";
+  const std::string kAtomic =
+      "error: 'atomic shared const' qualifies a reference; '";
   const std::string kLocked =
       "error: 'locked' holds an object in the prototype, not a '";
   expectErrors(
@@ -374,18 +384,60 @@ fn main() -> int {
 class Node { id: int; }
 struct Pair { left: Node; n: int; }
 fn main() -> int {
-  let st: atomic const Str = "x";
+  let st: atomic shared const Str = "x";
   let ss: shared Str = "y";
   let cs: const Str = "z";
   let ns: shared Node? = None;
   let cn: const Node? = Node(1);
-  let an: atomic const Node? = Node(2);
-  let bp: atomic const mem::Box<Pair> = mem::Box(Pair(Node(3), 4));
+  let an: atomic shared const Node? = Node(2);
+  let bp: atomic shared const mem::Box<Pair> = mem::Box(Pair(Node(3), 4));
   let sb: shared mem::Box<Pair> = mem::Box(Pair(Node(5), 6));
   return st.len() + ss.len() + cs.len() + bp.value().n + sb.value().n;
 })");
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
   EXPECT_EQ(ok.ErrorCount, 0u) << ok.Diagnostics;
+}
+
+// `atomic T` is the cell of a number, a `bool` or a `char`, wherever it is
+// declared: `atomic int` stays the cell.  A class is not a cell's value: an
+// object crosses threads frozen (`atomic shared const N`) or under a lock
+// (`locked N`), and the message names both forms, with the class.
+TEST(Qualifier, AtomicHoldsAValueNotAnObject) {
+  auto ok = semaCheck(R"(class Box { n: atomic int; done: atomic bool; }
+fn f(c: atomic int) -> int { return c; }
+fn main() -> int {
+  let hits: atomic int = 0;
+  let b = Box(0, False);
+  hits += 1;
+  b.n += 2;
+  let was = b.done.exchange(True);
+  let plain: int = hits;
+  return f(b.n) + plain + (if was then 1 else 0);
+})");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  EXPECT_EQ(ok.ErrorCount, 0u) << ok.Diagnostics;
+
+  auto r = semaCheck(R"(class Node { id: int; }
+class Holder { n: atomic Node; }
+fn f(n: atomic Node) -> int { return 1; }
+fn g() -> atomic Node { return Node(1); }
+fn main() -> int {
+  let a: atomic Node = Node(2);
+  let s: atomic Str = "s";
+  let k: atomic int = 3;
+  k += 1;
+  return k;
+})");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  const std::string node =
+      ": error: 'atomic' holds a number, a 'bool' or a 'char', not 'Node': an "
+      "object crosses threads as 'atomic shared const Node' (frozen) or "
+      "'locked Node'";
+  expectErrors(r, {(":2:16" + node).c_str(), (":3:6" + node).c_str(),
+                   (":4:1" + node).c_str(), (":6:3" + node).c_str(),
+                   ":7:3: error: 'atomic' holds a number, a 'bool' or a "
+                   "'char', not 'Str': an object crosses threads as 'atomic "
+                   "shared const Str' (frozen) or 'locked Str'"});
 }
 
 // A borrow is written with no qualifier, as a parameter, a result or a
@@ -398,7 +450,7 @@ fn a(n: view const Node) -> int { return n.id; }
 fn b(n: inout shared Node) { }
 fn c(n: view shared Node) -> int { return n.id; }
 fn d(n: inout const Node) { }
-fn e(n: view atomic const Node) -> int { return n.id; }
+fn e(n: view atomic shared const Node) -> int { return n.id; }
 fn f(n: inout locked Node) { }
 fn g(n: view shared const Node) -> int { return n.id; }
 fn h(n: inout Node) -> inout shared Node { return n; }
@@ -418,7 +470,8 @@ fn main() -> int {
        (":3:6: " + noQualifierOnBorrow(param, "inout shared", "inout")).c_str(),
        (":4:6: " + noQualifierOnBorrow(param, "view shared", "view")).c_str(),
        (":5:6: " + noQualifierOnBorrow(param, "inout const", "inout")).c_str(),
-       (":6:6: " + noQualifierOnBorrow(param, "view atomic const", "view"))
+       (":6:6: " +
+        noQualifierOnBorrow(param, "view atomic shared const", "view"))
            .c_str(),
        (":7:6: " + noQualifierOnBorrow(param, "inout locked", "inout")).c_str(),
        (":8:6: " + noQualifierOnBorrow(param, "view shared const", "view"))
@@ -452,7 +505,7 @@ fn main() -> int {
   s: shared Node = Node(1);
   c: const Node = Node(2);
   sc: shared const Node = Node(3);
-  ac: atomic const Node = Node(4);
+  ac: atomic shared const Node = Node(4);
   l: locked Node = Node(5);
   u = Node(6);
   grow(s);
@@ -483,7 +536,7 @@ fn main() -> int {
           "parameter 'n'",
           ":22:8: error: 'sc' is 'shared const'; it cannot be passed to "
           "'inout' parameter 'n'",
-          ":23:8: error: 'ac' is 'atomic const'; it cannot be passed to "
+          ":23:8: error: 'ac' is 'atomic shared const'; it cannot be passed to "
           "'inout' parameter 'n'",
           ":24:8: error: 'l' is 'locked': a cell's contents are reached in a "
           "'lock' block, not borrowed by 'view' parameter 'n' of 'show'",
@@ -619,7 +672,7 @@ fn main() -> int {
   d.id = 3;
   let e: Node = d;
   let sd: shared const Node = d;
-  let ac: atomic const Node = Node(3);
+  let ac: atomic shared const Node = Node(3);
   let f = ac;
   f.id = 1;
   let g: Node = f;
@@ -638,10 +691,11 @@ fn main() -> int {
            .c_str(),
        ":14:3: error: 'd' is 'const'; cannot assign to its field 'id'",
        (":15:3: " + cannotStore("const Node", "variable 'e'", "Node")).c_str(),
-       ":19:3: error: 'f' is 'atomic const'; cannot assign to its "
+       ":19:3: error: 'f' is 'atomic shared const'; cannot assign to its "
        "field "
        "'id'",
-       (":20:3: " + cannotStore("atomic const Node", "variable 'g'", "Node"))
+       (":20:3: " +
+        cannotStore("atomic shared const Node", "variable 'g'", "Node"))
            .c_str(),
        (":24:3: " + cannotStore("locked Node", "variable 'mu'", "Node"))
            .c_str()});
@@ -663,13 +717,13 @@ struct Point { x: int; y: int; }
 fn make() -> Node { let n = Node(1); return move n; }
 fn take(n: Node) -> int { return n.id; }
 fn takeShared(n: shared Node) -> int { return n.id; }
-fn takeAtomic(n: atomic const Node) -> int { return n.id; }
+fn takeAtomic(n: atomic shared const Node) -> int { return n.id; }
 fn look(n: view Node) -> int { return n.id; }
 fn main() -> int {
   let a = Node(2);
   let s: shared Node = Node(3);
   let t = s;
-  let ac: atomic const Node = Node(4);
+  let ac: atomic shared const Node = Node(4);
   let ac2 = ac;
   let l: locked Node = Node(5);
   let l2 = l;
@@ -682,7 +736,7 @@ fn main() -> int {
   let cc: const Node = Node(8);
   let sc: shared const Node = move cc;
   let c2: const Node = Node(9);
-  let ac3: atomic const Node = move c2;
+  let ac3: atomic shared const Node = move c2;
   lock l2 as held: view { n = n + held.id; }
   return n + arr[0].x + sc.id + ac3.id;
 })");

@@ -1374,14 +1374,15 @@ private:
         qual = {QualForm::Shared, false};
       else if (*spelling == "shared const")
         qual = {QualForm::Shared, true};
-      else if (*spelling == "atomic const")
-        qual = {QualForm::AtomicConst, false};
+      else if (*spelling == "atomic shared const")
+        qual = {QualForm::AtomicSharedConst, false};
       else if (*spelling == "locked")
         qual = {QualForm::Locked, false};
       else
-        return fail(e, "unknown qualifier \"" + *spelling +
-                           "\" (const, shared, shared const, atomic const, "
-                           "locked)"),
+        return fail(e,
+                    "unknown qualifier \"" + *spelling +
+                        "\" (const, shared, shared const, atomic shared const, "
+                        "locked)"),
                nullptr;
       Type *inner = nullptr;
       if (!f.atEnd()) {

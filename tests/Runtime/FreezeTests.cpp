@@ -3,7 +3,7 @@
 //
 // Unit tests for the concurrency prototype's freeze (Paykan_freeze and
 // Paykan_freeze_mem, src/Runtime/Object.c), what a unique value goes
-// through on its way into an `atomic const` slot.  A frozen object is
+// through on its way into an `atomic shared const` slot.  A frozen object is
 // immortal, its strong count PAYKAN_REF_MAX, which retains and releases
 // leave alone; and the freeze walks, through the object's walk slot
 // (`__walk`, which the lowering generates per class: Paykan_freeze of each

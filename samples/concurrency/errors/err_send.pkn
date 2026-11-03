@@ -37,9 +37,7 @@ fn hold(n: inout const Job) { }                   // error: a borrow carries no 
 fn show(n: view Job) -> int {
   return n.name.len();
 }
-fn peek(n: view const Job) -> int {
-  return n.name.len();
-}   // error: a borrow carries no qualifier
+fn peek(n: view const Job) -> int => n.name.len();   // error: a borrow carries no qualifier
 
 fn main() -> int {
   let j = Job("j", Cache(0));
@@ -50,7 +48,7 @@ fn main() -> int {
   let o = any(move h);                  // error: field 'job.cache' is shared
   let f = fn() => 3;
   let c = call(move f);                 // (reported at the declaration of 'call')
-  let k: atomic const Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
+  let k: atomic shared const Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
   s: shared Job = Job("s", Cache(3));
   grow(s);                              // fine: a shared object passes to inout, with no retain or release
   show(s);                              // fine: a view takes every form

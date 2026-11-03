@@ -342,8 +342,9 @@ TEST(Lock, Errors) {
 // -- Qualifiers
 
 // A qualifier goes after the colon (or the arrow), before the type, and
-// covers the whole type: `const`, `shared`, `shared const`, `atomic const`
-// and `locked` make a QualifiedType around it, `atomic T` an AtomicType.
+// covers the whole type: `const`, `shared`, `shared const`,
+// `atomic shared const` and `locked` make a QualifiedType around it,
+// `atomic T` an AtomicType.
 // In a local declaration the qualifier may stand alone, with the type
 // inferred.  The parser records the qualifier in the type only; Sema moves
 // it to the place (Param::Qual, VarDecl's and FuncDecl's qualifier).
@@ -353,7 +354,7 @@ TEST(Qualifiers, OnFieldsParametersLocalsAndResults) {
   right: shared Node;
   left: const Node;
   both: shared const Node;
-  cfg: atomic const Node;
+  cfg: atomic shared const Node;
   counts: locked Node;
   hits: atomic int;
 }
@@ -361,7 +362,7 @@ struct Pair {
   left: shared Node;
 }
 fn f(a: const Node, b: shared Node, c: shared const Node,
-     d: atomic const Node, e: locked Node, h: atomic float, n: int)
+     d: atomic shared const Node, e: locked Node, h: atomic float, n: int)
     -> locked Node { return e; }
 fn g() -> shared Node { return a; }
 fn h() -> atomic int { return 1; }
@@ -370,7 +371,7 @@ fn main() -> int {
   b: shared = a;
   c: shared const = a;
   let d: locked = a;
-  e: atomic const = a;
+  e: atomic shared const = a;
   f: const = a;
   let g: atomic int = 1;
   h: shared Node[] = a;
@@ -387,7 +388,7 @@ fn main() -> int {
         "QualifiedType <3:10-3:21> 'shared'\n",
         "ClassType <3:17-3:21> 'Node'\n", "QualifiedType <4:9-4:19> 'const'\n",
         "QualifiedType <5:9-5:26> 'shared const'\n",
-        "QualifiedType <6:8-6:25> 'atomic const'\n",
+        "QualifiedType <6:8-6:32> 'atomic shared const'\n",
         "QualifiedType <7:11-7:22> 'locked'\n",
         "VarDecl <8:3-8:19> 'hits' type\n", "AtomicType <8:9-8:19>\n",
         "QualifiedType <11:9-11:20> 'shared'\n",
@@ -404,7 +405,7 @@ fn main() -> int {
         "QualifiedType <21:6-21:18> 'shared const'\n",
         "VarDecl <22:3-22:20> 'd' let type\n",
         "QualifiedType <22:10-22:16> 'locked'\n",
-        "QualifiedType <23:6-23:18> 'atomic const'\n",
+        "QualifiedType <23:6-23:25> 'atomic shared const'\n",
         "QualifiedType <24:6-24:11> 'const'\n",
         // the qualifier covers an array, an optional, and goes inside a
         // generic's argument or a tuple's element
@@ -424,7 +425,7 @@ fn main() -> int {
   EXPECT_STREQ(qualifierOf(params[0].ParamType), "const");
   EXPECT_STREQ(qualifierOf(params[1].ParamType), "shared");
   EXPECT_STREQ(qualifierOf(params[2].ParamType), "shared const");
-  EXPECT_STREQ(qualifierOf(params[3].ParamType), "atomic const");
+  EXPECT_STREQ(qualifierOf(params[3].ParamType), "atomic shared const");
   EXPECT_STREQ(qualifierOf(params[4].ParamType), "locked");
   EXPECT_TRUE(ast::isa<ast::AtomicType>(params[5].ParamType));
   EXPECT_EQ(qualifierOf(params[6].ParamType), nullptr);
@@ -461,7 +462,7 @@ fn main() -> int {
   EXPECT_EQ(ast::cast<ast::QualifiedType>(localType(1))->getQualifier().Form,
             ast::QualForm::Shared);
   EXPECT_EQ(ast::cast<ast::QualifiedType>(localType(4))->getQualifier().Form,
-            ast::QualForm::AtomicConst);
+            ast::QualForm::AtomicSharedConst);
   EXPECT_TRUE(ast::isa<ast::BuiltinType>(
       ast::cast<ast::AtomicType>(localType(6))->getInnerType()));
 }
@@ -529,10 +530,10 @@ TEST(Qualifiers, OneQualifierBeforeTheType) {
        "a type takes one qualifier: 'locked atomic' is two"},
       {"x: shared atomic int = a;",
        "a type takes one qualifier: 'shared atomic' is two"},
-      {"x: atomic const const Node = a;",
-       "a type takes one qualifier: 'atomic const const' is two"},
-      {"x: atomic const shared Node = a;",
-       "a type takes one qualifier: 'atomic const shared' is two"},
+      {"x: atomic shared const const Node = a;",
+       "a type takes one qualifier: 'atomic shared const const' is two"},
+      {"x: atomic shared const shared Node = a;",
+       "a type takes one qualifier: 'atomic shared const shared' is two"},
       {"x: atomic = 1;", "unexpected '='; expected a type"},
       {"x: shared;", "unexpected ';'; expected '=' (a variable declaration "
                      "needs an initial value)"},
@@ -559,6 +560,91 @@ TEST(Qualifiers, OneQualifierBeforeTheType) {
   };
   for (const auto &c : topLevel)
     expectRejected(atTopLevel(c[0]), c[1]);
+}
+
+// The frozen, thread-crossing object is `atomic shared const T`: one
+// qualifier of three words, each saying one thing (`atomic`: the reference
+// crosses threads; `shared`: it has several owners; `const`: nothing
+// writes it).  A spelling that leaves a word out is rejected at `atomic`,
+// wherever the type is written, with the full form to write; a fourth
+// word is a second qualifier.
+TEST(Qualifiers, AtomicSharedConstIsSpelledInFull) {
+  auto [ok, driver] = parse(R"(class Node { id: int; }
+fn f(n: atomic shared const Node) -> atomic shared const Node { return n; }
+fn main() -> int {
+  let a: atomic shared const Node = Node(1);
+  b: atomic shared const = a;
+  return 0;
+})");
+  ASSERT_TRUE(ok);
+  // One QualifiedType, spelled `atomic shared const`, around the class (or
+  // around nothing, in a local whose type is inferred).
+  auto expectForm = [](const ast::Type *ty, bool inferred) {
+    const auto *q = ast::dyn_cast<ast::QualifiedType>(ty);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(q->getQualifier().Form, ast::QualForm::AtomicSharedConst);
+    EXPECT_STREQ(q->getQualifier().spelling(), "atomic shared const");
+    if (inferred)
+      EXPECT_EQ(q->getInnerType(), nullptr);
+    else
+      EXPECT_TRUE(ast::isa<ast::ClassType>(q->getInnerType()));
+  };
+  const auto &fns = driver->getRoot()->getFuncDecls();
+  ASSERT_EQ(fns.size(), 2u);
+  ASSERT_EQ(fns[0]->getParams().size(), 1u);
+  expectForm(fns[0]->getParams()[0].ParamType, false);
+  expectForm(fns[0]->getReturnType(), false);
+  const auto &stmts = fns[1]->getBody()->getStatements();
+  ASSERT_EQ(stmts.size(), 3u);
+  auto localType = [&](size_t i) {
+    return ast::cast<ast::VarDecl>(
+               ast::cast<ast::DeclStmt>(stmts[i])->getDecl())
+        ->getType();
+  };
+  expectForm(localType(0), false);
+  expectForm(localType(1), true);
+  std::string dump = dumpAST(*driver);
+  for (const char *line :
+       {"QualifiedType <2:38-2:62> 'atomic shared const'\n",
+        "ClassType <2:58-2:62> 'Node'\n", "VarDecl <4:3-4:44> 'a' let type\n",
+        "QualifiedType <4:10-4:34> 'atomic shared const'\n",
+        "ClassType <4:30-4:34> 'Node'\n", "VarDecl <5:3-5:29> 'b' type\n",
+        "QualifiedType <5:6-5:25> 'atomic shared const'\n"})
+    EXPECT_NE(dump.find(line), std::string::npos) << line << "\n" << dump;
+
+  // `atomic const` and `atomic shared` each leave a word out.
+  const char *const kAtomicConst =
+      "'atomic const' is 'atomic shared const': an object read from several "
+      "threads has several owners; write 'atomic shared const T'";
+  const char *const kAtomicShared =
+      "'atomic shared T' would be written from several threads with no lock; "
+      "write 'atomic shared const T' to freeze it, or 'locked T' to change "
+      "it under a lock";
+  for (const char *stmt :
+       {"x: atomic const Node = a;", "let x: atomic const Node = a;",
+        "x: atomic const = a;"})
+    expectRejected(inMain(stmt), kAtomicConst);
+  for (const char *stmt :
+       {"x: atomic shared Node = a;", "let x: atomic shared Node = a;",
+        "x: atomic shared = a;"})
+    expectRejected(inMain(stmt), kAtomicShared);
+  const char *const topLevel[][2] = {
+      {"fn f(x: atomic const Node) { }", kAtomicConst},
+      {"fn f(x: atomic shared Node) { }", kAtomicShared},
+      {"fn f() -> atomic const Node { }", kAtomicConst},
+      {"fn f() -> atomic shared Node { }", kAtomicShared},
+      {"class C { n: atomic const Node; }", kAtomicConst},
+      {"class C { n: atomic shared Node; }", kAtomicShared},
+  };
+  for (const auto &c : topLevel)
+    expectRejected(atTopLevel(c[0]), c[1]);
+  // A fourth word is a second qualifier (OneQualifierBeforeTheType).
+  expectRejected(inMain("x: atomic shared const shared Node = a;"),
+                 "a type takes one qualifier: 'atomic shared const shared' is "
+                 "two");
+  expectRejected(inMain("x: atomic shared const const Node = a;"),
+                 "a type takes one qualifier: 'atomic shared const const' is "
+                 "two");
 }
 
 // -- The keywords

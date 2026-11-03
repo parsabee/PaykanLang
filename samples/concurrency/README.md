@@ -12,7 +12,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `err_03_first_checks.pkn` | the first checks: copying a unique reference into a task, use after `move`, sending a `shared` reference, writing anything but a reduction in a parallel body |
 | `04_qualifiers.pkn` | the qualifiers on places: unique, `const`, `shared`, `shared const`; the conversions between them; a `view` parameter taking every form |
 | `05_locked.pkn` | a `locked` cell shared by tasks and read in `lock c as v: inout { }` / `: view` blocks |
-| `06_atomic_const.pkn` | an `atomic const` object frozen with everything it holds, read by every task without a count |
+| `06_atomic_shared_const.pkn` | an `atomic shared const` object frozen with everything it holds, read by every task without a count |
 | `07_atomic.pkn` | `atomic` on every number type, `bool` and `char`; `atomic` fields of a class; `exchange` and `compareExchange`; handles |
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
@@ -20,8 +20,9 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `errors/err_qualifiers.pkn` | the conversions a qualifier refuses, `const` fields, qualifiers on values |
 | `errors/err_strict_copies.pkn` | the copy rule under `--strict-ownership`: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
-| `errors/err_atomic_const.pkn` | writing through `atomic const`, converting it back, qualifying a value |
+| `errors/err_atomic_shared_const.pkn` | writing through `atomic shared const`, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
+| `errors/err_atomic_spellings.pkn` | the two spellings that leave a word out, `atomic const` and `atomic shared`, each named in full by the parser |
 | `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
 | `errors/err_buffers.pkn` | a buffer written at another index than the loop's variable, or reshaped, in a parallel body |
 | `errors/err_send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; qualifiers on borrows rejected; `Copyable` |
@@ -32,18 +33,18 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   `shared`, `const`, `locked` and `lock`.  `async fn f(...) -> T`, `await
   e`, `move x`, `move x.f`, `parallel for i in a..b { }`, the qualifiers
   on any place's type (`let c: const Node`, `p: shared const Node` as a
-  parameter, `hits: atomic int` or `cfg: atomic const Config` as a field,
-  `-> locked Counts` as a result; `x: shared = e` with the type inferred),
-  and `lock cell as c: inout|view { }`.
+  parameter, `hits: atomic int` or `cfg: atomic shared const Config` as a
+  field, `-> locked Counts` as a result; `x: shared = e` with the type
+  inferred), and `lock cell as c: inout|view { }`.
 * **Qualifiers** (Sema): unique (unwritten), `const`, `shared`, `shared
-  const`, `atomic`, `atomic const` and `locked` on variables, parameters,
-  fields and results.  A unique value converts into any form, a `const`
-  one into the other `const` forms, a `shared` reference and a handle only
-  as they are.  A `const` place is frozen: no field assignment, no
-  non-`view` method, and what it holds reads as `const`.  A borrow is
-  written with no qualifier: a `view` parameter takes every form of the
-  object, an `inout` a unique or `shared` one, neither counting it, and
-  no borrow reaches a `locked`
+  const`, `atomic`, `atomic shared const` and `locked` on variables,
+  parameters, fields and results.  A unique value converts into any form,
+  a `const` one into the other `const` forms, a `shared` reference and a
+  handle only as they are.  A `const` place is frozen: no field
+  assignment, no non-`view` method, and what it holds reads as `const`.
+  A borrow is written with no qualifier: a `view` parameter takes every
+  form of the object, an `inout` a unique or `shared` one, neither
+  counting it, and no borrow reaches a `locked`
   cell.  Under `--strict-ownership` the copy rule holds: a move-only value
   read from a place (a unique reference, or a struct, tuple or array
   holding one) flows into an owning slot only by `move`; a `shared`
@@ -53,13 +54,24 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   and parallel bodies; its contents are reached only in a `lock` block,
   which may not `await`, `return`, `break`, `continue`, nest another
   `lock` or run a `parallel for`.
-* **`atomic const T`**: a unique value flowing into such a slot is frozen
-  with everything it holds (a vtable walk, `__walk`, visits every
+* **`atomic shared const T`**: a unique value flowing into such a slot is
+  frozen with everything it holds (a vtable walk, `__walk`, visits every
   class's reference fields and every buffer's elements), after the send
   check of its contents; the handle then copies anywhere, and reads
   inside count nothing.  An `atomic` field of a frozen object still
-  changes.  A struct, a tuple or an array is a value wherever it is and
-  takes no qualifier; to freeze one, box it: `let xs: atomic const
+  changes.  Each word says one thing: `atomic`, the reference crosses
+  threads; `shared`, the object has several owners, one on each thread at
+  least; `const`, nothing writes it.  The two spellings that leave a word
+  out are parse errors: `atomic const N` gives `'atomic const' is 'atomic
+  shared const': an object read from several threads has several owners;
+  write 'atomic shared const T'`, and `atomic shared N` gives `'atomic
+  shared T' would be written from several threads with no lock; write
+  'atomic shared const T' to freeze it, or 'locked T' to change it under a
+  lock`; `atomic N` of a class is Sema's `'atomic' holds a number, a
+  'bool' or a 'char', not 'N': an object crosses threads as 'atomic shared
+  const N' (frozen) or 'locked N'`.
+  A struct, a tuple or an array is a value wherever it is and
+  takes no qualifier; to freeze one, box it: `let xs: atomic shared const
   mem::Box<mem::Buffer<float>> = mem::Box(move b)` freezes the box, the
   buffer it holds (`mem::Buffer<T>` crosses when `T` does, the design's
   table) and the elements, and a `parallel for` body reads it through
@@ -103,7 +115,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   `cancel` or `detach`), so that no task is dropped while it runs; a
   handle stored in a field, an element or a tuple is not followed.
 * **The send check**: at an async call's arguments, at the declaration of
-  an `async fn`'s result, and at every conversion to `atomic const` or
+  an `async fn`'s result, and at every conversion to `atomic shared const` or
   `locked`.  A number, a `Str`, a cell, a handle and a unique or `const`
   class whose fields (own and inherited, through structs, tuples, arrays,
   optionals and enum payloads) are all crossable cross; a `shared` or
@@ -165,7 +177,7 @@ build/bin/paykan --check-only --strict-ownership samples/concurrency/errors/err_
 build/bin/paykan --emit-pir samples/concurrency/05_locked.pkn
 build/bin/paykan --emit-mlir=scf samples/concurrency/02_async_await.pkn
 build/bin/paykan --emit-mlir=llvm samples/concurrency/01_parallel_for.pkn
-build/bin/paykan build samples/concurrency/06_atomic_const.pkn -o cfg
+build/bin/paykan build samples/concurrency/06_atomic_shared_const.pkn -o cfg
 ```
 
 `--emit-c` of every program compiles as strict C11 against the runtime

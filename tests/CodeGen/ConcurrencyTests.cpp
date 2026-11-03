@@ -3,18 +3,18 @@
 // Codegen / E2E tests for the concurrency prototype
 // (docs/design/concurrency.md, samples/concurrency/README.md): tasks
 // (`async fn`, `await`), `parallel for`, `atomic` and `locked` cells,
-// `atomic const` objects, `move` and the qualifiers at run time.  Each test
-// compiles and runs a small program through the mlir backend's JIT, which
+// `atomic shared const` objects, `move` and the qualifiers at run time.  Each
+// test compiles and runs a small program through the mlir backend's JIT, which
 // loads MLIR's async runtime and LLVM's OpenMP runtime when a program uses
 // them, and checks its exact output.
 //
 // Two things decide which tests check the heap:
 //
-// * An `atomic` cell, a `locked` cell and a frozen (`atomic const`) object
-//   are immortal in the prototype: their counts are PAYKAN_REF_MAX and they
-//   are never freed (the samples README, "What is not").  A program that
-//   makes one leaks it by design, so those tests run without a LeakGuard
-//   and say so.
+// * An `atomic` cell, a `locked` cell and a frozen (`atomic shared const`)
+//   object are immortal in the prototype: their counts are PAYKAN_REF_MAX
+//   and they are never freed (the samples README, "What is not").  A
+//   program that makes one leaks it by design, so those tests run without
+//   a LeakGuard and say so.
 // * The tracking allocator's counters are plain integers shared by every
 //   thread (src/Runtime/Heap.c).  A test that does check the heap keeps
 //   the threads from allocating at once: a task that runs beside another
@@ -289,7 +289,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
     fn bump(c: atomic int, by: int) { c += by; }
     fn read(c: atomic int) -> int { return c; }
     fn fresh(v: int) -> atomic int { return v; }
-    async fn hit(st: atomic const Stats, n: int) -> int {
+    async fn hit(st: atomic shared const Stats, n: int) -> int {
       for i in 0..n { st.served += 1; }
       return n;
     }
@@ -304,7 +304,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
       let k = fresh(3);
       k += 1;
       io::println(Str(k) + " " + Str(a));
-      let st: atomic const Stats = Stats("s", 0);
+      let st: atomic shared const Stats = Stats("s", 0);
       let t1 = hit(st, 500);
       let t2 = hit(st, 500);
       let n = await t1 + await t2;
@@ -362,22 +362,22 @@ TEST(Concurrency, LockedCellIsReachedInLockBlocks) {
   EXPECT_EQ(r.ExitCode, 0);
 }
 
-// -- atomic const
+// -- atomic shared const
 
-// A unique object flowing into an `atomic const` slot is frozen with
+// A unique object flowing into an `atomic shared const` slot is frozen with
 // everything it holds (here a Str, an object and an array); the handle
 // copies into three tasks, which read the graph with no count, and main
 // reads it after them.  The frozen object is immortal: no heap check.
-TEST(Concurrency, AtomicConstObjectIsReadByTasks) {
+TEST(Concurrency, AtomicSharedConstObjectIsReadByTasks) {
   auto r = compileAndRun(R"(import ::io;
     class Limits { lo: int; hi: int; }
     class Config { name: Str; limits: Limits; weights: float[4]; }
-    async fn score(cfg: atomic const Config, x: int) -> int {
+    async fn score(cfg: atomic shared const Config, x: int) -> int {
       if x < cfg.limits.lo || x > cfg.limits.hi { return 0; }
       return x * cfg.name.len() + int(cfg.weights[x % 4]);
     }
     fn main() -> int {
-      let cfg: atomic const Config =
+      let cfg: atomic shared const Config =
           Config("demo", Limits(0, 100), [1.0, 2.0, 3.0, 4.0]);
       let a = score(cfg, 7);
       let b = score(cfg, 8);
@@ -398,14 +398,14 @@ TEST(Concurrency, AtomicConstObjectIsReadByTasks) {
 // through the box's `value()`: the prototype's way to data larger than a
 // fixed-size array.  The body calls, so it is heavy and forks at 1000
 // iterations.  The frozen box is immortal: no heap check.
-TEST(Concurrency, AtomicConstBoxedBufferIsReadInAParallelFor) {
+TEST(Concurrency, AtomicSharedConstBoxedBufferIsReadInAParallelFor) {
   auto r = compileAndRun(R"(import ::io;
     import ::memory as mem;
     fn main() -> int {
       buf = mem::Buffer<float>();
       let grown = buf.grow(unsigned(1000));
       for i in 0..1000 { let e = buf.set(unsigned(i), float(i)); }
-      let xs: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move buf);
+      let xs: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move buf);
       s = 0.0;
       parallel for i in 0..1000 { s += xs.value().at(unsigned(i)); }
       io::println(Str(s) + " " + Str(xs.value().len()) + " "

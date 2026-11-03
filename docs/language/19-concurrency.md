@@ -4,13 +4,13 @@ A program can run work on more than one thread. Calling an `async fn` starts a *
 which runs on a pool of worker threads while the caller goes on, and `parallel for` runs the
 iterations of a loop on that pool. What keeps this safe is that every reference says how its
 object is held: by one owner (the default), by aliases on one thread (`shared`), or by handles
-that any thread may use (`atomic`, `locked` and `atomic const`). A reference reaches another
-thread only by `move` or as a handle, and the compiler checks every crossing, so two threads
-never count or change one object at once. This chapter shows the qualifiers, `move`, tasks,
-`parallel for` and the cells that threads share, then gives the precise rules. The model is
-the one in [the design document](../design/concurrency.md); this version implements its
-qualifiers, `move`, the send check, `atomic`, `locked` and `parallel for`, and runs tasks on
-MLIR's async runtime and parallel loops on LLVM's OpenMP runtime ([Runtime](#runtime)).
+that any thread may use (`atomic`, `locked` and `atomic shared const`). A reference reaches
+another thread only by `move` or as a handle, and the compiler checks every crossing, so two
+threads never count or change one object at once. This chapter shows the qualifiers, `move`,
+tasks, `parallel for` and the cells that threads share, then gives the precise rules. The
+model is the one in [the design document](../design/concurrency.md); this version implements
+its qualifiers, `move`, the send check, `atomic`, `locked` and `parallel for`, and runs tasks
+on MLIR's async runtime and parallel loops on LLVM's OpenMP runtime ([Runtime](#runtime)).
 
 An example that makes an `atomic` or `locked` cell, or freezes an object, shows what it
 prints under **Prints** rather than **Output**: in this version such a cell or object is never
@@ -60,7 +60,7 @@ a #1, a #1, s #22
 A unique reference converts into every other form, since nothing else holds its object:
 `move a` into a `const`, `shared` or `shared const` slot, and a new object (`Node(2, "s")`)
 is unique until it is stored. A `const` reference converts into `shared const` (and into
-`atomic const`, [below](#atomic-const-frozen-objects)): more readers of an object that never
+`atomic shared const`, [below](#atomic-shared-const-frozen-objects)): more readers of an object that never
 changes are harmless. A `shared` reference stays what it is, since other aliases may still
 change the object, and nothing converts back to unique:
 
@@ -626,13 +626,13 @@ ys[7] = 15
 ```
 
 A body may read values of the enclosing function (numbers, `bool`, `char`, enums, and
-arrays of them, `view` or `inout`), its `atomic`, `locked` and `atomic const` variables, and
-the reduction variables; a reference, a `Str` or a function value of the enclosing function
-cannot be used, since reading one would count its object from several threads. A reduction
-is folded in a fixed order, so the result is the same on every run and with any number of
-threads (a float sum may differ from the sequential loop's, never between runs). The body
-may call functions and run loops of its own, and `..=` and `step` are allowed; `break`,
-`continue`, `return`, `await` and starting a task are not:
+arrays of them, `view` or `inout`), its `atomic`, `locked` and `atomic shared const`
+variables, and the reduction variables; a reference, a `Str` or a function value of the
+enclosing function cannot be used, since reading one would count its object from several
+threads. A reduction is folded in a fixed order, so the result is the same on every run and
+with any number of threads (a float sum may differ from the sequential loop's, never between
+runs). The body may call functions and run loops of its own, and `..=` and `step` are
+allowed; `break`, `continue`, `return`, `await` and starting a task are not:
 
 ```pkn
 class Node {
@@ -852,14 +852,15 @@ A `lock` block takes a `locked` variable, field or parameter. A handle may also 
 
 `atomic T` is a cell holding one number, `bool` or `char` that any thread may change with
 one atomic operation at a time. `T` is any number type (`int`, `float`, `u8`, `f32`, ...),
-`bool` or `char`. A read of the place is an atomic load and `=` an atomic store; `+=` and
-`-=` are one atomic add or subtract (an integer wraps like `+`, a float adds by a
-compare-and-swap loop); `x.exchange(v)` stores `v` and returns the value found;
-`x.compareExchange(expected, desired)` stores `desired` only if the cell holds `expected`,
-and returns whether it did. A variable, a parameter, a result or a class field can be
-`atomic`. A copy of an atomic place (`let m = n`, an argument, a result, a field assigned
-in `__init__`) is another **handle** to the same cell; a plain value flowing into an `atomic`
-slot makes a new cell:
+`bool` or `char`, never a class: an object crosses threads frozen, as `atomic shared const T`
+([below](#atomic-shared-const-frozen-objects)), or `locked`. A read of the place is an
+atomic load and `=` an atomic store; `+=` and `-=` are one atomic add or subtract (an
+integer wraps like `+`, a float adds by a compare-and-swap loop); `x.exchange(v)` stores
+`v` and returns the value found; `x.compareExchange(expected, desired)` stores `desired`
+only if the cell holds `expected`, and returns whether it did. A variable, a parameter, a
+result or a class field can be `atomic`. A copy of an atomic place (`let m = n`, an
+argument, a result, a field assigned in `__init__`) is another **handle** to the same cell;
+a plain value flowing into an `atomic` slot makes a new cell:
 
 ```pkn
 import ::io;
@@ -913,8 +914,9 @@ s served 3, done True
 
 `let` fixes the handle, not the cell, so `+=` and `=` work on a `let` atomic. An operation
 that would read the cell and write it separately is an error: a read of the place on the
-right of an assignment to it, and every compound operator but `+=` and `-=`. The prototype
-has no atomic arrays, and a struct cannot hold a cell:
+right of an assignment to it, and every compound operator but `+=` and `-=`. `atomic` of an
+object is an error that names the two forms an object crosses in, the prototype has no
+atomic arrays, and a struct cannot hold a cell:
 
 ```pkn
 struct P {
@@ -926,7 +928,7 @@ fn main() -> int {
   hits = hits * 2 + 1;
   hits *= 2;
   let s: atomic Str = "a";
-  let k: atomic const int = 1;
+  let k: atomic shared const int = 1;
   return 0;
 }
 ```
@@ -937,19 +939,19 @@ Error:
 field 'c' in struct 'P' has type 'atomic int': a struct cannot hold an 'atomic' field in the prototype (hold the cell in a class)
 'hits' is 'atomic': 'hits = ...' reads and writes it separately; write 'hits += e', or use 'exchange' or 'compareExchange'
 'hits' is 'atomic': this operator reads and writes it separately; its atomic operations are '+=', '-=', 'exchange' and 'compareExchange'
-'atomic' holds a number, a 'bool' or a 'char', not 'Str' (the prototype has no atomic arrays)
-'atomic const' qualifies a reference; 'int' is a value
+'atomic' holds a number, a 'bool' or a 'char', not 'Str': an object crosses threads as 'atomic shared const Str' (frozen) or 'locked Str'
+'atomic shared const' qualifies a reference; 'int' is a value
 ```
 
-## `atomic const`: frozen objects
+## `atomic shared const`: frozen objects
 
-Data that every thread reads and none changes is shared as `atomic const T`: the object is
-**frozen** with everything it holds, and its reference is a handle that copies anywhere. A
-unique object flowing into an `atomic const` slot is send-checked and then frozen by a walk
-over the objects it holds, through its fields, arrays and buffers; reading a frozen object
-counts nothing, so the threads share no written memory. Access is `const`: no field is
-assigned and only `view fn`s are called, except that an `atomic` field of a frozen object is
-a cell, and still changes.
+Data that every thread reads and none changes is shared as `atomic shared const T`: the
+object is **frozen** with everything it holds, and its reference is a handle that copies
+anywhere. A unique object flowing into an `atomic shared const` slot is send-checked and then
+frozen by a walk over the objects it holds, through its fields, arrays and buffers; reading
+a frozen object counts nothing, so the threads share no written memory. Access is `const`:
+no field is assigned and only `view fn`s are called, except that an `atomic` field of a
+frozen object is a cell, and still changes.
 
 ```pkn
 import ::io;
@@ -966,13 +968,13 @@ class Config {
 }
 
 // A frozen configuration, read by every task without a count.
-async fn score(cfg: atomic const Config, x: int) -> int {
+async fn score(cfg: atomic shared const Config, x: int) -> int {
   if x < cfg.limits.lo || x > cfg.limits.hi { return 0; }
   return x * cfg.name.len() + int(cfg.weights[x % 4]);
 }
 
 fn main() -> int {
-  let cfg: atomic const Config = Config("demo", Limits(0, 100), [1.0, 2.0, 3.0, 4.0]);
+  let cfg: atomic shared const Config = Config("demo", Limits(0, 100), [1.0, 2.0, 3.0, 4.0]);
   let a = score(cfg, 7);          // the handle is copied into each task
   let b = score(cfg, 8);
   let c = score(cfg, 500);
@@ -1002,7 +1004,7 @@ fn main() -> int {
   b = mem::Buffer<float>();
   b.grow(100000);
   for i in 0..100000 { b.set(unsigned(i), float(i % 7)); }
-  let xs: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move b);   // boxed, then frozen
+  let xs: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move b);   // boxed, then frozen
   s = 0.0;
   parallel for i in 0..100000 {
     s += xs.value().at(unsigned(i));     // every thread reads the frozen buffer
@@ -1018,7 +1020,7 @@ Prints:
 sum = 299995 of 100000
 ```
 
-Nothing is written through an `atomic const` reference, nothing converts it back, and an
+Nothing is written through an `atomic shared const` reference, nothing converts it back, and an
 object with a part that cannot cross cannot be frozen:
 
 ```pkn
@@ -1042,11 +1044,11 @@ class Holder {
 }
 
 fn main() -> int {
-  let cfg: atomic const Config = Config("demo", Limits(0, 100));
+  let cfg: atomic shared const Config = Config("demo", Limits(0, 100));
   cfg.limits.hi = 5;
   cfg.rename("x");
   let u: Config = cfg;
-  let h: atomic const Holder = Holder(Cache(0));
+  let h: atomic shared const Holder = Holder(Cache(0));
   return 0;
 }
 ```
@@ -1054,10 +1056,63 @@ fn main() -> int {
 Error:
 
 ```
-'cfg' is 'atomic const'; cannot assign to its field 'hi'
-'cfg' is 'atomic const'; 'rename' is not a 'view fn'
-cannot store a 'atomic const Config' in variable 'u', a 'Config': a reference converts only from unique, or from 'const' into the other 'const' forms
-cannot make 'Holder(...)' (a 'Holder') 'atomic const': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread
+'cfg' is 'atomic shared const'; cannot assign to its field 'hi'
+'cfg' is 'atomic shared const'; 'rename' is not a 'view fn'
+cannot store a 'atomic shared const Config' in variable 'u', a 'Config': a reference converts only from unique, or from 'const' into the other 'const' forms
+cannot make 'Holder(...)' (a 'Holder') 'atomic shared const': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread
+```
+
+Each of the three words says one thing: `atomic`, the reference crosses threads; `shared`,
+the object has several owners, one on each thread at least; `const`, nothing writes it. The
+qualifier is written whole. A spelling that leaves a word out would describe an object the
+model has no place for, so the parser rejects it and names the whole one: `atomic const T`
+would be read from several threads by one owner, and `atomic shared T` written from
+several threads with no lock.
+
+```pkn
+class Node {
+  id: int;
+}
+
+fn main() -> int {
+  let a: atomic const Node = Node(1);
+  let b: atomic shared Node = Node(2);
+  return 0;
+}
+```
+
+Error:
+
+```
+'atomic const' is 'atomic shared const': an object read from several threads has several owners; write 'atomic shared const T'
+'atomic shared T' would be written from several threads with no lock; write 'atomic shared const T' to freeze it, or 'locked T' to change it under a lock
+```
+
+Those are syntax errors, so nothing past the parser checks such a program. `atomic` alone
+holds a number, a `bool` or a `char` ([above](#atomic-cells)): `atomic Node` is an error
+that names the two forms an object crosses in. And a `shared const` reference, the
+read-only form aliased on one thread, does not convert into `atomic shared const`, although
+both are `const` ([Conversions](#conversions)): a frozen object is made from a unique or
+`const` reference, whose object nothing else holds.
+
+```pkn
+class Node {
+  id: int;
+}
+
+fn main() -> int {
+  let n: atomic Node = Node(1);
+  let s: shared const Node = Node(2);
+  let f: atomic shared const Node = s;
+  return 0;
+}
+```
+
+Error:
+
+```
+'atomic' holds a number, a 'bool' or a 'char', not 'Node': an object crosses threads as 'atomic shared const Node' (frozen) or 'locked Node'
+cannot store a 'shared const Node' in variable 'f', a 'atomic shared const Node': a reference converts only from unique, or from 'const' into the other 'const' forms
 ```
 
 ## `Copyable`
@@ -1193,10 +1248,11 @@ that the finished feature needs; what `parallel for` costs, and why, is in
 - A reference's **qualifier** says how its object is held: none (unique, one owner),
   `const T` (one owner, never changes), `shared T` (aliases on one thread), `shared const T`,
   `atomic T` (a cell holding a number, `bool` or `char`), `locked T` (a cell holding an
-  object behind a mutex), `atomic const T` (a frozen object). A struct, a tuple or an array
-  takes none; `mem::Box<T>` does.
-- A unique reference converts into every form; a `const` one into `shared const` and `atomic
-  const`; a `shared` reference and a handle only into their own kind. Nothing converts back.
+  object behind a mutex), `atomic shared const T` (a frozen object). A struct, a tuple or an
+  array takes none; `mem::Box<T>` does.
+- A unique reference converts into every form; a `const` one into `shared const` and
+  `atomic shared const`; a `shared` or `shared const` reference and a handle only into their
+  own kind. Nothing converts back.
 - A `const` object has no field assigned, no non-`view` method called, and what it holds
   reads as `const`.
 - A `view T` parameter takes every form of the object, an `inout T` a unique or `shared`
@@ -1218,9 +1274,13 @@ that the finished feature needs; what `parallel for` costs, and why, is in
 - `atomic T`: a read is a load, `=` a store, `+=` and `-=` atomic; `exchange(v)` and
   `compareExchange(expected, desired) -> bool`. A copy of an atomic place is another handle;
   a value makes a new cell.
-- `atomic const T`: frozen with everything it holds after the send check; `const` access;
-  its `atomic` fields still change; `atomic const mem::Box<mem::Buffer<T>>` is a frozen
-  buffer a `parallel for` reads through `value()`.
+- `atomic shared const T`: frozen with everything it holds after the send check; `const`
+  access; its `atomic` fields still change; `atomic shared const mem::Box<mem::Buffer<T>>`
+  is a frozen buffer a `parallel for` reads through `value()`.
+- `atomic shared const` is written whole, each word saying one thing (the reference crosses
+  threads; the object has several owners; nothing writes it): `atomic const T` and `atomic
+  shared T` are syntax errors, and `atomic N` with `N` a class is an error that names the
+  two forms an object crosses in, `atomic shared const N` and `locked N`.
 - `Copyable` is a built-in, structural trait: numbers, `bool`, `char`, handles and values of
   such parts. `T: Copyable` bounds a template; `impl Copyable for X` is an error.
 - `--strict-ownership`: a move-only value read from a place flows into an owning slot by
@@ -1238,33 +1298,48 @@ that the finished feature needs; what `parallel for` costs, and why, is in
 | `shared const T` | an object that never changes | aliases on one thread | never | a unique or `const` reference, moved or new |
 | `atomic T` | a cell of a number, `bool` or `char` | handles on any thread | as a handle | a value (a new cell); another handle (the same cell) |
 | `locked T` | a cell of an object behind a mutex | handles on any thread | as a handle | a unique reference, moved or new, after the send check |
-| `atomic const T` | a frozen object | handles on any thread | as a handle | a unique or `const` reference, moved or new, after the send check |
+| `atomic shared const T` | a frozen object | handles on any thread | as a handle | a unique or `const` reference, moved or new, after the send check |
 
 A qualifier is written before the type of a variable (`let c: const Node = ...`, or alone,
-`let c: const = ...`), a parameter (`cfg: atomic const Config`), a field (`hits: atomic int`,
-`cache: shared Cache`) and a result (`-> atomic int`). A type takes one qualifier. `const`,
-`shared`, `atomic` and `atomic const` qualify a reference: on a value (`shared int`, `const
-Point`, `shared int[2]`) each is an error, and `atomic` takes a number, `bool` or `char` only.
-`locked` holds an object in this version (`locked int` is an error: wrap the value in a
-class).
+`let c: const = ...`), a parameter (`cfg: atomic shared const Config`), a field (`hits: atomic
+int`, `cache: shared Cache`) and a result (`-> atomic int`). A type takes one qualifier, and
+`atomic shared const` is one qualifier of three words, each saying one thing: `atomic`, the
+reference crosses threads; `shared`, the object has several owners, one on each thread at
+least; `const`, nothing writes it. The two spellings that leave a word out are syntax
+errors: `atomic const T` is `'atomic const' is 'atomic shared const': an object read from
+several threads has several owners; write 'atomic shared const T'`, and `atomic shared T`
+is `'atomic shared T' would be written from several threads with no lock; write 'atomic
+shared const T' to freeze it, or 'locked T' to change it under a lock`. `const`, `shared`,
+`shared const` and `atomic shared const` qualify a reference: on a value (`shared int`,
+`const Point`, `shared int[2]`, `atomic shared const Pair`) each is an error. `atomic` takes a
+number, `bool` or `char` only: on a class it is an error that names the two forms an object
+crosses in (`'atomic' holds a number, a 'bool' or a 'char', not 'N': an object crosses
+threads as 'atomic shared const N' (frozen) or 'locked N'`). `locked` holds an object in
+this version (`locked int` is an error: wrap the value in a class).
 
 ## Conversions
 
 The declared type of the destination converts, in every declaration, assignment, argument,
 return and store:
 
-| Into \ from | a new object, or `move` of a unique | `move` of a `const` | `shared` | `shared const` | `atomic const` | `atomic`, `locked` |
+| Into \ from | a new object, or `move` of a unique | `move` of a `const` | `shared` | `shared const` | `atomic shared const` | `atomic`, `locked` |
 |---|---|---|---|---|---|---|
 | unique | moves | error | error | error | error | error |
 | `const` | converts | moves | error | error | error | error |
 | `shared` | converts | error | copies | error | error | error |
 | `shared const` | converts | converts | error | copies | error | error |
-| `atomic const` | send check, then frozen | the same | error | error | copies | error |
+| `atomic shared const` | send check, then frozen | the same | error | error | copies | error |
 | `locked` | send check, then a new cell | error | error | error | error | copies |
 
 Each error reads `cannot store a 'shared Node' in variable 'u', a 'Node': a reference
-converts only from unique, or from 'const' into the other 'const' forms`. A `view T` parameter
-takes every form of `T`; an `inout T` takes a unique or `shared` one.
+converts only from unique, or from 'const' into the other 'const' forms`. The `const` forms
+are `const`, `shared const` and `atomic shared const`, and only a `const` reference converts
+among them, into either of the other two: a `shared const` reference stays on its thread
+and does not become `atomic shared const` (`cannot store a 'shared const Node' in variable
+'f', a 'atomic shared const Node': ...`), and `atomic shared const` is a destination under
+that spelling only, since `atomic const` and `atomic shared` are not qualifiers
+([The qualifiers](#the-qualifiers)). A `view T` parameter takes every form of `T`; an
+`inout T` takes a unique or `shared` one.
 
 ## Moves
 
@@ -1307,13 +1382,13 @@ takes every form of `T`; an `inout T` takes a unique or `shared` one.
   that declares one cannot be imported yet (`return type of function 'slow' is a task
   ('Task<int>'): a module that declares an 'async fn' cannot be imported in the prototype`).
 - The send check at an async call's arguments: a number, a `bool`, a `char`, a `Str`, a
-  handle (`atomic`, `locked`, `atomic const`) and a unique or `const` object whose fields,
-  own and inherited and through structs, tuples, arrays, optionals and enum payloads, all
-  cross. A unique object crosses by `move` or as a temporary; copying one into a task is an
-  error (`cannot copy 'a' (a unique 'Node') into a task: write 'move a' to transfer it`). A
-  `shared` or `weak` part, a function value and an `Obj` do not cross, and the error names
-  the field (`cannot send 'j' (a 'Job'): field 'cache' is 'shared Cache'`; a deeper one by
-  its path, `field 'job.cache'`).
+  handle (`atomic`, `locked`, `atomic shared const`) and a unique or `const` object whose
+  fields, own and inherited and through structs, tuples, arrays, optionals and enum
+  payloads, all cross. A unique object crosses by `move` or as a temporary; copying one into
+  a task is an error (`cannot copy 'a' (a unique 'Node') into a task: write 'move a' to
+  transfer it`). A `shared` or `weak` part, a function value and an `Obj` do not cross, and
+  the error names the field (`cannot send 'j' (a 'Job'): field 'cache' is 'shared Cache'`; a
+  deeper one by its path, `field 'job.cache'`).
 
 ## `parallel for`
 
@@ -1321,10 +1396,10 @@ takes every form of `T`; an `inout T` takes a unique or `shared` one.
   statement. `..=` and `step` are allowed; the range is evaluated once, as for `for`.
 - A body uses, of the enclosing function: values (numbers, `bool`, `char`, enums, and arrays
   of them, a `view` or `inout` slice too), read only unless a reduction; `atomic`, `locked`
-  and `atomic const` variables and parameters; and the reduction variables. A reference, a
-  `Str`, a function value or an array of references is an error (`'nodes' (a 'Node[2]')
-  cannot be used in a 'parallel for' body: an iteration uses only values, arrays of values
-  and 'atomic' variables of the enclosing function`).
+  and `atomic shared const` variables and parameters; and the reduction variables. A
+  reference, a `Str`, a function value or an array of references is an error (`'nodes' (a
+  'Node[2]') cannot be used in a 'parallel for' body: an iteration uses only values, arrays
+  of values and 'atomic' variables of the enclosing function`).
 - A variable of the enclosing function changes only by a reduction, `s += e`, `s -= e` or
   `s *= e`, or, if `atomic`, by its operations (`cannot assign to 'mx' in a 'parallel for'
   body: a variable of the enclosing function changes only by a reduction ('mx += e', 'mx -=
@@ -1364,7 +1439,9 @@ takes every form of `T`; an `inout T` takes a unique or `shared` one.
   lock`), another `lock` (`a 'lock' block cannot hold another 'lock'`), a `parallel for`,
   `return`, `break` and `continue` are errors.
 - **`atomic T`.** `T` is a number type, `bool` or `char` (`'atomic' holds a number, a 'bool'
-  or a 'char', not 'Str'`). A read is an atomic load, `=` an atomic store, `+=` and `-=` one
+  or a 'char', not 'int?' (the prototype has no atomic arrays)`; for a class, `'atomic' holds
+  a number, a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic shared const
+  N' (frozen) or 'locked N'`). A read is an atomic load, `=` an atomic store, `+=` and `-=` one
   atomic operation (integers wrap; `f32` and `f16` round on every store; narrow integers wrap
   on reads); `x.exchange(v)` returns the value found; `x.compareExchange(expected, desired)
   -> bool` stores `desired` if the cell holds `expected`. A read of the place on the right of
@@ -1373,14 +1450,21 @@ takes every form of `T`; an `inout T` takes a unique or `shared` one.
   place (a declaration, an argument, a result, `self.f = p` in `__init__`) is another handle
   to the cell; any other value flowing into an `atomic` slot makes a new cell. A struct
   cannot hold an `atomic` field in this version; a class can.
-- **`atomic const T`.** A unique or `const` object flowing into an `atomic const` slot is
-  send-checked (`cannot make 'Holder(...)' (a 'Holder') 'atomic const': field 'cache' is
-  'shared Cache'`) and frozen: a walk visits every object it holds through its fields,
-  arrays and buffers. The handle copies anywhere, and reads through it count nothing. Access
-  is `const` (`'cfg' is 'atomic const'; cannot assign to its field 'hi'`, `'cfg' is 'atomic
-  const'; 'rename' is not a 'view fn'`); an `atomic` field of a frozen object still changes.
-  `atomic const` of a value is an error (`'atomic const' qualifies a reference; 'Pair' is a
-  value: box it ('mem::Box<Pair>') to share what it holds`): `let xs: atomic const
+- **`atomic shared const T`.** One qualifier of three words: `atomic`, the reference crosses
+  threads; `shared`, the object has several owners, one on each thread at least; `const`,
+  nothing writes it. The two spellings that leave a word out are syntax errors (`'atomic
+  const' is 'atomic shared const': an object read from several threads has several owners;
+  write 'atomic shared const T'`; `'atomic shared T' would be written from several threads
+  with no lock; write 'atomic shared const T' to freeze it, or 'locked T' to change it under
+  a lock`). A unique or `const` object flowing into an `atomic shared const` slot is
+  send-checked (`cannot make 'Holder(...)' (a 'Holder') 'atomic shared const': field 'cache'
+  is 'shared Cache'`) and frozen: a walk visits every object it holds through its fields,
+  arrays and buffers; a `shared const` reference does not convert into the slot. The handle
+  copies anywhere, and reads through it count nothing. Access is `const` (`'cfg' is 'atomic
+  shared const'; cannot assign to its field 'hi'`, `'cfg' is 'atomic shared const'; 'rename'
+  is not a 'view fn'`); an `atomic` field of a frozen object still changes. `atomic shared
+  const` of a value is an error (`'atomic shared const' qualifies a reference; 'Pair' is a
+  value: box it ('mem::Box<Pair>') to share what it holds`): `let xs: atomic shared const
   mem::Box<mem::Buffer<float>> = mem::Box(move b)` freezes the box, the buffer and its
   elements.
 
@@ -1416,10 +1500,11 @@ takes every form of `T`; an `inout T` takes a unique or `shared` one.
 
 | Error | Trigger |
 |-------|---------|
-| Conversion refused | `let u: Node = s` with `s: shared Node`; a `const` into a unique or `shared` slot; an `atomic const` into anything but `atomic const` |
-| Qualifier on a value | `shared int`, `const Point`, `shared int[2]`, `atomic const Pair` |
+| Conversion refused | `let u: Node = s` with `s: shared Node`; a `const` into a unique or `shared` slot; a `shared const` into an `atomic shared const` slot; an `atomic shared const` into anything but `atomic shared const` |
+| Qualifier on a value | `shared int`, `const Point`, `shared int[2]`, `atomic shared const Pair` |
 | Qualifier on a borrow | `n: view const Node`, `n: inout shared Node` |
-| Field of a `const` assigned | `cfg.name = "x"` with `cfg: const Config`; through `shared const` or `atomic const` too |
+| Atomic spelling | `atomic const N` and `atomic shared N`, the two spellings of `atomic shared const N` that leave a word out (syntax errors); `atomic N` with `N` a class |
+| Field of a `const` assigned | `cfg.name = "x"` with `cfg: const Config`; through `shared const` or `atomic shared const` too |
 | Non-`view` method on a `const` | `cfg.rename("y")`, `frozen.get()` |
 | Copy into a task | `consume(a)` with `a` a unique `Node` |
 | Task handle | `let t = fib(5);` with no `await` before the scope ends or a `return`; `await t` twice; `await t` in one branch only; `t = fib(4)` before `await t` |

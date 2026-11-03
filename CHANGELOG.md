@@ -16,8 +16,8 @@ samples/concurrency/README.md.
 - The keywords `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `const`, `locked`
   and `lock` (docs/grammar.md).
 - Qualifiers on a reference, as a variable's, a parameter's, a field's or a result's type:
-  unique (unwritten), `const`, `shared`, `shared const`, `atomic`, `atomic const` and `locked`.
-  A borrow (`view`, `inout`) takes none.
+  unique (unwritten), `const`, `shared`, `shared const`, `atomic`, `atomic shared const` and
+  `locked`. A borrow (`view`, `inout`) takes none.
 - `move x` and `move x.f`, the explicit transfer: `x` ends at the move, and a later read is an
   error naming it (or "may have been moved" after a branch that moved it on one path).
 - `async fn` and `await`: calling an `async fn` starts a task and `await` gives its result;
@@ -30,10 +30,12 @@ samples/concurrency/README.md.
   reached only inside a `lock` block.
 - `atomic T` cells of a number type, `bool` or `char`: a read is a load, `=` a store, `+=` and
   `-=` one atomic operation; `exchange(v)` and `compareExchange(expected, desired) -> bool`.
-- `atomic const T`: an object frozen with everything it holds by `__walk`, the compiler-generated
-  walk of a class's references in a slot of every vtable (*Changed*); read with no count.
+- `atomic shared const T`: an object frozen with everything it holds by `__walk`, the
+  compiler-generated walk of a class's references in a slot of every vtable (*Changed*); read
+  with no count; `atomic const T` and `atomic shared T` are parse errors naming the full spelling.
 - The send check, at an async call's arguments, an `async fn`'s result and every conversion to
-  `atomic const` or `locked`: a `shared` or `weak` part, a function value or an `Obj` cannot cross.
+  `atomic shared const` or `locked`: a `shared` or `weak` part, a function value or an `Obj`
+  cannot cross.
 - The built-in trait `Copyable` (docs/language/06-traits.md): structural, never implemented;
   numbers, `bool`, `char`, enums, `shared` references, handles and values of such parts.
 - `paykan --strict-ownership` (docs/language/17-the-paykan-command.md): the design's copy rule,
@@ -45,7 +47,7 @@ samples/concurrency/README.md.
 - The mlir backend's `pir.async_call`, `pir.await` and `pir.parallel` ops: `async.func`,
   `async.call`, `async.await` and `scf.parallel` then OpenMP on the LLVM path; in order on the C path.
 - `mem::Box<T>::value()` (docs/stdlib/memory.md), a `view fn` reading the value: the way into a
-  `view`, `const` or `atomic const` box, since `get()` is not one.
+  `view`, `const` or `atomic shared const` box, since `get()` is not one.
 - A `mem::Buffer<T>` of numbers in a `parallel for` body: one of the enclosing function read at
   any index and written at the loop's variable (`set`); one frozen in a box read through `value()`.
 - The lowering emits a number buffer's `at`, `get` and `len` in place, a bounds check and a load,
