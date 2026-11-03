@@ -399,6 +399,28 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
       reported.push_back(i);
       continue;
     }
+    // `move x` (the prototype) writes x: it may not share storage with
+    // what the call borrows, before or after it.
+    if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(arg);
+        u && u->getOpcode() == ast::UnaryOpcode::Move &&
+        modes.mode(i) == ast::ParamMode::Value) {
+      std::vector<std::string> paths;
+      borrowedPaths(u->getOperand(), paths);
+      std::vector<CallUse> mine;
+      mine.reserve(paths.size());
+      for (std::string &path : paths)
+        mine.push_back({std::move(path),
+                        "moved into parameter '" + modes.name(i) + "'",
+                        modes.name(i), true});
+      std::string msg = conflictWith(uses, mine);
+      uses.push_back(std::move(mine));
+      if (!msg.empty()) {
+        error(arg->getLocation(), msg);
+        reported.push_back(i);
+        ok = false;
+      }
+      continue;
+    }
     if (modes.mode(i) == ast::ParamMode::View) {
       // The lowering keeps what the argument is part of alive for the call
       // (ast::Expr::isViewedByCall).

@@ -4599,12 +4599,27 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
   }
 
   bool ok = true;
+  // Each branch starts from the moves before the `if`; what follows the
+  // `if` joins the branches that reach it (the prototype's move analysis).
+  const MovedMap before = MovedVars;
+  std::vector<MovedMap> paths;
   // Type-check the then branch.
+  FlowEnded = false;
   if (!visit(node->getThenBranch()))
     ok = false;
+  const bool thenEnded = FlowEnded;
+  if (!thenEnded)
+    paths.push_back(MovedVars);
   // Type-check the else branch (if present).
+  MovedVars = before;
+  FlowEnded = false;
   if (node->hasElse() && !visit(node->getElseBranch()))
     ok = false;
+  const bool elseEnded = node->hasElse() && FlowEnded;
+  if (!elseEnded)
+    paths.push_back(std::move(MovedVars));
+  joinMoves(paths, "if", node->getLocation());
+  FlowEnded = thenEnded && elseEnded;
   return ok;
 }
 
@@ -4620,9 +4635,11 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   }
 
   // Type-check the body inside a loop context.
+  beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool ok = visit(node->getBody());
   --LoopDepth;
+  finishLoopMoves();
   return ok;
 }
 
@@ -4740,9 +4757,11 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
     ParallelStack.push_back({node, CurrentScope});
   if (!discard)
     DeclLoopDepth[name] = LoopDepth + 1;
+  beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool bodyOk = visit(node->getBody());
   --LoopDepth;
+  finishLoopMoves();
   if (node->isParallel())
     ParallelStack.pop_back();
   return ok && bodyOk;
@@ -4799,6 +4818,10 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
           "'break' cannot be used in a 'parallel for' body (the prototype)");
     return false;
   }
+  // The moves so far leave the loop by this path.
+  if (!LoopMoveStack.empty())
+    LoopMoveStack.back().Breaks.push_back(MovedVars);
+  FlowEnded = true;
   return true;
 }
 
@@ -4816,6 +4839,10 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
                                "for' body (the prototype)");
     return false;
   }
+  // The next iteration starts here.
+  if (!LoopMoveStack.empty())
+    checkLoopIteration(LoopMoveStack.back(), node->getLocation());
+  FlowEnded = true;
   return true;
 }
 
@@ -5254,11 +5281,18 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     const bool savedAsync = std::exchange(InAsyncFn, node->isAsync());
     const ast::Qualifier savedResultQual =
         std::exchange(CurrentResultQual, node->getResultQual());
-    MovedVars.clear();
+    // (A generic instance is checked in the middle of another body: that
+    // body's state comes back after.)
+    MovedMap savedMoves = std::exchange(MovedVars, {});
+    std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+    const bool savedFlowEnded = std::exchange(FlowEnded, false);
     DeclLoopDepth.clear();
     for (const ast::Param &p : node->getParams())
       DeclLoopDepth[p.getName()] = 0;
     bool ok = visitBody(node->getBody()->getStatements());
+    MovedVars = std::move(savedMoves);
+    LoopMoveStack = std::move(savedLoopMoves);
+    FlowEnded = savedFlowEnded;
     InAsyncFn = savedAsync;
     CurrentResultQual = savedResultQual;
     CurrentReturnType = savedRetTy;
@@ -5917,6 +5951,7 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
     }
 
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;
@@ -5987,6 +6022,7 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
     }
 
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;
@@ -6090,6 +6126,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   // particular, distinguish an enum subject from a class subject).
   node->getSubject()->setResolvedType(subjectTy);
 
+  // The arms' moves join after the match (the prototype's move analysis).
+  MatchMovesGuard matchMoves(*this, node);
+
   // A match is value-mode when its subject resolves to a builtin primitive
   // (int/float/bool/char) or to Str.  In value-mode, arms compare the subject
   // against literal patterns instead of dispatching on runtime type.  Str is a
@@ -6144,6 +6183,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 
     // Open a new scope for each arm (the binding, if any, lives here).
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;
@@ -6259,6 +6299,7 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
 
     // Open a new scope for each arm (the binding, if any, lives here).
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;

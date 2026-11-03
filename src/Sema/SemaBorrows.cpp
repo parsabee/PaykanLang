@@ -223,6 +223,10 @@ bool Sema::visitStatements(const std::vector<ast::Stmt *> &stmts) {
   for (size_t i = 0; i < stmts.size(); ++i) {
     if (!visit(stmts[i]))
       ok = false;
+    // Nothing after a `return` runs: its path's moves join nothing (the
+    // prototype's move analysis; `break` and `continue` say so themselves).
+    if (ast::isa<ast::ReturnStmt>(stmts[i]))
+      FlowEnded = true;
     if (const auto *ds = ast::dyn_cast<ast::DeclStmt>(stmts[i]))
       if (const auto *vd = ast::dyn_cast<ast::VarDecl>(ds->getDecl()))
         if (vd->getMode() != ast::ParamMode::Value) {

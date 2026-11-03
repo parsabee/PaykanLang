@@ -236,6 +236,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   CurrentReturnType = retTy;
   LoopDepth = 0;
   CurrentMethodUse = nullptr;
+  // Its moves are its own: a capture is a read-only copy (the prototype).
+  MovedMap savedMoves = std::exchange(MovedVars, {});
+  std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+  const bool savedFlowEnded = std::exchange(FlowEnded, false);
   bool bodyOk;
   {
     ScopeGuard guard(*this);
@@ -266,6 +270,9 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   CurrentReturnType = savedRetTy;
   CurrentResult = savedResult;
   LoopDepth = savedLoopDepth;
+  MovedVars = std::move(savedMoves);
+  LoopMoveStack = std::move(savedLoopMoves);
+  FlowEnded = savedFlowEnded;
   CurrentMethodUse = savedMethodUse;
   CurrentClassCtx = savedClassCtx;
   if (!bodyOk)

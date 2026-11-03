@@ -321,8 +321,73 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static std::string qualifiedName(ast::Qualifier q, ast::Type *ty);
   /// The source text of a place, for diagnostics: `x`, `x.f`, `xs[i]`.
   static std::string placeText(const ast::Expr *e);
-  /// The variables a `move` has ended, by name, with the move's location.
-  std::unordered_map<std::string, ast::SourceLocation> MovedVars;
+  /// How a `move` ended a variable: where, and whether on some paths only
+  /// (then By names the branch or loop whose paths joined).
+  struct MovedState {
+    ast::SourceLocation At;
+    bool Maybe = false;
+    std::string By;
+  };
+  using MovedMap = std::unordered_map<std::string, MovedState>;
+  /// The variables a `move` has ended, by name: a forward "maybe moved" set
+  /// over the body (the design's SemaMoves).
+  MovedMap MovedVars;
+  /// Set by a statement no statement after it reaches (`return`, `break`,
+  /// `continue`): its path's moves do not join what follows the branch.
+  bool FlowEnded = false;
+  /// The loops being checked, innermost last: the moves on entry (an
+  /// iteration assigns again what it moves of the enclosing function's
+  /// variables), the body's depth, and the moves at each `break`.
+  struct LoopMoves {
+    ast::SourceLocation Loc;
+    unsigned Depth = 0;
+    MovedMap Entry;
+    std::vector<MovedMap> Breaks;
+  };
+  std::vector<LoopMoves> LoopMoveStack;
+  /// The (variable, loop) pairs reported as moved and not assigned again.
+  std::set<std::string> LoopMovesReported;
+  /// A `match` being checked: the moves on entry, and at the end of each
+  /// arm that falls through, joined after the match (MatchMovesGuard).
+  struct MatchMoves {
+    ast::MatchStmt *Node;
+    MovedMap Entry;
+    std::vector<MovedMap> Arms;
+    bool AllEnded = true;
+  };
+  std::vector<MatchMoves> MatchMoveStack;
+  /// Around a `match`: joins its arms' moves on the way out.
+  struct MatchMovesGuard {
+    Sema &S;
+    MatchMovesGuard(Sema &s, ast::MatchStmt *node);
+    ~MatchMovesGuard();
+  };
+  /// Around one arm's check: starts it from the match's entry state and
+  /// records where it leaves off.
+  struct ArmMovesGuard {
+    Sema &S;
+    ArmMovesGuard(Sema &s);
+    ~ArmMovesGuard();
+  };
+  /// MovedVars joined from the states @p paths of the branches of the
+  /// @p what (an "if", a "loop", a "match") at @p loc: a variable moved on
+  /// every path stays so; one moved on some paths only is "maybe moved".
+  /// No path: MovedVars is left as it is (nothing after is reached).
+  void joinMoves(const std::vector<MovedMap> &paths, const char *what,
+                 ast::SourceLocation loc);
+  /// The end of an iteration of @p loop (its body's end, a `continue` at
+  /// @p loc): every variable of the enclosing function it moved was
+  /// assigned again, or an error.
+  void checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc);
+  /// Opens the loop at @p loc for the moves of its body.
+  void beginLoopMoves(ast::SourceLocation loc);
+  /// Closes it: checks the body's end as an iteration's, and joins the
+  /// paths out of the loop.
+  void finishLoopMoves();
+  /// `move x.f`: a unique reference field reached through unique fields of
+  /// an owned variable leaves its slot, and the variable ends.  The field's
+  /// type, or nullptr after an error.
+  ast::Type *checkPartialMove(ast::UnaryExpr *node, ast::MemberAccessExpr *ma);
   /// The loop depth each variable was declared at, by name.
   std::unordered_map<std::string, unsigned> DeclLoopDepth;
   /// Set while an expression that is an `atomic` variable's handle (not

@@ -357,6 +357,17 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     return L.B.await(task, t, "awaited");
   }
   if (node->getOpcode() == ast::UnaryOpcode::Move) {
+    // `move x.f` (the prototype): the field's reference leaves its slot,
+    // which becomes null; `x` has ended (Sema), so its teardown finds the
+    // slot empty.
+    if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand())) {
+      Val addr = L.emitPlaceAddress(ma);
+      if (!addr)
+        return Val();
+      Val box = L.B.ptrLoad(addr, Type::Box, "moved");
+      L.B.ptrStore(addr, Val::null(Type::Box));
+      return box;
+    }
     auto *id = ast::cast<ast::Identifier>(node->getOperand());
     if (L.holdsBox(id->getName())) {
       Val box = L.loadVarBox(id->getName());

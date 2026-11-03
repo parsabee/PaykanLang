@@ -7,6 +7,9 @@
 #include "Names.h"
 #include "NativeABI.h"
 #include "Sema.h"
+#include "SemaInternal.h"
+
+#include <algorithm>
 
 namespace paykan::sema {
 
@@ -330,7 +333,171 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
   return ok;
 }
 
+// -- Moves (docs/design/concurrency.md, "Use after move")
+
+Sema::MatchMovesGuard::MatchMovesGuard(Sema &s, ast::MatchStmt *node) : S(s) {
+  S.MatchMoveStack.push_back({node, S.MovedVars, {}, true});
+}
+
+Sema::MatchMovesGuard::~MatchMovesGuard() {
+  MatchMoves m = std::move(S.MatchMoveStack.back());
+  S.MatchMoveStack.pop_back();
+  // A match no arm of which takes the subject falls through as it came.
+  if (!detail::matchIsExhaustive(m.Node)) {
+    m.Arms.push_back(std::move(m.Entry));
+    m.AllEnded = false;
+  }
+  S.joinMoves(m.Arms, "match", m.Node->getLocation());
+  S.FlowEnded = m.AllEnded;
+}
+
+Sema::ArmMovesGuard::ArmMovesGuard(Sema &s) : S(s) {
+  S.MovedVars = S.MatchMoveStack.back().Entry;
+  S.FlowEnded = false;
+}
+
+Sema::ArmMovesGuard::~ArmMovesGuard() {
+  MatchMoves &m = S.MatchMoveStack.back();
+  if (S.FlowEnded)
+    return;
+  m.Arms.push_back(S.MovedVars);
+  m.AllEnded = false;
+}
+
+void Sema::joinMoves(const std::vector<MovedMap> &paths, const char *what,
+                     ast::SourceLocation loc) {
+  if (paths.empty())
+    return; // nothing after is reached
+  MovedMap joined;
+  for (const MovedMap &p : paths)
+    for (const auto &[name, st] : p) {
+      auto it = joined.find(name);
+      if (it == joined.end())
+        joined[name] = st;
+      else if (st.Maybe && !it->second.Maybe)
+        it->second = st;
+    }
+  for (auto &[name, st] : joined) {
+    if (st.Maybe)
+      continue;
+    const bool onEveryPath =
+        std::all_of(paths.begin(), paths.end(),
+                    [&](const MovedMap &p) { return p.count(name) != 0; });
+    if (!onEveryPath) {
+      st.Maybe = true;
+      st.By = std::string("the '") + what + "' at " + at(loc);
+    }
+  }
+  MovedVars = std::move(joined);
+}
+
+void Sema::beginLoopMoves(ast::SourceLocation loc) {
+  LoopMoveStack.push_back({loc, LoopDepth + 1, MovedVars, {}});
+  FlowEnded = false;
+}
+
+void Sema::finishLoopMoves() {
+  LoopMoves loop = std::move(LoopMoveStack.back());
+  LoopMoveStack.pop_back();
+  // The body's end is an iteration's end.
+  if (!FlowEnded)
+    checkLoopIteration(loop, loop.Loc);
+  // After the loop: no iteration at all, the last one's end, or a `break`.
+  std::vector<MovedMap> paths{std::move(loop.Entry)};
+  if (!FlowEnded)
+    paths.push_back(MovedVars);
+  for (MovedMap &b : loop.Breaks)
+    paths.push_back(std::move(b));
+  joinMoves(paths, "loop", loop.Loc);
+  FlowEnded = false;
+}
+
+void Sema::checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc) {
+  for (const auto &[name, st] : MovedVars) {
+    if (loop.Entry.count(name))
+      continue; // moved before the loop: reported at its use
+    // The body's own variables are declared anew each iteration.
+    if (auto d = DeclLoopDepth.find(name);
+        d != DeclLoopDepth.end() && d->second >= loop.Depth)
+      continue;
+    if (!LoopMovesReported.insert(name + "@" + at(loop.Loc)).second)
+      continue;
+    error(st.At, "'" + name + "' is moved in the loop at " + at(loop.Loc) +
+                     " and not assigned again before the next iteration" +
+                     (at(loc) == at(loop.Loc)
+                          ? ""
+                          : " (the 'continue' at " + at(loc) + ")"));
+  }
+}
+
+ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
+                                  ast::MemberAccessExpr *ma) {
+  const ast::SourceLocation loc = node->getLocation();
+  const std::string what = placeText(ma);
+  // The root: an owned local or by-value parameter.
+  const ast::Expr *e = ma;
+  while (const auto *link = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    e = link->getReceiver();
+  const auto *root = ast::dyn_cast<ast::Identifier>(e);
+  if (!root || root->getName() == names::kSelf) {
+    error(loc, "cannot move '" + what +
+                   "': 'move' takes a variable, or a field of one it owns" +
+                   (root ? "; write 'mem::replace(" + what + ", v)'" : ""));
+    return nullptr;
+  }
+  const std::string &name = root->getName();
+  switch (varKind(name)) {
+  case VarKind::Plain:
+  case VarKind::Let:
+    break;
+  default:
+    error(loc, "cannot move '" + what + "': '" + name +
+                   "' is not an owned variable (a borrow, a capture or a "
+                   "'weak' reference); write 'mem::replace(" +
+                   what + ", v)'");
+    return nullptr;
+  }
+  ast::Type *ty = resolveExprType(ma); // the root live, not moved, not lent
+  if (!ty)
+    return nullptr;
+  // Every link a unique field: a `shared` or `const` one is an alias, a
+  // `weak` one no owner.
+  for (const ast::Expr *x = ma;
+       const auto *link = ast::dyn_cast<ast::MemberAccessExpr>(x);
+       x = link->getReceiver()) {
+    const ast::Qualifier q = qualifierOf(link);
+    const auto *ct = ast::dyn_cast<ast::ClassType>(
+        ast::stripOptional(link->getReceiver()->getResolvedType()));
+    if (ct && ct->isWeakField(link->getFieldName())) {
+      error(loc, "cannot move '" + placeText(link) +
+                     "': it is a 'weak' field, which owns nothing");
+      return nullptr;
+    }
+    if (!q.isUnique()) {
+      error(loc, "cannot move '" + placeText(link) + "': it is '" +
+                     qualifiedName(q, link->getResolvedType()) +
+                     "', not a unique part of '" + name + "'");
+      return nullptr;
+    }
+  }
+  if (!ast::isRefType(ty)) {
+    error(loc, "cannot move '" + what + "': it is a '" + typeName(ty) +
+                   "', a value (a value is copied; a field of a reference "
+                   "type moves out)");
+    return nullptr;
+  }
+  if (std::string why = viewedBy(name); !why.empty()) {
+    error(loc, why + "; it cannot be moved out of");
+    return nullptr;
+  }
+  MovedVars[name] = MovedState{loc, false, ""};
+  return ty;
+}
+
 ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
+  // `move x.f` (the prototype): the field leaves, and x ends.
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand()))
+    return checkPartialMove(node, ma);
   auto *id = ast::dyn_cast<ast::Identifier>(node->getOperand());
   if (!id) {
     error(node->getLocation(), "'move' takes a variable: a local or a "
@@ -371,18 +538,17 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
           "cannot move '" + name + "': the function captures it by copy");
     return nullptr;
   }
-  ast::Type *ty = resolveExprType(id); // live, and not moved already
+  ast::Type *ty = resolveExprType(id); // live, not moved, not lent inout
   if (!ty)
     return nullptr;
-  if (auto depth = DeclLoopDepth.find(name);
-      depth != DeclLoopDepth.end() && depth->second < LoopDepth) {
-    error(node->getLocation(),
-          "'" + name +
-              "' is moved in a loop it is declared outside of: the "
-              "next iteration would read it after the move");
+  // A move is a write: not while a `view` local reads the variable.
+  if (std::string why = viewedBy(name); !why.empty()) {
+    error(node->getLocation(), why + "; it cannot be moved");
     return nullptr;
   }
-  MovedVars[name] = node->getLocation();
+  // (A move in a loop of a variable declared outside it is checked at the
+  // iteration's end: checkLoopIteration.)
+  MovedVars[name] = MovedState{node->getLocation(), false, ""};
   return ty;
 }
 
@@ -390,8 +556,13 @@ bool Sema::checkNotMoved(const std::string &name, ast::SourceLocation loc) {
   auto moved = MovedVars.find(name);
   if (moved == MovedVars.end())
     return true;
-  error(loc, "'" + name + "' was moved at " + at(moved->second) +
-                 "; it cannot be used after the move");
+  const MovedState &st = moved->second;
+  if (st.Maybe)
+    error(loc, "'" + name + "' may have been moved (by " + st.By + ", at " +
+                   at(st.At) + "); it cannot be used after a move");
+  else
+    error(loc, "'" + name + "' was moved at " + at(st.At) +
+                   "; it cannot be used after the move");
   return false;
 }
 
