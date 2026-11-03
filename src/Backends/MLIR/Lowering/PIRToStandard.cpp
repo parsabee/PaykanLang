@@ -235,6 +235,9 @@ private:
   /// the 64 bits of its result; on the C path an `async fn` returns them
   /// in a `ptr`.
   void makeReturn(Value r);
+  /// After an async function's execute region @p exec (null for none): the
+  /// await of its value, returned.
+  void finishAsync(async::ExecuteOp exec);
   /// A task carries its result as 64 bits (an i64): a value as those bits,
   /// and back.
   Value toBits(Value v);
@@ -534,6 +537,18 @@ void FunctionLowering::run() {
   for (auto [from, to] : llvm::zip(body.getArguments(), entry->getArguments()))
     Map.map(from, to);
 
+  // An `async fn` on the LLVM path (the concurrency prototype): its body is
+  // an async.execute region, which the async runtime hands to its worker
+  // pool, so a call returns at once with the task; the function awaits the
+  // region's value (a suspension point) and returns it.  A bare async.func
+  // would run its body on the caller's thread.
+  async::ExecuteOp exec;
+  if (IsAsync && !M.sequential()) {
+    exec = async::ExecuteOp::create(B, Loc, TypeRange{B.getI64Type()},
+                                    ValueRange{}, ValueRange{});
+    B.setInsertionPointToEnd(&exec.getBodyRegion().front());
+  }
+
   // The locals are slots at the top of the function, as PIR declares them.
   for (auto l : body.getOps<P::LocalOp>()) {
     Type slot = l.getSlot().getType().getSlot();
@@ -549,6 +564,7 @@ void FunctionLowering::run() {
       [&](Operation *o) { loopExits |= isa<P::BreakOp, P::ContinueOp>(o); });
   if (!loopExits && tailOnly(body)) {
     makeReturn(lowerTail(body));
+    finishAsync(exec);
     return;
   }
   ExitSlot = P::AllocaOp::create(B, Loc, 1, 1, "exit");
@@ -560,6 +576,16 @@ void FunctionLowering::run() {
   lowerBlock(body);
   makeReturn(RetType ? Value(P::PtrLoadOp::create(B, Loc, RetType, RetSlot))
                      : Value());
+  finishAsync(exec);
+}
+
+void FunctionLowering::finishAsync(async::ExecuteOp exec) {
+  if (!exec)
+    return;
+  B.setInsertionPointAfter(exec);
+  Value bits =
+      async::AwaitOp::create(B, Loc, exec.getBodyResults()[0])->getResult(0);
+  async::ReturnOp::create(B, Loc, ValueRange(bits));
 }
 
 void FunctionLowering::makeReturn(Value r) {
@@ -573,7 +599,7 @@ void FunctionLowering::makeReturn(Value r) {
                            ValueRange(P::CastOp::create(
                                B, Loc, P::PtrType::get(B.getContext()), bits)));
   else
-    async::ReturnOp::create(B, Loc, ValueRange(bits));
+    async::YieldOp::create(B, Loc, ValueRange(bits)); // the execute region's
 }
 
 Value FunctionLowering::toBits(Value v) {

@@ -854,16 +854,17 @@ void loadLLVMDialects(MLIRContext &ctx) {
 
 void addLLVMDialectPasses(PassManager &pm) {
   // The concurrency prototype (docs/design/concurrency.md): a parallel
-  // loop's scf.parallel becomes OpenMP (its runtime is libomp) before scf
-  // becomes cf, and after it an async.func, its async.call and its awaits
-  // become coroutines on MLIR's async runtime, whose suspension points
-  // split blocks, which only a cf body allows.
+  // loop's scf.parallel becomes OpenMP (its runtime is libomp); an
+  // async.func, the async.execute region that is its body, its async.call
+  // and its awaits become coroutines on MLIR's async runtime (the pass
+  // lowers the scf around an await to cf itself, as a suspension point
+  // splits blocks); then the rest of scf becomes cf.
   pm.addPass(createConvertSCFToOpenMPPass());
   pm.addPass(std::make_unique<InlineAllocaScopesPass>());
-  pm.addPass(std::make_unique<SCFToCFPass>());
   pm.addPass(createAsyncFuncToAsyncRuntimePass());
   pm.addPass(createAsyncToAsyncRuntimePass());
   pm.addPass(createConvertAsyncToLLVMPass());
+  pm.addPass(std::make_unique<SCFToCFPass>());
   pm.addPass(std::make_unique<ConvertToLLVMPass>());
   pm.addPass(createReconcileUnrealizedCastsPass());
   pm.addPass(std::make_unique<DropDeadCodePass>());

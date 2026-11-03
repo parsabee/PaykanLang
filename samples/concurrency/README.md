@@ -33,8 +33,11 @@ than to be complete.  Three programs here run with `paykan run`:
   `while` it is the same loop run in order, which every PIR pass and the C
   path do, so nothing else in the compiler had to learn about threads.
 * **MLIR**: `pir.async_call`, `pir.await` and `pir.parallel` ops.  The
-  shared lowering makes an `async fn` an `async.func`, an async call an
-  `async.call` and an await an `async.await`; a `pir.parallel` becomes an
+  shared lowering makes an `async fn` an `async.func` whose body is an
+  `async.execute` region (which the runtime hands to its worker pool, so a
+  call returns at once with the task and the body runs on a worker), an
+  async call an `async.call` and an await an `async.await`, a suspension
+  point inside a task; a `pir.parallel` becomes an
   `scf.parallel` over at most 256 chunks, each chunk running its range in
   an inner loop into its own partial, the partials folded in chunk order
   afterwards (the design's reproducible reduction).  The LLVM path then
@@ -43,10 +46,14 @@ than to be complete.  Three programs here run with `paykan run`:
   and `convert-async-to-llvm`, and translates OpenMP to LLVM IR.  The C
   path (`--emit-c`) lowers the same ops sequentially: a task is the
   function's result carried in a pointer, a parallel loop a plain loop.
-* **Runtimes**: tasks run on MLIR's async runtime (`libmlir_async_runtime`),
+* **Runtimes**: tasks run on MLIR's async runtime (`libmlir_async_runtime`:
+  a thread pool and reference-counted token, value and group objects with
+  awaiter callbacks; no event loop, timers, cancellation or channels),
   parallel loops on LLVM's OpenMP runtime (`libomp`); both ship with the
   LLVM the compiler is built against, and `paykan run` loads them into the
-  JIT when a program uses them (`paykan build` links them).  The Paykan
+  JIT when a program uses them (`paykan build` links them).  The prototype
+  keeps that runtime; the finished feature needs Paykan's own, as the
+  design's Runtime section describes.  The Paykan
   runtime's deferred-destroy state became thread-local, and an `atomic
   int` is a heap cell (`src/Runtime/Atomic.c`) whose count is immortal, so
   a handle crosses threads without an atomic count.
