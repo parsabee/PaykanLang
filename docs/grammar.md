@@ -56,9 +56,9 @@ STRING   ::= '"' ( [^\\"\n] | "\\" [^\n] )* '"'
 Keywords (reserved; never identifiers):
 
 ```
-import  as  class  struct  enum  match  mov  fn  native  return  if  then  else
+import  as  class  struct  enum  match  fn  native  return  if  then  else
 elif  while  for  break  continue  True  False  None  _  view  inout  let  weak  impl
-static  trait
+static  trait  move  async  await  parallel  atomic  shared  const  locked  lock
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -572,12 +572,6 @@ subscript's base before its index, a tuple or array literal's elements in
 order, and an assignment's target place before its value; `&&` and `||`
 evaluate their right operand only when needed, and a ternary only the
 branch it chooses ([Evaluation order](language/02-basics.md#evaluation-order)).
-
-`mov` is reserved but no longer part of the grammar (removed in v0.2.0).
-A frontend reports `'mov' was removed in v0.2.0; ownership transfers are
-inferred` (`frontend::kMovRemoved`) once per use, and once for a run of
-them (`mov mov s`), and keeps parsing the operand after it, so that is the
-only error.
 
 A parenthesised expression is just the inner expression (no node is
 created); `(a)` is a 1-tuple nowhere. A tuple literal has at least two

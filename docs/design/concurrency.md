@@ -145,10 +145,7 @@ forStmt        ::= "parallel"? "for" ...                -- as today after "for"
 * Recovery (docs/grammar.md:672-678) adds `async fn`, `shared fn` and
   `shared view fn` to the member and top-level points; `lock` and `parallel
   for` recover like other statements.
-* `mov` stays reserved one release: `'mov' is spelled 'move' since v0.4`
-  replaces kMovRemoved (include/paykan/Frontend.h:65-68,
-  src/Frontends/RecursiveDescent/Parser.cpp:2512-2535) (proposed; owner may
-  change).
+* The transfer is spelled `move`; there is no `mov` keyword.
 * `shared int` is `'shared' qualifies a reference; 'int' is a value`, and
   `const int` is `'const' applies to objects; 'int' is a value, which 'let'
   fixes` (decision 36).  A type takes one qualifier: the parser reads a run

@@ -75,24 +75,43 @@ struct Keyword {
 // Keywords in docs/grammar.md.  `_` on its own is the UNDERSCORE token; any
 // longer identifier starting with `_` is an ordinary identifier.
 constexpr Keyword kKeywords[] = {
-    {"import", Tok::KwImport}, {"as", Tok::KwAs},
-    {"class", Tok::KwClass},   {"enum", Tok::KwEnum},
-    {"match", Tok::KwMatch},   {"mov", Tok::KwMov},
-    {"fn", Tok::KwFn},         {"native", Tok::KwNative},
-    {"impl", Tok::KwImpl},     {"static", Tok::KwStatic},
-    {"return", Tok::KwReturn}, {"if", Tok::KwIf},
-    {"then", Tok::KwThen},     {"else", Tok::KwElse},
+    {"import", Tok::KwImport},
+    {"as", Tok::KwAs},
+    {"class", Tok::KwClass},
+    {"enum", Tok::KwEnum},
+    {"match", Tok::KwMatch},
+    {"fn", Tok::KwFn},
+    {"native", Tok::KwNative},
+    {"impl", Tok::KwImpl},
+    {"static", Tok::KwStatic},
+    {"return", Tok::KwReturn},
+    {"if", Tok::KwIf},
+    {"then", Tok::KwThen},
+    {"else", Tok::KwElse},
     {"elif", Tok::KwElif}, // an if-statement's `else if`
-    {"while", Tok::KwWhile},   {"for", Tok::KwFor},
-    {"break", Tok::KwBreak},   {"continue", Tok::KwContinue},
-    {"True", Tok::KwTrue},     {"False", Tok::KwFalse},
-    {"None", Tok::KwNone},     {"_", Tok::Underscore},
-    {"view", Tok::KwView},     {"inout", Tok::KwInout},
-    {"let", Tok::KwLet},       {"weak", Tok::KwWeak},
-    {"trait", Tok::KwTrait},   {"struct", Tok::KwStruct},
-    {"move", Tok::KwMove},     {"async", Tok::KwAsync},
-    {"await", Tok::KwAwait},   {"parallel", Tok::KwParallel},
-    {"atomic", Tok::KwAtomic}, {"shared", Tok::KwShared},
+    {"while", Tok::KwWhile},
+    {"for", Tok::KwFor},
+    {"break", Tok::KwBreak},
+    {"continue", Tok::KwContinue},
+    {"True", Tok::KwTrue},
+    {"False", Tok::KwFalse},
+    {"None", Tok::KwNone},
+    {"_", Tok::Underscore},
+    {"view", Tok::KwView},
+    {"inout", Tok::KwInout},
+    {"let", Tok::KwLet},
+    {"weak", Tok::KwWeak},
+    {"trait", Tok::KwTrait},
+    {"struct", Tok::KwStruct},
+    {"move", Tok::KwMove},
+    {"async", Tok::KwAsync},
+    {"await", Tok::KwAwait},
+    {"parallel", Tok::KwParallel},
+    {"atomic", Tok::KwAtomic},
+    {"shared", Tok::KwShared},
+    {"const", Tok::KwConst},
+    {"locked", Tok::KwLocked},
+    {"lock", Tok::KwLock},
 };
 
 // The table spells the grammar's keywords, frontend::kKeywords, each once
@@ -125,8 +144,6 @@ const char *describe(Tok k) {
     return "'enum'";
   case Tok::KwMatch:
     return "'match'";
-  case Tok::KwMov:
-    return "'mov'";
   case Tok::KwFn:
     return "'fn'";
   case Tok::KwNative:
@@ -183,6 +200,12 @@ const char *describe(Tok k) {
     return "'atomic'";
   case Tok::KwShared:
     return "'shared'";
+  case Tok::KwConst:
+    return "'const'";
+  case Tok::KwLocked:
+    return "'locked'";
+  case Tok::KwLock:
+    return "'lock'";
   case Tok::Underscore:
     return "'_'";
   case Tok::Assign:
@@ -303,8 +326,6 @@ const char *tokenKindName(Tok k) {
     return "KW_ENUM";
   case Tok::KwMatch:
     return "KW_MATCH";
-  case Tok::KwMov:
-    return "KW_MOV";
   case Tok::KwFn:
     return "KW_FN";
   case Tok::KwNative:
@@ -361,6 +382,12 @@ const char *tokenKindName(Tok k) {
     return "KW_ATOMIC";
   case Tok::KwShared:
     return "KW_SHARED";
+  case Tok::KwConst:
+    return "KW_CONST";
+  case Tok::KwLocked:
+    return "KW_LOCKED";
+  case Tok::KwLock:
+    return "KW_LOCK";
   case Tok::Underscore:
     return "UNDERSCORE";
   case Tok::Assign:

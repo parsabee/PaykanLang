@@ -325,6 +325,12 @@ std::string typeName(Type *ty) {
     return "atomic " + typeName(at->getInnerType());
   if (auto *tt = dyn_cast<TaskType>(ty))
     return "Task<" + typeName(tt->getInnerType()) + ">";
+  if (auto *qt = dyn_cast<QualifiedType>(ty)) {
+    std::string s = qt->getQualifier().spelling();
+    if (qt->getInnerType())
+      s += std::string(s.empty() ? "" : " ") + typeName(qt->getInnerType());
+    return s;
+  }
   // A slice is spelled as its parameter's type is, its mode aside.
   if (auto *st = dyn_cast<SliceType>(ty))
     return suffixed(st->getElementType()) + "[]";

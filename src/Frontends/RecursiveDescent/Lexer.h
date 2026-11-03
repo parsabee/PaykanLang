@@ -34,7 +34,6 @@ enum class Tok : uint8_t {
   KwClass,
   KwEnum,
   KwMatch,
-  KwMov,
   KwFn,
   KwNative,
   KwImpl,
@@ -64,6 +63,9 @@ enum class Tok : uint8_t {
   KwParallel,
   KwAtomic,
   KwShared,
+  KwConst,
+  KwLocked,
+  KwLock,
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators
   Assign, // =

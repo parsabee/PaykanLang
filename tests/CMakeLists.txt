@@ -26,7 +26,6 @@ add_executable(parser_tests
     Parser/ClassTests.cpp
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
-    Parser/MovTests.cpp
     Parser/NativeTests.cpp
     Parser/GenericsTests.cpp
     Parser/ConversionTests.cpp

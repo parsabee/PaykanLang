@@ -19,12 +19,13 @@ namespace paykan::frontend {
 /// digits and `_`, and is none of these.  The AST interchange reader holds a
 /// plugin's names to it (isIdentifier).
 inline constexpr std::string_view kKeywords[] = {
-    "import", "as", "class", "struct", "enum", "match", "mov", "fn", "native",
+    "import", "as", "class", "struct", "enum", "match", "fn", "native",
     "return", "if", "then", "else", "elif", "while", "for", "break", "continue",
     "True", "False", "None", "_", "view", "inout", "let", "weak", "impl",
     "static", "trait",
     // The concurrency prototype (docs/design/concurrency.md).
-    "move", "async", "await", "parallel", "atomic", "shared"};
+    "move", "async", "await", "parallel", "atomic", "shared", "const", "locked",
+    "lock"};
 
 /// Whether @p s is one of the grammar's keywords (kKeywords).
 inline bool isKeyword(std::string_view s) {

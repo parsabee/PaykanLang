@@ -118,8 +118,9 @@ public:
     NK_TupleType,
     NK_StructType, // a TupleType with a name and named fields (see TupleType)
     NK_SliceType,
-    NK_AtomicType, // `atomic int` (the concurrency prototype)
-    NK_TaskType,   // the result of an async call (the concurrency prototype)
+    NK_AtomicType,    // `atomic int` (the concurrency prototype)
+    NK_TaskType,      // the result of an async call (the concurrency prototype)
+    NK_QualifiedType, // `shared T`, `const T`, ... as written (the prototype)
     NK_PoisonType,
     NK_FunctionType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
@@ -193,6 +194,29 @@ public:
   }
 };
 
+// -- Reference qualifiers (docs/design/concurrency.md, "The qualifiers")
+
+/// How a reference is held and shared (the concurrency prototype): unique
+/// (unwritten), `shared` (aliases on one thread), `atomic const` (counted
+/// atomically, frozen, shared read-only across threads) or `locked` (a cell
+/// reached only in `lock` blocks); `const` makes a unique or shared one
+/// read-only.  A qualifier belongs to a place (a variable, parameter, field
+/// or result): the type it qualifies stays the plain type.
+enum class QualForm : uint8_t { Unique, Shared, AtomicConst, Locked };
+
+struct Qualifier {
+  QualForm Form = QualForm::Unique;
+  bool Const = false; // `const T`, `shared const T`
+
+  bool isUnique() const { return Form == QualForm::Unique && !Const; }
+  /// Read-only through this reference: `const`, `shared const`, `atomic const`.
+  bool isConst() const { return Const || Form == QualForm::AtomicConst; }
+  bool operator==(const Qualifier &) const = default;
+  /// The spelling: "", "const", "shared", "shared const", "atomic const" or
+  /// "locked".
+  const char *spelling() const;
+};
+
 // Base for all expressions
 class Expr : public ASTNode {
   Type *ResolvedType = nullptr; // set by Sema after type-checking
@@ -212,9 +236,16 @@ class Expr : public ASTNode {
   // reads it where it is for the whole call (a value held in memory is
   // passed by its address and not copied).
   bool ViewedByCall = false;
+  // Set by Sema when a unique value flows into a `locked` or `atomic const`
+  // slot (the concurrency prototype): the lowering makes a cell of it, or
+  // freezes it, at this use.
+  QualForm Materialize = QualForm::Unique;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
+
+  void setMaterialize(QualForm form) { Materialize = form; }
+  QualForm getMaterialize() const { return Materialize; }
 
   void setResolvedType(Type *ty) { ResolvedType = ty; }
   Type *getResolvedType() const { return ResolvedType; }
@@ -346,7 +377,7 @@ private:
   Expr *InitExpr;
   bool Let = false;
   bool Weak = false;
-  bool Shared = false; // `x: shared T = e;` (the concurrency prototype)
+  Qualifier Qual; // `x: shared T = e;` (set by Sema; the prototype)
   ParamMode Mode = ParamMode::Value; // `x: view = e;`, `x: inout = p;`
 
 public:
@@ -373,10 +404,11 @@ public:
   bool isWeak() const { return Weak; }
   void setWeak(bool weak) { Weak = weak; }
 
-  /// Declared `shared` (docs/design/concurrency.md): the reference may be
-  /// aliased on its thread, and never crosses to another.
-  bool isShared() const { return Shared; }
-  void setShared(bool shared) { Shared = shared; }
+  /// The reference's qualifier (docs/design/concurrency.md), which Sema
+  /// records from the annotation (or infers): how the lowering holds it.
+  const Qualifier &getQualifier() const { return Qual; }
+  void setQualifier(Qualifier q) { Qual = q; }
+  bool isShared() const { return Qual.Form == QualForm::Shared; }
 
   /// A local borrow (docs/language/02-basics.md, "Local borrows"):
   /// `view` or `inout`; Value for any other declaration.
@@ -391,7 +423,7 @@ struct Param {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
   ParamMode Mode = ParamMode::Value; // `x: view int`, `x: inout int`
-  bool Shared = false;               // `x: shared T` (the prototype)
+  Qualifier Qual;                    // `x: shared T` (set by Sema)
   /// Where it is written, `x: int`: its function's location for one the
   /// compiler declares, or one read from an AST without it.
   SourceLocation Loc;
@@ -463,6 +495,7 @@ private:
   bool ModulePrivateInit = false;
   bool InferredResult = false;             // `fn double(x: int) => x * 2;`
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
+  Qualifier ResultQual;                    // `-> shared T` (set by Sema)
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
@@ -530,6 +563,9 @@ public:
   /// function was given as one; Value for a copy.
   ParamMode getResultMode() const { return ResultMode; }
   void setResultMode(ParamMode mode) { ResultMode = mode; }
+  /// `-> shared T`: the result's qualifier (the concurrency prototype).
+  const Qualifier &getResultQual() const { return ResultQual; }
+  void setResultQual(Qualifier q) { ResultQual = q; }
 
   /// Written `fn double(x: int) => x * 2;`, with no result type: the result
   /// type is the type of the expression, which the parser makes the body's
@@ -1365,6 +1401,10 @@ private:
   // (the calling convention is the Modes'): empty for a method declared
   // without them, a builtin's or an imported class's.
   std::vector<const std::string *> ParamNames;
+  // The parameters' and the result's qualifiers (the concurrency
+  // prototype): empty / unique for a builtin's or an imported class's.
+  std::vector<Qualifier> ParamQuals;
+  Qualifier ResultQual;
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
@@ -1386,6 +1426,15 @@ public:
   void setParamNames(std::vector<const std::string *> names) {
     ParamNames = std::move(names);
   }
+  Qualifier getParamQual(size_t i) const {
+    return i < ParamQuals.size() ? ParamQuals[i] : Qualifier{};
+  }
+  const std::vector<Qualifier> &getParamQuals() const { return ParamQuals; }
+  void setParamQuals(std::vector<Qualifier> quals) {
+    ParamQuals = std::move(quals);
+  }
+  const Qualifier &getResultQual() const { return ResultQual; }
+  void setResultQual(Qualifier q) { ResultQual = q; }
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate() && !isImpl(); }
@@ -1429,6 +1478,8 @@ class ClassType : public Type {
   // The fields declared `weak` (docs/language/16-memory.md): they hold
   // a weak reference, and their type is `T?` of a class `T`.
   std::unordered_set<std::string> WeakFields;
+  // The fields' qualifiers (the concurrency prototype): absent for unique.
+  std::unordered_map<std::string, Qualifier> FieldQuals;
 
   // All virtual methods in layout order (vtable). __init__ is NOT here.
   std::vector<MethodDecl *> VTable;
@@ -1507,10 +1558,21 @@ public:
 
   // -- Fields
 
-  void addField(const std::string &name, Type *ty, bool weak = false) {
+  void addField(const std::string &name, Type *ty, bool weak = false,
+                Qualifier qual = {}) {
     Fields.emplace_back(name, ty);
     if (weak)
       WeakFields.insert(name);
+    if (!qual.isUnique())
+      FieldQuals[name] = qual;
+  }
+  /// The qualifier of field @p name, this class's or an ancestor's (unique
+  /// when it has none, or is not a field).
+  Qualifier findFieldQualifier(const std::string &name) const {
+    for (const ClassType *c = this; c; c = c->SuperClass)
+      if (auto it = c->FieldQuals.find(name); it != c->FieldQuals.end())
+        return it->second;
+    return {};
   }
   const std::vector<std::pair<std::string, Type *>> &getFields() const {
     return Fields;
@@ -1945,6 +2007,26 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_TaskType; }
 };
 
+/// A qualified type as written (the concurrency prototype): `const T`,
+/// `shared T`, `shared const T`, `atomic const T`, `locked T`, or, in a
+/// declaration, the qualifier alone (`x: shared = e;`, Inner null).  Sema
+/// resolves it to the inner type and records the qualifier on the place.
+class QualifiedType : public Type {
+  Qualifier Qual;
+  Type *InnerType; // may be null: the type is inferred
+
+public:
+  QualifiedType(SourceLocation loc, Qualifier qual, Type *inner)
+      : Type(NK_QualifiedType, loc), Qual(qual), InnerType(inner) {}
+
+  const Qualifier &getQualifier() const { return Qual; }
+  Type *getInnerType() const { return InnerType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_QualifiedType;
+  }
+};
+
 // Enum type (nominal value type backed by a 64-bit unsigned integer).
 //
 // Each enum is a distinct nominal type.  Variants are assigned implicit
@@ -2257,6 +2339,7 @@ public:
 class StructType : public TupleType {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   std::vector<std::string> FieldNames; // parallel to the element types
+  std::vector<Qualifier> FieldQuals;   // parallel too (the prototype)
   // The methods of its `impl` blocks, in declaration order (no vtable: each
   // is called directly), and its `__init__`, kept apart like a class's.
   std::vector<MethodDecl *> ImplMethods;
@@ -2282,9 +2365,18 @@ public:
 
   // -- Fields (Sema adds them as it resolves their types)
 
-  void addField(const std::string &name, Type *ty) {
+  void addField(const std::string &name, Type *ty, Qualifier qual = {}) {
     FieldNames.push_back(name);
+    FieldQuals.push_back(qual);
     addElementType(ty);
+  }
+  /// The qualifier of field @p name (unique when it has none, or is not a
+  /// field).
+  Qualifier findFieldQualifier(const std::string &name) const {
+    int i = fieldIndex(name);
+    return i < 0 || static_cast<size_t>(i) >= FieldQuals.size()
+               ? Qualifier{}
+               : FieldQuals[static_cast<size_t>(i)];
   }
   const std::vector<std::string> &getFieldNames() const { return FieldNames; }
   const std::string &getFieldName(size_t i) const { return FieldNames[i]; }

@@ -706,17 +706,10 @@ VarDecl *Parser::parseVarDecl() {
   const std::string &name = intern(consume().Text);
   if (!expect(Tok::Colon, "after the name (a declaration needs a type)"))
     return nullptr;
-  // `x: shared T = e;` or `x: shared = e;` (the concurrency prototype).
-  const bool shared = accept(Tok::KwShared);
-  Type *ty = nullptr;
-  if (!shared || !at(Tok::Assign)) {
-    ty = parseTypeAnnotation();
-    if (!ty)
-      return nullptr;
-  }
-  auto *vd = Ctx.make<VarDecl>(span(start), name, ty, nullptr);
-  vd->setShared(shared);
-  return vd;
+  Type *ty = parseTypeAnnotation();
+  if (!ty)
+    return nullptr;
+  return Ctx.make<VarDecl>(span(start), name, ty, nullptr);
 }
 
 ClassDecl *Parser::parseClassDecl() {
@@ -1139,7 +1132,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
           &name,
           Ctx.make<ClassType>(span(nameTok.Loc),
                               intern(names::untypedParamType(name)), nullptr),
-          ParamMode::Value, false, nameTok.Loc});
+          ParamMode::Value, Qualifier{}, nameTok.Loc});
       continue;
     }
     if (!expect(Tok::Colon, "after the parameter name"))
@@ -1149,12 +1142,10 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
       mode = ParamMode::View;
     else if (accept(Tok::KwInout))
       mode = ParamMode::Inout;
-    // `x: shared T` (the concurrency prototype).
-    const bool shared = accept(Tok::KwShared);
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty, mode, shared, span(nameTok.Loc)});
+    out.push_back(Param{&name, ty, mode, Qualifier{}, span(nameTok.Loc)});
   } while (accept(Tok::Comma));
   return true;
 }
@@ -1584,7 +1575,6 @@ bool Parser::parseTypedDecl(Stmt *&out) {
   // the statement.
   auto *vd =
       Ctx.make<VarDecl>(span(start), decl->getName(), decl->getType(), init);
-  vd->setShared(decl->isShared());
   auto *ds = Ctx.make<DeclStmt>(span(start), vd);
   if (!expect(Tok::Semi, "after the declaration"))
     return false;
@@ -1654,7 +1644,6 @@ bool Parser::parseLetDecl(Stmt *&out) {
   }
   const std::string &name = intern(consume().Text);
   Type *ty = nullptr;
-  bool shared = false;
   if (accept(Tok::Colon)) {
     if (at(Tok::KwView) || at(Tok::KwInout)) {
       error(cur().Loc, "a local borrow cannot be 'let': a '" +
@@ -1662,13 +1651,9 @@ bool Parser::parseLetDecl(Stmt *&out) {
                            "' local always names what it was given");
       return false;
     }
-    // `let x: shared T = e;` or `let x: shared = e;` (the prototype).
-    shared = accept(Tok::KwShared);
-    if (!shared || !at(Tok::Assign)) {
-      ty = parseTypeAnnotation();
-      if (!ty)
-        return false;
-    }
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return false;
   }
   if (at(Tok::Comma)) {
     error(cur().Loc, "'let' declares one variable; destructuring with 'let' "
@@ -1684,7 +1669,6 @@ bool Parser::parseLetDecl(Stmt *&out) {
   // `;` is only part of the statement; both start at `let`.
   auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);
   vd->setLet(true);
-  vd->setShared(shared);
   auto *ds = Ctx.make<DeclStmt>(span(start), vd);
   if (!expect(Tok::Semi, "after the declaration"))
     return false;
@@ -2321,14 +2305,52 @@ Type *Parser::parsePrimaryType() {
   return Ctx.make<ClassType>(span(start), intern(name), nullptr);
 }
 
+// typeAnnotation ::= qualifier? primaryType suffixes
+// qualifier      ::= "const" | "shared" "const"? | "atomic" "const" | "locked"
+//                  | "atomic"                     -- a cell of a number
+//
+// A qualifier (docs/design/concurrency.md) covers the whole type.  In a
+// declaration it may stand alone, with the type inferred (`x: shared =
+// e;`).  A type takes one qualifier.
 Type *Parser::parseTypeAnnotation() {
   SourceLocation start = cur().Loc;
-  // `atomic T` (the concurrency prototype) covers the whole type.
-  if (accept(Tok::KwAtomic)) {
+  Qualifier qual;
+  bool qualified = true;
+  if (accept(Tok::KwConst)) {
+    qual.Const = true;
+  } else if (accept(Tok::KwShared)) {
+    qual.Form = QualForm::Shared;
+    qual.Const = accept(Tok::KwConst);
+  } else if (accept(Tok::KwLocked)) {
+    qual.Form = QualForm::Locked;
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwConst) {
+    consume();
+    consume();
+    qual.Form = QualForm::AtomicConst;
+  } else if (accept(Tok::KwAtomic)) {
+    // `atomic T`: a cell holding a number.
     Type *inner = parseTypeAnnotation();
     if (!inner)
       return nullptr;
     return Ctx.make<AtomicType>(span(start), inner);
+  } else {
+    qualified = false;
+  }
+  if (qualified) {
+    if (at(Tok::KwConst) || at(Tok::KwShared) || at(Tok::KwLocked) ||
+        at(Tok::KwAtomic)) {
+      error(cur().Loc, std::string("a type takes one qualifier: '") +
+                           qual.spelling() + " " + std::string(cur().Text) +
+                           "' is two");
+      return nullptr;
+    }
+    // The qualifier alone, in a declaration: the type is inferred.
+    if (at(Tok::Assign) || at(Tok::Semi) || at(Tok::Comma) || at(Tok::RParen))
+      return Ctx.make<QualifiedType>(span(start), qual, nullptr);
+    Type *inner = parseTypeAnnotation();
+    if (!inner)
+      return nullptr;
+    return Ctx.make<QualifiedType>(span(start), qual, inner);
   }
   Type *ty = parsePrimaryType();
   if (!ty)
@@ -2557,27 +2579,17 @@ Expr *Parser::parseBinary(int minPrec) {
   }
 }
 
-// unary ::= ( "!" | "-" | "~" ) unary | postfix   ("mov" is reserved: an
-// error)
+// unary ::= ( "!" | "-" | "~" | "move" | "await" ) unary | postfix
 Expr *Parser::parseUnary() {
-  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMov) ||
-      at(Tok::KwMove) || at(Tok::KwAwait)) {
+  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMove) ||
+      at(Tok::KwAwait)) {
     if (!enterNesting())
       return nullptr;
     const Tok op = kind();
     const SourceLocation opLoc = consume().Loc;
-    // `mov` is retired (#145), and reported at once, so that its error comes
-    // before any in the operand, in source order.  A run of them (`mov mov
-    // s`) is the one error.  The operand still parses, and becomes the
-    // expression.
-    if (op == Tok::KwMov) {
-      error(opLoc, std::string(kMovRemoved));
-      while (at(Tok::KwMov))
-        consume();
-    }
     Expr *operand = parseUnary();
     leaveNesting();
-    if (!operand || op == Tok::KwMov)
+    if (!operand)
       return operand;
     UnaryOpcode code = UnaryOpcode::Neg;
     if (op == Tok::Not)

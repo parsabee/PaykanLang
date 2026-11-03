@@ -70,8 +70,11 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
 
 void Sema::declareFunction(std::string_view name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys, bool isBuiltin) {
-  FunctionTable[std::string(name)] = {
-      retTy, std::move(paramTys), isBuiltin, {}};
+  FunctionSig sig;
+  sig.ReturnType = retTy;
+  sig.ParamTypes = std::move(paramTys);
+  sig.IsBuiltin = isBuiltin;
+  FunctionTable[std::string(name)] = std::move(sig);
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(std::string_view name) const {
@@ -744,6 +747,25 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       ResolvedTypes.insert(canonical);
     return canonical;
   };
+  // A qualified type (the concurrency prototype): the inner type, its
+  // qualifier left for the declaration to take (takeQualifier).
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    if (!qt->getInnerType()) {
+      error(loc, std::string("'") + qt->getQualifier().spelling() +
+                     "' needs a type here ('" + qt->getQualifier().spelling() +
+                     " T'); only a variable declaration infers it");
+      return nullptr;
+    }
+    FixedArrayAllowed = allowFixed;
+    InferredLengthAllowed = allowInferred;
+    SliceAllowed = allowSlice;
+    NoArrayHolder = noArray;
+    ast::Type *inner = resolveType(qt->getInnerType(), loc, context);
+    if (!inner || !checkQualifierApplies(qt->getQualifier(), inner, loc))
+      return nullptr;
+    LastQualifier = qt->getQualifier();
+    return inner;
+  }
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
   // `atomic T` (the concurrency prototype): T is `int`.
@@ -2687,6 +2709,18 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   if (sig->Async && !S.checkSendArgs(node, *sig))
     return nullptr;
   const std::string callee = displayName(node->getCalleeName());
+  // A by-value parameter is an owning slot (the prototype): what flows
+  // into it converts and, under the copy rule, moves.  A builtin borrows.
+  if (!sig->IsBuiltin)
+    for (size_t i = 0; i < argTypes.size() && i < sig->ParamTypes.size(); ++i)
+      if (argTypes[i] && sig->Modes.mode(i) == ast::ParamMode::Value &&
+          !S.checkQualifiedFlow(i < sig->ParamQuals.size() ? sig->ParamQuals[i]
+                                                           : ast::Qualifier{},
+                                node->getArguments()[i],
+                                "parameter " + std::to_string(i + 1) + " of '" +
+                                    callee + "'",
+                                node->getArguments()[i]->getLocation()))
+        return nullptr;
   S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
                    callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
@@ -2701,6 +2735,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // Resolve receiver type.
   auto *recvTy = visit(node->getReceiver());
   if (!recvTy)
+    return nullptr;
+  if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
     return nullptr;
 
   // A method cannot be called on an optional receiver (it may be None),
@@ -2891,6 +2927,14 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   sliceArgNote(paramTys[i], argTy));
     }
   }
+  for (size_t i = 0; i < node->getNumArguments(); ++i)
+    if (node->getArguments()[i]->getResolvedType() &&
+        method->getParamModes().mode(i) == ast::ParamMode::Value &&
+        !S.checkQualifiedFlow(method->getParamQual(i), node->getArguments()[i],
+                              "parameter " + std::to_string(i + 1) + " of '" +
+                                  node->getMethodName() + "'",
+                              node->getArguments()[i]->getLocation()))
+      return nullptr;
   S.checkInoutArgs(node, method->getParamModes(), paramTys,
                    node->getArguments(), node->getMethodName(),
                    node->getReceiver(), method);
@@ -2931,6 +2975,8 @@ ast::Type *
 Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   auto *recvTy = visit(node->getReceiver());
   if (!recvTy)
+    return nullptr;
+  if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
     return nullptr;
 
   // A field cannot be read through an optional receiver (it may be None).
@@ -3142,6 +3188,8 @@ bool Sema::checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index) {
 ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   auto *arrayTy = visit(node->getArray());
   if (!arrayTy)
+    return nullptr;
+  if (!S.checkNotLocked(node->getArray(), node->getLocation()))
     return nullptr;
 
   // An optional array / string cannot be indexed (it may be None).
@@ -4387,6 +4435,13 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     }
     CurrentScope->set(varName, valTy);
     DeclLoopDepth[varName] = LoopDepth;
+    // The prototype: the new variable adopts the value's qualifier.
+    const ast::Qualifier q =
+        sharesStorage(valTy) ? qualifierOf(node->getValue()) : ast::Qualifier{};
+    CurrentScope->Quals[varName] = q;
+    if (!checkQualifiedFlow(q, node->getValue(), "variable '" + varName + "'",
+                            node->getLocation()))
+      return false;
     return viewOk;
   }
 
@@ -4410,6 +4465,9 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                                      "'");
     return false;
   }
+  if (!checkQualifiedFlow(qualifierOfVar(varName), node->getValue(),
+                          "variable '" + varName + "'", node->getLocation()))
+    return false;
 
   return viewOk;
 }
@@ -4441,6 +4499,11 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
+    // The result is an owning slot of the caller's (the prototype).
+    if (CurrentResult.Mode == ast::ParamMode::Value &&
+        !checkQualifiedFlow(CurrentResultQual, node->getReturnValue(),
+                            "the result", node->getLocation()))
+      return false;
     // A borrowed result is a borrow of what the function was given.
     if (CurrentResult.Mode != ast::ParamMode::Value) {
       std::string why = borrowedResultError(node->getReturnValue());
@@ -4792,6 +4855,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName());
       return false;
     }
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+      node->setResultQual(q);
     node->setReturnType(retTy);
   }
 
@@ -4818,6 +4883,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+      p.Qual = q;
     p.ParamType = ty;
     paramTypes.push_back(ty);
   }
@@ -4877,6 +4944,9 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   sig.Modes.Result = node->getResultMode();
   sig.Native = node->isNative();
   sig.Async = node->isAsync();
+  for (const ast::Param &p : node->getParams())
+    sig.ParamQuals.push_back(p.Qual);
+  sig.ResultQual = node->getResultQual();
   return checkResultDecl(node, /*method=*/false);
 }
 
@@ -5069,22 +5139,24 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   CurrentReturnType = retTy;
   {
     ScopeGuard guard(*this);
-    for (size_t i = 0; i < node->getParams().size(); ++i)
+    for (size_t i = 0; i < node->getParams().size(); ++i) {
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
+      CurrentScope->Quals[node->getParams()[i].getName()] =
+          node->getParams()[i].Qual;
+    }
     declareParamKinds(node);
-    // The concurrency prototype: the function's own moves, `shared`
-    // variables and loop depths.
+    // The concurrency prototype: the function's own moves, loop depths and
+    // result qualifier.
     const bool savedAsync = std::exchange(InAsyncFn, node->isAsync());
-    SharedVars.clear();
+    const ast::Qualifier savedResultQual =
+        std::exchange(CurrentResultQual, node->getResultQual());
     MovedVars.clear();
     DeclLoopDepth.clear();
-    for (const ast::Param &p : node->getParams()) {
-      if (p.Shared)
-        SharedVars.insert(p.getName());
+    for (const ast::Param &p : node->getParams())
       DeclLoopDepth[p.getName()] = 0;
-    }
     bool ok = visitBody(node->getBody()->getStatements());
     InAsyncFn = savedAsync;
+    CurrentResultQual = savedResultQual;
     CurrentReturnType = savedRetTy;
     CurrentResult = savedResult;
     if (!ok)
@@ -5291,13 +5363,21 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (node->isLet())
     CurrentScope->Kinds[node->getName()] = VarKind::Let;
   // The concurrency prototype.
-  if (node->isShared())
-    SharedVars.insert(node->getName());
   DeclLoopDepth[node->getName()] = LoopDepth;
   MovedVars.erase(node->getName());
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
+  // The qualifier (the concurrency prototype): the annotation's, or, in
+  // `x: shared = e;`, written alone with the type inferred.
+  ast::Qualifier qual;
+  bool qualified = false;
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(node->getType());
+      qt && !qt->getInnerType()) {
+    qual = qt->getQualifier();
+    qualified = true;
+    node->setType(nullptr);
+  }
 
   if (node->getType()) {
     FixedArrayAllowed = true; // a local may be a fixed-size array
@@ -5310,6 +5390,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       return false;
     }
     node->setType(declTy); // canonical write-back (see VarDecl::setType)
+    qual = takeQualifier();
+    qualified = true;
   }
 
   // Check the initializer type.
@@ -5440,11 +5522,31 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         weakOfView ? VarKind::WeakView : VarKind::Weak;
   }
 
+  // The qualifier (the prototype): a value has none; an inferred one adopts
+  // the initializer's (a copy of a `shared` reference is `shared`); a
+  // qualified slot takes what converts into it.
+  if (!sharesStorage(declTy) || node->isWeak())
+    qual = ast::Qualifier{};
+  else if (!qualified && node->getInitExpr())
+    qual = qualifierOf(node->getInitExpr());
+  if (!checkQualifierApplies(qual, declTy, node->getLocation())) {
+    declarePoisoned(CurrentScope, node->getName());
+    return false;
+  }
+  if (node->getInitExpr() && node->getMode() == ast::ParamMode::Value &&
+      !node->isWeak() &&
+      !checkQualifiedFlow(qual, node->getInitExpr(),
+                          "variable '" + node->getName() + "'",
+                          node->getLocation()))
+    viewOk = false;
+  node->setQualifier(qual);
+
   // Register the variable in the current scope.  An inferred type (`let x =
   // e;`) is written back like an annotation's, for the lowering.
   if (!node->getType())
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
+  CurrentScope->Quals[node->getName()] = qual;
   return checkLocalBorrow(node) && viewOk;
 }
 
@@ -5523,11 +5625,13 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   }
 
   ast::Type *fieldTy = nullptr;
+  ast::Qualifier fieldQual; // the prototype
   if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
     // A struct's fields can be assigned, in place, where the struct is
     // changeable: not through a `view`, and not in a `let` local, whose
     // fields are part of its value.
     fieldTy = st->findField(node->getFieldName());
+    fieldQual = st->findFieldQualifier(node->getFieldName());
     if (!fieldTy) {
       if (ErroneousClasses.count(st->getName()))
         ++SuppressedFollowOns; // the struct declaration was already reported
@@ -5576,6 +5680,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
     // Look up the field in the class hierarchy.
     fieldTy = ct->findField(node->getFieldName());
+    fieldQual = ct->findFieldQualifier(node->getFieldName());
     if (!fieldTy) {
       if (isErroneousClass(ct)) // the class declaration was already reported
         ++SuppressedFollowOns;
@@ -5612,6 +5717,10 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                 node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
     return false;
   }
+  if (!checkQualifiedFlow(fieldQual, node->getValue(),
+                          "field '" + node->getFieldName() + "'",
+                          node->getLocation()))
+    return false;
 
   return checkViewNotStored(node->getValue(), valTy);
 }
@@ -5671,6 +5780,11 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(elemTy) + "'");
     return false;
   }
+  // The elements carry the array's qualifier (the prototype).
+  if (!checkQualifiedFlow(qualifierOf(node->getArray()), node->getValue(),
+                          "an element of '" + placeText(node->getArray()) + "'",
+                          node->getLocation()))
+    return false;
   return checkViewNotStored(node->getValue(), valTy);
 }
 

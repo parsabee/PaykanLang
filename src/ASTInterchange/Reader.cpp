@@ -1076,7 +1076,7 @@ private:
       ParamMode mode = ParamMode::Value;
       if (!pty || !paramMode(pf, mode) || !pf.done())
         return false;
-      out.push_back({pname, pty, mode, false, ploc});
+      out.push_back({pname, pty, mode, Qualifier{}, ploc});
     }
     return true;
   }
@@ -2104,9 +2104,6 @@ private:
                  nullptr;
       }
       out = Ctx.make<EnumValueExpr>(loc, *en, *v, std::move(targs));
-    } else if (t == "mov") {
-      return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
-             nullptr;
     } else if (t == "call-value") {
       Link link(*this, e);
       Expr *callee = operand(f, e, "the function value", Operand::Receiver);

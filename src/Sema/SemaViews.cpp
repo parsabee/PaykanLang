@@ -75,6 +75,11 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
     if (CurrentMethodUse)
       CurrentMethodUse->ChangesSelf = true;
   }
+  // A `const` reference, or a `const` field on the way, never changes (the
+  // concurrency prototype); a copy of what it names may still be taken.
+  if (!copy)
+    if (std::string why = constPlace(e); !why.empty())
+      return why;
   switch (varKind(name)) {
   case VarKind::View:
     return "'" + name + "' is a 'view' parameter";

@@ -469,15 +469,8 @@ A hand-off of the variable while a `weak` local made from it (`weak u = n;`) is 
 copy, whether or not that local is read again, so the local reads the object until the
 variable's scope ends.
 
-Earlier releases had a `mov` keyword for this. It was removed in v0.2.0: `mov` is still a
-reserved word, and writing `t = mov s` is an error:
-
-```
-error: 'mov' was removed in v0.2.0; ownership transfers are inferred
-```
-
-Drop the keyword: `t = mov s;` becomes `t = s;`. The program prints the same output and frees
-the same objects. The variable `s` simply stays readable afterwards.
+An explicit transfer is written `move`: `t = move s;` hands the reference to `t`, and `s`
+cannot be read again (docs/design/concurrency.md).
 
 ## Reference counts the compiler removes
 

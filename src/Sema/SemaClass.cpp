@@ -600,6 +600,8 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
+    const ast::Qualifier fieldQual = takeQualifier(); // the prototype
+    field->setQualifier(fieldQual);
     field->setType(fty); // canonical write-back for the lowering
     if (field->isWeak() &&
         !checkWeakType(fty, field->getLocation(),
@@ -608,7 +610,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
-    ct->addField(field->getName(), fty, field->isWeak());
+    ct->addField(field->getName(), fty, field->isWeak(), fieldQual);
     // A public field of a public class cannot hand an importer a type it
     // could not name (an instantiation's fields are the template's).
     if (!names::isPrivateName(field->getName()) &&
@@ -773,7 +775,7 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
         name += "_";
       const std::string &interned = Ctx.intern(name);
       params.push_back({&interned, superInit->getParamTypes()[i], modes.mode(i),
-                        false, loc});
+                        superInit->getParamQual(i), loc});
       args.push_back(Ctx.make<ast::Identifier>(loc, interned));
     }
     body.push_back(Ctx.make<ast::ExprStmt>(
@@ -782,7 +784,8 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
   }
   for (auto &[name, type] : ct->getFields()) {
     const std::string &interned = Ctx.intern(name);
-    params.push_back({&interned, type, ast::ParamMode::Value, false, loc});
+    params.push_back({&interned, type, ast::ParamMode::Value,
+                      ct->findFieldQualifier(name), loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));
@@ -847,6 +850,8 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     if (!retTy || !checkFixedResult(retTy, method->getResultMode(),
                                     method->getLocation()))
       return nullptr;
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+      method->setResultQual(q);
     method->setReturnType(retTy);
   }
   // Resolve parameter types.
@@ -875,6 +880,8 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                      method->getName(), "' in '", className, "'"}));
     if (!pty)
       return nullptr;
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+      p.Qual = q;
     p.ParamType = pty;
     paramTys.push_back(pty);
   }
@@ -938,6 +945,11 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   for (const ast::Param &p : method->getParams())
     names.push_back(p.Name);
   mdecl->setParamNames(std::move(names));
+  std::vector<ast::Qualifier> quals; // the prototype
+  for (const ast::Param &p : method->getParams())
+    quals.push_back(p.Qual);
+  mdecl->setParamQuals(std::move(quals));
+  mdecl->setResultQual(method->getResultQual());
   mdecl->setModulePrivateInit(method->isModulePrivateInit());
   return mdecl;
 }
@@ -952,8 +964,10 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
   assert(!lookupFunction(cd->getName()) &&
          "constructor would overwrite a registered function");
   declareFunction(cd->getName(), ct, ctorParams);
-  if (initDecl)
+  if (initDecl) {
     FunctionTable[cd->getName()].Modes = initDecl->getParamModes();
+    FunctionTable[cd->getName()].ParamQuals = initDecl->getParamQuals();
+  }
 }
 
 void Sema::reportAbstractConstruction(const ast::ClassType *ct,
@@ -1271,9 +1285,13 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     {
       ScopeGuard guard(*this);
       CurrentScope->declare(names::kSelf, ct);
-      for (size_t i = 0; i < method->getParams().size(); ++i)
+      for (size_t i = 0; i < method->getParams().size(); ++i) {
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+        CurrentScope->Quals[method->getParams()[i].getName()] =
+            method->getParams()[i].Qual;
+      }
       declareParamKinds(method);
+      CurrentResultQual = method->getResultQual(); // the prototype
 
       // What the body does to `self`, for warnMissingViewFns.
       if (method->getName() != names::kMethodInit) {

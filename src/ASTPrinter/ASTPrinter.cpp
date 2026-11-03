@@ -508,6 +508,15 @@ void ASTPrinter::visitTaskType(TaskType *node) {
   visit(node->getInnerType());
 }
 
+void ASTPrinter::visitQualifiedType(QualifiedType *node) {
+  header("QualifiedType", node);
+  OS << " '" << node->getQualifier().spelling() << "'\n";
+  if (node->getInnerType()) {
+    ChildScope cs(*this, true);
+    visit(node->getInnerType());
+  }
+}
+
 void ASTPrinter::visitPoisonType(PoisonType *node) {
   header("PoisonType", node);
   OS << "\n";

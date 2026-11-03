@@ -173,6 +173,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The subject a ViewBinding names a `view` of: a `view` result may be
     /// part of it.
     StringMap<const ast::Expr *> ViewSubjects;
+    /// The qualifier of each reference bound here (the prototype); absent
+    /// for unique.
+    StringMap<ast::Qualifier> Quals;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -274,8 +277,47 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// Whether the function being checked is an `async fn`.
   bool InAsyncFn = false;
-  /// The variables declared `shared` in the current function, by name.
-  std::unordered_set<std::string> SharedVars;
+  /// The qualifier of the annotation resolveType last resolved (a
+  /// QualifiedType's; unique for any other), taken by the declaration that
+  /// records it on its place.
+  ast::Qualifier LastQualifier;
+  ast::Qualifier takeQualifier() {
+    return std::exchange(LastQualifier, ast::Qualifier{});
+  }
+  /// The result qualifier of the function being checked.
+  ast::Qualifier CurrentResultQual;
+  /// --strict-ownership: a unique reference read from a place is moved into
+  /// an owning slot, never copied.
+  bool StrictOwnership = false;
+  /// Set while a `lock` statement's operand is checked, where a `locked`
+  /// place may be named.
+  bool LockOperand = false;
+  /// The qualifier of variable @p name (unique when it has none).
+  ast::Qualifier qualifierOfVar(std::string_view name) const;
+  /// The qualifier of the reference @p e reads: its place's (a variable's,
+  /// a field's, through a `const` receiver), a call's result's; unique for
+  /// a temporary.
+  ast::Qualifier qualifierOf(const ast::Expr *e);
+  /// Whether @p q may qualify a value of type @p inner (an error names why
+  /// not).
+  bool checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
+                             ast::SourceLocation loc);
+  /// A reference @p src stored into an owning slot of qualifier @p dst (a
+  /// variable, field, element, by-value parameter or result): the
+  /// conversion rules, what a unique value becomes there (Materialize),
+  /// and the copy rule under --strict-ownership.
+  bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
+                          const std::string &what, ast::SourceLocation loc);
+  /// Why the place @p e cannot change through a `const` reference or field
+  /// on its way; "" when it can.
+  std::string constPlace(const ast::Expr *e);
+  /// Error (and false) when @p place is `locked`: its contents are reached
+  /// only in a `lock` block.
+  bool checkNotLocked(const ast::Expr *place, ast::SourceLocation loc);
+  /// The spelling of a slot: "shared Node", "Node".
+  static std::string qualifiedName(ast::Qualifier q, ast::Type *ty);
+  /// The source text of a place, for diagnostics: `x`, `x.f`, `xs[i]`.
+  static std::string placeText(const ast::Expr *e);
   /// The variables a `move` has ended, by name, with the move's location.
   std::unordered_map<std::string, ast::SourceLocation> MovedVars;
   /// The loop depth each variable was declared at, by name.
@@ -373,6 +415,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// An `async fn` (the concurrency prototype): ReturnType is the task
     /// of its result.
     bool Async = false;
+    /// The parameters' and the result's qualifiers (the prototype).
+    std::vector<ast::Qualifier> ParamQuals;
+    ast::Qualifier ResultQual;
   };
 
   /// Maps function names to their signatures.
@@ -2529,6 +2574,8 @@ public:
     Required,   ///< ... and the program must declare one
   };
   void setEntryPointCheck(EntryPoint check) { EntryPointCheck = check; }
+  /// --strict-ownership (the concurrency prototype's copy rule).
+  void setStrictOwnership(bool strict) { StrictOwnership = strict; }
 
 private:
   EntryPoint EntryPointCheck = EntryPoint::None;

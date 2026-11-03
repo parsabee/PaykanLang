@@ -112,13 +112,14 @@ struct Options {
   bool Verbose = false;        // --verbose: one line per import on stderr
   bool Stats = false;          // --stats: what the PIR passes did, on stderr
 
-  bool DumpAST = false;       // --dump-ast
-  bool EmitAST = false;       // --emit-ast: the AST interchange format
-  bool DumpTokens = false;    // --dump-tokens
-  bool TraceParsing = false;  // --trace-parser
-  bool TraceScanning = false; // --trace-scanner
-  bool CheckOnly = false;     // --check-only
-  bool TrackHeap = false;     // --track-heap
+  bool DumpAST = false;         // --dump-ast
+  bool EmitAST = false;         // --emit-ast: the AST interchange format
+  bool DumpTokens = false;      // --dump-tokens
+  bool TraceParsing = false;    // --trace-parser
+  bool TraceScanning = false;   // --trace-scanner
+  bool CheckOnly = false;       // --check-only
+  bool TrackHeap = false;       // --track-heap
+  bool StrictOwnership = false; // --strict-ownership (the prototype)
   /// -O<n>; unset means the default (optLevel()).
   std::optional<unsigned> OptLevel;
 

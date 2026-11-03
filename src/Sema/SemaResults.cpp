@@ -23,7 +23,9 @@ namespace {
 /// `self.xs[2]`, `a[i]`, `self.slot().c`, `(if ... then a else b).c` (an
 /// index other than a number or a name, a call's arguments, or a
 /// condition, as `...`).
-std::string placeText(const ast::Expr *e) {
+} // namespace
+
+std::string Sema::placeText(const ast::Expr *e) {
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
     return id->getName();
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
@@ -50,7 +52,7 @@ std::string placeText(const ast::Expr *e) {
   return "...";
 }
 
-} // namespace
+namespace {} // namespace
 
 bool Sema::holdsPlace(ast::Type *ty, ast::Type *place) {
   if (typesEqual(ty, place))

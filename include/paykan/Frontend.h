@@ -62,11 +62,6 @@ inline constexpr unsigned kMaxChain = 2048;
 /// with `'<file>' is too large for a source file (more than 256 MiB)`.
 inline constexpr size_t kMaxSourceBytes = size_t{256} << 20;
 
-/// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`
-/// stays reserved; the operand after it still parses.
-inline constexpr std::string_view kMovRemoved =
-    "'mov' was removed in v0.2.0; ownership transfers are inferred";
-
 /// The diagnostics every frontend reports for a method's or a `static fn`'s
 /// own type parameters (docs/grammar.md section 4): only a free function is
 /// generic, and a generic type's methods use the type's.

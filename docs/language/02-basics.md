@@ -918,11 +918,11 @@ grade: B
 - It has the lowest precedence of all, so as an operand it needs parentheses:
   `bar + (if done then "#" else "-")`.
 
-### `mov`
+### `move`
 
-`mov` is a reserved word, not an operator: write `t = s`, not `t = mov s` (an error,
-`'mov' was removed in v0.2.0; ownership transfers are inferred`). Ownership transfers are
-inferred by the compiler; see [Ownership transfers](16-memory.md#ownership-transfers).
+`move x` is x's value, which `x` no longer holds: an explicit ownership transfer
+(docs/design/concurrency.md). Transfers at a last use are still inferred by the compiler;
+see [Ownership transfers](16-memory.md#ownership-transfers).
 
 ### Operator Precedence (highest -> lowest)
 

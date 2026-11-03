@@ -337,6 +337,12 @@ private:
       open("task-type", tt);
       type(tt->getInnerType());
       close();
+    } else if (const auto *qt = dyn_cast<QualifiedType>(t)) {
+      open("qualified-type", qt);
+      OS << " \"" << qt->getQualifier().spelling() << "\"";
+      if (qt->getInnerType())
+        type(qt->getInnerType());
+      close();
     } else if (const auto *tt = dyn_cast<TupleType>(t)) {
       open("tuple-type", tt);
       for (const Type *e : tt->getElementTypes())
