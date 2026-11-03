@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Run the samples corpus on every enabled backend and compare the results.
 
-Every runnable sample (samples/codegen, samples/leak-check, and each
-samples/imports/<dir>/main.pkn) is run with `--track-heap` on each backend
-named on the command line.  The backends must agree on stdout, on the exit
-code and on the number of live heap blocks (which must be zero), and must
-produce the same stderr apart from the heap statistics.  A sample with
-`// expect-stdout: <line>` comments must print exactly those lines.  Printed
-object addresses (`Foo@0x...`) are normalised before comparing.
+Every runnable sample (samples/codegen, samples/leak-check, the numbered
+programs of samples/concurrency, and each samples/imports/<dir>/main.pkn)
+is run with `--track-heap` on each backend named on the command line.  The
+backends must agree on stdout, on the exit code and on the number of live
+heap blocks (which must be zero), and must produce the same stderr apart
+from the heap statistics.  A sample with `// expect-stdout: <line>`
+comments must print exactly those lines.  A sample with a
+`// expect-leaks: <why>` comment may end with live blocks (the concurrency
+prototype's atomic and locked cells and frozen objects are immortal,
+samples/concurrency/README.md); it must still print a heap report, and at
+least one block must be live, or the line is stale.  Printed object
+addresses (`Foo@0x...`) are normalised before comparing.
 
 Every sample runs with the arguments `a b`, or with the words of its
 `// args: <word>...` line, where `{tmpdir}` is a fresh, empty directory for
@@ -46,6 +51,10 @@ STATS_RE = re.compile(r"^paykan heap stats:\n(?:  .*\n?)*", re.M)
 def samples():
     files = sorted((ROOT / "samples" / "codegen").glob("*.pkn"))
     files += sorted((ROOT / "samples" / "leak-check").glob("*.pkn"))
+    # The concurrency prototype's programs that run; the ones Sema rejects
+    # (err_*.pkn and errors/) are not here.
+    files += sorted(f for f in (ROOT / "samples" / "concurrency").glob("*.pkn")
+                    if not f.name.startswith("err_"))
     for d in sorted((ROOT / "samples" / "imports").iterdir()):
         main = d / "main.pkn"
         if main.is_file() and not d.name.startswith("err_"):
@@ -62,6 +71,16 @@ def expected_stdout(sample):
     if not lines:
         return None
     return "".join(line + "\n" for line in lines)
+
+
+LEAKS_RE = re.compile(r"^// expect-leaks: (.*)$", re.M)
+
+
+def expects_leaks(sample):
+    """Why a sample may end with live blocks, from its `// expect-leaks:`
+    line; None when every block must be freed."""
+    m = LEAKS_RE.search(sample.read_text())
+    return m.group(1) if m else None
 
 
 ARGS_RE = re.compile(r"^// args:(.*)$", re.M)
@@ -172,11 +191,15 @@ def check(args, outdir):
             results = {b: run(args.paykan, b, sample, outdir, args.opt)
                        for b in args.backend}
         problems = []
+        leaks = expects_leaks(sample)
         for b, (rc, out, err, live) in results.items():
             if live is None:
                 problems.append(f"{b}: no heap report (exit {rc})")
-            elif live != 0:
+            elif live != 0 and leaks is None:
                 problems.append(f"{b}: {live} live blocks")
+            elif live == 0 and leaks is not None:
+                problems.append(f"{b}: 0 live blocks, but the sample has "
+                                f"'// expect-leaks: {leaks}'")
         expected = expected_stdout(sample)
         if expected is not None:
             for b, (_, out, _, _) in results.items():

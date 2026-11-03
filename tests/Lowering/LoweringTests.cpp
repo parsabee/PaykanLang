@@ -5085,3 +5085,57 @@ TEST(LoweringLend, AReadGivenToAnotherModulesNativeIsLent) {
   EXPECT_EQ(argCopy(m, "call @\"lib::look\"("), "copy") << m;
   EXPECT_EQ(argCopy(m, "call @\"lib::poke\"("), "copy") << m;
 }
+
+// -- Buffer reads in place
+
+// `b.at(i)`, `b.get(i)` and `b.len()` on a `mem::Buffer<T>` of numbers are
+// emitted in place: the buffer's object out of the struct's one field, its
+// length and its storage read with `ptr.load`, the index checked against
+// the length (a panic past it, as the runtime's `PaykanBuffer_get` makes),
+// and the element loaded -- no call of `at` and no count on the object.
+// Through a box's `value()` the read takes the box's field itself, not
+// the copy a `view` result of a struct is.
+TEST(Lowering, BufferElementReadsAreEmittedInPlace) {
+  Lowered l = lower(R"(import ::memory as mem;
+fn main() -> int {
+  b = mem::Buffer<float>();
+  let g = b.grow(8);
+  let x = b.at(3) + b.get(2);
+  let n = b.len();
+  let bx: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move b);
+  let y = bx.value().at(1);
+  return 0;
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string m = function(l.Text, "main");
+  EXPECT_EQ(m.find("call @Buffer<float>.at"), std::string::npos) << m;
+  EXPECT_EQ(m.find("call @Buffer<float>.get"), std::string::npos) << m;
+  EXPECT_EQ(m.find("call @Buffer<float>.len"), std::string::npos) << m;
+  EXPECT_EQ(m.find("call @Box<Buffer<float>>.value"), std::string::npos) << m;
+  EXPECT_NE(m.find("ptr.load f64"), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.Paykan_panic_index"), std::string::npos) << m;
+  EXPECT_NE(m.find("field.addr"), std::string::npos) << m;
+}
+
+// A buffer read in place is a value read: its receiver is not a struct's
+// `view fn` receiver read where it is and used only once the later operands
+// have run, so a `set` in the same statement makes no copy of the buffer
+// (a copy counts the object, which a `parallel for` body may never do).
+TEST(Lowering, BufferReadBesideAWriteTakesNoSnapshot) {
+  Lowered l = lower(R"(import ::memory as mem;
+fn main() -> int {
+  ys = mem::Buffer<float>();
+  let g = ys.grow(8);
+  for i in 0..8 {
+    let e = ys.set(unsigned<int>(i), ys.at(unsigned<int>(i)) + 1.0);
+    let f = ys.set(unsigned<int>(i), float<unsigned>(ys.len()));
+  }
+  return 0;
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string m = function(l.Text, "main");
+  EXPECT_EQ(m.find("%held"), std::string::npos) << m;
+  EXPECT_EQ(m.find("retain"), std::string::npos) << m;
+}
