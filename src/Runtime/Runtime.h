@@ -160,7 +160,7 @@ enum {
                              //   PaykanShared *other, uint64_t owned)
   PAYKAN_SLOT_WALK = 3,      // void (*)(PaykanObject *self): freezes what
                              //   the object holds (the prototype's
-                             //   `atomic const`, Paykan_freeze)
+                             //   `atomic shared const`, Paykan_freeze)
   PAYKAN_OBJECT_SLOTS = 4,
   // String
   PAYKAN_SLOT_STRING_LENGTH = 4, // int64_t (*)(PaykanObject *self)
@@ -208,10 +208,11 @@ static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
 PaykanObject *PaykanObject_new(void);
 /// The walk of an object holding no references: nothing (the prototype).
 void PaykanObject_walk(PaykanObject *self);
-/// `atomic const` (the concurrency prototype): freezes @p obj and, through
-/// its walk slot, everything it holds: their counts become PAYKAN_REF_MAX,
-/// immortal, so any thread reads them with no count.  The design counts
-/// the root atomically and thaws it; the prototype never frees it.
+/// `atomic shared const` (the concurrency prototype): freezes @p obj and,
+/// through its walk slot, everything it holds: their counts become
+/// PAYKAN_REF_MAX, immortal, so any thread reads them with no count.  The
+/// design counts the root atomically and thaws it; the prototype never frees
+/// it.
 void Paykan_freeze(PaykanObject *obj);
 /// Freezes the references the value of PaykanType @p type at @p value holds.
 void Paykan_freeze_mem(const void *type, void *value);
@@ -864,6 +865,10 @@ double Paykan_uint_to_f32(int64_t bits);
 /// Print a diagnostic naming @p index and @p len and abort: a fixed-size
 /// array's element read or written at an index outside 0..len-1.
 PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
+/// Print a diagnostic naming @p index (unsigned, as PaykanBuffer_get prints
+/// it) and @p len and abort: a buffer's element read in place by the
+/// generated code (the concurrency prototype) at an index outside 0..len-1.
+PAYKAN_NORETURN void Paykan_panic_buffer_index(int64_t index, int64_t len);
 
 /// Print a diagnostic and abort: a `for` loop whose step, computed when the
 /// loop starts, is 0 (a constant 0 is a compile error).

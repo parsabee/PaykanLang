@@ -5102,7 +5102,7 @@ fn main() -> int {
   let g = b.grow(8);
   let x = b.at(3) + b.get(2);
   let n = b.len();
-  let bx: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move b);
+  let bx: atomic shared const mem::Box<mem::Buffer<float>> = mem::Box(move b);
   let y = bx.value().at(1);
   return 0;
 }
@@ -5114,7 +5114,8 @@ fn main() -> int {
   EXPECT_EQ(m.find("call @Buffer<float>.len"), std::string::npos) << m;
   EXPECT_EQ(m.find("call @Box<Buffer<float>>.value"), std::string::npos) << m;
   EXPECT_NE(m.find("ptr.load f64"), std::string::npos) << m;
-  EXPECT_NE(m.find("call @$rt.Paykan_panic_index"), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.Paykan_panic_buffer_index"), std::string::npos)
+      << m;
   EXPECT_NE(m.find("field.addr"), std::string::npos) << m;
 }
 

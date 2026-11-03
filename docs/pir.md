@@ -421,7 +421,7 @@ generated like `destroy`, final like it (Sema rejects a class that writes
 one: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'`), and the
 target of the `__walk` slot, which the runtime's `Paykan_freeze` (§8)
 calls once it has made the object immortal, so that a value made `atomic
-const` is frozen with everything it holds.  The body freezes what the
+shared const` is frozen with everything it holds.  The body freezes what the
 object's fields hold: `call @$rt.Paykan_freeze` of the `unbox` of every
 reference field's box but a `weak` field's (the runtime skips a null box
 and an object already immortal, so a cycle ends), and `call
@@ -975,7 +975,7 @@ CodeGen enforced, now in one place.
   through it: `ptr.load box`, then `unbox`), and calls
   `PaykanLocked_unlock` on the handle when the block ends; Sema keeps a
   `return`, `break`, `continue` or `await` out of the block, so the unlock
-  is reached.  A unique value flowing into an `atomic const` slot is
+  is reached.  A unique value flowing into an `atomic shared const` slot is
   frozen there, `call @$rt.Paykan_freeze` of its `unbox`: the object and
   everything its walk (§5) reaches are immortal from then on, and the
   handle copies like a cell's.
@@ -1359,6 +1359,7 @@ Paykan_dispose(obj) -> void      ; destroy and free an object never boxed (a str
 Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
 Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 Paykan_panic_index(i64, i64) -> void    ; the index, the length
+Paykan_panic_buffer_index(i64, i64) -> void ; a buffer's element read in place: the index (printed unsigned), the length
 Paykan_panic_for_step() -> void         ; a `for` loop's computed step is 0
 Paykan_panic_float_to_type(f64, ptr, i64) -> void   ; the value, the target type's name and its length
 Paykan_panic_to_char(i64, i64, ptr, i64) -> void    ; `char<S>`: the value, whether S is unsigned, S's name and its length
@@ -1413,7 +1414,7 @@ PaykanAtomic_fcompare_exchange(obj, f64, f64) -> i64
 PaykanLocked_new(box) -> box            ; a new cell taking the box (handed over)
 PaykanLocked_lock(obj) -> ptr           ; takes the mutex; the address of the slot holding the contents' box
 PaykanLocked_unlock(obj) -> void        ; releases the mutex
-; `atomic const`: an object made immortal with everything it holds
+; `atomic shared const`: an object made immortal with everything it holds
 Paykan_freeze(obj) -> void              ; makes the object immortal and calls its walk slot (§5); null and an immortal: nothing
 Paykan_freeze_mem(ptr, ptr) -> void     ; freezes the references a value holds: its type descriptor (§4), its address
 ; globals

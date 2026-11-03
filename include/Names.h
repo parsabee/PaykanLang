@@ -100,7 +100,7 @@ inline constexpr const char *kMethodEquals = "equals";
 inline constexpr const char *kMethodExchange = "exchange";
 inline constexpr const char *kMethodCompareExchange = "compareExchange";
 /// The walk every class has after `equals` (the concurrency prototype):
-/// freezes what the object holds, for `atomic const`.
+/// freezes what the object holds, for `atomic shared const`.
 inline constexpr const char *kMethodWalk = "__walk";
 
 // Traits
@@ -191,8 +191,8 @@ inline constexpr const char *kPaykanObjectDestroy = "PaykanObject_destroy";
 inline constexpr const char *kPaykanObjectToString = "PaykanObject_toString";
 inline constexpr const char *kPaykanObjectEquals = "PaykanObject_equals";
 inline constexpr const char *kPaykanObjectWalk = "PaykanObject_walk";
-// The concurrency prototype's freeze (`atomic const`): an object and what
-// it holds become immortal, counted nowhere.
+// The concurrency prototype's freeze (`atomic shared const`): an object and
+// what it holds become immortal, counted nowhere.
 inline constexpr const char *kPaykanFreeze = "Paykan_freeze";
 inline constexpr const char *kPaykanFreezeMem = "Paykan_freeze_mem";
 inline constexpr const char *kPaykanObjectVtable = "PaykanObject_vtable";
@@ -344,6 +344,10 @@ inline constexpr const char *kPaykanRoundF16 = "Paykan_round_f16";
 inline constexpr const char *kPaykanIntToF32 = "Paykan_int_to_f32";
 inline constexpr const char *kPaykanUintToF32 = "Paykan_uint_to_f32";
 inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
+/// A buffer's element read in place (the concurrency prototype) at an
+/// index outside 0..len-1: the runtime's own message, the index unsigned.
+inline constexpr const char *kPaykanPanicBufferIndex =
+    "Paykan_panic_buffer_index";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -490,6 +494,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicIntToChar,
     kPaykanPanicToChar,
     kPaykanPanicIndex,
+    kPaykanPanicBufferIndex,
     kPaykanPanicForStep,
     kPaykanPanicPureVirtual,
     // String
@@ -539,8 +544,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
 inline constexpr const char *kNoReturnRuntimeFunctions[] = {
     kPaykanPanicDivByZero,   kPaykanPanicDivOverflow, kPaykanPanicFloatToInt,
     kPaykanPanicFloatToType, kPaykanPanicIntToChar,   kPaykanPanicToChar,
-    kPaykanPanicIndex,       kPaykanPanicForStep,     kPaykanPanicPureVirtual,
-    kPaykanPanicMessage,     kPaykanPanicValue,       kPaykanUnreachableView,
+    kPaykanPanicIndex,       kPaykanPanicBufferIndex, kPaykanPanicForStep,
+    kPaykanPanicPureVirtual, kPaykanPanicMessage,     kPaykanPanicValue,
+    kPaykanUnreachableView,
 };
 /// The runtime functions that write no memory a program can reach: they
 /// read memory, and the panic of a bad index or an unset slot writes only

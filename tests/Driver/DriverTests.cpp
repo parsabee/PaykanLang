@@ -2314,7 +2314,8 @@ fn main() -> int {
   EXPECT_EQ(calls, 1u) << ints;
   EXPECT_EQ(ints.find("call ptr @PaykanBuffer_get("), std::string::npos)
       << ints;
-  EXPECT_NE(ints.find("@Paykan_panic_index("), std::string::npos) << ints;
+  EXPECT_NE(ints.find("@Paykan_panic_buffer_index("), std::string::npos)
+      << ints;
   const size_t reread = lengthLoad(hooked);
   ASSERT_NE(reread, std::string::npos) << hooked;
   EXPECT_GT(reread, hooked.find("; preds = ")) << hooked;

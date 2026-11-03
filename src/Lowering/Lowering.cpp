@@ -2004,8 +2004,9 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
     // holds, through nested tuples and arrays, by offset.
     MemLayout l = memLayout(ty);
     words = {l.Size, l.Align,
-             ast::isa<ast::TupleType>(ty) ? kNativeKindTuple
-                                          : nativeTypeKind(ty),
+             static_cast<int64_t>(ast::isa<ast::TupleType>(ty)
+                                      ? kNativeKindTuple
+                                      : nativeTypeKind(ty)),
              0, 0};
     std::function<void(ast::Type *, int64_t, bool)> refs =
         [&](ast::Type *e, int64_t off, bool nullable) {
@@ -2309,10 +2310,10 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
     Val box = emitAsSharedRaw(expr, /*lend=*/false);
     return box ? callRuntime(names::kPaykanLockedNew, {box}, "cell") : box;
   }
-  // A unique value flowing into an `atomic const` slot: the object and
+  // A unique value flowing into an `atomic shared const` slot: the object and
   // everything it holds are frozen at this use (immortal, counted nowhere;
   // the design counts the root atomically and thaws it).
-  if (expr->getMaterialize() == ast::QualForm::AtomicConst) {
+  if (expr->getMaterialize() == ast::QualForm::AtomicSharedConst) {
     Val box = emitAsSharedRaw(expr, /*lend=*/false);
     if (box)
       callRuntime(names::kPaykanFreeze, {emitSharedGet(box, "frozen")});

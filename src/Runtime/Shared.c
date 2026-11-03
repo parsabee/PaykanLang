@@ -155,11 +155,15 @@ static void destroy_dead_object(PaykanObject *obj) {
 }
 
 void Paykan_release(PaykanShared *shared) {
-  // Keep the common case (the count stays above zero) as the fall-through.
-  // With an early `if (!shared || --strong > 0) return;` GCC lays that path
-  // out as a taken jump to a distant `ret`, which measurably slows
-  // retain/release-heavy programs; this shape gives `test; jle slow; pop; ret`.
-  if (shared && shared->strong != PAYKAN_REF_MAX && --shared->strong <= 0) {
+  // Keep the common case (the count stays above zero) short: an early
+  // `if (!shared || --strong > 0) return;` made GCC lay that path out as a
+  // taken jump to a distant `ret`, which measurably slowed retain/release-
+  // heavy programs; the decrement and its test stand on their own lines for
+  // clang-tidy (bugprone-inc-dec-in-conditions), the shape is the same.
+  if (shared && shared->strong != PAYKAN_REF_MAX) {
+    shared->strong -= 1;
+    if (shared->strong > 0)
+      return;
     if (g_destroying) {
       // A destroy is running: defer to the outermost release.
       push_pending(shared);

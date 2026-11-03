@@ -1352,7 +1352,7 @@ ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
   pir::If *s = L.B.openIf(L.B.select(neg, Val::boolean(true), over, "idx.bad"),
                           /*withElse=*/false);
   L.B.enter(*s->Then);
-  L.callRuntime(kPaykanPanicIndex, {idx, len});
+  L.callRuntime(kPaykanPanicBufferIndex, {idx, len});
   L.B.emitUnreachable();
   L.B.leave();
   // The storage's address, read as the bits a `ptr.load` has (an `i64`),
