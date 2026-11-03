@@ -1925,6 +1925,11 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
               "'await' cannot be used in a 'parallel for' body");
       return nullptr;
     }
+    if (S.LockDepth > 0) {
+      S.error(node->getLocation(), "'await' cannot be used in a 'lock' "
+                                   "block: a wait holding a lock");
+      return nullptr;
+    }
     ast::Type *t = visit(operand);
     if (!t)
       return nullptr;
@@ -4477,6 +4482,10 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     error(node->getLocation(), "'return' cannot leave a 'parallel for' body");
     return false;
   }
+  if (LockDepth > 0) {
+    error(node->getLocation(), "'return' cannot leave a 'lock' block");
+    return false;
+  }
   if (node->getReturnValue()) {
     auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
     if (!valTy)
@@ -4677,6 +4686,10 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
     CurrentScope->Kinds[name] = VarKind::ForVar;
   // A `parallel for` (the concurrency prototype): its variable, and what
   // its body declares, are an iteration's own.
+  if (node->isParallel() && LockDepth > 0) {
+    error(node->getLocation(), "a 'parallel for' cannot run in a 'lock' block");
+    return false;
+  }
   if (node->isParallel())
     ParallelStack.push_back({node, CurrentScope});
   if (!discard)
@@ -4689,9 +4702,50 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   return ok && bodyOk;
 }
 
+// `lock c as v: inout|view { }` (the concurrency prototype): the cell is a
+// `locked` place; the binding is a local borrow of its contents for the
+// block, which holds the lock to its end.
+bool Sema::visitLockStmt(ast::LockStmt *node) {
+  if (LockDepth > 0) {
+    error(node->getLocation(), "a 'lock' block cannot hold another 'lock'");
+    return false;
+  }
+  LockOperand = true;
+  ast::Type *cellTy = resolveExprType(node->getCell());
+  LockOperand = false;
+  if (!cellTy)
+    return false;
+  if (qualifierOf(node->getCell()).Form != ast::QualForm::Locked) {
+    error(node->getCell()->getLocation(),
+          "'" + placeText(node->getCell()) +
+              "' is not 'locked': a 'lock' block takes a 'locked' variable, "
+              "field or parameter");
+    return false;
+  }
+  ast::VarDecl *b = node->getBinding();
+  if (!checkBinderName(b->getName(), b->getLocation()) ||
+      !checkNotSelf(b->getName(), b->getLocation()))
+    return false;
+  b->setType(cellTy);
+  ScopeGuard guard(*this);
+  CurrentScope->declare(b->getName(), cellTy);
+  CurrentScope->Kinds[b->getName()] = b->getMode() == ast::ParamMode::View
+                                          ? VarKind::ViewLocal
+                                          : VarKind::Inout;
+  DeclLoopDepth[b->getName()] = LoopDepth;
+  ++LockDepth;
+  const bool ok = visit(node->getBody());
+  --LockDepth;
+  return ok;
+}
+
 bool Sema::visitBreakStmt(ast::BreakStmt *node) {
   if (LoopDepth == 0) {
     error(node->getLocation(), "'break' outside of a loop");
+    return false;
+  }
+  if (LockDepth > 0) {
+    error(node->getLocation(), "'break' cannot leave a 'lock' block");
     return false;
   }
   if (!ParallelStack.empty()) {
@@ -4705,6 +4759,10 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
 bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
   if (LoopDepth == 0) {
     error(node->getLocation(), "'continue' outside of a loop");
+    return false;
+  }
+  if (LockDepth > 0) {
+    error(node->getLocation(), "'continue' cannot leave a 'lock' block");
     return false;
   }
   if (!ParallelStack.empty()) {

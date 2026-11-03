@@ -693,6 +693,20 @@ void PaykanAtomic_store(PaykanObject *cell, int64_t value);
 /// Adds @p delta to the cell's value atomically; the value found.
 int64_t PaykanAtomic_add(PaykanObject *cell, int64_t delta);
 
+// -- Locked cell (the concurrency prototype, docs/design/concurrency.md)
+//
+// `locked T`: one heap cell holding an object's box behind a mutex, reached
+// only in `lock` blocks.  Immortal, as an atomic cell is (src/Runtime/
+// Locked.c).
+
+/// A new cell holding @p payload (an owned box the cell takes), as an
+/// owned box.
+PaykanShared *PaykanLocked_new(PaykanShared *payload);
+/// Takes the cell's mutex; the address of its payload slot (a box).
+void *PaykanLocked_lock(PaykanObject *cell);
+/// Releases the cell's mutex.
+void PaykanLocked_unlock(PaykanObject *cell);
+
 // -- Buffer
 //
 // The storage of the standard library's memory::Buffer<T>: `len` live values

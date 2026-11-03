@@ -258,6 +258,10 @@ inline constexpr const char *kPaykanAtomicNew = "PaykanAtomic_new";
 inline constexpr const char *kPaykanAtomicLoad = "PaykanAtomic_load";
 inline constexpr const char *kPaykanAtomicStore = "PaykanAtomic_store";
 inline constexpr const char *kPaykanAtomicAdd = "PaykanAtomic_add";
+// The prototype's `locked` cell (src/Runtime/Locked.c).
+inline constexpr const char *kPaykanLockedNew = "PaykanLocked_new";
+inline constexpr const char *kPaykanLockedLock = "PaykanLocked_lock";
+inline constexpr const char *kPaykanLockedUnlock = "PaykanLocked_unlock";
 
 // The standard library's ::io (stdlib/io.pkn): reached only through its
 // `native fn`s
@@ -436,6 +440,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanAtomicLoad,
     kPaykanAtomicStore,
     kPaykanAtomicAdd,
+    kPaykanLockedNew,
+    kPaykanLockedLock,
+    kPaykanLockedUnlock,
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,

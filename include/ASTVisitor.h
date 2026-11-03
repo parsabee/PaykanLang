@@ -46,6 +46,7 @@ namespace ast {
   NODE(NK_MemberAssignStmt, MemberAssignStmt, MemberAssignStmt)                \
   NODE(NK_MatchStmt, MatchStmt, MatchStmt)                                     \
   NODE(NK_SubscriptAssignStmt, SubscriptAssignStmt, SubscriptAssignStmt)       \
+  NODE(NK_LockStmt, LockStmt, LockStmt)                                        \
   NODE(NK_DestructureStmt, DestructureStmt, DestructureStmt)
 
 #define PAYKAN_EXPR_NODES(NODE)                                                \

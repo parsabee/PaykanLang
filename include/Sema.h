@@ -292,6 +292,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Set while a `lock` statement's operand is checked, where a `locked`
   /// place may be named.
   bool LockOperand = false;
+  /// The `lock` blocks being checked, innermost last (no `await`, `return`,
+  /// nested `lock` or `parallel for` inside one).
+  unsigned LockDepth = 0;
   /// The qualifier of variable @p name (unique when it has none).
   ast::Qualifier qualifierOfVar(std::string_view name) const;
   /// The qualifier of the reference @p e reads: its place's (a variable's,

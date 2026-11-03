@@ -41,6 +41,10 @@ bool Sema::checkParallelRead(const std::string &name, ast::Type *ty,
     return true;
   if (isPlainValue(ty) || ast::isa<ast::AtomicType>(ty))
     return true;
+  // A handle: a `locked` cell or an `atomic const` object.
+  if (const ast::Qualifier q = qualifierOfVar(name);
+      q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicConst)
+    return true;
   ast::Type *elem = nullptr;
   if (auto *a = ast::dyn_cast<ast::ArrayType>(ty))
     elem = a->getElementType();
@@ -331,7 +335,12 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
     }
     return true;
   case ast::QualForm::Locked:
-    return true; // any crossable value
+    if (!ast::isRefType(inner)) {
+      error(loc, "'locked' holds an object in the prototype, not a '" +
+                     typeName(inner) + "' (wrap the value in a class)");
+      return false;
+    }
+    return true;
   }
   return true;
 }

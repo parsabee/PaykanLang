@@ -1457,6 +1457,27 @@ Val ModuleLowering::emitParallelFor(ast::ForStmt *node) {
   return Val();
 }
 
+// `lock c as v: inout|view { }` (the prototype): the cell's mutex is taken
+// for the block, and `v` is an `inout` local at the cell's payload slot,
+// which holds the contents' box.  Sema lets nothing leave the block early,
+// so the unlock after it always runs.
+Val ModuleLowering::visitLockStmt(ast::LockStmt *node) {
+  Val cell = emitExpr(node->getCell());
+  if (!cell)
+    return Val();
+  Val payload = callRuntime(names::kPaykanLockedLock, {cell}, "payload");
+  ScopeGuard guard(*this);
+  const std::string &name = node->getBinding()->getName();
+  pir::LocalId local = B.addLocal(name, Type::Ptr);
+  B.store(local, payload);
+  ast::Type *innerTy = canonicalizeDeclType(node->getBinding()->getType());
+  CurrentScope->declareInout(name, local, toPIRType(innerTy), innerTy);
+  CurrentScope->markStable(name);
+  visit(node->getBody());
+  callRuntime(names::kPaykanLockedUnlock, {cell});
+  return Val();
+}
+
 Val ModuleLowering::emitAtomicAssign(ast::AssignStmt *node) {
   using K = ast::AssignStmt::AtomicKind;
   const std::string &name = node->getVarName();
@@ -2119,6 +2140,12 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
+  // A unique value flowing into a `locked` slot (the prototype): a new
+  // cell holding it (the cell takes the +1 box).
+  if (expr->getMaterialize() == ast::QualForm::Locked) {
+    Val box = emitAsSharedRaw(expr, /*lend=*/false);
+    return box ? callRuntime(names::kPaykanLockedNew, {box}, "cell") : box;
+  }
   // An optional value is never boxed (Sema lets none reach a box slot).
   if (valueOptionalType(expr)) {
     reportInternalError("an optional value where a box is due");

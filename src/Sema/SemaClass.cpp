@@ -341,6 +341,11 @@ bool Sema::checkInitFieldsAssigned(
       // `while True` with no `break` out of it is left only by a return.
       return {in, detail::stmtAlwaysReturns(ws)};
     }
+    if (auto *ls = ast::dyn_cast<ast::LockStmt>(s)) {
+      // A lock block runs once, to its end (it cannot return).
+      checkUses(ls->getCell(), in, false);
+      return {analyzeStmt(ls->getBody(), in).Assigned, false};
+    }
     if (auto *fs = ast::dyn_cast<ast::ForStmt>(s)) {
       // As a while loop's: the range may be empty.
       checkUses(fs->getStart(), in, false);

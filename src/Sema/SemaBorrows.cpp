@@ -169,6 +169,11 @@ bool mentions(const ast::Stmt *s, const std::string &name) {
     const auto *w = ast::cast<ast::WhileStmt>(s);
     return mentions(w->getCondition(), name) || mentions(w->getBody(), name);
   }
+  case ast::ASTNode::NK_LockStmt: {
+    const auto *l = ast::cast<ast::LockStmt>(s);
+    return mentions(l->getCell(), name) ||
+           (l->getBinding()->getName() != name && mentions(l->getBody(), name));
+  }
   case ast::ASTNode::NK_ForStmt: {
     // The range and the step are evaluated outside the loop's variable; the
     // body names that variable by its name.

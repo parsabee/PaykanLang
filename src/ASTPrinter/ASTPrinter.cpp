@@ -209,6 +209,20 @@ void ASTPrinter::visitIfStmt(IfStmt *node) {
   }
 }
 
+void ASTPrinter::visitLockStmt(LockStmt *node) {
+  header("LockStmt", node);
+  OS << " '" << node->getBinding()->getName() << "' "
+     << paramModeName(node->getBinding()->getMode()) << "\n";
+  {
+    ChildScope cs(*this, false);
+    visit(node->getCell());
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getBody());
+  }
+}
+
 void ASTPrinter::visitWhileStmt(WhileStmt *node) {
   header("WhileStmt", node);
   OS << "\n";

@@ -83,6 +83,7 @@ public:
     NK_MemberAssignStmt,
     NK_MatchStmt,
     NK_SubscriptAssignStmt,
+    NK_LockStmt, // `lock c as v: inout { }` (the concurrency prototype)
     NK_DestructureStmt,
     NK_StmtEnd = NK_DestructureStmt,
 
@@ -2532,6 +2533,27 @@ public:
 // already in scope — the same implicit-declaration rule as AssignStmt), a
 // name with an explicit type annotation (always a fresh declaration, like
 // VarDecl), or `_` to skip the element.  At least two targets are required.
+/// `lock <cell> as <name>: inout|view { body }` (docs/design/concurrency.md,
+/// "locked and lock blocks", the prototype): the cell, a `locked` place, is
+/// locked for the block, whose binding names its contents, a local borrow
+/// (`view`: read-only).  The block holds the lock to its end: it cannot be
+/// left by `return`, `break` or `continue`, and cannot `await`.
+class LockStmt : public Stmt {
+  Expr *Cell;
+  VarDecl *Binding; // the name and mode; Sema writes the contents' type
+  CompoundStmt *Body;
+
+public:
+  LockStmt(SourceLocation loc, Expr *cell, VarDecl *binding, CompoundStmt *body)
+      : Stmt(NK_LockStmt, loc), Cell(cell), Binding(binding), Body(body) {}
+
+  Expr *getCell() const { return Cell; }
+  VarDecl *getBinding() const { return Binding; }
+  CompoundStmt *getBody() const { return Body; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_LockStmt; }
+};
+
 class DestructureStmt : public Stmt {
 public:
   struct Target {

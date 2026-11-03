@@ -448,6 +448,15 @@ private:
       close();
       return;
     }
+    case ASTNode::NK_LockStmt: {
+      const auto *l = cast<LockStmt>(s);
+      open("lock", l);
+      expr(l->getCell());
+      varDecl(*l->getBinding());
+      stmt(l->getBody());
+      close();
+      return;
+    }
     case ASTNode::NK_ForStmt: {
       const auto *f = cast<ForStmt>(s);
       open("for", f);

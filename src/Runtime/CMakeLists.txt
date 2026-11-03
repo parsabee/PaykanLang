@@ -13,6 +13,7 @@ add_library(paykan_runtime STATIC
     IO.c
     Heap.c
     Atomic.c
+    Locked.c
 )
 
 target_include_directories(paykan_runtime

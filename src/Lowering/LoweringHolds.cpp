@@ -964,6 +964,8 @@ void ModuleLowering::BorrowedReads::statement(ast::Stmt *s) {
     eval(x->getCondition());
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     eval(x->getCondition());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    eval(x->getCell());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     eval(x->getStart());
     eval(x->getEnd());
@@ -1305,6 +1307,9 @@ void ModuleLowering::EffectScan::stmt(ast::Stmt *s) {
     stmt(x->getElseBranch());
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     expr(x->getCondition());
+    stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    expr(x->getCell());
     stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     expr(x->getStart());
@@ -1840,6 +1845,9 @@ void ModuleLowering::BufferUses::stmt(ast::Stmt *s) {
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     expr(x->getCondition());
     stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    expr(x->getCell());
+    stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     expr(x->getStart());
     expr(x->getEnd());
@@ -2093,6 +2101,9 @@ void ModuleLowering::FieldStoreScan::stmt(ast::Stmt *s) {
     stmt(x->getElseBranch());
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     expr(x->getCondition());
+    stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    expr(x->getCell());
     stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     expr(x->getStart());

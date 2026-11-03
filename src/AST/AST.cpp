@@ -804,6 +804,15 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     return Ctx.make<WhileStmt>(loc, cloneExpr(w->getCondition()),
                                cloneStmt(w->getBody()));
   }
+  case ASTNode::NK_LockStmt: {
+    auto *l = cast<LockStmt>(s);
+    VarDecl *b = l->getBinding();
+    auto *nb =
+        Ctx.make<VarDecl>(b->getLocation(), in(b->getName()), nullptr, nullptr);
+    nb->setMode(b->getMode());
+    return Ctx.make<LockStmt>(loc, cloneExpr(l->getCell()), nb,
+                              cast<CompoundStmt>(cloneStmt(l->getBody())));
+  }
   case ASTNode::NK_ForStmt: {
     auto *f = cast<ForStmt>(s);
     VarDecl *v = f->getVar();

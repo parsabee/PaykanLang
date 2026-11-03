@@ -1476,6 +1476,10 @@ bool Parser::parseStatement(Stmt *&out) {
     out = parseForStmt();
     return out != nullptr;
 
+  case Tok::KwLock:
+    out = parseLockStmt();
+    return out != nullptr;
+
   case Tok::KwParallel:
     // `parallel for` (the concurrency prototype).
     consume();
@@ -2069,6 +2073,43 @@ Stmt *Parser::parseForStmt() {
     return nullptr;
   return Ctx.make<ForStmt>(span(start), var, first, last, step, inclusive,
                            body);
+}
+
+// lockStmt ::= "lock" expression "as" IDENT ":" ( "view" | "inout" ) block
+// (the concurrency prototype)
+Stmt *Parser::parseLockStmt() {
+  SourceLocation start = consume().Loc; // "lock"
+  Expr *cell = parseExpression();
+  if (!cell)
+    return nullptr;
+  if (!expect(Tok::KwAs, "after the 'lock' statement's cell"))
+    return nullptr;
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a name for the cell's contents after 'as'");
+    return nullptr;
+  }
+  Token name = consume();
+  if (!expect(Tok::Colon, "after the name"))
+    return nullptr;
+  ParamMode mode = ParamMode::View;
+  if (accept(Tok::KwInout)) {
+    mode = ParamMode::Inout;
+  } else if (!accept(Tok::KwView)) {
+    errorAtCurrent("expected 'view' or 'inout': how the block reaches the "
+                   "cell's contents");
+    return nullptr;
+  }
+  if (!at(Tok::LBrace)) {
+    errorAtCurrent("expected '{' to open the 'lock' block");
+    return nullptr;
+  }
+  CompoundStmt *body = parseBlock();
+  if (!body)
+    return nullptr;
+  auto *binding =
+      Ctx.make<VarDecl>(span(name.Loc), intern(name.Text), nullptr, nullptr);
+  binding->setMode(mode);
+  return Ctx.make<LockStmt>(span(start), cell, binding, body);
 }
 
 // matchStmt ::= "match" expression "{" matchArm+ "}"

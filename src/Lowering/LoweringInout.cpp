@@ -151,6 +151,8 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
     exprs = {x->getCondition()};
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     exprs = {x->getCondition()};
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    exprs = {x->getCell()};
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     exprs = {x->getStart(), x->getEnd(), x->getStep()};
   } else if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
