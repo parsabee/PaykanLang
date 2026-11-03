@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the `parallel for` benchmarks over a range of thread counts.
 
-    python3 benchmarks/run.py                 # build, run everything, write results/
+    python3 benchmarks/run.py                 # build, run everything, write build/benchmarks/results/
     python3 benchmarks/run.py sum compute     # some of them
     python3 benchmarks/run.py --threads 1,4,16 --no-build
 
@@ -18,7 +18,9 @@ builds the programs with `paykan build`, runs each under OMP_NUM_THREADS =
   process's whole wall and CPU time (wait4's rusage) are recorded too;
 - speedup = ns_min(1 thread) / ns_min(t threads), efficiency = speedup / t.
 
-Results go to benchmarks/results/<host>.json and <host>.md (a table).
+The programs build into build/benchmarks/bin/, and the results go to
+build/benchmarks/results/<host>.json and <host>.md (a table): the build
+directory, kept out of the repository.
 """
 import argparse
 import json
@@ -33,7 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BENCH = ROOT / "benchmarks"
-BIN = BENCH / "bin"
+BIN = ROOT / "build" / "benchmarks" / "bin"
 PAYKAN = ROOT / "build" / "bin" / "paykan"
 
 # name -> (arguments, what the row says)
@@ -78,7 +80,7 @@ def machine():
 
 
 def build(names):
-    BIN.mkdir(exist_ok=True)
+    BIN.mkdir(parents=True, exist_ok=True)
     for n in names:
         src = BENCH / f"{n}.pkn"
         out = BIN / n
@@ -179,8 +181,8 @@ def main():
             rows.append(best)
             print(f"{name:20s} {t:2d} thr  ns_min={best['ns_min']:>12d}  wall={best['wall_s']:.3f}s  "
                   f"cpu={best['cpu_s']:.3f}s  check={best['check']}", file=sys.stderr)
-    out_dir = BENCH / "results"
-    out_dir.mkdir(exist_ok=True)
+    out_dir = ROOT / "build" / "benchmarks" / "results"
+    out_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"-blocktime{a.blocktime}" if a.blocktime else ""
     (out_dir / f"{a.out}{suffix}.json").write_text(json.dumps({"machine": machine(), "rows": rows}, indent=1))
     md = [f"# {a.out}{suffix}", "", "```", json.dumps(machine(), indent=1), "```", "",

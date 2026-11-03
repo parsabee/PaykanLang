@@ -44,10 +44,10 @@ with performance and efficiency cores), where every loop then wakes the
 workers from a kernel sleep.  `--blocktime 200` sets it.
 
 ```
-python3 benchmarks/run.py                       # everything; results/<host>.md and .json
+python3 benchmarks/run.py                       # everything; build/benchmarks/results/<host>.md and .json
 python3 benchmarks/run.py sum compute --threads 1,8,16
 python3 benchmarks/run.py --blocktime 200       # workers spin 200 ms after a loop
-OMP_NUM_THREADS=8 benchmarks/bin/atomic_counter 4194304 5 16
+OMP_NUM_THREADS=8 build/benchmarks/bin/atomic_counter 4194304 5 16
 ```
 
 ## What to look for
@@ -77,13 +77,13 @@ OMP_NUM_THREADS=8 benchmarks/bin/atomic_counter 4194304 5 16
 ## Results
 
 Apple M3 Max (12 performance + 4 efficiency cores, 128-byte lines, 64 KB
-L1d, 16 MB L2 per performance cluster), macOS 26, 2026-11-02.  The full
-tables, with efficiency and the busy fraction, are in `results/`
-(`*-static.md`: the static schedule the prototype had before these
-benchmarks; `*.md`: the dynamic schedule it has now; `*-blocktime200.md`:
-the same with `KMP_BLOCKTIME=200`; `*-buffers.md`: the boxed heap
-buffers, below).  Each cell is the loop's best time and
-its speedup over one thread.
+L1d, 16 MB L2 per performance cluster), macOS 26, 2026-11-02; `run.py`
+with the thread counts below, three process runs a point, the best kept
+(the `static schedule (before)` rows from the build before the dynamic
+schedule, the `KMP_BLOCKTIME=200` rows with `--blocktime 200`).  Each
+cell is the loop's best time and its speedup over one thread; the
+runner's own output, with efficiency and the busy fraction, is written
+under `build/` and not kept here.
 
 | program | schedule | 1 thr | 4 thr | 8 thr | 12 thr | 16 thr |
 |---|---|---|---|---|---|---|
@@ -157,8 +157,7 @@ What the numbers say:
   writing these), so two threads write neighbouring elements only at a
   chunk boundary, 255 lines in a loop at most.
 
-**Boxed heap buffers** (`*-buffers.md`; the dynamic schedule, the
-default block time).  `sum_buf` reads 64M floats (512 MB), `sum_buf_1m`
+**Boxed heap buffers** (the dynamic schedule, the default block time).  `sum_buf` reads 64M floats (512 MB), `sum_buf_1m`
 1M (8 MB, in L2), `dot_buf` 32M of each of two buffers:
 
 | program | 1 thr | 4 thr | 8 thr | 12 thr | 16 thr |
