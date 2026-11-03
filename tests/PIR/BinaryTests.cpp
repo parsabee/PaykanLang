@@ -198,6 +198,8 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::VCall:
     case Opcode::Retain:
     case Opcode::Release:
+    case Opcode::AsyncCall:
+    case Opcode::Await:
     case Opcode::Box:
     case Opcode::Unbox:
     case Opcode::New:
@@ -271,9 +273,9 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     // some none is_some unwrap weak.load weak.new; local.addr field.addr
     // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
     // ucmp utof ftou fround32 weak.release; fn.addr icall; vtable.store;
-    // owned; and or xor shl shr
+    // owned; and or xor shl shr; async_call await
     bool used =
-        c <= 31 || (c >= 34 && c <= 52) || c == 54 || (c >= 58 && c <= 62);
+        c <= 31 || (c >= 34 && c <= 52) || c == 54 || (c >= 58 && c <= 64);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
@@ -577,7 +579,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
   // A reserved function flag bit.
   {
     std::vector<uint8_t> b = good;
-    b[rec + 2] |= 0x20; // flags bit 5
+    b[rec + 2] |= 0x40; // flags bit 6 (bit 5 is kFnAsync, the prototype)
     EXPECT_FALSE(binary::decode(b).isOk());
   }
   // Slack: one extra byte inside the record, length adjusted.
@@ -662,7 +664,7 @@ fn @bits(%x.1: i64, %n.2: i64) -> i64 {
     EXPECT_EQ(binary::encode(*d), b);
   }
   std::vector<uint8_t> b = good;
-  b[opcode] = 63;
+  b[opcode] = 65;
   auto bad = binary::decode(b);
   ASSERT_FALSE(bad.isOk());
   EXPECT_NE(bad.status().message().find("reserved opcode"), std::string::npos)

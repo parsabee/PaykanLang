@@ -9,20 +9,20 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 |---|---|
 | `01_parallel_for.pkn` | `parallel for` with a reduction, an `inout` array written at the loop's index, and an `atomic int` counter |
 | `02_async_await.pkn` | `async fn`, `await`, tasks started by calling an async function, `move` of a reference into a task, `async fn main` |
-| `03_errors.pkn` | the first checks: copying a unique reference into a task, use after `move`, sending a `shared` reference, writing anything but a reduction in a parallel body |
+| `err_03_first_checks.pkn` | the first checks: copying a unique reference into a task, use after `move`, sending a `shared` reference, writing anything but a reduction in a parallel body |
 | `04_qualifiers.pkn` | the qualifiers on places: unique, `const`, `shared`, `shared const`; the conversions between them; a `view` parameter taking every form |
 | `05_locked.pkn` | a `locked` cell shared by tasks and read in `lock c as v: inout { }` / `: view` blocks |
 | `06_atomic_const.pkn` | an `atomic const` object frozen with everything it holds, read by every task without a count |
 | `07_atomic.pkn` | `atomic` on every number type, `bool` and `char`; `atomic` fields of a class; `exchange` and `compareExchange`; handles |
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
-| `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; `view const` |
-| `errors/qualifiers.pkn` | the conversions a qualifier refuses, `const` fields, qualifiers on values |
-| `errors/strict_copies.pkn` | the copy rule under `--strict-ownership`: a unique value read from a place moves, `[v; n]` copies |
-| `errors/locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
-| `errors/atomic_const.pkn` | writing through `atomic const`, converting it back, qualifying a value |
-| `errors/atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
-| `errors/moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
-| `errors/send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; `inout` and `view const` qualifiers; `Copyable` |
+| `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
+| `errors/err_qualifiers.pkn` | the conversions a qualifier refuses, `const` fields, qualifiers on values |
+| `errors/err_strict_copies.pkn` | the copy rule under `--strict-ownership`: a unique value read from a place moves, `[v; n]` copies |
+| `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
+| `errors/err_atomic_const.pkn` | writing through `atomic const`, converting it back, qualifying a value |
+| `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
+| `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
+| `errors/err_send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; `inout` exactness, `view const` rejected; `Copyable` |
 
 ## What is in the prototype
 
@@ -39,8 +39,8 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   one into the other `const` forms, a `shared` reference and a handle only
   as they are.  A `const` place is frozen: no field assignment, no
   non-`view` method, and what it holds reads as `const`.  A `view`
-  parameter takes every form, `view const` an object that never changes,
-  `inout` exactly its own qualifier, and no borrow reaches a `locked`
+  parameter takes every form (`view const` is an error: a `view` is
+  read-only already), `inout` exactly its own qualifier, and no borrow reaches a `locked`
   cell.  Under `--strict-ownership` the copy rule holds: a move-only value
   read from a place (a unique reference, or a struct, tuple or array
   holding one) flows into an owning slot only by `move`; a `shared`
@@ -132,8 +132,8 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 ```
 build/bin/paykan run samples/concurrency/01_parallel_for.pkn
 build/bin/paykan run samples/concurrency/07_atomic.pkn
-build/bin/paykan --check-only samples/concurrency/errors/moves.pkn
-build/bin/paykan --check-only --strict-ownership samples/concurrency/errors/strict_copies.pkn
+build/bin/paykan --check-only samples/concurrency/errors/err_moves.pkn
+build/bin/paykan --check-only --strict-ownership samples/concurrency/errors/err_strict_copies.pkn
 build/bin/paykan --emit-pir samples/concurrency/05_locked.pkn
 build/bin/paykan --emit-mlir=scf samples/concurrency/02_async_await.pkn
 build/bin/paykan --emit-mlir=llvm samples/concurrency/01_parallel_for.pkn

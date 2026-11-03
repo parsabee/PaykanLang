@@ -14,7 +14,7 @@ fn main() -> int {
   io::println(Str(b.id));       // error: 'b' was moved
   let s: shared Node = Node(3);
   let t3 = consume(move s);     // error: 's' is shared: it never crosses
-  nodes = [Node(4)];
+  let nodes = [Node(4)];
   total = 0;
   parallel for i in 0..1 {
     total = nodes[i].id;        // error: not a reduction; nodes is a reference

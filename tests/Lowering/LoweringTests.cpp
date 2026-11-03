@@ -3324,7 +3324,7 @@ TEST(Lowering, RepeatLiteralsOfScalars) {
 // evaluated once.
 TEST(Lowering, RepeatLiteralsOfReferences) {
   auto l = lower(R"(
-    fn shared() -> int {
+    fn sharing() -> int {
       s = "a";
       xs: Str[3] = [s; 3];
       return xs[2].len();
@@ -3338,10 +3338,10 @@ TEST(Lowering, RepeatLiteralsOfReferences) {
       g: Str[3][2] = [[s; 2]; 3];
       return g[2][1].len();
     }
-    fn main() -> int { return shared() + fresh(7) + rows(); }
+    fn main() -> int { return sharing() + fresh(7) + rows(); }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  std::string shared = function(l.Text, "shared");
+  std::string shared = function(l.Text, "sharing");
   EXPECT_EQ(count(shared, "retain"), 3u) << shared;
   EXPECT_EQ(count(shared, "ptr.store %"), 3u) << shared;
   // The literal's three and s.
@@ -3489,7 +3489,7 @@ TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
       "  mine: Mine;\n"
       "  view fn total() -> int { return self.origin.sum(); }\n"
       "  view fn own() -> int { return self.mine.sum(); }\n"
-      "  fn move(p: point::Point, m: Mine) { self.origin = p; self.mine = m; "
+      "  fn put(p: point::Point, m: Mine) { self.origin = p; self.mine = m; "
       "}\n"
       "}\n"
       "class Fixed {\n"

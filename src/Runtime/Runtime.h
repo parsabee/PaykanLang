@@ -133,7 +133,10 @@ typedef struct PaykanObject PaykanWeak;
 //                 PaykanWeak* references.  The memory is freed when both are
 //                 zero.
 //
-// A count that would pass PAYKAN_REF_MAX panics rather than wrap.
+// A strong count that would reach PAYKAN_REF_MAX panics rather than wrap:
+// PAYKAN_REF_MAX itself marks an immortal object (the concurrency
+// prototype's cells and frozen objects, which no retain or release
+// counts).  A weak count that would pass PAYKAN_REF_MAX panics.
 //
 // Every constructor (the runtime's and the generated class constructors)
 // initialises `strong` and `weak` to 0: a new object is unowned until it is
@@ -487,10 +490,12 @@ void Paykan_weak_release(PaykanWeak *weak);
 // call no C library function (see Paykan_vtable_of), only runtime functions
 // that take a box, which no native function binds.
 
-/// Paykan_retain, inline.
+/// Paykan_retain, inline: a count below the limit (PAYKAN_REF_MAX - 1)
+/// is incremented here; the limit and the immortal sentinel are the
+/// function's.
 static inline void Paykan_retain_inline(PaykanShared *shared) {
   if (shared) {
-    if (shared->strong != PAYKAN_REF_MAX)
+    if (shared->strong < PAYKAN_REF_MAX - 1)
       ++shared->strong;
     else
       Paykan_retain(shared);
@@ -515,7 +520,7 @@ static inline void Paykan_release_inline(PaykanShared *shared) {
 /// path on which the box is NULL, which GCC's -Warray-bounds would follow
 /// to a later write into the object.
 static inline void Paykan_retain_nonnull_inline(PaykanShared *shared) {
-  if (shared->strong != PAYKAN_REF_MAX)
+  if (shared->strong < PAYKAN_REF_MAX - 1)
     ++shared->strong;
   else
     Paykan_retain(shared);
@@ -775,7 +780,6 @@ typedef struct PaykanBuffer {
 extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
-void PaykanBuffer_walk(PaykanObject *self);         // the prototype's freeze
 int64_t PaykanBuffer_len(void *t, PaykanObject *b);
 /// PaykanBuffer_len's body, which the backends read in place: the C path
 /// calls this, the LLVM path loads `len` itself (ToLLVM.cpp).

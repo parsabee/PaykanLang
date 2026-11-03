@@ -5010,8 +5010,15 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName());
       return false;
     }
-    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, node->getResultMode(),
+                                "the result of '" + node->getName() + "'",
+                                node->getLocation())) {
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
       node->setResultQual(q);
+    }
     node->setReturnType(retTy);
   }
 
@@ -5038,8 +5045,14 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
-    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
+                                p.Loc)) {
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
       p.Qual = q;
+    }
     p.ParamType = ty;
     paramTypes.push_back(ty);
   }
@@ -5580,6 +5593,12 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     node->setType(declTy); // canonical write-back (see VarDecl::setType)
     qual = takeQualifier();
     qualified = true;
+    if (!checkBorrowQualifier(qual, node->getMode(),
+                              "local '" + node->getName() + "'",
+                              node->getLocation())) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
   }
 
   // Check the initializer type.

@@ -126,7 +126,7 @@ fn main() -> int {
   io::println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
   io::println(Str<bool>(bi == Box<int>(4)));  // False
 
-  let shared: Box<int> = bi;                  // shares the box
-  io::println(Str(shared.get()));               // 3
+  let alias: Box<int> = bi;                  // shares the box
+  io::println(Str(alias.get()));               // 3
   return 0;
 }

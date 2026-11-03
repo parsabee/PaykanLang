@@ -25,6 +25,7 @@
 #define PAYKAN_BUFFER_MIN_CAP 8
 
 static void PaykanBuffer_destroy(PaykanObject *self);
+static void PaykanBuffer_walk(PaykanObject *self);
 
 PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanBuffer_destroy,
@@ -39,7 +40,7 @@ static void *buffer_value(const PaykanBuffer *buf, int64_t i) {
 
 /// The walk of a buffer (the prototype): freezes the references its live
 /// values hold (storage never set holds none).
-void PaykanBuffer_walk(PaykanObject *self) {
+static void PaykanBuffer_walk(PaykanObject *self) {
   PaykanBuffer *buf = (PaykanBuffer *)self;
   for (int64_t i = 0; i < buf->len; ++i) {
     void *v = buffer_value(buf, i);

@@ -1616,10 +1616,10 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
                 "has a bad CODE section: it does not verify:\nlib::b: "
                 "function '@Shape.__init__' takes a void parameter\n");
   expectNotUsed("slot", code([](Module &m) {
-                  named(m.Classes, "Seg").VTable[3].Target.clear();
+                  named(m.Classes, "Seg").VTable[4].Target.clear();
                 }),
                 "has an IFACE section that does not match its CODE: class "
-                "'Seg': slot 3 ('area') of its vtable is empty in CODE");
+                "'Seg': slot 4 ('area') of its vtable is empty in CODE");
   expectNotUsed("copy", code([](Module &m) {
                   named(m.Classes, "Box<int>").VTable[0].Target.clear();
                 }),
@@ -1628,7 +1628,7 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
                 "CODE");
   expectNotUsed("target", rename("Line.extra", "Line.extrb"),
                 "has an IFACE section that does not match its CODE: class "
-                "'Line': slot 5 ('extra') of its vtable names '@Line.extrb' "
+                "'Line': slot 6 ('extra') of its vtable names '@Line.extrb' "
                 "in CODE, which is not the class's or an ancestor's method "
                 "'extra'");
   expectNotUsed("init", rename("Line.__init__", "Line.__inix__"),
@@ -2368,8 +2368,9 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
     auto code = paykan(std::string("pkm dump --section=code ") + file);
     ASSERT_EQ(code.exitCode, 0) << code.out;
     EXPECT_TRUE(contains(code.out, "shared fn @Pair<Str>.both(")) << code.out;
-    EXPECT_TRUE(contains(code.out, " [3] (lent %x.6)\n")) << code.out;
-    EXPECT_TRUE(contains(code.out, " [3] (lent %x.9)\n")) << code.out;
+    // Slot 4: after destroy, toString, equals and the prototype's walk.
+    EXPECT_TRUE(contains(code.out, " [4] (lent %x.6)\n")) << code.out;
+    EXPECT_TRUE(contains(code.out, " [4] (lent %x.9)\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain %x.6\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain nonnull %x.6\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain lend")) << code.out;

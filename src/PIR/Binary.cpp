@@ -362,6 +362,22 @@ private:
         E.block(w.CondBlock.get());
         E.operand(w.Cond);
         E.block(w.Body.get());
+        // The `parallel` annotation (the concurrency prototype): the
+        // counter, the trip count, the privates, the reductions.
+        E.W.u8(w.Parallel ? 1 : 0);
+        if (w.Parallel) {
+          const Parallel &p = *w.Parallel;
+          E.W.uleb(p.Counter);
+          E.operand(p.Count);
+          E.W.uleb(p.Privates.size());
+          for (LocalId l : p.Privates)
+            E.W.uleb(l);
+          E.W.uleb(p.Reductions.size());
+          for (const Parallel::Reduction &r : p.Reductions) {
+            E.W.uleb(r.Partial);
+            E.W.u8(opcodeEntry(r.Op).Code);
+          }
+        }
       }
       void operator()(const Break &) const { E.W.u8(kStBreak); }
       void operator()(const Continue &) const { E.W.u8(kStContinue); }
@@ -913,6 +929,33 @@ private:
       While w;
       if (!subBlock(w.CondBlock) || !operand(w.Cond) || !subBlock(w.Body))
         return false;
+      uint8_t parallel;
+      if (!flag(parallel))
+        return false;
+      if (parallel) {
+        Parallel p;
+        uint32_t n;
+        if (!R.uleb32(p.Counter) || !operand(p.Count) || !R.uleb32(n))
+          return false;
+        for (uint32_t i = 0; i < n; ++i) {
+          LocalId l;
+          if (!R.uleb32(l))
+            return false;
+          p.Privates.push_back(l);
+        }
+        if (!R.uleb32(n))
+          return false;
+        for (uint32_t i = 0; i < n; ++i) {
+          Parallel::Reduction r;
+          uint8_t code;
+          if (!R.uleb32(r.Partial) || !R.u8(code))
+            return false;
+          if (!opcodeFromCode(code, r.Op))
+            return R.fail("reserved opcode in a reduction");
+          p.Reductions.push_back(r);
+        }
+        w.Parallel = std::move(p);
+      }
       s = std::move(w);
       return true;
     }

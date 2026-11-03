@@ -502,6 +502,17 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
   return ok;
 }
 
+bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
+                                const std::string &what,
+                                ast::SourceLocation loc) {
+  if (mode == ast::ParamMode::View && q.isConst()) {
+    error(loc, what + " is 'view const': a 'view' already means the object "
+                      "does not change through it; drop 'const'");
+    return false;
+  }
+  return true;
+}
+
 bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
                                  const std::vector<ast::Qualifier> &quals,
                                  const std::vector<ast::Expr *> &args,
@@ -530,15 +541,6 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
             "'" + text + "' is a '" + qualifiedName(q, ty) + "'; 'inout' " +
                 "parameter '" + modes.name(i) + "' of '" + callee +
                 "' takes exactly a '" + qualifiedName(pq, ty) + "'");
-      ok = false;
-    } else if (modes.mode(i) == ast::ParamMode::View && pq.isConst() &&
-               !q.isUnique() && !q.isConst()) {
-      error(args[i]->getLocation(),
-            "'" + text + "' is a '" + qualifiedName(q, ty) +
-                "'; 'view const' parameter '" + modes.name(i) + "' of '" +
-                callee +
-                "' takes an object that never changes: a 'const', 'shared "
-                "const' or 'atomic const' one (a unique one converts)");
       ok = false;
     }
   }

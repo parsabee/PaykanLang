@@ -13,7 +13,7 @@ fn main() -> int {
     let r = await p;                    // error: await in a lock block
     lock counts as d: inout { }         // error: nested lock
   }
-  n = 3;
+  let n = 3;
   lock n as m: inout { }                // error: not locked
   let k: locked int = 1;                // error: the prototype locks objects
   return 0;

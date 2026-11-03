@@ -1450,7 +1450,8 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
   index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode,
   57 a `retain nonnull`'s opcode (after a 56 when it is both); a record
   without one reads as before the mark existed, unmarked.  `owned`
-  is opcode 54, and `and`, `or`, `xor`, `shl` and `shr` are 58 to 62.
+  is opcode 54, `and`, `or`, `xor`, `shl` and `shr` are 58 to 62, and
+  `async_call` and `await` (the concurrency prototype) 63 and 64.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
   (`index`, `encodeSymbolIndex`) lists every record with its offset, length

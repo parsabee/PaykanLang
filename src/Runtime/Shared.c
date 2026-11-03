@@ -26,34 +26,44 @@
 //
 // A weak load therefore gives an object only while `strong` is above zero:
 // never one that is dying, pending or destroyed.  Both counts are 32 bits
-// (Runtime.h, PaykanObject); one more reference than PAYKAN_REF_MAX panics
-// instead of wrapping to a count that would free a live object.
+// (Runtime.h, PaykanObject); one more reference than the limit panics
+// instead of wrapping to a count that would free a live object.  The limit
+// is PAYKAN_REF_MAX - 1 for a strong count: PAYKAN_REF_MAX itself marks an
+// immortal object (below), and PAYKAN_REF_MAX for a weak count.
 
 enum { kDying = -1, kPending = -2 };
 
-PAYKAN_NORETURN static void count_overflow(const char *kind) {
+PAYKAN_NORETURN static void count_overflow(const char *kind, int limit) {
   Paykan_runtime_panic("too many %s references to one object (the limit is "
                        "%d)",
-                       kind, (int)PAYKAN_REF_MAX);
+                       kind, limit);
 }
 
 // -- Strong references
 
 // An object whose strong count is PAYKAN_REF_MAX is immortal (the
-// concurrency prototype's atomic cells, Atomic.c): nothing counts it, so a
-// handle to it crosses threads with no atomic count.  (Before the
-// prototype that count was an overflow, which the retain reported; the
-// retain that reaches it now leaves the object immortal instead.)
+// concurrency prototype's cells and frozen objects, Atomic.c, Locked.c,
+// Object.c): nothing counts it, so a handle to it crosses threads with no
+// atomic count.  A counted object's limit is one below: the reference that
+// would reach the sentinel is the overflow.
+
+static inline void strong_retain(PaykanObject *obj) {
+  if (obj->strong != PAYKAN_REF_MAX) {
+    if (PAYKAN_UNLIKELY(obj->strong == PAYKAN_REF_MAX - 1))
+      count_overflow("strong", PAYKAN_REF_MAX - 1);
+    ++obj->strong;
+  }
+}
 
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
-  if (obj && obj->strong != PAYKAN_REF_MAX)
-    ++obj->strong;
+  if (obj)
+    strong_retain(obj);
   return obj;
 }
 
 void Paykan_retain(PaykanShared *shared) {
-  if (shared && shared->strong != PAYKAN_REF_MAX)
-    ++shared->strong;
+  if (shared)
+    strong_retain(shared);
 }
 
 PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
@@ -172,7 +182,7 @@ void Paykan_dispose(PaykanObject *obj) {
 PaykanWeak *Paykan_weak_new(PaykanShared *shared) {
   if (shared) {
     if (PAYKAN_UNLIKELY(shared->weak == PAYKAN_REF_MAX))
-      count_overflow("weak");
+      count_overflow("weak", PAYKAN_REF_MAX);
     ++shared->weak;
   }
   return shared;
@@ -180,9 +190,7 @@ PaykanWeak *Paykan_weak_new(PaykanShared *shared) {
 
 PaykanShared *Paykan_weak_load(PaykanWeak *weak) {
   if (weak && weak->strong > 0) {
-    if (PAYKAN_UNLIKELY(weak->strong == PAYKAN_REF_MAX))
-      count_overflow("strong");
-    ++weak->strong;
+    strong_retain(weak);
     return weak;
   }
   return (PaykanShared *)0;

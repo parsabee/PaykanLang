@@ -59,9 +59,9 @@ fn main() -> int {
 
   // A tuple: read in place, replaced whole.
   pair = memory::Box((1, "one"));
-  shared = pair;
+  pairAlias = pair;
   io::println(Str(pair.get().0) + pair.get().1);
-  p: inout (int, Str) = shared.get();
+  p: inout (int, Str) = pairAlias.get();
   p = (2, "two");
   io::println(Str(pair.get().0) + pair.get().1);
   kept = pair.get();

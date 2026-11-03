@@ -90,9 +90,10 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::Xor, 60, "xor"},
     {Opcode::Shl, 61, "shl"},
     {Opcode::Shr, 62, "shr"},
+    // The concurrency prototype.
     {Opcode::AsyncCall, 63, "async_call"},
     {Opcode::Await, 64, "await"},
-    // 63-255 reserved.
+    // 65-255 reserved.
 };
 
 struct TypeEntry {

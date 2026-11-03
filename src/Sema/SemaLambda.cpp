@@ -183,6 +183,13 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     SliceAllowed = p.Mode != ast::ParamMode::Value;
     auto *pty =
         resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
+    // The prototype's qualifiers: taken here too, as a function's are.
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
+                                p.Loc))
+        ok = false;
+      p.Qual = q;
+    }
     if (pty)
       p.ParamType = pty;
     else
@@ -198,6 +205,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "the lambda's result");
+    (void)takeQualifier(); // a lambda's result carries none (the prototype)
     if (!retTy)
       return nullptr;
     node->setReturnType(retTy);

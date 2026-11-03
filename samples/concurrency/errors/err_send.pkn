@@ -17,7 +17,8 @@ async fn give() -> shared Job { return Job("x", Cache(0)); }   // error: result 
 
 fn twice<T: Copyable>(x: T) -> (T, T) { return (x, x); }
 fn grow(n: inout Job) { }
-fn show(n: view const Job) -> int { return n.name.len(); }
+fn show(n: view Job) -> int { return n.name.len(); }
+fn peek(n: view const Job) -> int { return n.name.len(); }   // error: a view is read-only already
 
 fn main() -> int {
   let j = Job("j", Cache(0));
@@ -31,7 +32,7 @@ fn main() -> int {
   let k: atomic const Holder = Holder(Job("k", Cache(2)));   // error: cannot freeze: field 'job.cache' is shared
   let s: shared Job = Job("s", Cache(3));
   grow(s);                              // error: inout takes exactly a 'Job'
-  show(s);                              // error: view const takes an object that never changes
+  show(s);                              // fine: a view takes every form
   let d = twice(Named("d", 2));         // error: 'Named' is not Copyable
   return 0;
 }

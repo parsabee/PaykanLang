@@ -44,8 +44,8 @@ class P {
   errno: int;
   stdout: Str;
   vtable: int;
-  shared: int;
-  view fn EOF() -> int { return self.errno + self.vtable + self.shared; }
+  strong: int;
+  view fn EOF() -> int { return self.errno + self.vtable + self.strong; }
 }
 
 impl P {
@@ -53,7 +53,7 @@ impl P {
     self.errno = e;
     self.stdout = "s";
     self.vtable = 1;
-    self.shared = 2;
+    self.strong = 2;
   }
 }
 fn P_vtable() -> int {

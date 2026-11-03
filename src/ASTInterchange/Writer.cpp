@@ -260,6 +260,10 @@ private:
       sym(d.isView() ? "view" : "static");
       close();
     }
+    if (d.isAsync()) { // the concurrency prototype
+      open("async");
+      close();
+    }
     if (d.hasInferredResult()) {
       open("inferred");
       close();
@@ -467,6 +471,10 @@ private:
       stmt(f->getBody());
       if (f->isInclusive()) {
         open("inclusive");
+        close();
+      }
+      if (f->isParallel()) { // the concurrency prototype
+        open("parallel");
         close();
       }
       close();

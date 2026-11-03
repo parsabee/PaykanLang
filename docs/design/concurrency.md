@@ -134,7 +134,7 @@ forStmt        ::= "parallel"? "for" ...                -- as today after "for"
   `locked Node?`; `atomic const Node[3]`, one boxed array), except that
   `atomic const` leaves a trailing `?` outside: `atomic const Str?` is an
   optional reference (proposed; owner may change).  A mode comes first
-  (`n: view const Node`).
+  (`n: inout shared Node`).
 * `x: shared = e;` and `let x: const = e;` infer the type, as a borrow
   declaration does (docs/grammar.md:385) (decision 36 for `const`; proposed;
   owner may change).  There is no `const x = e;` (decision 36).  A receiver
@@ -145,7 +145,7 @@ forStmt        ::= "parallel"? "for" ...                -- as today after "for"
 * Recovery (docs/grammar.md:672-678) adds `async fn`, `shared fn` and
   `shared view fn` to the member and top-level points; `lock` and `parallel
   for` recover like other statements.
-* The transfer is spelled `move`; there is no `mov` keyword.
+* The transfer is spelled `move`.
 * `shared int` is `'shared' qualifies a reference; 'int' is a value`, and
   `const int` is `'const' applies to objects; 'int' is a value, which 'let'
   fixes` (decision 36).  A type takes one qualifier: the parser reads a run
@@ -295,9 +295,9 @@ change):
   whole (proposed; owner may change).
 * **Borrows.**  A `view` parameter accepts a `const` argument and an
   `inout` one does not (decision 36); `inout const T` takes a `const T`
-  slot, which the callee may refill but not change.  `view const T` takes
-  only the `const` forms, so its body knows the object never changes
-  (proposed; owner may change).
+  slot, which the callee may refill but not change.  `view const T` is an
+  error: a `view` already means the object does not change through it
+  (owner, 2026-11-02).
 * **Crossing.**  `const T` crosses by `move` when its parts can; `shared
   const` never crosses.  No `const` value holds a `task::Task`: it could
   never be awaited, joined, cancelled or detached (proposed; owner may
@@ -334,7 +334,6 @@ change).
 | `n: shared Node`, `n: shared const Node` | `s` (a copy), `move s`, or `move a` (converts) | a new shared reference |
 | `n: atomic const Node`, and `atomic`, `locked` | `h` (a copy), `move h`, or `move a` (converts) | another handle |
 | `n: view Node` | `a` in any form, or a temporary | a borrow, never counted |
-| `n: view const Node` | a `const`, `shared const` or `atomic const` `a` | a borrow of an object that never changes |
 | `n: inout Node` | `a`, of exactly `Node` | the caller's storage |
 
 ```pkn
@@ -1555,8 +1554,8 @@ programs need `shared` as well as `move`.
 
 **Two settled decisions are reversed:**
 
-* **`move` returns.**  v0.2.0 removed `mov` and inferred every transfer
-  (#145; docs/language/16-memory.md:371-414, 472-480).  Now a transfer of a
+* **Transfers are explicit.**  v0.2.0 inferred every transfer (#145;
+  docs/language/16-memory.md:371-414, 472-480).  Now a transfer of a
   unique value is written `move x`, and a plain `b = a` is an error; inferred
   moves stay only as an optimisation.
 * **An unmarked container is no longer "copies are the same container".**
@@ -1682,10 +1681,10 @@ themselves.
    borrowed arrays and slices, and `atomic`, `atomic const`, `locked` and
    channel locals and parameters, which count nothing (decision 33's
    locals; the rest proposed); no `const` or `shared const` value
-   (question 106).
+   (question 105).
 2. **What may `locked` and `atomic const` hold?**  Answered by decisions 33
    and 37's proposals: any `T` that passes the send check; no `const` form
-   holds a `task::Task` (question 101).
+   holds a `task::Task` (question 100).
 3. **Is `self` borrowed?**  Yes; through the `const` forms only `view fn`s
    (decisions 36, 37).  `shared fn` (23) departs from this default.
 4. **Which atomic types are there?**  **Answered by decision 37.**  Numbers,
@@ -1699,261 +1698,260 @@ themselves.
 
 8. **May a declaration name only the qualifier?**  **Answered by decision
    36.**  Yes: `let x: const = e;`, and `x: shared = e;` likewise.
-9. **Is `mov` still reserved?**  One release, its message naming `move`.
-10. **Is `move` before a temporary accepted?**  Yes, as decision 23 writes
+9. **Is `move` before a temporary accepted?**  Yes, as decision 23 writes
     it; the alternative is an error.
-11. **May `move` end a Copyable value?**  Yes, so generic code can write
+10. **May `move` end a Copyable value?**  Yes, so generic code can write
     `move v`.
-12. **Does an assignment revive a moved variable?**  Yes, a non-`let` one.
-13. **Is there a partial move?**  Only a payload field of an owned variant
+11. **Does an assignment revive a moved variable?**  Yes, a non-`let` one.
+12. **Is there a partial move?**  Only a payload field of an owned variant
     binding, to empty a `Result`.
-14. **Which qualifiers do borrows take?**  **Answered by decision 36.**
+13. **Which qualifiers do borrows take?**  **Answered by decision 36.**
     `view` every form, `const` ones included, `inout` only its exact form;
-    `view const T` the `const` forms (proposed).
-15. **May a plain binding copy a unique place?**  No; a temporary subject is
+    `view const T` is an error, a `view` being read-only already.
+14. **May a plain binding copy a unique place?**  No; a temporary subject is
     owned by its binding.
-16. **What qualifier does a downcast binding have?**  Its subject's; writing
+15. **What qualifier does a downcast binding have?**  Its subject's; writing
     it is optional, so `m: Str` in stdlib/error.pkn still reads.
-17. **How are send paths named?**  Dotted fields, elements by type.
-18. **How are subclasses in other modules checked?**  By a flag fixed in the
+16. **How are send paths named?**  Dotted fields, elements by type.
+17. **How are subclasses in other modules checked?**  By a flag fixed in the
     class's module; the alternative is a whole-program check at link.
-19. **Is the move-out check worth its loads?**  Yes: without it a held
+18. **Is the move-out check worth its loads?**  Yes: without it a held
     unique object crosses threads.  A walk at each crossing point instead
     has no single point for stores inside a `lock` block.  It walks every
-    type (question 91).
-20. **How do qualified `T`s substitute?**  A qualifier on `T` joins `T`'s
+    type (question 90).
+19. **How do qualified `T`s substitute?**  A qualifier on `T` joins `T`'s
     own: `const T` with `shared Node` is `shared const Node`, and on a plain
     value is the value; a join that is no qualifier is an error; `atomic T`
     and `locked T` take none.  The alternative forbids qualified arguments
     to qualified parameters.
-21. **How are missing `Copyable` bounds found?**  The archetype check; the
+20. **How are missing `Copyable` bounds found?**  The archetype check; the
     fallback is CI instantiating every stdlib template with unique and
     shared classes.
-22. **Where do copying methods live?**  In conditional `impl` blocks, as
+21. **Where do copying methods live?**  In conditional `impl` blocks, as
     methods have no bounds.
-23. **How does a method keep a counted `self`?**  `shared fn` or `shared
+22. **How does a method keep a counted `self`?**  `shared fn` or `shared
     view fn`; the alternative is a free function taking `shared Node`.
-24. **How does `equals` take its operand?**  `view Obj`; a native's plain
+23. **How does `equals` take its operand?**  `view Obj`; a native's plain
     reference parameter owns its argument.
-25. **Are the containers classes?**  Yes, with `Buffer`; Stack and Queue on
+24. **Are the containers classes?**  Yes, with `Buffer`; Stack and Queue on
     a Buffer; LinkedList uncrossable.
-26. **What does `Str(s)` of a `Str` do?**  Copies; the alternative keeps the
+25. **What does `Str(s)` of a `Str` do?**  Copies; the alternative keeps the
     identity with the argument's qualifier.
-27. **What is `err::Error.msg`?**  **Answered by decision 37.**  `atomic
+26. **What is `err::Error.msg`?**  **Answered by decision 37.**  `atomic
     const Str?`, so errors cross.
-28. **How does a native return an alias?**  A `shared` or borrowed result,
+27. **How does a native return an alias?**  A `shared` or borrowed result,
     only the latter aliasing a `view` argument, or a runtime object that
     locks itself, as Stdin.
-29. **Are function values unique?**  Yes, as types cannot show captures;
-    callbacks `view`; none crosses threads (question 87).
-30. **Can a lambda pass its `move` capture on?**  No, each call borrows it.
+28. **Are function values unique?**  Yes, as types cannot show captures;
+    callbacks `view`; none crosses threads (question 86).
+29. **Can a lambda pass its `move` capture on?**  No, each call borrows it.
     The alternative, a once-callable lambda with a run-time check, could.
-31. **Can a lambda capture `self`?**  Only in a `shared fn`, reversing
+30. **Can a lambda capture `self`?**  Only in a `shared fn`, reversing
     docs/design/function-types.md:89-94.
-32. **Is `f(move a)` to a `view` parameter allowed?**  Yes; the value drops
+31. **Is `f(move a)` to a `view` parameter allowed?**  Yes; the value drops
     after the call.
 
 **Tasks.**
 
-33. **Is `spawn` a function or a keyword?**  A compiler-known function taking
+32. **Is `spawn` a function or a keyword?**  A compiler-known function taking
     an async call in place.
-34. **What may a spawned function return?**  `Result` or `Error`, so a
+33. **What may a spawned function return?**  `Result` or `Error`, so a
     cancelled wait is a value.
-35. **What does `task::newLoop` return?**  A `res::Result`, since making a
+34. **What does `task::newLoop` return?**  A `res::Result`, since making a
     thread can fail; the thread runs until exit.
-36. **What may a task handle be?**  Unique, by value, with `t.isDone()`.
-37. **Does `cancel()` spend a task handle?**  No; it decides it, and
+35. **What may a task handle be?**  Unique, by value, with `t.isDone()`.
+36. **Does `cancel()` spend a task handle?**  No; it decides it, and
     dropping it then detaches.
-38. **May a task handle live in a field or container?**  Yes, checked at
+37. **May a task handle live in a field or container?**  Yes, checked at
     drop and reported at exit.  This softens decision 7's compile error;
     forbidding `task::Task` outside locals, parameters and results keeps it
     at compile time but rules out a list of workers.
-39. **Is a joining call a scheduling point?**  Yes, since `join` runs the
+38. **Is a joining call a scheduling point?**  Yes, since `join` runs the
     loop.
-40. **How is `join` through an indirect call caught?**  By a run-time panic.
-41. **Should a task detached in an ordinary `main` warn?**  Yes: it runs only
+39. **How is `join` through an indirect call caught?**  By a run-time panic.
+40. **Should a task detached in an ordinary `main` warn?**  Yes: it runs only
     while `main` joins.
-42. **Which borrows may cross a wait?**  `inout` of owned storage; a `view`
+41. **Which borrows may cross a wait?**  `inout` of owned storage; a `view`
     argument elsewhere is snapshotted when Copyable.  The alternative is an
     error.
-43. **Are detached results dropped silently?**  Yes.
-44. **Where does `Cancelled` go?**  After `OutOfRange`.
-45. **What do the new modules hold?**  `::task` task handles and loops,
+42. **Are detached results dropped silently?**  Yes.
+43. **Where does `Cancelled` go?**  After `OutOfRange`.
+44. **What do the new modules hold?**  `::task` task handles and loops,
     `::time` `sleep(ms: int)`, `::sync` channels and `take`, `::fs` files; a
     `time::Duration` can come later.
-46. **Can cleanup wait after a cancel?**  Not in v0.4: the flag is sticky,
+45. **Can cleanup wait after a cancel?**  Not in v0.4: the flag is sticky,
     with no shield; `cancelAfter` gives `TimedOut`, with no timeout
     combinator.
-47. **Does a cancelled wait yield?**  Once, so its loop is not starved.
-48. **What does a cancelled joiner do?**  Cancels the task it awaits.
-49. **Where do orphaned children go?**  To the grandparent.
-50. **Is a running `parallel` loop interrupted?**  No.
-51. **Should blocking I/O in async code warn?**  Yes: it is no cancellation
+46. **Does a cancelled wait yield?**  Once, so its loop is not starved.
+47. **What does a cancelled joiner do?**  Cancels the task it awaits.
+48. **Where do orphaned children go?**  To the grandparent.
+49. **Is a running `parallel` loop interrupted?**  No.
+50. **Should blocking I/O in async code warn?**  Yes: it is no cancellation
     point.
-52. **Where does exit run?**  `Paykan_tasks_finish` in every `@main`; the
+51. **Where does exit run?**  `Paykan_tasks_finish` in every `@main`; the
     alternative is the entry points only.
-53. **Are busy file helpers awaited at exit?**  No; operations own their
+52. **Are busy file helpers awaited at exit?**  No; operations own their
     descriptors.
-54. **Is waiting for one's own task handle caught?**  By a run-time panic.
-55. **What may an async function be?**  Not a value, lambda or `__init__`,
+53. **Is waiting for one's own task handle caught?**  By a run-time panic.
+54. **What may an async function be?**  Not a value, lambda or `__init__`,
     no borrowed result; a `native async fn` returns an operation object.
-56. **How are frames polled?**  From the root, with striped task locks.
-57. **Where does the split run?**  Before the code passes; frames hold what
+55. **How are frames polled?**  From the root, with striped task locks.
+56. **Where does the split run?**  Before the code passes; frames hold what
     is live at an await.
 
 **Communicating and `parallel`.**
 
-58. **What does `Channel<T>` require?**  A crossable `T`, as every channel
+57. **What does `Channel<T>` require?**  A crossable `T`, as every channel
     is a cross-thread handle (decision 33); it always locks inside.
-59. **Which channel errors?**  `BrokenPipe`, `EndOfFile`; a failed send
+58. **Which channel errors?**  `BrokenPipe`, `EndOfFile`; a failed send
     drops its value; `tryRecv`, `trySend(slot)`.
-60. **Do `view` lock blocks share the lock?**  No, one mutex for both modes.
+59. **Do `view` lock blocks share the lock?**  No, one mutex for both modes.
     A reader-writer lock can come later, once `view` lock bodies take no
     counts on the contents, holds included.
-61. **What may a lock block call?**  Resolvable functions without Waits;
+60. **What may a lock block call?**  Resolvable functions without Waits;
     native callbacks meet a run-time backstop.
-62. **Is deadlock impossible?**  Through `lock`, `join` and `parallel`, not
+61. **Is deadlock impossible?**  Through `lock`, `join` and `parallel`, not
     through task handles, channels or spins; this scopes decision 29's
     wording, not its rules.
-63. **Which atomic operations are there?**  Answered by decision 33's
-    proposal: the operators, `exchange` and `compareExchange` (question 96).
-64. **How are chunks cut?**  `K(n) = min(n, 256)`, free to change before
+62. **Which atomic operations are there?**  Answered by decision 33's
+    proposal: the operators, `exchange` and `compareExchange` (question 95).
+63. **How are chunks cut?**  `K(n) = min(n, 256)`, free to change before
     1.0.
-65. **What if written borrows overlap?**  Chunks run in order; the
+64. **What if written borrows overlap?**  Chunks run in order; the
     alternative is a panic.
-66. **Which reductions?**  Five forms and the four comparisons; bitwise ones
+65. **Which reductions?**  Five forms and the four comparisons; bitwise ones
     could join.
-67. **Which nested writes pass?**  Every enclosing `parallel` variable a
+66. **Which nested writes pass?**  Every enclosing `parallel` variable a
     whole subscript.
-68. **May a body write unique elements at its index?**  Not in v0.4.
-69. **Are `..=` and `step` allowed?**  Yes.
-70. **Is packed element storage in v0.4?**  No: decision 13 says "possibly";
+67. **May a body write unique elements at its index?**  Not in v0.4.
+68. **Are `..=` and `step` allowed?**  Yes.
+69. **Is packed element storage in v0.4?**  No: decision 13 says "possibly";
     it comes with tensors.
 
 **Runtime.**
 
-71. **How are counts atomic in C?**  Runtime functions behind a target
+70. **How are counts atomic in C?**  Runtime functions behind a target
     assumption, for handles (`atomic const` objects included) and task
     records only; the alternative,
     `_Atomic int32_t` in the header, is to measure.  The sentinels are
     `INT32_MAX` (immortal) and one below (frozen), refining decision 33's one
     immortal value.  Cells are runtime calls, with no new PIR op.
-72. **How many threads, how much stack?**  `PAYKAN_THREADS`; 8-64 MiB.
-73. **What does the libm wording promise?**  No machine dependence beyond
+71. **How many threads, how much stack?**  `PAYKAN_THREADS`; 8-64 MiB.
+72. **What does the libm wording promise?**  No machine dependence beyond
     libm's.
-74. **How do async files work?**  Four helpers; io_uring later.
-75. **Are summaries `Attrs`?**  No, flag bits.
-76. **Does TSan block merges?**  Not until green.
+73. **How do async files work?**  Four helpers; io_uring later.
+74. **Are summaries `Attrs`?**  No, flag bits.
+75. **Does TSan block merges?**  Not until green.
 
 **Migration and staging.**
 
-77. **Does `paykan migrate` write?**  Yes, as decision 26 says; `--check` and
+76. **Does `paykan migrate` write?**  Yes, as decision 26 says; `--check` and
     `--diff` are proposed.
-78. **Is the legacy mode the default until the flip?**  Yes.
-79. **In what order?**  Runtime and front end; the send check, generics,
+77. **Is the legacy mode the default until the flip?**  Yes.
+78. **In what order?**  Runtime and front end; the send check, generics,
     `const` and cells; migration; `parallel for`; async; channels.
-80. **Is v0.4 about 37 chunks?**  Yes, decisions 36 and 37 adding about
+79. **Is v0.4 about 37 chunks?**  Yes, decisions 36 and 37 adding about
     1.5.  TSan for LLVM and the JIT, the count savings and the `const` reads
     (about 1.5 chunks) can move to v0.5 without reversing a decision;
     moving async files would reverse decision 27.
 
 **Added by decisions 33-35.**
 
-81. **Do `atomic` and `locked` cover the whole type?**  Yes; `atomic
+80. **Do `atomic` and `locked` cover the whole type?**  Yes; `atomic
     int[1024]` is one cell, read by element.  `atomic const` does too, but
     leaves a trailing `?` outside, so `atomic const Str?` is an optional
     reference.  A type takes one qualifier; a class holding a handle can be
     `locked`.
-82. **May `atomic` hold a reference?**  **Answered by decision 37.**  No: a
+81. **May `atomic` hold a reference?**  **Answered by decision 37.**  No: a
     value replaced now and then is an `atomic const` field of a `locked`
     holder; lock-free reference slots can come later.
-83. **What does an `atomic` operand mean?**  The handle where one is bound,
+82. **What does an `atomic` operand mean?**  The handle where one is bound,
     else a load; a later `=` stores, so an `atomic` variable is never
     rebound, while `locked` and `atomic const` ones are.
-84. **What if `sync::take` gets a handle that is not the last?**  It
+83. **What if `sync::take` gets a handle that is not the last?**  It
     releases it and returns `Err(Busy)`; one acquire-release subtract
     decides.  The alternative hands the handle back in the error, for a
     retry.
-85. **What does freezing cost, and when does it panic?**  A load and a store
+84. **What does freezing cost, and when does it panic?**  A load and a store
     per object inside, at the conversion and at the free, on whichever
     thread drops the last reference; it panics only on a held object.  One vtable walk slot
     and one walker serve the move-out check, the freeze and the thaw.
-86. **What does an error message cost?**  Its string, counted atomically,
+85. **What does an error message cost?**  Its string, counted atomically,
     with nothing inside to freeze and no cell; `err::none()` makes none.
-87. **Which function values cross threads?**  None in v0.4; an `atomic
+86. **Which function values cross threads?**  None in v0.4; an `atomic
     const` lambda written in place could come later.
-88. **Will `parallel` apply to other statements?**  Not in v0.4; perhaps
+87. **Will `parallel` apply to other statements?**  Not in v0.4; perhaps
     with the dataflow layer.
-89. **Does `atomic const` take a value type?**  **Answered by decision
+88. **Does `atomic const` take a value type?**  **Answered by decision
     37.**  A struct, tuple or fixed array, boxed automatically; Copyable
     ones too, so a large table is shared without a copy (proposed); a
     number, `bool` or `char` is an error.
-90. **How do holds keep frozen objects alive?**  By holding the handle their
+89. **How do holds keep frozen objects alive?**  By holding the handle their
     path passes through, unless an owned local, a `const` region or a
     `parallel` body's parent holds it.
 
 **Added in review.**
 
-91. **Does the move-out check walk uncrossable values?**  Yes, every value
+90. **Does the move-out check walk uncrossable values?**  Yes, every value
     moved out of borrowed storage, as a crossable part may leave later
     through an owned path; a native with an `inout` parameter and a
     move-only result is MovesOut.  A pop of a held element panics on one
     thread too.
-92. **Does a type arm count its binding?**  Not over a borrowed subject,
+91. **Does a type arm count its binding?**  Not over a borrowed subject,
     which it borrows; otherwise by type, a handle atomically.  `box` and the
     weak entries test the sentinels.
-93. **May a `sync::Channel` or `task::Loop` become an `Obj`?**  No: both
+92. **May a `sync::Channel` or `task::Loop` become an `Obj`?**  No: both
     are final and convert only to themselves; a `view Obj` may borrow one.
-94. **May an atomic's value be lent?**  Never by address, and an element is
+93. **May an atomic's value be lent?**  Never by address, and an element is
     never a handle; a scalar `view` argument loads.
-95. **What does `=` do on an atomic in a template or a struct copy?**  It
+94. **What does `=` do on an atomic in a template or a struct copy?**  It
     rebinds the handle, as the Buffer natives do; it stores only on a place
     typed `atomic` outside templates.  The alternative forbids `atomic` type
     arguments and struct fields in v0.4.
-96. **What does `compareExchange` return?**  A `bool`, writing the value
+95. **What does `compareExchange` return?**  A `bool`, writing the value
     found into an `inout` `expected` and comparing bits; the alternative
     restricts it to integers, `bool` and `char`.
-97. **Which atomic updates are errors?**  A read of the place on the right
+96. **Which atomic updates are errors?**  A read of the place on the right
     of its own `=`, and `*=`, `/=`, `%=` and the shifts.
-98. **What may a `parallel` body do with an outer handle?**  Use it without
+97. **What may a `parallel` body do with an outer handle?**  Use it without
     holds, never assign, move or lend it `inout`; an outer `atomic` is never
     a reduction, and an atomic float sum is not reproducible.
-99. **How do handle cycles end?**  They leak until a field is cleared;
+98. **How do handle cycles end?**  They leak until a field is cleared;
     `--track-heap` reports live cells at exit.
-100. **How is a task record counted?**  Atomically, by its task handle and
+99. **How is a task record counted?**  Atomically, by its task handle and
      its frame; no code holds two stripes at once.
-101. **May an `atomic const` hold a `task::Task`?**  No, nor may any
+100. **May an `atomic const` hold a `task::Task`?**  No, nor may any
      `const` value: it could never be decided; `locked` may hold one.
 
 **Added by decisions 36 and 37.**
 
-102. **May an `atomic const` become an `Obj`?**  Only an `atomic const
+101. **May an `atomic const` become an `Obj`?**  Only an `atomic const
      Obj`: an upcast keeps the qualifier, as a plain `Obj` would be counted
      plainly.  The alternative refuses the upcast.
-103. **May a weak reference refer to a `shared const`?**  Yes: it is a
+102. **May a weak reference refer to a `shared const`?**  Yes: it is a
      `shared` object on one thread, and a cycle can pass through its
      `shared` references; a load gives `shared const T?`.  Decision 37
      names only `shared`.
-104. **Are `shared` references inside a `const T` usable?**  Yes, as in a
+103. **Are `shared` references inside a `const T` usable?**  Yes, as in a
      `shared const T`, which decision 36 names: the reference is fixed, its
      object may change.  The alternative makes them read-only.
-105. **Where do reads skip holds?**  Only inside a `const` region: fields of
+104. **Where do reads skip holds?**  Only inside a `const` region: fields of
      the `const` objects, of what they own and of the `const` objects their
      references name; not past a `shared` or weak reference or into a cell.
-     A `view T` callee keeps its holds; a `view const T` one skips them.
-106. **May a `parallel` body read a `const` or `shared const` value?**  No:
+     A `view T` callee keeps its holds.
+105. **May a `parallel` body read a `const` or `shared const` value?**  No:
      a `view` callee holds plainly under it; it is made `atomic const`.  The
      alternative allows field reads with no calls.
-107. **What is `const` on a struct?**  Its references become `const` and
+106. **What is `const` on a struct?**  Its references become `const` and
      the value read only; a non-`let` variable is still assigned whole.  The
      alternative leaves its value fields assignable.
-108. **Can a `shared view fn` be called through `shared const`?**  No: its
+107. **Can a `shared view fn` be called through `shared const`?**  No: its
      `self` could be stored as a `shared` reference and written through.
      The alternative is a `shared const fn` receiver.
-109. **Is the count on the object slower than a cell?**  Not for reads,
+108. **Is the count on the object slower than a cell?**  Not for reads,
      which save a load; frequent cross-thread copies share a cache line
      with the object's first fields, measured with the benchmarks.
-110. **Can a function value be `const`?**  No, and one reached through a
+109. **Can a function value be `const`?**  No, and one reached through a
      `const` root is not called: a call may change what its captures own.
      Callbacks there are `shared`.
 
@@ -1978,7 +1976,6 @@ Errors unless marked.  `12:9` stands for a source position.
 | `move` of a borrow | `cannot move 'n': it is a 'view' parameter, a borrow` (`an 'inout' parameter`, `a 'view' local`) |
 | `move` of a weak | `cannot move 'w': a 'weak' variable holds no strong reference` |
 | move while borrowed | `'l' is borrowed by 'view' local 'x' until 'x' is last used; it cannot be moved` |
-| `mov` | `'mov' is spelled 'move' since v0.4` |
 | qualified value | `'shared' qualifies a reference; 'int' is a value` |
 | two qualifiers | `a type takes one qualifier: 'locked atomic const Config'`; `write 'shared const', not 'const shared'` |
 | `locked view` | `there is no 'locked view': read 'x' in 'lock x as v: view { }'` |

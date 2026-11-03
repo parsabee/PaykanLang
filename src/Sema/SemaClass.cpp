@@ -855,8 +855,13 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     if (!retTy || !checkFixedResult(retTy, method->getResultMode(),
                                     method->getLocation()))
       return nullptr;
-    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, method->getResultMode(),
+                                "the result of '" + method->getName() + "'",
+                                method->getLocation()))
+        return nullptr;
       method->setResultQual(q);
+    }
     method->setReturnType(retTy);
   }
   // Resolve parameter types.
@@ -885,8 +890,12 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                      method->getName(), "' in '", className, "'"}));
     if (!pty)
       return nullptr;
-    if (ast::Qualifier q = takeQualifier(); !q.isUnique())
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
+                                p.Loc))
+        return nullptr;
       p.Qual = q;
+    }
     p.ParamType = pty;
     paramTys.push_back(pty);
   }

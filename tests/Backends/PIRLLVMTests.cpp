@@ -843,17 +843,21 @@ fn @main() -> i64 {
 )",
                                 err);
   ASSERT_FALSE(ir.empty()) << err;
-  // Each a test of the count, the common case weighted 2000 to 1 ...
-  EXPECT_EQ(linesWith(ir, "icmp ne i32 ").size(), 1u) << ir;
-  EXPECT_EQ(linesWith(ir, ", 2147483647").size(), 1u) << ir;
-  EXPECT_EQ(linesWith(ir, "icmp sgt i32 ").size(), 2u) << ir;
+  // Each a test of the count, the common case weighted 2000 to 1: a
+  // retain's is a count below the limit (PAYKAN_REF_MAX - 1), a release's
+  // one in [2, PAYKAN_REF_MAX) as an unsigned compare of the count less 2
+  // (PAYKAN_REF_MAX itself is immortal, Runtime.h) ...
+  EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 3u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 2147483646").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 2147483645").size(), 2u) << ir;
   EXPECT_EQ(linesWith(ir, "!prof").size(), 3u) << ir;
   EXPECT_FALSE(linesWith(ir, "!{!\"branch_weights\", i32 2000, i32 1}").empty())
       << ir;
   // ... an increment or a decrement of the count in place ...
   EXPECT_EQ(linesWith(ir, "load i32, ptr").size(), 3u) << ir;
   EXPECT_EQ(linesWith(ir, "add i32 ").size(), 1u) << ir;
-  EXPECT_EQ(linesWith(ir, "sub i32 ").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, "sub i32 ").size(), 4u)
+      << ir; // the test and the decrement
   EXPECT_EQ(linesWith(ir, "store i32 ").size(), 3u) << ir;
   // ... and the runtime for the rest.
   EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
@@ -887,8 +891,7 @@ fn @main() -> i64 {
   ASSERT_FALSE(ir.empty()) << err;
   EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 1u) << ir;
   // The counts as before: a test of each, the call for the rest.
-  EXPECT_EQ(linesWith(ir, "icmp ne i32 ").size(), 1u) << ir;
-  EXPECT_EQ(linesWith(ir, "icmp sgt i32 ").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 3u) << ir;
   EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
   EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
   EXPECT_EQ(ir.find("nonnull"), std::string::npos) << ir;
@@ -1112,14 +1115,15 @@ TEST(PIRLLVM, SwitchCasesOfTheDenseSetKeys) {
 }
 
 TEST(PIRLLVMDeathTest, AnInlineRetainAtTheLimitCallsTheRuntime) {
-  // A count at the limit takes the call, which panics rather than wrap.
+  // A count at the limit (PAYKAN_REF_MAX - 1; PAYKAN_REF_MAX itself marks
+  // an immortal object) takes the call, which panics rather than wrap.
   const std::string text = std::string(kCounted) + R"(
 fn @main() -> i64 {
   %o = new C
   %b = box %o
   %p = cast %o to ptr
   %at = ptr.add %p, 8
-  ptr.store %at, 2147483647
+  ptr.store %at, 2147483646
   retain %b
   ret 0
 }
