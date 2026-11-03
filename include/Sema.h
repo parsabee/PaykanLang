@@ -330,16 +330,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// looked at ("" for the value itself).
   std::string uncrossable(ast::Type *ty, ast::Qualifier q,
                           const std::string &path);
-  /// The borrowing parameters' qualifiers: an `inout` parameter takes
-  /// exactly its qualifier, a `view` one every form, and no borrow reaches
-  /// a `locked` cell.
+  /// The borrowing parameters' arguments: a `view` takes every form of the
+  /// object and an `inout` a unique or `shared` one, neither counting it,
+  /// and no borrow reaches a `locked` cell.
   bool checkBorrowQualifiers(const ast::ParamModes &modes,
                              const std::vector<ast::Qualifier> &quals,
                              const std::vector<ast::Expr *> &args,
                              const std::string &callee);
   /// A qualifier written on a borrow (a `view` or `inout` parameter,
-  /// result or local): `view const` is an error, a `view` being read-only
-  /// already (owner, 2026-11-02).
+  /// result or local): a borrow is never `shared` (or a handle), it
+  /// borrows the object whatever its qualifier; and `view const` is an
+  /// error, a `view` being read-only already (owner, 2026-11-02).
   bool checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                             const std::string &what, ast::SourceLocation loc);
   /// Error (and false) when @p place is `locked`: its contents are reached

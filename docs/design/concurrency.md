@@ -134,7 +134,7 @@ forStmt        ::= "parallel"? "for" ...                -- as today after "for"
   `locked Node?`; `atomic const Node[3]`, one boxed array), except that
   `atomic const` leaves a trailing `?` outside: `atomic const Str?` is an
   optional reference (proposed; owner may change).  A mode comes first
-  (`n: inout shared Node`).
+  (`n: inout const Node`).
 * `x: shared = e;` and `let x: const = e;` infer the type, as a borrow
   declaration does (docs/grammar.md:385) (decision 36 for `const`; proposed;
   owner may change).  There is no `const x = e;` (decision 36).  A receiver
@@ -296,8 +296,10 @@ change):
 * **Borrows.**  A `view` parameter accepts a `const` argument and an
   `inout` one does not (decision 36); `inout const T` takes a `const T`
   slot, which the callee may refill but not change.  `view const T` is an
-  error: a `view` already means the object does not change through it
-  (owner, 2026-11-02).
+  error: a `view` already means the object does not change through it;
+  and a borrow is never written `shared`: `view shared T` and `inout
+  shared T` are errors, while a `shared T` passes to `view T` and `inout
+  T` with no retain or release (owner, 2026-11-02).
 * **Crossing.**  `const T` crosses by `move` when its parts can; `shared
   const` never crosses.  No `const` value holds a `task::Task`: it could
   never be awaited, joined, cancelled or detached (proposed; owner may
@@ -334,13 +336,13 @@ change).
 | `n: shared Node`, `n: shared const Node` | `s` (a copy), `move s`, or `move a` (converts) | a new shared reference |
 | `n: atomic const Node`, and `atomic`, `locked` | `h` (a copy), `move h`, or `move a` (converts) | another handle |
 | `n: view Node` | `a` in any form, or a temporary | a borrow, never counted |
-| `n: inout Node` | `a`, of exactly `Node` | the caller's storage |
+| `n: inout Node` | `a`, a unique or `shared` `Node` | the caller's storage |
 
 ```pkn
 keep(move a);   // fn keep(n: Node): a is unusable afterwards
 grow(b);        // fn grow(n: inout Node): a borrow, no 'move'
 show(move c);   // fn show(n: view Node): c ends; the Node is dropped after the call
-grow(s);        // s: shared Node -- error: 's' is a 'shared Node'; 'inout' parameter 'n' takes exactly a 'Node'
+grow(s);        // s: shared Node -- fine: a borrow counts nothing, whatever the qualifier
 ```
 
 * A plain move-only parameter is always handed over, so lending skips its
@@ -1706,8 +1708,9 @@ themselves.
 12. **Is there a partial move?**  Only a payload field of an owned variant
     binding, to empty a `Result`.
 13. **Which qualifiers do borrows take?**  **Answered by decision 36.**
-    `view` every form, `const` ones included, `inout` only its exact form;
-    `view const T` is an error, a `view` being read-only already.
+    `view` every form, `const` ones included, `inout` a unique or `shared`
+    one; a borrow is written with no qualifier (`inout const T` apart),
+    `view const T` and `inout shared T` being errors (owner, 2026-11-02).
 14. **May a plain binding copy a unique place?**  No; a temporary subject is
     owned by its binding.
 15. **What qualifier does a downcast binding have?**  Its subject's; writing
@@ -1987,7 +1990,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | qualified handle class | `'sync::Channel' is a handle: it takes no qualifier` (also `'task::Loop'`) |
 | handle class to `Obj` | `'sync::Channel<int>' is a handle: it cannot become an 'Obj'` (also `'task::Loop'`) |
 | conversions | `no conversion from 'shared Node' to 'Node'`; `no conversion from 'shared Node' to 'atomic const Node': a shared object stays on its thread`; `no conversion from 'shared Node' to 'shared const Node': other references may still change it`; `no conversion from 'const Node' to 'Node': a 'const' object never changes; make a new one`; `no conversion from 'atomic const Config' to 'Config'`; `no conversion from 'atomic const Config' to 'Obj': write 'atomic const Obj'` |
-| `inout` qualifier | `'s' is a 'shared Node'; 'inout' parameter 'n' takes exactly a 'Node'` |
+| borrow qualifier | `parameter 'n' is 'inout shared': a borrow carries no 'shared'; ... write 'inout T'` |
 | read, later `inout` | `'s' is read by the left operand of '+'; a later operand cannot pass it to 'inout' parameter 'x' of 'shout'` |
 | read, later `move` | `'j' is read by the left operand of '+'; a later operand cannot move it` |
 | binding a unique place | `cannot bind 'n' by copy: 'x' is a unique 'Node'; bind 'n: view Node' or 'n: inout Node', or match 'move x'` |

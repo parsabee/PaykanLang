@@ -505,6 +505,20 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
 bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                                 const std::string &what,
                                 ast::SourceLocation loc) {
+  if (mode == ast::ParamMode::Value)
+    return true;
+  const char *m = ast::paramModeName(mode);
+  // A borrow is never written `shared` (or as a handle): it borrows the
+  // object whatever its qualifier, and counts nothing.
+  if (q.Form != ast::QualForm::Unique) {
+    error(loc, what + " is '" + m + " " + q.spelling() +
+                   "': a borrow carries no '" + q.spelling() +
+                   "'; a 'view' takes every form of the object and an "
+                   "'inout' a unique or 'shared' one, with no retain or "
+                   "release; write '" +
+                   m + " T'");
+    return false;
+  }
   if (mode == ast::ParamMode::View && q.isConst()) {
     error(loc, what + " is 'view const': a 'view' already means the object "
                       "does not change through it; drop 'const'");
@@ -524,8 +538,11 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     ast::Type *ty = args[i]->getResolvedType();
     if (!ty || !ast::isRefType(ty))
       continue;
+    // A `shared` object passes to a `view` or an `inout` as a unique one
+    // does, with no retain or release; a `const` one is frozen
+    // (inoutPlaceError) and a cell is reached in a `lock` block.
     const ast::Qualifier q = qualifierOf(args[i]);
-    const ast::Qualifier pq = i < quals.size() ? quals[i] : ast::Qualifier{};
+    (void)quals;
     const std::string text = placeText(args[i]);
     const char *mode = ast::paramModeName(modes.mode(i));
     if (q.Form == ast::QualForm::Locked) {
@@ -535,12 +552,6 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
                 "'lock' block, not borrowed by '" +
                 mode + "' parameter '" + modes.name(i) + "' of '" + callee +
                 "'");
-      ok = false;
-    } else if (modes.mode(i) == ast::ParamMode::Inout && q != pq) {
-      error(args[i]->getLocation(),
-            "'" + text + "' is a '" + qualifiedName(q, ty) + "'; 'inout' " +
-                "parameter '" + modes.name(i) + "' of '" + callee +
-                "' takes exactly a '" + qualifiedName(pq, ty) + "'");
       ok = false;
     }
   }

@@ -13,6 +13,7 @@ async fn run(j: Job, x: int, nm: Named) -> int {
 fn twice<T: Copyable>(x: T) -> (T, T) { return (x, x); }
 
 fn show(n: view Job) -> int { return n.name.len(); }   // a view takes every form
+fn mark(n: inout Job) { n.name = n.name + "!"; }        // an inout takes a unique or shared object
 
 fn main() -> int {
   let shared_cache: atomic const Cache = Cache(0);
@@ -25,5 +26,8 @@ fn main() -> int {
   io::println(Str(pair.0.x + pair.1.y));
   let c: const Job = Job("cc", shared_cache);
   io::println(Str(show(c)));
+  s: shared Job = Job("s", shared_cache);
+  mark(s);                                   // no retain or release for the borrow
+  io::println(s.name + " " + Str(show(s)));
   return 0;
 }
