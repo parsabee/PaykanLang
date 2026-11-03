@@ -2004,9 +2004,9 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
     // holds, through nested tuples and arrays, by offset.
     MemLayout l = memLayout(ty);
     words = {l.Size, l.Align,
-             static_cast<int64_t>(ast::isa<ast::TupleType>(ty)
-                                      ? kNativeKindTuple
-                                      : nativeTypeKind(ty)),
+             ast::isa<ast::TupleType>(ty)
+                 ? static_cast<int64_t>(kNativeKindTuple)
+                 : static_cast<int64_t>(nativeTypeKind(ty)),
              0, 0};
     std::function<void(ast::Type *, int64_t, bool)> refs =
         [&](ast::Type *e, int64_t off, bool nullable) {
