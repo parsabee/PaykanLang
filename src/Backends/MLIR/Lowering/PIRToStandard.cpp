@@ -243,6 +243,9 @@ private:
   Value toBits(Value v);
   Value fromBits(Value bits, Type t);
   /// A pir.parallel: in order on the C path; else the iterations in up to
+  /// A light body's loop runs inline below this many iterations
+  /// (lowerParallel).
+  static constexpr int64_t kInlineBelow = 4096;
   /// 256 chunks, an scf.parallel loop over them, each chunk's partials
   /// combined in chunk order after it.
   void lowerParallel(P::ParallelOp op);
@@ -663,18 +666,38 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
                : Value(arith::AddIOp::create(B, Loc, a, b));
   };
 
-  if (M.sequential()) {
+  // The loop run in order on the calling thread: the C path's, and a light
+  // body's below the threshold.
+  auto emitSequential = [&] {
     auto loop = scf::ForOp::create(B, Loc, cst(0), toIndex(count), cst(1));
-    {
-      OpBuilder::InsertionGuard guard(B);
-      B.setInsertionPointToStart(loop.getBody());
-      Map.map(index, toI64(loop.getInductionVar()));
-      lowerBlock(body);
-    }
+    OpBuilder::InsertionGuard guard(B);
+    B.setInsertionPointToStart(loop.getBody());
+    Map.map(index, toI64(loop.getInductionVar()));
+    lowerBlock(body);
+  };
+  if (M.sequential()) {
+    emitSequential();
     P::PtrStoreOp::create(B, Loc, lookup(op.getCounter()), count);
     return;
   }
 
+  // A light body, one with no call and no loop of its own, runs a few
+  // nanoseconds an iteration: below kInlineBelow iterations the fork and
+  // the join of a parallel loop cost more than the loop (benchmarks/
+  // README.md), so such a loop runs inline, decided by its trip count at
+  // run time.  A body with a call or a loop may be heavy however short the
+  // loop, and forks.
+  bool light = true;
+  op.getBody().walk([&](Operation *o) {
+    if (auto c = dyn_cast<P::CallOp>(o)) {
+      StringRef callee = c.getCallee();
+      if (!callee.starts_with("$rt.") && !callee.starts_with("$c."))
+        light = false; // the runtime's own (a bounds check's panic) is not
+    } else if (isa<P::VCallOp, P::ICallOp, P::AsyncCallOp, P::WhileOp,
+                   P::ParallelOp>(o)) {
+      light = false;
+    }
+  });
   // K = min(count, 256) chunks: chunk c runs [c*q + min(c, r), + q + (c <
   // r)) with q = count / K and r = count % K (docs/design/concurrency.md,
   // "Reproducible chunking").
@@ -682,12 +705,25 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
   Value kSafe = arith::MaxSIOp::create(B, Loc, k, i64(1));
   Value q = arith::DivSIOp::create(B, Loc, count, kSafe);
   Value r = arith::RemSIOp::create(B, Loc, count, kSafe);
-  // Each reduction's 256 chunk partials.
+  // Each reduction's 256 chunk partials (allocated before the choice of
+  // path, where every alloca of the function is).
   std::vector<Value> arrays;
   for (Value p : partials) {
     auto [size, align] = sizeAlign(slotOf(p));
     arrays.push_back(
         P::AllocaOp::create(B, Loc, 256 * size, align, "partials"));
+  }
+  scf::IfOp small;
+  if (light) {
+    Value few = arith::CmpIOp::create(B, Loc, arith::CmpIPredicate::slt, count,
+                                      i64(kInlineBelow));
+    small = scf::IfOp::create(B, Loc, few, /*withElseRegion=*/true);
+    {
+      OpBuilder::InsertionGuard guard(B);
+      B.setInsertionPoint(small.thenBlock()->getTerminator());
+      emitSequential();
+    }
+    B.setInsertionPoint(small.elseBlock()->getTerminator());
   }
   auto par = scf::ParallelOp::create(
       B, Loc, ValueRange{cst(0)}, ValueRange{toIndex(k)}, ValueRange{cst(1)});
@@ -760,6 +796,8 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
       P::PtrStoreOp::create(B, Loc, slot, combine(cur, v, reductions[i] == 1));
     }
   }
+  if (small)
+    B.setInsertionPointAfter(small);
   P::PtrStoreOp::create(B, Loc, lookup(op.getCounter()), count);
 }
 

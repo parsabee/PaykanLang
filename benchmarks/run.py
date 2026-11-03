@@ -42,7 +42,7 @@ PROGRAMS = {
     "dot": (["16777216", "5"], "reduction, two loads per iteration"),
     "compute": (["16384", "5", "2000"], "2000 multiply-adds per element"),
     "saxpy": (["16384", "1000"], "a 16K-element loop, a store per element"),
-    "overhead": (["1024", "2000"], "a 1K-element loop: fork, chunk, join"),
+    "overhead": (["4096", "2000"], "a 4K-element loop: fork, chunk, join"),
     "reduce_counter": (["4194304", "5", "1"], "count by reduction"),
     "atomic_counter": (["4194304", "5", "1"], "count on one atomic cell"),
     "atomic_counter_16": (["4194304", "5", "16"], "one atomic add per 16 iterations"),

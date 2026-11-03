@@ -26,7 +26,7 @@ a parallel body are not in it).
 | `dot.pkn` | `s += xs[i % 16384] * ys[i % 16384]` | two loads and a multiply-add per iteration |
 | `compute.pkn` | `work` dependent multiply-adds per element, then `s += x` | compute bound: ideal scaling, and the performance/efficiency core mix |
 | `saxpy.pkn` | `ys[i] = a * xs[i] + ys[i]`, n ≤ 16384 | a store at the loop's index; whether so short a loop pays for its fork and join |
-| `overhead.pkn` | `reps` loops of n trivial iterations | the cost of one `parallel for`: fork, chunking, join |
+| `overhead.pkn` | `reps` loops of n trivial iterations (n ≥ 4096, or the loop runs inline) | the cost of one `parallel for`: fork, chunking, join |
 | `reduce_counter.pkn` | `if i % stride == 0 { c += 1; }` as a reduction | counting with no shared line |
 | `atomic_counter.pkn` | the same on one `atomic int` | true sharing: one cache line bouncing between cores, at a rate set by `stride` |
 
@@ -58,7 +58,10 @@ OMP_NUM_THREADS=8 benchmarks/bin/atomic_counter 4194304 5 16
   256 chunks out as threads come free.
 - **Fork and join**: `overhead` gives the fixed cost of a loop, which
   depends on the block time above far more than on anything the compiler
-  emits; `saxpy` at 16384 elements shows the break-even.
+  emits; `saxpy` at 16384 elements shows the break-even.  A light body
+  (no call, no loop of its own) under 4096 iterations runs inline, on the
+  calling thread, since a fork cannot pay there; a body with a call or a
+  loop may be heavy however short the loop, and always forks.
 - **Cache coherence**: the prototype's reductions never share a line
   between threads (each chunk's partial is a slot on its own thread's
   stack, written to the shared partials array once, at the chunk's end),

@@ -100,7 +100,9 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   path do, so nothing else in the compiler had to learn about threads.
   Cells, freezing and locks are runtime calls.
 * **MLIR**: `pir.async_call`, `pir.await` and `pir.parallel` ops.  The
-  shared lowering makes an `async fn` an `async.func` whose body is an
+  shared lowering runs a light body (no call, no loop) inline below 4096
+  iterations, where a fork cannot pay (`benchmarks/README.md`); makes an
+  `async fn` an `async.func` whose body is an
   `async.execute` region (which the runtime hands to its worker pool, so a
   call returns at once with the task and the body runs on a worker), an
   async call an `async.call` and an await an `async.await`, a suspension

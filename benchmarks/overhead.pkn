@@ -1,12 +1,12 @@
 // The cost of one `parallel for`: `reps` loops of `n` trivial iterations,
 // timed together.  At small n the fork, the chunking and the join are all
 // of it.
-//   overhead <n> <reps>
+//   overhead <n> <reps>    n >= 4096, or the loop runs inline (a light body)
 import ::io;
 import bench;
 
 fn main(args: view Str[]) -> int {
-  n = bench::arg(args, 1, 1024);
+  n = bench::arg(args, 1, 4096);
   if n > 16384 { n = 16384; }
   let reps = bench::arg(args, 2, 1000);
   xs = [0.0; 16384];

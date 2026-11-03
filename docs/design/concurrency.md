@@ -1338,7 +1338,9 @@ whose entry and exit are count barriers, and folds.  Since borrowed paths are
 checked only syntactically, the entry compares the byte ranges of written
 borrowed parameters and written local borrows (`ys: inout = h.arr`) with the
 others; on overlap the chunks run in order on the caller (proposed; owner
-may change).  The chunks are handed out dynamically, one at a time: on a
+may change).  A light body, one with no call and no loop, runs inline
+below 4096 iterations, where the fork and join cost more than the loop
+(benchmarks/README.md).  The chunks are handed out dynamically, one at a time: on a
 hybrid CPU a static split lets a thread on an efficiency core set the
 loop's time, 16 threads then losing to 12 (benchmarks/README.md,
 2026-11-02), and the result is the same whichever thread runs a chunk.
