@@ -454,6 +454,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   checkAtomicValue(const ast::Expr *place, ast::Expr *value,
                    ast::AtomicType *at, ast::SourceLocation loc,
                    ast::Type *valTy = nullptr);
+  /// A warning when the atomic @p place of the enclosing function changes
+  /// on every iteration of a `parallel for` (the statement at @p loc is
+  /// the body's own, under no condition): each operation moves the cell's
+  /// cache line between cores (benchmarks/README.md).
+  void warnAtomicEveryIteration(const ast::Expr *place,
+                                ast::SourceLocation loc);
   /// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an
   /// `atomic` place: the result's type, or nullptr after an error.
   ast::Type *checkAtomicMethodCall(ast::MethodCallExpr *node,

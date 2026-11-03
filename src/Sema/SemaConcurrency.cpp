@@ -214,7 +214,27 @@ bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
   if (!kind)
     return false;
   node->setAtomicKind(*kind);
+  warnAtomicEveryIteration(node->getLHS(), node->getLocation());
   return true;
+}
+
+void Sema::warnAtomicEveryIteration(const ast::Expr *place,
+                                    ast::SourceLocation loc) {
+  // The body's own statements run every iteration; one in an `if` or a
+  // `match` inside it is in a scope of its own below the body's.
+  if (ParallelStack.empty() ||
+      CurrentScope->Parent != ParallelStack.back().Boundary)
+    return;
+  const ast::Identifier *root = placeRoot(place);
+  if (!root || !isOuterScope(CurrentScope->findOwner(root->getName())))
+    return;
+  warning(loc, "'" + placeText(place) +
+                   "' changes on every iteration of the 'parallel for': "
+                   "each atomic operation moves its cache line between "
+                   "cores, a thousand times a reduction's cost on 16 "
+                   "threads (benchmarks/README.md); count in a reduction "
+                   "(a plain variable of the enclosing function, '+='), "
+                   "or change it less often");
 }
 
 bool Sema::checkAtomicMemberAssign(ast::MemberAssignStmt *node,
@@ -252,6 +272,7 @@ bool Sema::checkAtomicMemberAssign(ast::MemberAssignStmt *node,
   if (!kind)
     return false;
   node->setAtomicKind(*kind);
+  warnAtomicEveryIteration(&place, node->getLocation());
   return true;
 }
 

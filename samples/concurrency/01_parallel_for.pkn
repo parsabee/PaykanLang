@@ -1,12 +1,13 @@
 // The concurrency prototype: `parallel for` (docs/design/concurrency.md).
 // A dot product with a reduction, an element-wise update of an `inout`
-// array, and an `atomic int` counter the iterations bump from any thread.
+// array, and an `atomic int` counter bumped from any thread, once in ten
+// iterations (every iteration would bounce its cache line between cores).
 // Every iteration is independent, so the loop runs its chunks on a worker
 // pool; the reduction is folded in chunk order, so the sum is the same on
 // every run and every machine.
 // expect-stdout: dot = 333283335000
 // expect-stdout: ys[7] = 21
-// expect-stdout: hits = 10000
+// expect-stdout: hits = 1000
 
 import ::io;
 
@@ -39,7 +40,7 @@ fn main() -> int {
 
   let hits: atomic int = 0;
   parallel for i in 0..n {
-    hits += 1;
+    if i % 10 == 0 { hits += 1; }
   }
   io::println("hits = " + Str(hits));
   return 0;
