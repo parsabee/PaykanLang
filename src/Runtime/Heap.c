@@ -24,6 +24,7 @@
 #include "RuntimeInternal.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,7 +59,24 @@ typedef struct PaykanHeapHeader {
 // and the payload overflow, or to 0, which realloc may take as a free.
 #define PAYKAN_HEAP_MAX_PAYLOAD (SIZE_MAX - PAYKAN_HEAP_HEADER_SIZE)
 
-static PaykanHeapStats g_stats;
+// The counters (PaykanHeapStats's, kept atomic): a task's worker and a
+// parallel loop's threads allocate and free while the main thread does, and a
+// plain `+= 1` from two threads loses one.  Relaxed, since each is a count
+// read whole at the end and orders nothing.
+typedef struct HeapCounters {
+  _Atomic int64_t liveBlocks;
+  _Atomic int64_t liveBytes;
+  _Atomic int64_t totalAllocs;
+  _Atomic int64_t totalFrees;
+  _Atomic int64_t totalReallocs;
+  _Atomic int64_t peakBytes;
+} HeapCounters;
+
+static HeapCounters g_stats;
+
+#define HEAP_LOAD(c) atomic_load_explicit(&(c), memory_order_relaxed)
+#define HEAP_ADD(c, n)                                                         \
+  atomic_fetch_add_explicit(&(c), (n), memory_order_relaxed)
 
 /// Paykan_heap_set_limit's: the most payload bytes the tracking back-end
 /// keeps live, 0 for no limit.
@@ -67,23 +85,30 @@ static int64_t g_limit;
 /// An allocation of @p more payload bytes takes the live ones past the
 /// limit.
 static int heap_over_limit(size_t more) {
-  const int64_t room =
-      g_limit > g_stats.liveBytes ? g_limit - g_stats.liveBytes : 0;
+  const int64_t live = HEAP_LOAD(g_stats.liveBytes);
+  const int64_t room = g_limit > live ? g_limit - live : 0;
   return g_limit && more > (uint64_t)room;
 }
 
+/// Raise the high-water mark to @p live when it is higher.
+static void heap_note_peak(int64_t live) {
+  int64_t peak = HEAP_LOAD(g_stats.peakBytes);
+  while (live > peak && !atomic_compare_exchange_weak_explicit(
+                            &g_stats.peakBytes, &peak, live,
+                            memory_order_relaxed, memory_order_relaxed)) {
+  }
+}
+
 static void heap_record_alloc(uint64_t size) {
-  g_stats.liveBlocks += 1;
-  g_stats.liveBytes += (int64_t)size;
-  g_stats.totalAllocs += 1;
-  if (g_stats.liveBytes > g_stats.peakBytes)
-    g_stats.peakBytes = g_stats.liveBytes;
+  HEAP_ADD(g_stats.liveBlocks, 1);
+  HEAP_ADD(g_stats.totalAllocs, 1);
+  heap_note_peak(HEAP_ADD(g_stats.liveBytes, (int64_t)size) + (int64_t)size);
 }
 
 static void heap_record_free(uint64_t size) {
-  g_stats.liveBlocks -= 1;
-  g_stats.liveBytes -= (int64_t)size;
-  g_stats.totalFrees += 1;
+  HEAP_ADD(g_stats.liveBlocks, -1);
+  HEAP_ADD(g_stats.liveBytes, -(int64_t)size);
+  HEAP_ADD(g_stats.totalFrees, 1);
 }
 
 // Convert a payload pointer back to its header, validating the magic word.
@@ -111,7 +136,7 @@ static void *tracking_malloc(size_t size) {
 }
 
 static void *tracking_realloc(void *ptr, size_t size) {
-  g_stats.totalReallocs += 1;
+  HEAP_ADD(g_stats.totalReallocs, 1);
   if (!ptr)
     return tracking_malloc(size);
 
@@ -127,9 +152,8 @@ static void *tracking_realloc(void *ptr, size_t size) {
     return NULL; // original block left intact, counters unchanged
 
   // Adjust the live-byte count for the size delta; block count is unchanged.
-  g_stats.liveBytes += (int64_t)size - (int64_t)oldSize;
-  if (g_stats.liveBytes > g_stats.peakBytes)
-    g_stats.peakBytes = g_stats.liveBytes;
+  const int64_t delta = (int64_t)size - (int64_t)oldSize;
+  heap_note_peak(HEAP_ADD(g_stats.liveBytes, delta) + delta);
 
   newH->magic = PAYKAN_HEAP_MAGIC;
   newH->size = (uint64_t)size;
@@ -224,17 +248,28 @@ void Paykan_heap_set_tracking(int enable) {
 
 int Paykan_heap_tracking_enabled(void) { return g_tracking_enabled; }
 
-void Paykan_heap_reset(void) { memset(&g_stats, 0, sizeof(g_stats)); }
+void Paykan_heap_reset(void) {
+  atomic_store_explicit(&g_stats.liveBlocks, 0, memory_order_relaxed);
+  atomic_store_explicit(&g_stats.liveBytes, 0, memory_order_relaxed);
+  atomic_store_explicit(&g_stats.totalAllocs, 0, memory_order_relaxed);
+  atomic_store_explicit(&g_stats.totalFrees, 0, memory_order_relaxed);
+  atomic_store_explicit(&g_stats.totalReallocs, 0, memory_order_relaxed);
+  atomic_store_explicit(&g_stats.peakBytes, 0, memory_order_relaxed);
+}
 
-int64_t Paykan_heap_live_blocks(void) { return g_stats.liveBlocks; }
+int64_t Paykan_heap_live_blocks(void) { return HEAP_LOAD(g_stats.liveBlocks); }
 
-int64_t Paykan_heap_live_bytes(void) { return g_stats.liveBytes; }
+int64_t Paykan_heap_live_bytes(void) { return HEAP_LOAD(g_stats.liveBytes); }
 
-int64_t Paykan_heap_total_reallocs(void) { return g_stats.totalReallocs; }
+int64_t Paykan_heap_total_reallocs(void) {
+  return HEAP_LOAD(g_stats.totalReallocs);
+}
 
-int64_t Paykan_heap_total_allocs(void) { return g_stats.totalAllocs; }
+int64_t Paykan_heap_total_allocs(void) {
+  return HEAP_LOAD(g_stats.totalAllocs);
+}
 
-int64_t Paykan_heap_peak_bytes(void) { return g_stats.peakBytes; }
+int64_t Paykan_heap_peak_bytes(void) { return HEAP_LOAD(g_stats.peakBytes); }
 
 void Paykan_heap_set_limit(int64_t bytes) { g_limit = bytes; }
 
@@ -255,10 +290,14 @@ void Paykan_heap_dump(void) {
           "  live blocks       : %lld\n"
           "  live bytes        : %lld\n"
           "  peak bytes        : %lld\n",
-          (long long)g_stats.totalAllocs, (long long)g_stats.totalFrees,
-          (long long)g_stats.totalReallocs, (long long)g_stats.liveBlocks,
-          (long long)g_stats.liveBytes, (long long)g_stats.peakBytes);
-  if (g_stats.liveBlocks != 0)
+          (long long)HEAP_LOAD(g_stats.totalAllocs),
+          (long long)HEAP_LOAD(g_stats.totalFrees),
+          (long long)HEAP_LOAD(g_stats.totalReallocs),
+          (long long)HEAP_LOAD(g_stats.liveBlocks),
+          (long long)HEAP_LOAD(g_stats.liveBytes),
+          (long long)HEAP_LOAD(g_stats.peakBytes));
+  if (HEAP_LOAD(g_stats.liveBlocks) != 0)
     fprintf(stderr, "  ** LEAK: %lld block(s) / %lld byte(s) not freed **\n",
-            (long long)g_stats.liveBlocks, (long long)g_stats.liveBytes);
+            (long long)HEAP_LOAD(g_stats.liveBlocks),
+            (long long)HEAP_LOAD(g_stats.liveBytes));
 }

@@ -94,6 +94,13 @@ samples/concurrency/README.md.
 - The generated `__init__` of a class or struct moves a move-only parameter into its field, so a
   type holding a `Str` or a unique reference passes `--strict-ownership` with no `__init__` of its own.
 
+### Fixed
+
+- `--track-heap` counted from several threads at once: a task's worker and a parallel loop's
+  threads allocate and free while the main thread does, and the counters' plain `+= 1` lost
+  updates, so an async program that freed everything could report hundreds of live blocks.
+  The counters are atomic (src/Runtime/Heap.c).
+
 ### Removed
 
 - The `mov` keyword, reserved since 0.2.0 removed it: `mov` is an ordinary identifier now, and

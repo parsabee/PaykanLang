@@ -5,7 +5,8 @@
 // allocator"), on both back-ends: Paykan_malloc and Paykan_realloc panic when
 // the memory is not there, and Paykan_tryMalloc and Paykan_tryRealloc
 // (RuntimeInternal.h) return NULL with errno ENOMEM instead, a failed
-// realloc leaving the old block as it was.
+// realloc leaving the old block as it was.  The tracking counters are
+// atomic, kept by every thread.
 
 #include <cerrno>
 #include <cstddef>
@@ -13,6 +14,8 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
+#include <thread>
+#include <vector>
 
 extern "C" {
 #include "Runtime.h"
@@ -155,6 +158,34 @@ TEST(Heap, ASizeOfZeroIsABlock) {
     Paykan_free(b);
     Paykan_free(shrunk);
   }
+}
+
+// The tracking counters are kept by every thread at once: a task's worker
+// and a parallel loop's threads allocate and free while the main thread does,
+// and no count is lost (a lost one left `--track-heap` reporting hundreds of
+// live blocks after an async program that freed them all).
+TEST(Heap, TrackingCountsFromThreadsAreNotLost) {
+  Heap heap(1);
+  constexpr int kThreads = 8;
+  constexpr int kRounds = 20000;
+  std::vector<std::thread> threads;
+  threads.reserve(kThreads);
+  for (int t = 0; t < kThreads; ++t)
+    threads.emplace_back([t] {
+      for (int i = 0; i < kRounds; ++i) {
+        void *p = Paykan_malloc(static_cast<size_t>(8 + (i + t) % 24));
+        p = Paykan_realloc(p, 48);
+        Paykan_free(p);
+      }
+    });
+  for (std::thread &t : threads)
+    t.join();
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  EXPECT_EQ(Paykan_heap_live_bytes(), 0);
+  EXPECT_EQ(Paykan_heap_total_allocs(), int64_t{kThreads} * kRounds);
+  EXPECT_EQ(Paykan_heap_total_reallocs(), int64_t{kThreads} * kRounds);
+  EXPECT_GE(Paykan_heap_peak_bytes(), 48);
+  EXPECT_LE(Paykan_heap_peak_bytes(), int64_t{kThreads} * 48);
 }
 
 // Generated code and the runtime's constructors use what Paykan_malloc and
