@@ -22,7 +22,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `errors/err_atomic_const.pkn` | writing through `atomic const`, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
 | `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
-| `errors/err_send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; `inout shared` and `view const` rejected; `Copyable` |
+| `errors/err_send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; qualifiers on borrows rejected; `Copyable` |
 
 ## What is in the prototype
 
@@ -38,10 +38,10 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   fields and results.  A unique value converts into any form, a `const`
   one into the other `const` forms, a `shared` reference and a handle only
   as they are.  A `const` place is frozen: no field assignment, no
-  non-`view` method, and what it holds reads as `const`.  A `view`
-  parameter takes every form (`view const` is an error: a `view` is
-  read-only already), `inout` a unique or `shared` one (a borrow is never
-  written `shared`), and no borrow reaches a `locked`
+  non-`view` method, and what it holds reads as `const`.  A borrow is
+  written with no qualifier: a `view` parameter takes every form of the
+  object, an `inout` a unique or `shared` one, neither counting it, and
+  no borrow reaches a `locked`
   cell.  Under `--strict-ownership` the copy rule holds: a move-only value
   read from a place (a unique reference, or a struct, tuple or array
   holding one) flows into an owning slot only by `move`; a `shared`

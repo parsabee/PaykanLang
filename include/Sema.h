@@ -338,9 +338,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                              const std::vector<ast::Expr *> &args,
                              const std::string &callee);
   /// A qualifier written on a borrow (a `view` or `inout` parameter,
-  /// result or local): a borrow is never `shared` (or a handle), it
-  /// borrows the object whatever its qualifier; and `view const` is an
-  /// error, a `view` being read-only already (owner, 2026-11-02).
+  /// result or local) is an error: a borrow takes the object whatever its
+  /// qualifier, a `view` is read-only already, and an `inout` of a `const`
+  /// object could not change it (owner, 2026-11-02).
   bool checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                             const std::string &what, ast::SourceLocation loc);
   /// Error (and false) when @p place is `locked`: its contents are reached

@@ -17,9 +17,10 @@ async fn give() -> shared Job { return Job("x", Cache(0)); }   // error: result 
 
 fn twice<T: Copyable>(x: T) -> (T, T) { return (x, x); }
 fn grow(n: inout Job) { }
-fn grab(n: inout shared Job) { }                  // error: a borrow is never shared
+fn grab(n: inout shared Job) { }                  // error: a borrow carries no qualifier
+fn hold(n: inout const Job) { }                   // error: a borrow carries no qualifier
 fn show(n: view Job) -> int { return n.name.len(); }
-fn peek(n: view const Job) -> int { return n.name.len(); }   // error: a view is read-only already
+fn peek(n: view const Job) -> int { return n.name.len(); }   // error: a borrow carries no qualifier
 
 fn main() -> int {
   let j = Job("j", Cache(0));

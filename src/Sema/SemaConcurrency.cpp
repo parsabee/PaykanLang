@@ -505,26 +505,19 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
 bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                                 const std::string &what,
                                 ast::SourceLocation loc) {
-  if (mode == ast::ParamMode::Value)
+  if (mode == ast::ParamMode::Value || q.isUnique())
     return true;
+  // A borrow is written with no qualifier: it borrows the object whatever
+  // its qualifier and counts nothing.  A `view` is read-only already, and
+  // an `inout` of a `const` object could not change it.
   const char *m = ast::paramModeName(mode);
-  // A borrow is never written `shared` (or as a handle): it borrows the
-  // object whatever its qualifier, and counts nothing.
-  if (q.Form != ast::QualForm::Unique) {
-    error(loc, what + " is '" + m + " " + q.spelling() +
-                   "': a borrow carries no '" + q.spelling() +
-                   "'; a 'view' takes every form of the object and an "
-                   "'inout' a unique or 'shared' one, with no retain or "
-                   "release; write '" +
-                   m + " T'");
-    return false;
-  }
-  if (mode == ast::ParamMode::View && q.isConst()) {
-    error(loc, what + " is 'view const': a 'view' already means the object "
-                      "does not change through it; drop 'const'");
-    return false;
-  }
-  return true;
+  error(loc, what + " is '" + m + " " + q.spelling() +
+                 "': a borrow carries no qualifier; a 'view' takes every "
+                 "form of the object (read-only through it) and an 'inout' "
+                 "a unique or 'shared' one, with no retain or release; "
+                 "write '" +
+                 m + " T'");
+  return false;
 }
 
 bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
