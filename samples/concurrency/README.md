@@ -16,12 +16,14 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `07_atomic.pkn` | `atomic` on every number type, `bool` and `char`; `atomic` fields of a class; `exchange` and `compareExchange`; handles |
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
+| `10_buffers.pkn` | heap buffers in a `parallel for`: one of the enclosing function read at any index and written at the loop's variable, and one frozen in a box read by every thread |
 | `errors/err_qualifiers.pkn` | the conversions a qualifier refuses, `const` fields, qualifiers on values |
 | `errors/err_strict_copies.pkn` | the copy rule under `--strict-ownership`: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
 | `errors/err_atomic_const.pkn` | writing through `atomic const`, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
 | `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
+| `errors/err_buffers.pkn` | a buffer written at another index than the loop's variable, or reshaped, in a parallel body |
 | `errors/err_send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; qualifiers on borrows rejected; `Copyable` |
 
 ## What is in the prototype
@@ -62,7 +64,13 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   buffer it holds (`mem::Buffer<T>` crosses when `T` does, the design's
   table) and the elements, and a `parallel for` body reads it through
   the box's `value()`, the prototype's way to data larger than a
-  fixed-size array (`benchmarks/sum_buf.pkn`).
+  fixed-size array (`benchmarks/sum_buf.pkn`).  A `parallel for` body
+  also uses a `mem::Buffer<T>` of numbers that the enclosing function
+  owns: read at any index (`at`, `get`, `len`), written at the loop's
+  variable only (`set(i, v)`), never reshaped (`grow`, `reserve` are
+  errors there).  A buffer's `at`, `get` and `len` on a number type
+  are read in place by the lowering, a bounds check and a load, with no
+  call into the memory module and no count on the buffer.
 * **`atomic T`**: `T` any number type, `bool` or `char`; variables and
   class fields.  A read is an atomic load, `=` a store, `+=` and `-=` one
   atomic add (floats by a compare-and-swap loop, `f32` and `f16` rounded
@@ -85,6 +93,15 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   an owned variable (through unique fields only; `shared`, `const` and
   `weak` fields, values and fields of a borrow are errors) and ends the
   variable; `move` before a temporary does nothing.
+* **Task handles**: `await t` spends `t` (a later use is an error naming
+  the await), and every task handle in a variable is spent, by `await` or
+  by `move`, on every path before its scope ends and before the variable
+  takes another task: `task 't' is not awaited before this 'return'`,
+  `task 't' may not be awaited when its scope ends: it is spent on some
+  paths only`, `task 't' is replaced before it is awaited`.  The design's
+  typestate reduced to the one operation the prototype has (no `join`,
+  `cancel` or `detach`), so that no task is dropped while it runs; a
+  handle stored in a field, an element or a tuple is not followed.
 * **The send check**: at an async call's arguments, at the declaration of
   an `async fn`'s result, and at every conversion to `atomic const` or
   `locked`.  A number, a `Str`, a cell, a handle and a unique or `const`
@@ -166,9 +183,20 @@ is `List<Node>`), the archetype check of templates (a copy of an unbounded
 `T` is caught per instance under `--strict-ownership` only), `match`
 bindings' qualifiers, the run-time check of a move out of borrowed
 storage, a value held in memory (a struct, tuple or array) as a task
-parameter, async methods, async functions across modules, a task whose
-result is an optional value, `break`/`continue` in a parallel body, the
-par-safe call check, and the diagnostics' final wording.  Non-atomic
+parameter, async methods, importing a module that declares an `async fn`
+(`... is a task ('Task<int>'): a module that declares an 'async fn' cannot
+be imported in the prototype`), a task whose result is a tuple, a struct
+or an optional value (`an 'async fn' returns a number, bool, char, a
+reference or nothing in the prototype`), task handles in fields, elements
+or tuples (not followed by the await check), `break`/`continue` in a
+parallel body, the par-safe call check, and the diagnostics' final
+wording.  A program with an `async fn` is compiled with the `-O1` pipeline
+under `-O0` (the coroutines of MLIR's async runtime do not survive an
+unoptimized split; the design's own runtime replaces the lowering).
+Non-atomic
 reference counts are only safe because the checks keep references on one
 thread; a program that calls into non-thread-safe runtime pieces from a
-task (heap tracking, stdin) is not protected.
+task (heap tracking, stdin) is not protected, and an object a task drops
+on a worker thread may sit in that thread's deferred-destroy list at
+exit, which `--track-heap` then counts as live (`09_send.pkn` shows two
+to four live blocks from run to run).

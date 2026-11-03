@@ -953,6 +953,19 @@ private:
     /// call's `inout` result.
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
+    /// `b.at(i)`, `b.get(i)` and `b.len()` of a `mem::Buffer<T>` @p st
+    /// holding a number type @p elem, read in place (the prototype): a
+    /// bounds check and a load, as a fixed array's element, with no call
+    /// into the memory module and no count on the buffer.  nullopt when the
+    /// call is another method or another element type.
+    /// The box of `bx.value().at(i)`, `bx.get().len()` & co.: the receiver
+    /// of a `value()` or `get()` on a `mem::Box<mem::Buffer<T>>`, when the
+    /// buffer read is one emitBufferRead emits in place (a number's element,
+    /// or the length); nullptr otherwise.  The read takes the box's field
+    /// itself, so the box is the link visited first (visitedFirst).
+    ast::Expr *bufferReadBox(ast::MethodCallExpr *node);
+    std::optional<Val> emitBufferRead(ast::MethodCallExpr *node,
+                                      ast::Type *elem);
     /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
     /// field's function value, `hash()`, a Str's parse into @p target
     /// (`s.toInt()` & co.), an `unsigned`'s `toInt()`, an optional's
@@ -1133,6 +1146,15 @@ private:
   Val lowerStructDecl(ast::StructDecl *sd);
   /// The struct type of @p e's value, canonical in this module, or nullptr.
   ast::StructType *getExprStructType(ast::Expr *e);
+  /// `T` when @p st is the standard library's `mem::Buffer<T>` (one field,
+  /// `__data`, the runtime's buffer object as an `Obj`); nullptr otherwise.
+  ast::Type *bufferElementType(ast::StructType *st);
+  /// Whether @p mc, a call on a `mem::Buffer<T>`, is an element or length
+  /// read the lowering emits in place (ExprEmitter::emitBufferRead): `at`
+  /// or `get` of a number, or `len`.  Such a read loads its number at once,
+  /// as a variable's read does, so the holds analysis (LoweringHolds.cpp)
+  /// takes it as one, not as a struct's `view fn` on its receiver.
+  bool isBufferReadInPlace(ast::MethodCallExpr *mc);
   /// `p.x` read, the receiver a struct: in place, as a tuple element.
   Val lowerStructFieldRead(ast::MemberAccessExpr *node, ast::StructType *st);
   /// `p.x = v`, the receiver a struct: written in place.

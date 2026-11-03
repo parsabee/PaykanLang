@@ -19,7 +19,8 @@ fn main(args: view Str[]) -> int {
   }
   let dt = bench::now() - t0;
   let cpu = bench::cpu() - c0;
-  io::println("overhead n=" + Str(n) + " reps=" + Str(reps) + " ns_min=" + Str(dt / reps) +
-              " ns_mean=" + Str(dt / reps) + " wall_ns=" + Str(dt) + " cpu_ns=" + Str(cpu) + " check=" + Str(s));
+  io::println("overhead n=" + Str(n) + " reps=" + Str(reps) + " ns_min="
+      + Str(dt / reps) + " ns_mean=" + Str(dt / reps) + " wall_ns=" + Str(dt)
+      + " cpu_ns=" + Str(cpu) + " check=" + Str(s));
   return 0;
 }

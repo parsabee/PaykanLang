@@ -372,9 +372,14 @@ ast::FuncDecl *Sema::defaultInit(ast::StructType *st, ast::SourceLocation loc) {
     const std::string &interned = Ctx.intern(st->getFieldName(i));
     params.push_back({&interned, st->getElementType(i), ast::ParamMode::Value,
                       st->findFieldQualifier(st->getFieldName(i)), loc});
+    // The field takes the parameter: a move-only one by `move` (the
+    // prototype's copy rule, --strict-ownership), a Copyable one as it is.
+    ast::Expr *value = Ctx.make<ast::Identifier>(loc, interned);
+    if (!isCopyable(st->getElementType(i)))
+      value = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, value);
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
-        Ctx.make<ast::Identifier>(loc, interned)));
+        value));
   }
   return Ctx.make<ast::FuncDecl>(
       loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
@@ -818,7 +823,28 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
         CurrentMethodUse->Struct = st;
         CurrentMethodUse->Decl = method;
       }
+      // The method's moves, task handles and loop depths are its own (the
+      // prototype); a generic instance's methods are checked in the middle
+      // of another body, whose state comes back after.
+      Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+      std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+          std::exchange(TaskLocals, {});
+      MovedMap savedMoves = std::exchange(MovedVars, {});
+      std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+      const bool savedFlowEnded = std::exchange(FlowEnded, false);
+      std::unordered_map<std::string, unsigned> savedDeclDepths =
+          std::exchange(DeclLoopDepth, {});
+      const unsigned savedLoopDepth = std::exchange(LoopDepth, 0u);
       bool bodyOk = visitBody(method->getBody()->getStatements());
+      if (bodyOk && !FlowEnded)
+        checkTasksAwaited(CurrentScope, nullptr, method->getLocation());
+      LoopDepth = savedLoopDepth;
+      DeclLoopDepth = std::move(savedDeclDepths);
+      FlowEnded = savedFlowEnded;
+      LoopMoveStack = std::move(savedLoopMoves);
+      MovedVars = std::move(savedMoves);
+      FunctionScope = savedFunctionScope;
+      TaskLocals = std::move(savedTasks);
       CurrentMethodUse = nullptr;
 
       if (!bodyOk) {

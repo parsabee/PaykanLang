@@ -13,10 +13,14 @@ fn arg(args: view Str[], i: int, dflt: int) -> int {
 native fn now_ns(id: int) -> int = "clock_gettime_nsec_np";
 
 // Nanoseconds since an arbitrary point, monotonic.
-fn now() -> int { return now_ns(4); }
+fn now() -> int {
+  return now_ns(4);
+}
 
 native fn clock_ticks() -> int = "clock";
 
 // The process's CPU time, every thread, in nanoseconds (clock(), whose
 // tick is a microsecond on macOS).
-fn cpu() -> int { return clock_ticks() * 1000; }
+fn cpu() -> int {
+  return clock_ticks() * 1000;
+}

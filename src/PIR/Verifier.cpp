@@ -1194,6 +1194,7 @@ private:
           expect(w->Cond, Type::Bool, "while condition");
           verifyBlock(*w->Body, /*inLoop=*/true);
           closeScope(cond);
+          verifyParallel(*w);
         } else if (std::holds_alternative<Break>(s) ||
                    std::holds_alternative<Continue>(s)) {
           if (!inLoop)
@@ -1217,6 +1218,29 @@ private:
       return terminated;
     }
 
+    /// The `parallel` annotation of @p w (the concurrency prototype): its
+    /// locals are the function's, its count an i64, its reductions by add
+    /// or mul.
+    void verifyParallel(const While &w) {
+      if (!w.Par)
+        return;
+      const Parallel &p = *w.Par;
+      auto local = [&](LocalId l, const char *what) {
+        if (l >= F.Locals.size())
+          error(std::string("parallel ") + what + " names local " +
+                std::to_string(l) + ", which the function has not");
+      };
+      local(p.Counter, "counter");
+      expect(p.Count, Type::I64, "parallel count");
+      for (LocalId l : p.Privates)
+        local(l, "private");
+      for (const Parallel::Reduction &r : p.Reductions) {
+        local(r.Partial, "reduction");
+        if (r.Op != Opcode::Add && r.Op != Opcode::Mul)
+          error("parallel reduction with '" + std::string(opcodeName(r.Op)) +
+                "' (only add and mul)");
+      }
+    }
     /// Like verifyBlock, but the block's definitions stay visible: they go
     /// into the caller's scope (for a while's condition region, whose values
     /// the body may use).
@@ -1250,24 +1274,7 @@ private:
           expect(w->Cond, Type::Bool, "while condition");
           verifyBlock(*w->Body, true);
           closeScope(cond);
-          if (w->Parallel) {
-            const Parallel &p = *w->Parallel;
-            auto local = [&](LocalId l, const char *what) {
-              if (l >= F.Locals.size())
-                error(std::string("parallel ") + what + " names local " +
-                      std::to_string(l) + ", which the function has not");
-            };
-            local(p.Counter, "counter");
-            expect(p.Count, Type::I64, "parallel count");
-            for (LocalId l : p.Privates)
-              local(l, "private");
-            for (const Parallel::Reduction &r : p.Reductions) {
-              local(r.Partial, "reduction");
-              if (r.Op != Opcode::Add && r.Op != Opcode::Mul)
-                error("parallel reduction with '" +
-                      std::string(opcodeName(r.Op)) + "' (only add and mul)");
-            }
-          }
+          verifyParallel(*w);
         }
       }
     }

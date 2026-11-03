@@ -1450,7 +1450,7 @@ Val ModuleLowering::emitParallelFor(ast::ForStmt *node) {
     par.Privates.push_back(static_cast<pir::LocalId>(l));
   for (const Reduction &r : reductions)
     par.Reductions.push_back({r.Partial, r.Op});
-  w->Parallel = std::move(par);
+  w->Par = std::move(par);
   // Each partial folds into its variable.
   for (const Reduction &r : reductions)
     B.store(r.Target,
@@ -1849,6 +1849,7 @@ void ModuleLowering::emitAsyncMainEntry(const pir::Function &task) {
     entry.Params.push_back(pir::Value{entry.NextValueId++, t, ""});
   FunctionStateGuard state(*this, &entry, nullptr, /*methodClassTy=*/nullptr);
   std::vector<Val> args;
+  args.reserve(entry.Params.size());
   for (const pir::Value &p : entry.Params)
     args.emplace_back(pir::Operand::value(p), p.Ty);
   Val t = B.asyncCall(task.Name, task.Sig, args, "task");
@@ -1998,25 +1999,33 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
                                 nativeTypeKind(ty), 0, 0};
-  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
-    MemLayout l = memLayout(tt);
-    words = {l.Size, l.Align, kNativeKindTuple, 0, 0};
-    std::function<void(ast::TupleType *, int64_t, bool)> refs =
-        [&](ast::TupleType *t, int64_t base, bool nullable) {
-          for (size_t i = 0; i < t->getArity(); ++i) {
-            ast::Type *e = t->getElementType(i);
-            int64_t off = base + tupleElementOffset(t, i);
-            const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e) ||
-                                   ast::isPayloadEnum(e);
-            if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
-              refs(nested, off, maybeNull);
-            } else if (ast::isRefType(e)) {
-              ++words[3];
-              words.push_back(off << 1 | (maybeNull ? 1 : 0));
-            }
+  if (ast::isa<ast::TupleType>(ty) || ast::isa<ast::FixedArrayType>(ty)) {
+    // A tuple (a struct's shape) or a fixed-size array: the references it
+    // holds, through nested tuples and arrays, by offset.
+    MemLayout l = memLayout(ty);
+    words = {l.Size, l.Align,
+             ast::isa<ast::TupleType>(ty) ? kNativeKindTuple
+                                          : nativeTypeKind(ty),
+             0, 0};
+    std::function<void(ast::Type *, int64_t, bool)> refs =
+        [&](ast::Type *e, int64_t off, bool nullable) {
+          const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e) ||
+                                 ast::isPayloadEnum(e);
+          ast::Type *shape = memShapeOf(e);
+          if (auto *tt = ast::dyn_cast<ast::TupleType>(shape)) {
+            for (size_t i = 0; i < tt->getArity(); ++i)
+              refs(tt->getElementType(i), off + tupleElementOffset(tt, i),
+                   maybeNull);
+          } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(shape)) {
+            const int64_t stride = memLayout(ft->getElementType()).Size;
+            for (int64_t i = 0; i < ft->getLength(); ++i)
+              refs(ft->getElementType(), off + i * stride, maybeNull);
+          } else if (ast::isRefType(e)) {
+            ++words[3];
+            words.push_back(off << 1 | (maybeNull ? 1 : 0));
           }
         };
-    refs(tt, 0, optional);
+    refs(ty, 0, optional);
   } else if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
@@ -2060,6 +2069,9 @@ std::vector<int64_t> ModuleLowering::unsetWords(ast::Type *ty, int64_t base) {
                    base + tupleElementOffset(enumCarrier(et), 0)); // the tag
     return words;
   }
+  // An array holds one in any element: the first's words tell.
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return unsetWords(ft->getElementType(), base);
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     std::vector<int64_t> fewest;
     for (size_t i = 0; i < tt->getArity(); ++i) {

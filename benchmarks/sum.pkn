@@ -10,7 +10,9 @@ fn main(args: view Str[]) -> int {
   let reps = bench::arg(args, 2, 5);
   xs = [0.0; 16384];
   for i in 0..16384 { xs[i] = float<int>(i % 7); }
-  best = 0; total = 0; s = 0.0;
+  best = 0;
+  total = 0;
+  s = 0.0;
   let c0 = bench::cpu();
   let w0 = bench::now();
   for r in 0..reps {
@@ -23,7 +25,8 @@ fn main(args: view Str[]) -> int {
   }
   let cpu = bench::cpu() - c0;
   let wall = bench::now() - w0;
-  io::println("sum n=" + Str(n) + " reps=" + Str(reps) + " ns_min=" + Str(best) +
-              " ns_mean=" + Str(total / reps) + " wall_ns=" + Str(wall) + " cpu_ns=" + Str(cpu) + " check=" + Str(s));
+  io::println("sum n=" + Str(n) + " reps=" + Str(reps) + " ns_min=" + Str(best)
+      + " ns_mean=" + Str(total / reps) + " wall_ns=" + Str(wall) + " cpu_ns="
+      + Str(cpu) + " check=" + Str(s));
   return 0;
 }

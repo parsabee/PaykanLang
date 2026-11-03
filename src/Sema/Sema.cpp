@@ -1952,6 +1952,20 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
                   typeName(t) + "'");
       return nullptr;
     }
+    // `await t` spends the variable's handle (the prototype's typestate):
+    // a second await, or any use after, is an error, as after a move.
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(operand);
+        id && !id->isFunctionRef() && id->getName() != names::kSelf &&
+        S.CurrentScope->findOwner(id->getName())) {
+      if (!S.checkMovable(id->getName(), node->getLocation(), "await"))
+        return nullptr;
+      if (std::string why = S.viewedBy(id->getName()); !why.empty()) {
+        S.error(node->getLocation(), why + "; it cannot be awaited");
+        return nullptr;
+      }
+      S.MovedVars[id->getName()] =
+          Sema::MovedState{node->getLocation(), false, "await"};
+    }
     return tt->getInnerType();
   }
   if (node->getOpcode() == ast::UnaryOpcode::Move) {
@@ -2028,9 +2042,8 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     return operandTy;
   case ast::UnaryOpcode::Not:
     return S.Ctx.getBoolTy();
-  case ast::UnaryOpcode::Move:
-  case ast::UnaryOpcode::Await:
-    break; // handled above
+  case ast::UnaryOpcode::Move:  // handled above
+  case ast::UnaryOpcode::Await: // handled above
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -2771,6 +2784,13 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return S.checkAtomicMethodCall(node, at);
   if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
     return nullptr;
+  // A `mem::Buffer<T>` of the enclosing function in a `parallel for` body
+  // (the prototype): reads, and `set` at the loop's variable.
+  if (!S.ParallelStack.empty() && S.bufferElementType(recvTy))
+    if (const auto *rid = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+        rid && S.isOuterScope(S.CurrentScope->findOwner(rid->getName())) &&
+        !S.checkParallelBufferCall(node, rid->getName()))
+      return nullptr;
 
   // A method cannot be called on an optional receiver (it may be None),
   // but for the builtin `Show`'s `toString()` of an optional whose value
@@ -4341,7 +4361,12 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
 
 bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
-  return visitStatements(node->getStatements());
+  const bool ok = visitStatements(node->getStatements());
+  // The block's task handles are spent where it ends (the prototype); a
+  // `return`, `break` or `continue` that left it checked them itself.
+  if (ok && !FlowEnded)
+    checkTasksAwaited(CurrentScope, nullptr, node->getLocation());
+  return ok;
 }
 
 bool Sema::visitDeclStmt(ast::DeclStmt *node) {
@@ -4504,6 +4529,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     }
     CurrentScope->set(varName, valTy);
     DeclLoopDepth[varName] = LoopDepth;
+    if (ast::isa<ast::TaskType>(valTy))
+      TaskLocals[varName] = node->getLocation();
     // The prototype: the new variable adopts the value's qualifier.
     const ast::Qualifier q =
         sharesStorage(valTy) ? qualifierOf(node->getValue()) : ast::Qualifier{};
@@ -4516,6 +4543,19 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 
   if (!checkReassignable(varName, node->getLocation()))
     return false;
+  // A task handle is spent before the variable takes another (the
+  // prototype): a handle dropped unawaited has no one to wait for it.
+  if (ast::Type *heldTy = owner->lookup(varName);
+      heldTy && ast::isa<ast::TaskType>(heldTy)) {
+    auto spent = MovedVars.find(varName);
+    if (spent == MovedVars.end() || spent->second.Maybe) {
+      error(node->getLocation(),
+            "task '" + varName +
+                "' is replaced before it is awaited: await it (or move it) "
+                "first");
+      return false;
+    }
+  }
   MovedVars.erase(varName); // assigned again after a move
   auto *varTy = owner->lookup(varName);
 
@@ -4601,6 +4641,10 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
       error(node->getReturnValue()->getLocation(), why);
       return false;
     }
+    // Every task handle of the function is spent before it returns (the
+    // prototype); the result's own flow spent one returned as it is.
+    checkTasksAwaitedUpTo(FunctionScope ? FunctionScope->Parent : nullptr,
+                          "return", node->getLocation());
     return checkViewNotReturned(node->getReturnValue(), valTy);
   }
   // void return
@@ -4608,6 +4652,8 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     error(node->getLocation(), "non-void function must return a value");
     return false;
   }
+  checkTasksAwaitedUpTo(FunctionScope ? FunctionScope->Parent : nullptr,
+                        "return", node->getLocation());
   return true;
 }
 
@@ -4842,9 +4888,13 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
           "'break' cannot be used in a 'parallel for' body (the prototype)");
     return false;
   }
-  // The moves so far leave the loop by this path.
-  if (!LoopMoveStack.empty())
+  // The moves so far leave the loop by this path; the task handles of the
+  // scopes inside the loop are spent before it (the prototype).
+  if (!LoopMoveStack.empty()) {
+    checkTasksAwaitedUpTo(LoopMoveStack.back().Outer, "break",
+                          node->getLocation());
     LoopMoveStack.back().Breaks.push_back(MovedVars);
+  }
   FlowEnded = true;
   return true;
 }
@@ -4863,9 +4913,13 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
                                "for' body (the prototype)");
     return false;
   }
-  // The next iteration starts here.
-  if (!LoopMoveStack.empty())
+  // The next iteration starts here; the task handles of the scopes inside
+  // the loop are spent before it (the prototype).
+  if (!LoopMoveStack.empty()) {
+    checkTasksAwaitedUpTo(LoopMoveStack.back().Outer, "continue",
+                          node->getLocation());
     checkLoopIteration(LoopMoveStack.back(), node->getLocation());
+  }
   FlowEnded = true;
   return true;
 }
@@ -5339,8 +5393,14 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
           node->getParams()[i].Qual;
     }
     declareParamKinds(node);
-    // The concurrency prototype: the function's own moves, loop depths and
-    // result qualifier.
+    // The concurrency prototype: the function's own moves, task handles,
+    // loop depths and result qualifier.
+    Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+    std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+        std::exchange(TaskLocals, {});
+    for (size_t i = 0; i < node->getParams().size(); ++i)
+      if (ast::isa<ast::TaskType>(paramTypes[i]))
+        TaskLocals[node->getParams()[i].getName()] = node->getParams()[i].Loc;
     const bool savedAsync = std::exchange(InAsyncFn, node->isAsync());
     const ast::Qualifier savedResultQual =
         std::exchange(CurrentResultQual, node->getResultQual());
@@ -5353,6 +5413,11 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     for (const ast::Param &p : node->getParams())
       DeclLoopDepth[p.getName()] = 0;
     bool ok = visitBody(node->getBody()->getStatements());
+    // The function's task handles are spent where its body ends.
+    if (ok && !FlowEnded)
+      checkTasksAwaited(CurrentScope, nullptr, node->getLocation());
+    FunctionScope = savedFunctionScope;
+    TaskLocals = std::move(savedTasks);
     MovedVars = std::move(savedMoves);
     LoopMoveStack = std::move(savedLoopMoves);
     FlowEnded = savedFlowEnded;
@@ -5578,6 +5643,13 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     qual = qt->getQualifier();
     qualified = true;
     node->setType(nullptr);
+    // As an annotation's qualifier is checked below: a borrow carries none.
+    if (!checkBorrowQualifier(qual, node->getMode(),
+                              "local '" + node->getName() + "'",
+                              node->getLocation())) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
   }
 
   if (node->getType()) {
@@ -5731,10 +5803,25 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   // The qualifier (the prototype): a value has none; an inferred one adopts
   // the initializer's (a copy of a `shared` reference is `shared`); a
   // qualified slot takes what converts into it.
-  if (!sharesStorage(declTy) || node->isWeak())
+  if (!sharesStorage(declTy) || node->isWeak()) {
+    // One written alone (`x: shared = 1;`, `weak w: shared = n;`) is
+    // checked as an annotation's is (resolveValueType).
+    if (!qual.isUnique() && node->isWeak()) {
+      error(node->getLocation(),
+            "weak variable '" + node->getName() +
+                "' takes no qualifier: a weak reference counts nothing");
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    if (!qual.isUnique() &&
+        !checkQualifierApplies(qual, declTy, node->getLocation())) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
     qual = ast::Qualifier{};
-  else if (!qualified && node->getInitExpr())
+  } else if (!qualified && node->getInitExpr()) {
     qual = qualifierOf(node->getInitExpr());
+  }
   if (!checkQualifierApplies(qual, declTy, node->getLocation())) {
     declarePoisoned(CurrentScope, node->getName());
     return false;
@@ -5753,6 +5840,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
   CurrentScope->Quals[node->getName()] = qual;
+  if (ast::isa<ast::TaskType>(declTy))
+    TaskLocals[node->getName()] = node->getLocation();
   return checkLocalBorrow(node) && viewOk;
 }
 

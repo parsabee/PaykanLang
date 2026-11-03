@@ -408,9 +408,13 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
       borrowedPaths(u->getOperand(), paths);
       std::vector<CallUse> mine;
       mine.reserve(paths.size());
+      // A callee whose declaration gives no names (a method's modes) has
+      // its parameters numbered.
+      const std::string pname = modes.name(i).empty()
+                                    ? std::to_string(i + 1)
+                                    : "'" + modes.name(i) + "'";
       for (std::string &path : paths)
-        mine.push_back({std::move(path),
-                        "moved into parameter '" + modes.name(i) + "'",
+        mine.push_back({std::move(path), "moved into parameter " + pname,
                         modes.name(i), true});
       std::string msg = conflictWith(uses, mine);
       uses.push_back(std::move(mine));

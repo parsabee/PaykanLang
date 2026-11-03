@@ -203,6 +203,38 @@ Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,
 
 // -- Method calls
 
+ast::Type *ModuleLowering::bufferElementType(ast::StructType *st) {
+  const std::string &n = st->getName();
+  const size_t lt = n.find('<');
+  if (lt == std::string::npos)
+    return nullptr;
+  const std::string base = n.substr(0, lt);
+  const bool named =
+      base == "Buffer" ||
+      (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
+  if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
+      st->getElementTypes()[0] != ASTCtx.getObjTy())
+    return nullptr;
+  const ast::MethodDecl *at = st->findMethod("at");
+  return at ? at->getReturnType() : nullptr;
+}
+
+bool ModuleLowering::isBufferReadInPlace(ast::MethodCallExpr *mc) {
+  ast::StructType *st = getExprStructType(mc->getReceiver());
+  ast::Type *elem = st ? bufferElementType(st) : nullptr;
+  if (!elem)
+    return false;
+  const std::string &m = mc->getMethodName();
+  if (m == names::kMethodLength)
+    return mc->getNumArguments() == 0;
+  if ((m != "at" && m != "get") || mc->getNumArguments() != 1)
+    return false;
+  // A number: an 8-byte slot in the buffer, loaded as the i64 or f64 it is
+  // held as (ExprEmitter::emitBufferRead).
+  const pir::Type et = toPIRType(elem);
+  return et == pir::Type::I64 || et == pir::Type::F64;
+}
+
 Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
                                                       ast::StructType *st,
                                                       bool wantAddress) {

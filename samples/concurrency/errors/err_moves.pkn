@@ -1,10 +1,19 @@
 import ::io;
 
-class Job { name: Str; }
-class Holder { job: Job; other: shared Job; }
+class Job {
+  name: Str;
+}
+class Holder {
+  job: Job;
+  other: shared Job;
+}
 
-fn keep(j: Job) -> int { return j.name.len(); }
-fn look(j: view Job, k: Job) -> int { return j.name.len() + k.name.len(); }
+fn keep(j: Job) -> int {
+  return j.name.len();
+}
+fn look(j: view Job, k: Job) -> int {
+  return j.name.len() + k.name.len();
+}
 
 fn main() -> int {
   let a = Job("a");
@@ -16,7 +25,11 @@ fn main() -> int {
   let c = Job("c");
   for i in 0..2 { keep(move c); }      // error: moved in the loop and not assigned again
   d = Job("d");
-  while True { if d.name.len() > 0 { keep(move d); continue; } d = Job("dd"); break; }  // error: continue without an assignment
+  while True {
+    if d.name.len() > 0 { keep(move d); continue; }   // error: continue without an assignment
+    d = Job("dd");
+    break;
+  }
   let e = Job("e");
   v: view Job = e;
   keep(move e);                        // error: viewed by 'v'

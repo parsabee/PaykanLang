@@ -152,8 +152,8 @@ class Box<T: ValueType> {
 }
 
 impl Box<T> {
-  fn __init__(v: T)   { self.__data = v; }
-  fn get() -> inout T { return self.__data; }
+  fn __init__(v: T)         { self.__data = move v; }
+  fn get() -> inout T       { return self.__data; }
   /// The value, read only: what a `const` or `atomic const` box gives
   /// (`get()` is not a `view fn`, since its result may be assigned).
   view fn value() -> view T { return self.__data; }

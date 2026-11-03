@@ -1107,7 +1107,7 @@ private:
           }
           advance();
         }
-        w.Parallel = std::move(p);
+        w.Par = std::move(p);
       }
       out = std::move(w);
       return true;

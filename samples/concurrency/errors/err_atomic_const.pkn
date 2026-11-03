@@ -1,7 +1,13 @@
 import ::io;
 
-class Limits { lo: int; hi: int; }
-class Config { name: Str; limits: Limits; }
+class Limits {
+  lo: int;
+  hi: int;
+}
+class Config {
+  name: Str;
+  limits: Limits;
+}
 
 fn main() -> int {
   let cfg: atomic const Config = Config("demo", Limits(0, 100));

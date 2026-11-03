@@ -616,6 +616,11 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
     return false;
   };
   auto unknownType = [](const std::string &what, const std::string &type) {
+    // A task type names an `async fn` of the module (the prototype).
+    if (type.rfind("Task<", 0) == 0)
+      return Status::error(what + " is a task ('" + type +
+                           "'): a module that declares an 'async fn' cannot "
+                           "be imported in the prototype");
     return Status::error(what + " has unknown type '" + type + "'");
   };
   auto signature = [&](const auto &decl, const std::string &ret,
@@ -991,7 +996,12 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
                              const std::string &what) -> ast::Type * {
     if (auto *ty = resolveExportedType(Ctx, tyName))
       return ty;
-    error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
+    if (tyName.rfind("Task<", 0) == 0)
+      error(loc, diagPrefix + what + " is a task ('" + tyName +
+                     "'): a module that declares an 'async fn' cannot be "
+                     "imported in the prototype");
+    else
+      error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
     return nullptr;
   };
 

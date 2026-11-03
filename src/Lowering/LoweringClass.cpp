@@ -321,12 +321,18 @@ void ModuleLowering::emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
     auto *ma = ast::dyn_cast<ast::MemberAssignStmt>(stmts[i]);
     auto *recv =
         ma ? ast::dyn_cast<ast::Identifier>(ma->getReceiver()) : nullptr;
+    // `self.f = move p` (the generated `__init__`, the prototype) is a
+    // variable's value too.
+    const ast::Expr *value = ma ? ma->getValue() : nullptr;
+    if (const auto *u = value ? ast::dyn_cast<ast::UnaryExpr>(value) : nullptr;
+        u && u->getOpcode() == ast::UnaryOpcode::Move)
+      value = u->getOperand();
     if (!recv || recv->getName() != kSelf ||
         std::none_of(
             fields.begin(), fields.end(),
             [&](const auto &f) { return f.first == ma->getFieldName(); }) ||
         !assigned.insert(ma->getFieldName()).second ||
-        (selfUsable && !ast::isa<ast::Identifier>(ma->getValue()) &&
+        (selfUsable && !ast::isa<ast::Identifier>(value) &&
          !isNoneForOptional(ma->getValue())))
       break;
     FirstFieldStores.insert(ma);

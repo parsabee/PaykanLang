@@ -781,7 +781,14 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
       const std::string &interned = Ctx.intern(name);
       params.push_back({&interned, superInit->getParamTypes()[i], modes.mode(i),
                         superInit->getParamQual(i), loc});
-      args.push_back(Ctx.make<ast::Identifier>(loc, interned));
+      // A move-only argument is passed on by `move` (the prototype's copy
+      // rule, --strict-ownership); a Copyable one as it is (an `atomic`
+      // handle copies into the cell's handle, not a new cell).
+      ast::Expr *arg = Ctx.make<ast::Identifier>(loc, interned);
+      if (modes.mode(i) == ast::ParamMode::Value &&
+          !isCopyable(superInit->getParamTypes()[i]))
+        arg = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, arg);
+      args.push_back(arg);
     }
     body.push_back(Ctx.make<ast::ExprStmt>(
         loc, Ctx.make<ast::CallExpr>(loc, Ctx.intern(names::kMethodSuper),
@@ -791,9 +798,14 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
     const std::string &interned = Ctx.intern(name);
     params.push_back({&interned, type, ast::ParamMode::Value,
                       ct->findFieldQualifier(name), loc});
+    // The field takes the parameter: a move-only one by `move` (the
+    // prototype's copy rule), a Copyable one as it is.
+    ast::Expr *value = Ctx.make<ast::Identifier>(loc, interned);
+    if (!isCopyable(type))
+      value = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, value);
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
-        Ctx.make<ast::Identifier>(loc, interned)));
+        value));
   }
 
   return Ctx.make<ast::FuncDecl>(
@@ -1060,6 +1072,15 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
 }
 
 bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
+  // A class's `__walk` (the prototype) is emitted for it too: the walk of
+  // its references that freezes an `atomic const` object.
+  if (fn->getName() == names::kMethodWalk) {
+    error(fn->getLocation(),
+          "'__walk' is reserved for the compiler-generated walk and cannot "
+          "be declared in " +
+              std::string(typeKindWord(owner)) + " '" + typeName(owner) + "'");
+    return true;
+  }
   // A class's `destroy` is emitted for it (releasing the fields and freeing
   // the object) and is final; a struct, a value, is never destroyed.
   if (fn->getName() != names::kMethodDestroy)
@@ -1314,7 +1335,28 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         CurrentMethodUse->Decl = method;
       }
 
+      // The method's moves, task handles and loop depths are its own (the
+      // prototype); a generic instance's methods are checked in the middle
+      // of another body, whose state comes back after.
+      Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+      std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+          std::exchange(TaskLocals, {});
+      MovedMap savedMoves = std::exchange(MovedVars, {});
+      std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+      const bool savedFlowEnded = std::exchange(FlowEnded, false);
+      std::unordered_map<std::string, unsigned> savedDeclDepths =
+          std::exchange(DeclLoopDepth, {});
+      const unsigned savedLoopDepth = std::exchange(LoopDepth, 0u);
       bool bodyOk = visitBody(method->getBody()->getStatements());
+      if (bodyOk && !FlowEnded)
+        checkTasksAwaited(CurrentScope, nullptr, method->getLocation());
+      LoopDepth = savedLoopDepth;
+      DeclLoopDepth = std::move(savedDeclDepths);
+      FlowEnded = savedFlowEnded;
+      LoopMoveStack = std::move(savedLoopMoves);
+      MovedVars = std::move(savedMoves);
+      FunctionScope = savedFunctionScope;
+      TaskLocals = std::move(savedTasks);
       CurrentMethodUse = nullptr;
 
       if (!bodyOk) {

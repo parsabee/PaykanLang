@@ -1,13 +1,17 @@
 import ::io;
 
-class Node { id: int; }
+class Node {
+  id: int;
+}
 
 fn make() -> Node {
   let n = Node(1);
   return n;                     // strict: write `return move n`
 }
 
-fn take(n: Node) -> int { return n.id; }
+fn take(n: Node) -> int {
+  return n.id;
+}
 
 fn main() -> int {
   let a = Node(2);

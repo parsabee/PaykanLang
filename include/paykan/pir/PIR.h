@@ -464,7 +464,7 @@ struct While {
   Operand Cond;
   std::unique_ptr<Block> Body;
   /// Set when the loop is a `parallel for` (the prototype).
-  std::optional<Parallel> Parallel;
+  std::optional<Parallel> Par;
 };
 
 /// `switch %v { case c { ... } ... default { ... } }`: runs the block of the

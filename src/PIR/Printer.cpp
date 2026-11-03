@@ -490,8 +490,8 @@ private:
           printBlock(*w->Body, depth + 1);
         indent(depth);
         OS << "}";
-        if (w->Parallel)
-          printParallel(*w->Parallel);
+        if (w->Par)
+          printParallel(*w->Par);
         OS << "\n";
       } else if (const auto *sw = std::get_if<Switch>(&s)) {
         OS << "switch ";

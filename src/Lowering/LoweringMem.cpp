@@ -197,6 +197,13 @@ void ModuleLowering::releaseSliceCopy(const Val &copy, const Val &len,
 }
 
 ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
+  // `move v` of a value held in memory (the prototype): the value where it
+  // is, as emitMemAddress reads it; Sema has ended `v`, whose teardown
+  // still drops its own references (a copy of the bytes retains the
+  // references among them).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    return emitMemRead(u->getOperand());
   // A tuple or a struct made the present value of its optional: the
   // optional, in a temporary.
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {

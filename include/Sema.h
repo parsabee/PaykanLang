@@ -361,6 +361,30 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The variables a `move` has ended, by name: a forward "maybe moved" set
   /// over the body (the design's SemaMoves).
   MovedMap MovedVars;
+  /// The task handles of the function being checked (the prototype): its
+  /// locals and parameters of a `Task<T>` type, by name, with where each
+  /// is declared.  A handle is spent by `await`, by `move`, or by its use
+  /// as a value (checkQualifiedFlow), and every path spends it before its
+  /// scope ends (checkTasksAwaited): the design's typestate, reduced to the
+  /// one operation the prototype has.
+  std::unordered_map<std::string, ast::SourceLocation> TaskLocals;
+  /// The scope of the body being checked (a function's, a method's, a
+  /// lambda's): a `return` checks the task handles of every scope up to it.
+  Scope *FunctionScope = nullptr;
+  /// The task handles of @p s not spent on every path: an error for each, at
+  /// its declaration, or at @p loc when @p exit names the statement leaving
+  /// (`return`, `break`, `continue`).
+  void checkTasksAwaited(const Scope *s, const char *exit,
+                         ast::SourceLocation loc);
+  /// checkTasksAwaited of every scope from the current one up to, not
+  /// including, @p stop.
+  void checkTasksAwaitedUpTo(const Scope *stop, const char *exit,
+                             ast::SourceLocation loc);
+  /// Whether @p name may be spent (moved, awaited: @p what) at @p loc: a
+  /// variable of the function's own, not a borrow, not a `weak` or a
+  /// capture; an error otherwise.
+  bool checkMovable(const std::string &name, ast::SourceLocation loc,
+                    const char *what);
   /// Set by a statement no statement after it reaches (`return`, `break`,
   /// `continue`): its path's moves do not join what follows the branch.
   bool FlowEnded = false;
@@ -372,6 +396,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     unsigned Depth = 0;
     MovedMap Entry;
     std::vector<MovedMap> Breaks;
+    /// The scope the loop stands in: a `break` or `continue` spends the
+    /// task handles of the scopes inside it (checkTasksAwaitedUpTo).
+    Scope *Outer = nullptr;
   };
   std::vector<LoopMoves> LoopMoveStack;
   /// The (variable, loop) pairs reported as moved and not assigned again.
@@ -466,6 +493,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                    ast::AtomicType *at);
   /// A variable, or a field reached through variables and fields only.
   static bool isPlaceChain(const ast::Expr *e);
+  /// `T` when @p ty is the standard library's `mem::Buffer<T>` (a struct of
+  /// one field, `__data`, the runtime's buffer object as an `Obj`); nullptr
+  /// otherwise.
+  ast::Type *bufferElementType(ast::Type *ty) const;
+  /// A method call on a `mem::Buffer<T>` of the enclosing function in a
+  /// `parallel for` body: a read (`at`, `get`, `len`), or `set` at the
+  /// loop's variable; anything else is an error.
+  bool checkParallelBufferCall(const ast::MethodCallExpr *node,
+                               const std::string &name);
   /// Whether @p a and @p b name the same place (isPlaceChain).
   static bool samePlace(const ast::Expr *a, const ast::Expr *b);
   /// Whether @p e reads @p place: a walk of the operators, accesses and

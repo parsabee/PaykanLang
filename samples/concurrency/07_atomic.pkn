@@ -1,6 +1,22 @@
+// The concurrency prototype: `atomic` cells (docs/design/concurrency.md).
+// `atomic` on every number type, `bool` and `char`; `exchange` and
+// `compareExchange`; handles; `atomic` fields of a frozen class, bumped
+// from tasks and from a `parallel for`.
+// expect-stdout: i8 -126, u8 4, f32 1.75, bool True (was False), char b (was a)
+// expect-stdout: n 9 True False
+// expect-stdout: n 20, m 20, k 4
+// expect-stdout: s served 3001, bytes 1500, done True, ids 6
+// expect-stdout: served 2951 True 0
+// expect-leaks: the cells and the frozen object are immortal in the prototype
+
 import ::io;
 
-class Stats { name: Str; served: atomic int; bytes: atomic float; done: atomic bool; }
+class Stats {
+  name: Str;
+  served: atomic int;
+  bytes: atomic float;
+  done: atomic bool;
+}
 
 // Every worker sees the same frozen Stats; its atomic fields are cells.
 async fn record(st: atomic const Stats, id: int, n: int) -> int {
@@ -11,9 +27,13 @@ async fn record(st: atomic const Stats, id: int, n: int) -> int {
   return id;
 }
 
-fn bump(c: atomic int, by: int) { c += by; }   // a handle parameter
+fn bump(c: atomic int, by: int) {
+  c += by;
+}   // a handle parameter
 
-fn fresh(v: int) -> atomic int { return v; }   // a value: a new cell
+fn fresh(v: int) -> atomic int {
+  return v;
+}   // a value: a new cell
 
 fn main() -> int {
   // Every number type, bool and char
@@ -27,9 +47,9 @@ fn main() -> int {
   let was = b.exchange(True);
   let c: atomic char = 'a';
   let old = c.exchange('b');
-  io::println("i8 " + Str(a) + ", u8 " + Str(u) + ", f32 " + Str(f) +
-              ", bool " + Str(b) + " (was " + Str(was) + "), char " + Str(c) +
-              " (was " + Str(old) + ")");
+  io::println("i8 " + Str(a) + ", u8 " + Str(u) + ", f32 " + Str(f) + ", bool "
+      + Str(b) + " (was " + Str(was) + "), char " + Str(c) + " (was " + Str(old)
+      + ")");
 
   // exchange and compareExchange on a variable
   let n: atomic int = 5;
@@ -54,10 +74,11 @@ fn main() -> int {
   st.done = True;
   let h = st.served;                        // a handle to the field's cell
   h += 1;
-  io::println(st.name + " served " + Str(st.served) + ", bytes " + Str(st.bytes) +
-              ", done " + Str(st.done) + ", ids " + Str(ids));
+  io::println(st.name + " served " + Str(st.served) + ", bytes " + Str(st.bytes)
+      + ", done " + Str(st.done) + ", ids " + Str(ids));
   // a parallel loop over a frozen object's cells
   parallel for i in 0..100 { if i % 2 == 0 { st.served -= 1; } }
-  io::println("served " + Str(st.served) + " " + Str(st.served.compareExchange(2951, 0)) + " " + Str(st.served));
+  io::println("served " + Str(st.served) + " "
+      + Str(st.served.compareExchange(2951, 0)) + " " + Str(st.served));
   return 0;
 }

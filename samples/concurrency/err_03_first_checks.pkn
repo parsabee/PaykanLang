@@ -2,7 +2,9 @@
 // line marked `error` is rejected by Sema.
 import ::io;
 
-class Node { id: int; }
+class Node {
+  id: int;
+}
 
 async fn consume(n: Node) -> int { return n.id; }
 

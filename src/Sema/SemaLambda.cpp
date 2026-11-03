@@ -251,6 +251,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   bool bodyOk;
   {
     ScopeGuard guard(*this);
+    // The lambda's task handles are its own (the prototype).
+    Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+    std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+        std::exchange(TaskLocals, {});
     LambdaStack.push_back(
         {node, CurrentScope, savedClassCtx, savedMethodUse, Borrows});
     for (size_t i = 0; i < node->getParams().size(); ++i) {
@@ -262,6 +266,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     }
     CurrentResult = {ast::ParamMode::Value, nullptr, CurrentScope};
     bodyOk = visitBody(node->getBody()->getStatements());
+    if (bodyOk && !FlowEnded)
+      checkTasksAwaited(CurrentScope, nullptr, node->getLocation());
+    FunctionScope = savedFunctionScope;
+    TaskLocals = std::move(savedTasks);
     if (bodyOk && inferred)
       retTy = inferredResult(node);
     if (!retTy)

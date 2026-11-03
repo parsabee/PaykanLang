@@ -1,19 +1,45 @@
+// The concurrency prototype: precise moves (docs/design/concurrency.md).
+// A move on one path of an `if`, revival by an assignment, a move in a loop
+// assigned again before the next iteration, a `break` after a move, a
+// `match` whose arms all move, and a partial move `move h.job`.
+// expect-stdout: ran 1
+// expect-stdout: 2 ccc
+// expect-stdout: total 5 xy
+// expect-stdout: kk
+// expect-stdout: mm
+// expect-stdout: inner
+// expect-stdout: left
+
 import ::io;
 
-class Job { name: Str; }
-class Holder { job: Job; tag: Str; }
-struct Pair { left: Job; n: int; }
+class Job {
+  name: Str;
+}
+class Holder {
+  job: Job;
+  tag: Str;
+}
+struct Pair {
+  left: Job;
+  n: int;
+}
 
 async fn run(j: Job) -> int { return j.name.len(); }
 
-fn keep(j: Job) -> int { return j.name.len(); }
+fn keep(j: Job) -> int {
+  return j.name.len();
+}
 
 fn main() -> int {
   // a move in one branch, a use on the other: fine
   let a = Job("a");
   let flag = True;
-  if flag { let t = run(move a); io::println("ran " + Str(await t)); }
-  else { io::println("kept " + a.name); }
+  if flag {
+    let t = run(move a);
+    io::println("ran " + Str(await t));
+  } else {
+    io::println("kept " + a.name);
+  }
   // revived by an assignment after the move
   b = Job("bb");
   let n = keep(move b);

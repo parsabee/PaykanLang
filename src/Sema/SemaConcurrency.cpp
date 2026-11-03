@@ -44,6 +44,11 @@ bool Sema::checkParallelRead(const std::string &name, ast::Type *ty,
     return true;
   if (isPlainValue(ty) || ast::isa<ast::AtomicType>(ty))
     return true;
+  // A `mem::Buffer<T>` of plain values: read at any index, written at the
+  // loop's variable only (checkParallelBufferCall), its object never
+  // counted by the body.
+  if (ast::Type *elem = bufferElementType(ty); elem && isPlainValue(elem))
+    return true;
   // A handle: a `locked` cell or an `atomic const` object.
   if (const ast::Qualifier q = qualifierOfVar(name);
       q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicConst)
@@ -371,10 +376,10 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
   return false;
 }
 
-/// The `at` of `mem::Buffer<T>` when @p st is that struct (one field,
-/// `__data`, the runtime's buffer object as an `Obj`); nullptr otherwise.
-static const ast::MethodDecl *bufferAt(const ast::StructType *st,
-                                       const ast::ASTContext &ctx) {
+ast::Type *Sema::bufferElementType(ast::Type *ty) const {
+  const auto *st = ty ? ast::dyn_cast<ast::StructType>(ty) : nullptr;
+  if (!st)
+    return nullptr;
   const std::string &n = st->getName();
   const size_t lt = n.find('<');
   if (lt == std::string::npos)
@@ -384,9 +389,45 @@ static const ast::MethodDecl *bufferAt(const ast::StructType *st,
       base == "Buffer" ||
       (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
   if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
-      st->getElementTypes()[0] != ctx.getObjTy())
+      st->getElementTypes()[0] != Ctx.getObjTy())
     return nullptr;
-  return st->findMethod("at");
+  // `view fn at(i: unsigned) -> view T`: its result is `T`.
+  const ast::MethodDecl *at = st->findMethod("at");
+  return at ? at->getReturnType() : nullptr;
+}
+
+bool Sema::checkParallelBufferCall(const ast::MethodCallExpr *node,
+                                   const std::string &name) {
+  const std::string &m = node->getMethodName();
+  if (m == "at" || m == "get" || m == "len")
+    return true;
+  const std::string &var = ParallelStack.back().Loop->getVar()->getName();
+  if (m == "set" && node->getNumArguments() == 2) {
+    // `set(i, v)`, or `set(unsigned<int>(i), v)`: the index is the loop's
+    // variable, possibly converted.
+    const ast::Expr *idx = node->getArguments()[0];
+    if (const auto *conv = ast::dyn_cast<ast::CallExpr>(idx);
+        conv && conv->getNumArguments() == 1 &&
+        isConversionTarget(conv->getCalleeName()))
+      idx = conv->getArguments()[0];
+    const auto *id = ast::dyn_cast<ast::Identifier>(idx);
+    if (id && id->getName() == var)
+      return true;
+    error(node->getArguments()[0]->getLocation(),
+          "'" + name +
+              "' is written in a 'parallel for' body at an index other than "
+              "the loop's variable '" +
+              var + "': two iterations could write one element");
+    return false;
+  }
+  error(node->getLocation(),
+        "'" + name + "' (a '" +
+            typeName(node->getReceiver()->getResolvedType()) +
+            "' of the enclosing function) is read ('at', 'get', 'len') and "
+            "written at the loop's variable ('set') in a 'parallel for' "
+            "body; '" +
+            m + "' could move its storage under the other iterations");
+  return false;
 }
 
 std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
@@ -410,13 +451,16 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
     // field is the runtime's buffer object, whose walk freezes the
     // elements (PaykanBuffer_walk), so the check is of `T`, by `at`'s
     // result.
-    if (const ast::MethodDecl *at = bufferAt(st, Ctx))
-      return uncrossable(at->getReturnType(), {}, path);
+    if (ast::Type *elem = bufferElementType(st))
+      return uncrossable(elem, {}, path);
     const auto &types = st->getElementTypes();
     for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
       const std::string &f = st->getFieldName(i);
-      std::string why = uncrossable(types[i], st->findFieldQualifier(f),
-                                    path.empty() ? f : path + "." + f);
+      std::string sub = path;
+      if (!sub.empty())
+        sub += '.';
+      sub += f;
+      std::string why = uncrossable(types[i], st->findFieldQualifier(f), sub);
       if (!why.empty())
         return why;
     }
@@ -459,7 +503,10 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
   std::string why;
   for (const ast::ClassType *c = ct; c && why.empty(); c = c->getSuperClass())
     for (const auto &[f, fty] : c->getFields()) {
-      const std::string sub = path.empty() ? f : path + "." + f;
+      std::string sub = path;
+      if (!sub.empty())
+        sub += '.';
+      sub += f;
       if (c->isWeakField(f)) {
         why = "field '" + sub + "' is 'weak': a weak load is a plain retain";
         break;
@@ -527,11 +574,23 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
       // copies; one holding a unique part moves.
       std::string part;
       if (!isCopyable(ty, &part)) {
-        error(arg->getLocation(),
-              "cannot copy '" + text + "' (" +
-                  (part.empty() ? "a move-only '" + typeName(ty) + "'"
-                                : "a '" + typeName(ty) + "' holding " + part) +
-                  ") into a task: write 'move " + text + "' to transfer it");
+        std::string msg = "cannot copy '";
+        msg += text;
+        msg += "' (";
+        if (part.empty()) {
+          msg += "a move-only '";
+          msg += typeName(ty);
+          msg += "'";
+        } else {
+          msg += "a '";
+          msg += typeName(ty);
+          msg += "' holding ";
+          msg += part;
+        }
+        msg += ") into a task: write 'move ";
+        msg += text;
+        msg += "' to transfer it";
+        error(arg->getLocation(), msg);
         ok = false;
         continue;
       }
@@ -539,8 +598,13 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
     // What crosses holds nothing of this thread: no `shared` or `weak`
     // part, no function value, no `Obj`.
     if (std::string why = uncrossable(ty, q, ""); !why.empty()) {
-      error(arg->getLocation(), "cannot send '" + text + "' (a '" +
-                                    qualifiedName(q, ty) + "'): " + why);
+      std::string msg = "cannot send '";
+      msg += text;
+      msg += "' (a '";
+      msg += qualifiedName(q, ty);
+      msg += "'): ";
+      msg += why;
+      error(arg->getLocation(), msg);
       ok = false;
     }
   }
@@ -584,12 +648,17 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     const std::string text = placeText(args[i]);
     const char *mode = ast::paramModeName(modes.mode(i));
     if (q.Form == ast::QualForm::Locked) {
-      error(args[i]->getLocation(),
-            "'" + text +
-                "' is 'locked': a cell's contents are reached in a "
-                "'lock' block, not borrowed by '" +
-                mode + "' parameter '" + modes.name(i) + "' of '" + callee +
-                "'");
+      std::string msg = "'";
+      msg += text;
+      msg += "' is 'locked': a cell's contents are reached in a 'lock' "
+             "block, not borrowed by '";
+      msg += mode;
+      msg += "' parameter '";
+      msg += modes.name(i);
+      msg += "' of '";
+      msg += callee;
+      msg += "'";
+      error(args[i]->getLocation(), msg);
       ok = false;
     }
   }
@@ -655,7 +724,7 @@ void Sema::joinMoves(const std::vector<MovedMap> &paths, const char *what,
 }
 
 void Sema::beginLoopMoves(ast::SourceLocation loc) {
-  LoopMoveStack.push_back({loc, LoopDepth + 1, MovedVars, {}});
+  LoopMoveStack.push_back({loc, LoopDepth + 1, MovedVars, {}, CurrentScope});
   FlowEnded = false;
 }
 
@@ -757,6 +826,34 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
   return ty;
 }
 
+bool Sema::checkMovable(const std::string &name, ast::SourceLocation loc,
+                        const char *what) {
+  const std::string head = std::string("cannot ") + what + " '" + name + "'";
+  switch (varKind(name)) {
+  case VarKind::Plain:
+  case VarKind::Let:
+  case VarKind::ForVar: // an integer: read as it is
+    return true;
+  case VarKind::Inout:
+    error(loc, head + ": it is an 'inout' parameter, the caller's storage");
+    return false;
+  case VarKind::View:
+  case VarKind::ViewLocal:
+  case VarKind::ViewBinding:
+    error(loc, head + ": it is a 'view', a borrow");
+    return false;
+  case VarKind::Weak:
+  case VarKind::WeakView:
+    error(loc, head + ": a 'weak' variable holds no strong reference");
+    return false;
+  case VarKind::Captured:
+  case VarKind::CapturedWeak:
+    error(loc, head + ": the function captures it by copy");
+    return false;
+  }
+  return true;
+}
+
 ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
   // `move x.f` (the prototype): the field leaves, and x ends.
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand()))
@@ -781,34 +878,8 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
           "cannot move 'self': a method borrows its receiver");
     return nullptr;
   }
-  switch (varKind(name)) {
-  case VarKind::Plain:
-  case VarKind::Let:
-  case VarKind::ForVar: // an integer: read as it is
-    break;
-  case VarKind::Inout:
-    error(node->getLocation(), "cannot move '" + name +
-                                   "': it is an 'inout' parameter, the "
-                                   "caller's storage");
+  if (!checkMovable(name, node->getLocation(), "move"))
     return nullptr;
-  case VarKind::View:
-  case VarKind::ViewLocal:
-  case VarKind::ViewBinding:
-    error(node->getLocation(),
-          "cannot move '" + name + "': it is a 'view', a borrow");
-    return nullptr;
-  case VarKind::Weak:
-  case VarKind::WeakView:
-    error(node->getLocation(), "cannot move '" + name +
-                                   "': a 'weak' variable holds no strong "
-                                   "reference");
-    return nullptr;
-  case VarKind::Captured:
-  case VarKind::CapturedWeak:
-    error(node->getLocation(),
-          "cannot move '" + name + "': the function captures it by copy");
-    return nullptr;
-  }
   ast::Type *ty = resolveExprType(id); // live, not moved, not lent inout
   if (!ty)
     return nullptr;
@@ -831,10 +902,48 @@ bool Sema::checkNotMoved(const std::string &name, ast::SourceLocation loc) {
   if (st.Maybe)
     error(loc, "'" + name + "' may have been moved (by " + st.By + ", at " +
                    at(st.At) + "); it cannot be used after a move");
+  else if (st.By == "await")
+    error(loc, "'" + name + "' was awaited at " + at(st.At) +
+                   "; a task handle is spent by its 'await'");
   else
     error(loc, "'" + name + "' was moved at " + at(st.At) +
                    "; it cannot be used after the move");
   return false;
+}
+
+void Sema::checkTasksAwaited(const Scope *s, const char *exit,
+                             ast::SourceLocation loc) {
+  for (const auto &[name, ty] : s->Locals) {
+    if (!ty || !ast::isa<ast::TaskType>(ty))
+      continue;
+    auto moved = MovedVars.find(name);
+    if (moved != MovedVars.end() && !moved->second.Maybe)
+      continue;
+    auto decl = TaskLocals.find(name);
+    const ast::SourceLocation where = exit                       ? loc
+                                      : decl != TaskLocals.end() ? decl->second
+                                                                 : loc;
+    const std::string when =
+        exit ? std::string(" before this '") + exit + "'" : "";
+    if (moved == MovedVars.end())
+      error(where, "task '" + name + "' is " +
+                       (exit ? "not awaited" + when : "never awaited") +
+                       ": a task handle is spent by 'await' (or 'move') on "
+                       "every path before its scope ends; the prototype "
+                       "has no 'join', 'cancel' or 'detach'");
+    else
+      error(where, "task '" + name + "' may not be awaited" +
+                       (exit ? when : " when its scope ends") +
+                       ": it is spent on some paths only (by " +
+                       moved->second.By + ", at " + at(moved->second.At) +
+                       "); every path awaits it, or moves it");
+  }
+}
+
+void Sema::checkTasksAwaitedUpTo(const Scope *stop, const char *exit,
+                                 ast::SourceLocation loc) {
+  for (const Scope *s = CurrentScope; s && s != stop; s = s->Parent)
+    checkTasksAwaited(s, exit, loc);
 }
 
 // -- Qualifiers on places (docs/design/concurrency.md, "The qualifiers")
@@ -952,6 +1061,15 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                               const std::string &what,
                               ast::SourceLocation loc) {
   ast::Type *ty = src ? src->getResolvedType() : nullptr;
+  // A task handle read from a variable into an owning slot (a result,
+  // another variable) leaves with it: the variable is spent, as by
+  // `await` (the prototype's typestate, checkTasksAwaited).
+  if (ty && ast::isa<ast::TaskType>(ty))
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(src);
+        id && !id->isFunctionRef() && CurrentScope &&
+        CurrentScope->findOwner(id->getName()))
+      MovedVars[id->getName()] =
+          MovedState{src->getLocation(), false, "its use as a value"};
   if (!ty || !sharesStorage(ty) || ast::isa<ast::PoisonType>(ty))
     return true; // a value is copied
   if (ast::isa<ast::NoneLiteral>(src))

@@ -364,9 +364,9 @@ private:
         E.block(w.Body.get());
         // The `parallel` annotation (the concurrency prototype): the
         // counter, the trip count, the privates, the reductions.
-        E.W.u8(w.Parallel ? 1 : 0);
-        if (w.Parallel) {
-          const Parallel &p = *w.Parallel;
+        E.W.u8(w.Par ? 1 : 0);
+        if (w.Par) {
+          const Parallel &p = *w.Par;
           E.W.uleb(p.Counter);
           E.operand(p.Count);
           E.W.uleb(p.Privates.size());
@@ -954,7 +954,7 @@ private:
             return R.fail("reserved opcode in a reduction");
           p.Reductions.push_back(r);
         }
-        w.Parallel = std::move(p);
+        w.Par = std::move(p);
       }
       s = std::move(w);
       return true;

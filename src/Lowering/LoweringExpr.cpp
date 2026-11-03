@@ -5,6 +5,7 @@
 
 #include "LoweringInternal.h"
 #include "Names.h"
+#include "Runtime.h"
 
 #include <cassert>
 #include <cmath>
@@ -61,6 +62,10 @@ ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
     if (ast::isa<ast::FixedArrayType>(ty))
       return ast::isa<ast::Identifier>(recv) ? nullptr
                                              : L.memValueVisitsFirst(recv);
+    // A buffer's element or length read through a box's `value()`
+    // (emitBufferRead): the box, as emitReceiver takes it.
+    if (ast::Expr *box = bufferReadBox(m))
+      return box;
     if (L.getExprStructType(recv) && m->getMethodName() != kMethodToString)
       return L.memValueVisitsFirst(recv);
     if ((ast::isa<ast::OptionalType>(ty) &&
@@ -417,9 +422,8 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     return L.canonicalize(
         L.B.binary(Opcode::Xor, operand, Val::i64(-1), "compl"), ty);
   }
-  case ast::UnaryOpcode::Move:
-  case ast::UnaryOpcode::Await:
-    break; // handled above
+  case ast::UnaryOpcode::Move:  // handled above
+  case ast::UnaryOpcode::Await: // handled above
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -1231,10 +1235,15 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       node->getMethodName() == kMethodToInt)
     return emitUnsignedToInt(node);
   // A struct's method, called directly on the receiver's storage
-  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
+  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.  A
+  // buffer's element and length are read in place.
   if (auto *st = L.getExprStructType(node->getReceiver());
-      st && node->getMethodName() != kMethodToString)
+      st && node->getMethodName() != kMethodToString) {
+    if (ast::Type *elem = !wantAddress ? L.bufferElementType(st) : nullptr)
+      if (std::optional<Val> read = emitBufferRead(node, elem))
+        return *read;
     return emitStructMethodCall(node, st, wantAddress);
+  }
   // `o.toString()` on an optional (the builtin `Show`).
   if (ast::dyn_cast<ast::OptionalType>(recvResolved) &&
       node->getMethodName() == kMethodToString)
@@ -1275,6 +1284,88 @@ Val ModuleLowering::ExprEmitter::emitAtomicMethodCall(ast::MethodCallExpr *node,
                                       : kPaykanAtomicCompareExchange,
                               args, "swapped");
   return L.B.cast(swapped, Type::Bool, "swapped.bool");
+}
+
+ast::Expr *
+ModuleLowering::ExprEmitter::bufferReadBox(ast::MethodCallExpr *node) {
+  if (!L.isBufferReadInPlace(node))
+    return nullptr;
+  ast::StructType *st = L.getExprStructType(node->getReceiver());
+  auto *mc = ast::dyn_cast<ast::MethodCallExpr>(node->getReceiver());
+  if (!mc || mc->getNumArguments() != 0 ||
+      (mc->getMethodName() != "value" && mc->getMethodName() != "get"))
+    return nullptr;
+  ast::ClassType *ct = L.getExprClassType(mc->getReceiver());
+  const auto *fst =
+      ct ? ast::dyn_cast<ast::StructType>(ct->findField("__data")) : nullptr;
+  return fst && fst->getName() == st->getName() ? mc->getReceiver() : nullptr;
+}
+
+std::optional<Val>
+ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
+                                            ast::Type *elem) {
+  if (!L.isBufferReadInPlace(node))
+    return std::nullopt;
+  const bool length = node->getMethodName() == kMethodLength;
+  // A number: an 8-byte slot in the buffer, as in the type descriptor
+  // (memLayout), loaded as the i64 or f64 it is held as.
+  const Type et = L.toPIRType(elem);
+  // The receiver's storage: a variable's, a field's, or the `__data` of a
+  // `mem::Box<mem::Buffer<T>>` read through `value()` or `get()` (a frozen
+  // buffer's way into a `parallel for` body) -- that field itself, where a
+  // `view` result of a struct is a copy, which counts the buffer's object
+  // (two runtime calls on a frozen one).  Its one field, `__data`, is the
+  // buffer's box.
+  const size_t mark = L.MemTemps.size();
+  Val self;
+  if (ast::Expr *boxExpr = bufferReadBox(node)) {
+    ast::ClassType *ct = L.getExprClassType(boxExpr);
+    L.getOrCreateClass(ct);
+    Receiver recv = L.emitReceiver(boxExpr, "box.obj");
+    if (!recv)
+      return Val();
+    if (recv.Owned.isOwned())
+      L.MemTemps.emplace_back(recv.Owned.V, nullptr);
+    self = L.B.fieldAddr(recv.Raw, ct->getName(), "__data", "__data.addr");
+  } else {
+    self = L.emitMemAddress(node->getReceiver());
+  }
+  if (!self)
+    return Val();
+  Val box = L.B.ptrLoad(self, Type::Box, "buf.box");
+  Val obj = L.B.cast(L.emitSharedGet(box, "buf.obj"), Type::Ptr, "buf.ptr");
+  Val len = L.B.ptrLoad(
+      L.B.ptrAdd(obj, Val::i64(offsetof(PaykanBuffer, len)), "buf.len.addr"),
+      Type::I64, "buf.len");
+  if (length) {
+    L.releaseMemTemps(mark);
+    return len;
+  }
+  Val idx = visit(node->getArguments()[0]);
+  if (!idx)
+    return Val();
+  idx = L.coerceTo(idx, Type::I64);
+  // The bounds check the runtime's PaykanBuffer_get makes (a number has no
+  // "never set" state to check).
+  Val neg = L.B.cmp(CmpPred::Lt, idx, Val::i64(0), "idx.neg");
+  Val over = L.B.cmp(CmpPred::Ge, idx, len, "idx.over");
+  pir::If *s = L.B.openIf(L.B.select(neg, Val::boolean(true), over, "idx.bad"),
+                          /*withElse=*/false);
+  L.B.enter(*s->Then);
+  L.callRuntime(kPaykanPanicIndex, {idx, len});
+  L.B.emitUnreachable();
+  L.B.leave();
+  // The storage's address, read as the bits a `ptr.load` has (an `i64`),
+  // then the pointer/int cast (docs/pir.md, `cast`).
+  Val data = L.B.cast(
+      L.B.ptrLoad(L.B.ptrAdd(obj, Val::i64(offsetof(PaykanBuffer, data)),
+                             "buf.data.addr"),
+                  Type::I64, "buf.data.bits"),
+      Type::Ptr, "buf.data");
+  Val off = L.B.binary(Opcode::Mul, idx, Val::i64(8), "elem.off");
+  Val v = L.B.ptrLoad(L.B.ptrAdd(data, off, "elem.addr"), et, "elem");
+  L.releaseMemTemps(mark);
+  return v;
 }
 
 // `obj.cb(args)` with `cb` a field of function type: the field's closure,

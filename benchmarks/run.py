@@ -45,6 +45,7 @@ PROGRAMS = {
     "sum_buf": (["67108864", "3"], "reduction over a frozen 512 MB buffer, one `at` per iteration"),
     "sum_buf_1m": (["1048576", "5"], "the same over 8 MB, in L2"),
     "dot_buf": (["33554432", "3"], "dot product over two frozen 256 MB buffers"),
+    "saxpy_buf": (["33554432", "3"], "a store per element into a 256 MB buffer, through the memory module's set"),
     "compute": (["16384", "5", "2000"], "2000 multiply-adds per element"),
     "saxpy": (["16384", "1000"], "a 16K-element loop, a store per element"),
     "overhead": (["4096", "2000"], "a 4K-element loop: fork, chunk, join"),

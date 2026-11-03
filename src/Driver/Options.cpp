@@ -530,8 +530,11 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)
     os << "  --" << f.Name
-       << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
-       << f.Help << "\n";
+       << std::string(std::string_view(f.Name).size() < 16
+                          ? 16 - std::string_view(f.Name).size()
+                          : 1,
+                      ' ')
+       << "- " << f.Help << "\n";
   os << "  --emit-llvm       - Print the program's LLVM IR and exit "
         "(--emit-source)\n"
      << "  --emit-c          - Print the program's C and exit\n"

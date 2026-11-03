@@ -1,9 +1,17 @@
 import ::io;
 
-class Node { id: int; name: Str; }
-struct Pair { left: Node; n: int; }
+class Node {
+  id: int;
+  name: Str;
+}
+struct Pair {
+  left: Node;
+  n: int;
+}
 
-fn change(n: Node) { n.id = 0; }
+fn change(n: Node) {
+  n.id = 0;
+}
 
 fn main() -> int {
   let s: shared Node = Node(1, "s");

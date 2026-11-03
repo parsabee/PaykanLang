@@ -229,7 +229,9 @@ private:
   /// whose body is the loop's, with the counter's first load the index and
   /// its first store, the increment, left out.
   void importParallel(const P::While &w) {
-    const P::Parallel &p = *w.Parallel;
+    if (!w.Par.has_value())
+      return;
+    const P::Parallel &p = *w.Par;
     SmallVector<Value> privates, partials;
     SmallVector<int64_t> reductions;
     for (P::LocalId l : p.Privates)
@@ -266,7 +268,7 @@ private:
     {
       if (const auto *in = std::get_if<P::Instr>(&s)) {
         importInstr(*in);
-      } else if (const auto *w = std::get_if<P::While>(&s); w && w->Parallel) {
+      } else if (const auto *w = std::get_if<P::While>(&s); w && w->Par) {
         importParallel(*w);
       } else if (const auto *i = std::get_if<P::If>(&s)) {
         auto op = IfOp::create(B, Loc, operand(i->Cond));

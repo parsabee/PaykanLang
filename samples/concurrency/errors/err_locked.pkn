@@ -1,6 +1,9 @@
 import ::io;
 
-class Counts { hits: int[16]; total: int; }
+class Counts {
+  hits: int[16];
+  total: int;
+}
 
 async fn ping(n: int) -> int { return n; }
 
