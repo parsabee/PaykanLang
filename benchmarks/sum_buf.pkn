@@ -13,16 +13,16 @@ fn main(args: view Str[]) -> int {
   let n = bench::arg(args, 1, 67108864);
   let reps = bench::arg(args, 2, 3);
   b = mem::Buffer<float>();
-  let grown = b.grow(unsigned<int>(n));
-  for i in 0..n { let e = b.set(unsigned<int>(i), float<int>(i % 7)); }
-  let xs: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move b);   // boxed, then frozen
+  let grown = b.grow(unsigned(n));
+  for i in 0..n { let e = b.set(unsigned(i), float(i % 7)); }
+  let xs: atomic const = mem::Box(move b);   // boxed, then frozen
   best = 0; total = 0; s = 0.0;
   let c0 = bench::cpu();
   let w0 = bench::now();
   for r in 0..reps {
     let t0 = bench::now();
     s = 0.0;
-    parallel for i in 0..n { s += xs.value().at(unsigned<int>(i)); }
+    parallel for i in 0..n { s += xs.value().at(unsigned(i)); }
     let dt = bench::now() - t0;
     total += dt;
     if best == 0 || dt < best { best = dt; }
