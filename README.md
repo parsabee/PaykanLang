@@ -275,6 +275,10 @@ To learn PaykanLang:
   (`samples/codegen/` has the feature demos; see also `imports/`, `sema/`, `leak-check/`).
   [`samples/imports/12_calc/`](samples/imports/12_calc/) is a larger multi-module program:
   an arithmetic calculator with variables, a hash map and a REPL.
+  [`samples/concurrency/`](samples/concurrency/README.md) is the concurrency prototype:
+  `async`/`await`, `parallel for` and the ownership qualifiers (`shared`, `const`, `atomic`,
+  `locked`) with explicit `move`, described in
+  [`docs/language/19-concurrency.md`](docs/language/19-concurrency.md).
 
 A taste:
 

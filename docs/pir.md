@@ -42,7 +42,7 @@ Design rules:
 | `char`| one byte                                                          | `int8_t`     |
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
 | `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
-| `ptr` | any other pointer: vtable addresses, literal data, type descriptors and tuple layouts, the address of a slot | `void *`  |
+| `ptr` | any other pointer: vtable addresses, literal data, type descriptors and tuple layouts, the address of a slot, a task (§6) | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
 | `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, a fixed-size array or a tuple. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
 | `weak` | `PaykanWeak*`: a weak reference to an object (docs/language/16-memory.md, "Weak references"), the type of a `weak` local or field; may be `null`. Made from a `box` by `weak.new`, read as a `box` by `weak.load`, dropped by `weak.release` (§6); never addressed, cast or compared | `PaykanWeak *` |
@@ -116,6 +116,7 @@ extern fn @add(i64, i64) -> i64 module "lib::math" ; defined in another PIR modu
 extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
 shared fn @Box<int>.get(%self: obj) -> i64 { ... }  ; an instantiation's copy
 extern fn @count() -> i64 module "lib" uses @Box<int>.get ; in module lib's compiled code
+async fn @fib(%n: i64) -> i64 { ... }               ; a task's body, started by `async_call` (§6)
 ```
 
 Locals are declared at the top of the function body (the lowering hoists them,
@@ -170,6 +171,20 @@ definition.  A compiled function lists, after `uses` on its line, the names
 of the module (functions and classes) its compiled body refers to, so a
 program that keeps the function keeps them (§12); a compiled class keeps
 its layout and its vtable's description, which the compiled code defines.
+
+**Async functions.**  An `async fn` (the concurrency prototype,
+docs/design/concurrency.md; samples/concurrency/README.md) is the body of
+a task: the lowering marks a Paykan `async fn f(...) -> T` as `async fn
+@f`, with the signature an ordinary `fn f` would have (`-> void` for one
+returning nothing) and a body lowered as any other.  It is never
+`call`ed: an `async_call` of it (§6) starts it as a task and yields a
+`ptr`, the task, whose `await` is the function's result.  The mark is the
+function's `IsAsync` (`PIR.h`), function flag bit 5 in the binary form
+(§11).  `async fn main` lowers to `async fn @main.async() -> i64` and an
+ordinary `@main` that `async_call`s it and `await`s the result, so the
+entry point keeps its signature (§4).  The parser reads `extern async
+fn` (and `extern shared async fn`), but the prototype has no async
+function across modules, so the lowering declares none.
 
 **Runtime names.**  Runtime externs (`extern fn` without a `module`, `extern
 obj`, `extern vtable`), and only they, are named `$rt.<C symbol>`:
@@ -288,7 +303,8 @@ class Point {                      ; layout + vtable, see §5 (`: Super` names
     destroy  = @Point.destroy  : (obj) -> void
     toString = @$rt.PaykanObject_toString : (obj) -> box
     equals   = @$rt.PaykanObject_equals   : (obj, box) -> i64
-    move     = @Point.move : (obj, i64, i64) -> void
+    __walk   = @Point.__walk : (obj) -> void
+    shift    = @Point.shift : (obj, i64, i64) -> void
   }
 }
 extern class Adder module "helper" { field n: i64 }   ; layout only
@@ -320,6 +336,8 @@ in the value and their struct's layout, named for the variant;
 int) }`'s.  An enum nested in a tuple or a struct is an entry of kind `ENUM`,
 its layout inline, and an optional one an `OPTIONAL` entry whose payload kind
 is `ENUM`, followed by a whole `ENUM` entry, as an optional struct's is).  A
+class's walk (§5) passes a `.typeN` global too, the descriptor of each
+`mem` field whose value holds references, to `Paykan_freeze_mem` (§8).  A
 `bytes` global (raw constant bytes) is part of the format, though the lowering
 emits none.
 
@@ -356,7 +374,11 @@ backend does no inheritance walk.
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
   function of this module, an `extern fn`, or `null` for an empty slot, which
   the lowering never emits: a pure virtual method's slot holds its trap,
-  below) plus its signature.  Slot 0 is always `destroy`.  The vtable's address is the
+  below) plus its signature.  Slot 0 is always `destroy`, and every class
+  has the four slots of `Obj` first, in `Runtime.h`'s order
+  (`PAYKAN_SLOT_*`): `destroy`, `toString`, `equals` and `__walk` (the
+  concurrency prototype's walk, below); its own virtual methods follow, a
+  subclass's after its superclass's.  The vtable's address is the
   class's runtime type identity (`vtable.addr`).
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
@@ -390,9 +412,24 @@ entirely compiler-generated: it is final, so a class cannot write or
 override it.  Every
 method `m` of a class `C` is the function `@C.m(obj self, params...)`.  The
 '.' cannot occur in a Paykan identifier, so these names never clash with a
-program function (`fn Point_move`, `fn Point_destroy`); backends must keep
+program function (`fn Point_shift`, `fn Point_destroy`); backends must keep
 them apart too (the mlir backend escapes the '.' as `_2E` in its link
 names, and a vtable's starts `pkvt_` where a function's starts `pk_`).
+
+`@Point.__walk(obj)` is the class's **walk** (the concurrency prototype):
+generated like `destroy`, final like it (Sema rejects a class that writes
+one: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'`), and the
+target of the `__walk` slot, which the runtime's `Paykan_freeze` (§8)
+calls once it has made the object immortal, so that a value made `atomic
+const` is frozen with everything it holds.  The body freezes what the
+object's fields hold: `call @$rt.Paykan_freeze` of the `unbox` of every
+reference field's box but a `weak` field's (the runtime skips a null box
+and an object already immortal, so a cycle ends), and `call
+@$rt.Paykan_freeze_mem` with the field's type descriptor (a `.typeN`
+global, §4) and its `field.addr` for every `mem` field whose value holds
+references; the walk of a class holding no reference is one `ret`.  The
+runtime's classes have `PaykanObject_walk` in the slot, which freezes
+nothing: a string holds no reference.
 
 A **pure virtual** method `m` of `C` (declared without a body,
 docs/language/05-classes.md) is the function `@C.m` too, with its slot's
@@ -429,6 +466,9 @@ switch %v {                         ; the case equal to %v, else the default
   default { ... }                   ; default optional
 }
 while { ...; cond %c } { ... }      ; condition region ends with `cond`; body may break/continue
+while { ...; cond %c } { ... } parallel %k, %n privates(%i) reduce(%p add)
+                                    ; a `parallel for`: the same loop, whose iterations
+                                    ; a backend may run on several threads
 break                               ; leave the innermost while
 continue                            ; re-enter the innermost while's condition region
 ret %v   |   ret                    ; return from the function
@@ -446,6 +486,58 @@ in turn, each in an `if` that runs it only while none before it held, stores
 the index of the first that held in a local (`-1` for none), then `switch`es
 on that index, with the wildcard (or nothing) as its `default`: two blocks
 deep however many arms there are.
+
+A `while` may end in a **`parallel` annotation** (`pir::Parallel` in
+`PIR.h`: the concurrency prototype's `parallel for`,
+docs/design/concurrency.md): `parallel %k, %n`, then `privates(...)` and
+`reduce(...)` when they are not empty.  It says the loop is a counted loop
+whose iterations are independent, so a backend may run them on several
+threads; read as a plain `while` it is the same loop run in order, which
+every pass and the C path do, so nothing else had to learn about threads.
+`%k` is the **counter**, a local the loop counts from 0 up to the
+**count** `%n`, an `i64` operand computed before the loop (the trip count,
+0 for an empty range): the condition region is a `ucmp lt` of a load of
+the counter against the count, and the body's first `load` of the counter
+is the iteration's index and its first `store` to it the increment.  The
+**privates** are the locals of one iteration, fresh for each: the loop
+variable (the start plus the index times the step, stored into it first
+thing) and the body's own variables and temporaries.  A **reduction** `%p
+add` or `%p mul` names a **partial**, a local holding the op's identity (0
+or 1) before the loop, which the body accumulates into in place of the
+variable (`s += e` adds to it, `s -= e` subtracts from it, `s *= e`
+multiplies it), and which the code after the loop folds into the variable
+with the op.  A backend that splits the loop into chunks gives each chunk
+a partial of its own, starting at the identity, and combines them with the
+op in chunk order into the partial, so a float sum is the same on every
+run and every machine (the design's reproducible reduction).  Sema rejects
+a `break` or a `continue` in a parallel body (the prototype), so the
+verifier does not ask.  `parallel for
+i in 0..xs.len() { s += xs[i] * ys[i]; }`
+(`samples/concurrency/01_parallel_for.pkn`) lowers to:
+
+```
+store %s.part.5, 0.0                      ; the partial: add's identity
+store %par.k.6, 0
+while {
+  %par.kv.11 = load %par.k.6
+  %par.go.12 = ucmp lt %par.kv.11, %par.count.10
+  cond %par.go.12
+} {
+  %par.idx.13 = load %par.k.6             ; the index
+  %par.next.14 = add %par.idx.13, 1
+  store %par.k.6, %par.next.14            ; the increment
+  %par.value.15 = add 0, %par.idx.13      ; the loop variable: the start plus the index
+  store %i.7, %par.value.15
+  %s.16 = load %s.part.5
+  ...
+  %fadd.36 = add %s.16, %fmul.35          ; s += ...: into the partial
+  store %s.part.5, %fadd.36
+} parallel %par.k.6, %par.count.10 privates(%i.7) reduce(%s.part.5 add)
+%s.37 = load %s.4
+%s.part.38 = load %s.part.5
+%s.fold.39 = add %s.37, %s.part.38        ; the fold
+store %s.4, %s.fold.39
+```
 
 Nothing may follow `break`, `continue`, `ret` or `unreachable` in the same
 block.  An `if` whose `then` and `else` blocks both end that way is itself a
@@ -534,6 +626,10 @@ are LLVM's `fcmp une` / `oeq olt ole ogt oge` and C's `!= == < <= > >=`.
 %r = icall %p : (obj, i64) -> i64 (%c, %a)    ; indirect: a call through the
                                               ; function address %p (a function
                                               ; value's code), signature written out
+%t = async_call @f(%a, %b)                    ; starts `async fn @f` (§3) as a task: ptr;
+                                              ; the arguments, and their ownership, as a call's
+%r = await i64, %t                            ; the task's result, of the type written,
+                                              ; waited for
 call @f(%a, lent %b, owned(%o) %c)            ; each box argument of a lending
                                               ; callee handed over (bare), lent, or
                                               ; handed over when bool %o is (§3);
@@ -553,6 +649,26 @@ runtime `int64_t` params, boxing, unboxing).  A call of a lending function
 (§3) also passes the ownership mask its arguments' ownership makes, and
 `owned %p` reads the bit of `%p` in the function's own; nothing else in PIR
 names the mask.
+
+An `async_call` (the concurrency prototype) names an `async fn` of the
+module (§3) and passes its arguments as a `call` does, their ownership
+included; its result is always the task, a `ptr`, which PIR keeps in a
+`ptr` local like any other pointer and never retains or releases: the
+backend's runtime owns it.  An `await` takes the task and writes its
+result's type, the callee's result type (any but `void`, `mem` and `weak`,
+§9; the prototype's tasks return no optional and take no value held in
+memory), or an `i64` for a task of a function returning `void`, since an
+`await` has a result (its value is nothing).  The lowering starts a task
+where a program calls an `async fn` and awaits it at its `await`
+(`samples/concurrency/02_async_await.pkn`):
+
+```
+%task.7 = async_call @fib(%sub.6)
+store %a.1, %task.7                       ; a: a task in a ptr local
+...
+%a.11 = load %a.1
+%awaited.12 = await i64, %a.11
+```
 
 **ARC and objects**
 
@@ -836,6 +952,33 @@ CodeGen enforced, now in one place.
   with `weak.new` from the variable's read, released by the closure's
   destroy, and loaded (`weak.load`) into an owned local at the start of a
   call.
+* **Cells and frozen objects** (the concurrency prototype,
+  docs/design/concurrency.md; the runtime functions are in §8).  An
+  `atomic T` place is a `box` slot holding the handle of a cell, an
+  object the runtime makes immortal, so a handle is retained and released
+  like any box (both leave its count alone) and copied into a task or a
+  parallel body with no atomic count.  A value flowing into an `atomic`
+  slot that is not a handle already makes a cell: `call
+  @$rt.PaykanAtomic_new(%v, kind)`, `PaykanAtomic_fnew` for a float, with
+  the `PaykanAtomicKind` of the place's type.  A read of the place loads
+  the handle, `unbox`es it and calls `PaykanAtomic_load` (`fload`); `=`
+  calls `PaykanAtomic_store`; `+=` and `-=` one `PaykanAtomic_add`
+  (`fadd`), of the `neg` of the operand for `-=`; `x.exchange(v)` calls
+  `PaykanAtomic_exchange`, and `x.compareExchange(e, d)`
+  `PaykanAtomic_compare_exchange`, whose `i64` is `cast` to the `bool`.
+  A `locked T` place holds the handle of a locked cell, made by
+  `PaykanLocked_new` of the box flowing into the slot (handed over).  A
+  `lock c as v: inout { ... }` block (or `: view`) calls
+  `PaykanLocked_lock` on the unboxed handle, which takes the cell's mutex
+  and returns the address of the slot holding the contents' box, keeps
+  the address in the `ptr` local `v` names (the body reads the contents
+  through it: `ptr.load box`, then `unbox`), and calls
+  `PaykanLocked_unlock` on the handle when the block ends; Sema keeps a
+  `return`, `break`, `continue` or `await` out of the block, so the unlock
+  is reached.  A unique value flowing into an `atomic const` slot is
+  frozen there, `call @$rt.Paykan_freeze` of its `unbox`: the object and
+  everything its walk (§5) reaches are immortal from then on, and the
+  handle copies like a cell's.
 * **Indexing** an array or a slice checks the index first: when it is
   negative or not below the length, `call @$rt.Paykan_panic_index(%i, %len)`
   and `unreachable`.  The element is then read or written in place, with
@@ -1249,6 +1392,30 @@ PaykanEnum_toString(ptr, ptr) -> obj    PaykanEnum_equals(ptr, ptr, ptr) -> i64
 ; (§3), and releases `other` only when bit 0 says it was handed over
 PaykanObject_destroy(obj) -> void   PaykanObject_toString(obj) -> box
 PaykanObject_equals(obj, box, i64) -> i64
+PaykanObject_walk(obj) -> void      ; the walk slot's target in the runtime's classes: nothing to freeze
+; the concurrency prototype (docs/design/concurrency.md): cells, locks and
+; freezing.  A cell is an object the runtime makes immortal (its strong count
+; PAYKAN_REF_MAX, which a retain and a release leave alone), so its handle, the
+; box PaykanAtomic_new returns, crosses threads with no atomic count.  The kind
+; is the PaykanAtomicKind of the place's type (Runtime.h: 0 int, 1 unsigned,
+; 2 bool, 3 char, 16 float, 17 f32, 18 f16): what the cell prints as, and the
+; rounding of a float cell's stores.  Every operation is sequentially consistent.
+PaykanAtomic_new(i64, i64) -> box       ; a new cell holding the value, of the kind
+PaykanAtomic_load(obj) -> i64           PaykanAtomic_store(obj, i64) -> void
+PaykanAtomic_add(obj, i64) -> i64       ; adds the delta; the value found
+PaykanAtomic_exchange(obj, i64) -> i64  ; stores the value; the value found
+PaykanAtomic_compare_exchange(obj, i64, i64) -> i64 ; stores the second when the cell holds the first; whether it did
+PaykanAtomic_fnew(f64, i64) -> box      ; the same cell holding a float's bits (`fadd` is a compare-and-swap loop)
+PaykanAtomic_fload(obj) -> f64          PaykanAtomic_fstore(obj, f64) -> void
+PaykanAtomic_fadd(obj, f64) -> f64      PaykanAtomic_fexchange(obj, f64) -> f64
+PaykanAtomic_fcompare_exchange(obj, f64, f64) -> i64
+; a `locked T` cell: an object's box behind a mutex, immortal as an atomic cell is
+PaykanLocked_new(box) -> box            ; a new cell taking the box (handed over)
+PaykanLocked_lock(obj) -> ptr           ; takes the mutex; the address of the slot holding the contents' box
+PaykanLocked_unlock(obj) -> void        ; releases the mutex
+; `atomic const`: an object made immortal with everything it holds
+Paykan_freeze(obj) -> void              ; makes the object immortal and calls its walk slot (§5); null and an immortal: nothing
+Paykan_freeze_mem(ptr, ptr) -> void     ; freezes the references a value holds: its type descriptor (§4), its address
 ; globals
 extern obj PaykanObject_None
 ; runtime classes' vtables, their type identities for `match`
@@ -1286,8 +1453,11 @@ its signature (§3), which for those three no native function has.
 
 Vtable slot layouts of runtime classes (slot index = position):
 
-* `Obj`: `destroy, toString, equals`
-* `Str`: `destroy, toString, equals, len, concat`
+* `Obj`: `destroy, toString, equals, __walk`
+* `Str`: `destroy, toString, equals, __walk, len, concat`
+
+These are `Runtime.h`'s `PAYKAN_SLOT_*`: the walk (§5) is slot 3,
+`PAYKAN_SLOT_WALK`, so `Str`'s `len` and `concat` are slots 4 and 5.
 
 Printing and files are not runtime classes or builtins: they are the
 standard library's `::io` module, whose `native fn`s call the runtime's
@@ -1366,6 +1536,14 @@ The verifier rejects a program when:
   vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
   `symbol`, a `cstr`/`data`/`bytes` global) has either name;
+* an `async_call` names a function the module does not declare or one that
+  is not an `async fn`, or its arguments or their ownership do not fit the
+  signature (checked as a `call`'s); an `await` takes anything but one
+  `ptr`, or has a result of type `void`, `mem` or `weak`;
+* a `parallel` annotation's counter, a private or a partial names a local
+  the function has not, its count is not an `i64`, or a reduction's op is
+  not `add` or `mul` (that the loop has the shape of §6 is the lowering's
+  guarantee: the verifier reads it as a `while`);
 * `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`;
 * a drop function (`@.drop.<type>`, §7) is not `(ptr) -> void`, or a call
   of one is given anything but the `local.addr` of a `mem` local;
@@ -1394,7 +1572,9 @@ major * 10000 + minor * 100 + patch (300 for 0.3.0), the same number the binary
 form stores.  0.3.0's adds a call argument's ownership (`lent`,
 `owned(%o)`), `owned`, `retain lend` and `retain nonnull` (§6), and with
 them the ownership mask a lending function takes (§3), and the bit
-operations `and`, `or`, `xor`, `shl` and `shr` (§6).
+operations `and`, `or`, `xor`, `shl` and `shr` (§6).  The concurrency
+prototype adds `async fn` (§3), `async_call` and `await` (§6) and a
+`while`'s `parallel` annotation (§6).
 
 ```
 module "01"
@@ -1456,6 +1636,16 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
   one function on its own (`decodeFunction`), and the symbol index
   (`index`, `encodeSymbolIndex`) lists every record with its offset, length
   and SHA-256.
+- **The concurrency prototype.**  A function record's flag word has bit 5
+  set for an `async fn` (bits 0 to 4 say extern, a `module` clause, a
+  `symbol` clause, `shared` and `uses`; a reader rejects any other bit).
+  A `while` record (`design/pkm.md` §5.6: the condition block, the
+  condition operand, the body) ends in a byte, 1 when the loop carries a
+  `parallel` annotation (§6) and 0 otherwise; after a 1 come the
+  counter's local index, the count operand, the privates (their number,
+  then each one's local index) and the reductions (their number, then
+  each partial's local index and its op's opcode code, 0 for `add`, 2 for
+  `mul`): LEB128 integers, an operand and one byte for the code.
 - **Determinism.** One module has one encoding: strings are interned in
   first-use order, reserved fields are zero, and `encode(decode(b)) == b`
   for every blob a reader accepts.  `EncodeOptions::StripNames` drops value

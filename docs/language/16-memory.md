@@ -713,6 +713,9 @@ execution, which is all the language offers today. Thread-safe ARC — counts th
 shared safely across threads — is part of the language's stated direction toward safe
 concurrency and heterogeneous execution, and is on the roadmap rather than in this release.
 Do not assume that sharing a reference-counted object across threads is safe today.
+The concurrency prototype's checks keep each counted reference on one thread at a time (a
+unique reference crosses by `move`; an `atomic` cell and a frozen object are not counted);
+[Concurrency](19-concurrency.md) describes which references may cross a thread.
 
 ## What You Can Rely On
 
@@ -737,4 +740,5 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 
 The two things the model does **not** do for you today are collecting reference cycles (break
 them with `weak`) and making reference counting safe across threads — both are known and on
-the roadmap.
+the roadmap. Which references the concurrency prototype lets cross a thread, and the checks that
+keep the counts on one thread, are in [Concurrency](19-concurrency.md).

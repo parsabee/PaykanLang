@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The concurrency and ownership prototype (#361): the design is docs/design/concurrency.md,
+the chapter docs/language/19-concurrency.md, and what it has and has not
+samples/concurrency/README.md.
+
+### Added
+
+- The keywords `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `const`, `locked`
+  and `lock` (docs/grammar.md).
+- Qualifiers on a reference, as a variable's, a parameter's, a field's or a result's type:
+  unique (unwritten), `const`, `shared`, `shared const`, `atomic`, `atomic const` and `locked`.
+  A borrow (`view`, `inout`) takes none.
+- `move x` and `move x.f`, the explicit transfer: `x` ends at the move, and a later read is an
+  error naming it (or "may have been moved" after a branch that moved it on one path).
+- `async fn` and `await`: calling an `async fn` starts a task and `await` gives its result;
+  `async fn main`. Tasks run on MLIR's async runtime for now (#362 is the language's own).
+  `await t` spends the handle, and every task handle in a variable is awaited (or moved) on
+  every path before its scope ends: the design's task-handle check, with `await` its one operation.
+- `parallel for i in a..b { }` on LLVM's OpenMP runtime (`libomp`): at most 256 chunks handed
+  out one at a time, with reductions (`+=`, `-=`, `*=`) folded in chunk order.
+- `locked T` cells and `lock cell as c: inout|view { }` blocks: an object behind a mutex,
+  reached only inside a `lock` block.
+- `atomic T` cells of a number type, `bool` or `char`: a read is a load, `=` a store, `+=` and
+  `-=` one atomic operation; `exchange(v)` and `compareExchange(expected, desired) -> bool`.
+- `atomic const T`: an object frozen with everything it holds by `__walk`, the compiler-generated
+  walk of a class's references in a slot of every vtable (*Changed*); read with no count.
+- The send check, at an async call's arguments, an `async fn`'s result and every conversion to
+  `atomic const` or `locked`: a `shared` or `weak` part, a function value or an `Obj` cannot cross.
+- The built-in trait `Copyable` (docs/language/06-traits.md): structural, never implemented;
+  numbers, `bool`, `char`, enums, `shared` references, handles and values of such parts.
+- `paykan --strict-ownership` (docs/language/17-the-paykan-command.md): the design's copy rule,
+  under which a move-only value read from a place flows into an owning slot only by `move`.
+- PIR's `async fn`, `async_call` and `await`, and a `parallel` annotation on `while` (docs/pir.md
+  §3, §6), which every pass and the C path read as a plain `while`.
+- The binary form (docs/pir.md §11): `async_call` and `await` are opcodes 63 and 64, an `async
+  fn` sets function flag bit 5, and a `while` record ends in a byte, 1 before a `parallel` annotation.
+- The mlir backend's `pir.async_call`, `pir.await` and `pir.parallel` ops: `async.func`,
+  `async.call`, `async.await` and `scf.parallel` then OpenMP on the LLVM path; in order on the C path.
+- `mem::Box<T>::value()` (docs/stdlib/memory.md), a `view fn` reading the value: the way into a
+  `view`, `const` or `atomic const` box, since `get()` is not one.
+- A `mem::Buffer<T>` of numbers in a `parallel for` body: one of the enclosing function read at
+  any index and written at the loop's variable (`set`); one frozen in a box read through `value()`.
+- The lowering emits a number buffer's `at`, `get` and `len` in place, a bounds check and a load,
+  with no call into the memory module and no count on the buffer.
+- The `benchmarks/` directory: programs that measure `parallel for`, and `run.py`, which runs them
+  over thread counts (benchmarks/README.md).
+
+### Changed
+
+- **Breaking:** every vtable's layout: `__walk` is the fourth slot of every class
+  (`PAYKAN_SLOT_WALK` 3, after `equals`; `PAYKAN_OBJECT_SLOTS` 4), so `Str`'s `length` and
+  `concat` are slots 4 and 5 and `File`'s 4 to 7 (src/Runtime/Runtime.h; docs/pir.md §5).
+- The runtime's deferred-destroy state is thread-local, and an `atomic` cell, a `locked` cell and
+  a frozen object are immortal (counts `PAYKAN_REF_MAX`), so a handle crosses threads with no count.
+- The runtime ABI version follows the release (`PAYKAN_RUNTIME_ABI_VERSION` is the version
+  number): a `.pkm` built by 0.3.0 is rebuilt from source by 0.4.0, whose vtables differ.
+- The generated `__init__` of a class or struct moves a move-only parameter into its field, so a
+  type holding a `Str` or a unique reference passes `--strict-ownership` with no `__init__` of its own.
+
+### Removed
+
+- The `mov` keyword, reserved since 0.2.0 removed it: `mov` is an ordinary identifier now, and
+  the explicit transfer is `move` (docs/language/19-concurrency.md, "`move`: an explicit transfer").
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

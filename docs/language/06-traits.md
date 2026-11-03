@@ -3,7 +3,7 @@
 A trait names the methods a type must have. `impl Trait for Type` declares that a class (or
 a struct) implements it, and a type parameter's bounds (`<T: Show>`) say which traits its
 type argument must implement. This chapter shows how to declare and use a trait, then gives
-the rules, including the built-in traits `Show`, `Hashable` and `ValueType`.
+the rules, including the built-in traits `Show`, `Hashable`, `ValueType` and `Copyable`.
 
 ## Declaring and using a trait
 
@@ -107,6 +107,11 @@ You use a built-in trait every time you print: `io::println` is declared
 - The built-in trait `ValueType` has no methods. It is implemented by the types held in
   place and copied whole: `int`, `float`, `bool`, `char`, every sized numeric type, every
   enum, every tuple, every struct and every function type (see [ValueType](#valuetype)).
+- The built-in trait `Copyable` has no methods and is never implemented: a type is
+  Copyable by what it holds. A number, `bool`, `char`, an enum, a `shared` reference and an
+  `atomic`, `atomic const` or `locked` handle are, and so are a struct, a tuple, a
+  fixed-size array and an optional of such parts; a unique reference, a `Str`, a function
+  value and a task are not. `T: Copyable` bounds a template (see [Copyable](#copyable)).
 - `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
   rules (see [Structs](11-structs.md)).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
@@ -304,16 +309,96 @@ Output:
 The standard library's `memory::Box<T: ValueType>` holds one in a shared object (see
 [Memory utilities](../stdlib/memory.md)).
 
+## Copyable
+
+`Copyable` is a built-in trait with no methods, of the types a program may copy freely
+([Concurrency](19-concurrency.md#copyable)). It is structural: a type is Copyable by what it
+holds, and no `impl` block gives it. A number, `bool`, `char`, an enum, a `shared` reference
+and an `atomic`, `atomic const` or `locked` handle are Copyable, and so are a struct, a
+tuple, a fixed-size array and an optional whose every part is (a struct's `shared` field
+counts). A unique reference, a `Str`, a function value and a task are not: they are
+move-only, and reach another owner by [`move`](19-concurrency.md#move-an-explicit-transfer).
+`T: Copyable` bounds a type parameter that copies its value:
+
+```pkn
+import ::io;
+
+struct Point {
+  x: int;
+  y: int;
+}
+
+class Node {
+  id: int;
+}
+
+struct Ref {
+  n: shared Node;
+}
+
+fn twice<T: Copyable>(v: T) -> (T, T) { return (v, v); }
+
+fn main() -> int {
+  let p = twice(Point(1, 2));
+  let n = twice(3);
+  let s: shared Node = Node(7);
+  let pair = twice(Ref(s));           // a struct of a shared reference is Copyable
+  pair.0.n.id = 8;
+  io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1) + " " + Str(pair.1.n.id));
+  return 0;
+}
+```
+
+Output:
+
+```
+3 6 8
+```
+
+`impl Copyable for X` is an error for any `X`, and a move-only type argument fails the
+bound:
+
+```pkn
+class Node {
+  id: int;
+}
+
+impl Copyable for Node {}
+
+fn twice<T: Copyable>(v: T) -> (T, T) { return (v, v); }
+
+fn main() -> int {
+  let d = twice(Node(2));
+  let e = twice("text");
+  return 0;
+}
+```
+
+Error:
+
+```
+'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented
+'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str', a function value or a task is move-only
+'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str', a function value or a task is move-only
+```
+
+A qualifier is not part of a type argument in this version (`twice(s)` with `s: shared Node`
+is checked as a `Node`, and rejected), so a `shared` reference reaches a template inside a
+struct, as `Ref` above. Under `--strict-ownership`
+([Concurrency](19-concurrency.md#the-copy-rule---strict-ownership)) a value that is not
+Copyable flows into an owning slot only by `move`.
+
 ## Semantic Checks
 
 | Error | Trigger |
 |-------|---------|
-| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`) |
+| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`, `Copyable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
 | Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
+| `impl Copyable` | `impl Copyable for X`, for a class or a struct: `'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented` (see [Copyable](#copyable)) |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by; the instantiation's body, the bounds of the templates it uses and the bodies of the instantiations only it uses are not checked, so it is the one error |
 | Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |

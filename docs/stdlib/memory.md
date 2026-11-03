@@ -165,13 +165,19 @@ trait 'ValueType', which 'memory::Box' requires of 'T'`): it is shared by refere
 |--------|------|
 | `Box<T>(v: T)` | A box holding `v` |
 | `fn get() -> inout T` | The value's storage |
+| `view fn value() -> view T` | The value, read only: the read of a `view`, `const` or `atomic const` box |
 
 `get()` returns `inout T`, the value's storage: read it (`pair.get().1`), pass it to an
 `inout` parameter, assign to one of its fields (`pt.get().x = 5` for a struct), or assign
 through an `inout` local, which borrows the box until its last use. The call itself is not
 a place to assign to (`b.get() = 5` is `left-hand side of '=' must be an identifier, field
 access, or subscript`). `get` is not a `view fn`, so a
-`view` box cannot be read through it.
+`view` box cannot be read through it, nor a `const` or `atomic const` one (`'b' is 'const';
+'get' is not a 'view fn'` for `let b: const mem::Box<P> = ...; b.get()`). `value()` is one,
+and reads such a box: a `view T`, which cannot be assigned
+([Concurrency](../language/19-concurrency.md#values-take-no-qualifier-membox) reads a `const`
+box through it, and [`atomic const`](../language/19-concurrency.md#atomic-const-frozen-objects)
+a frozen one).
 
 ```pkn
 import ::io;

@@ -187,7 +187,7 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams
+classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
               | "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
@@ -205,12 +205,12 @@ traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
-implMember  ::= funcDecl                          -- funcDecl without typeParams
+implMember  ::= funcDecl                          -- funcDecl without typeParams or "async"
               | "static" "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 
-funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= ( "async" | "view" )? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
@@ -285,6 +285,23 @@ written, `___init__` too); `destroy`, which is never declared, gets
 `'destroy' is reserved for the compiler-generated destructor and cannot be
 declared` at the function, an `impl` block's method or `static fn`, as
 Sema reports one with a body.
+`async fn` declares a free function that is a task
+([design/concurrency.md](design/concurrency.md), the concurrency prototype):
+a call of it starts the task, and `await` (§7) takes the result
+(`FuncDecl::isAsync`; the `FuncDecl` starts at `async`).  `async` stands
+directly before `fn`, at top level only.  Anywhere else it is a syntax
+error: before anything but `fn` at top level (`async main()`, `async view
+fn`) it is `unexpected 'async'; expected 'fn' after 'async'`, at the
+`async`, and `view async fn` is the top-level error at the `view`; in a
+class body, an `impl` block or a trait it is the member error there
+(`unexpected 'async'; expected a field ('name: Type;') or a method ('fn')
+in the class body`, `unexpected 'async'; expected a method ('fn', 'view fn'
+or 'static fn') in the impl block; fields go in the type's declaration`,
+`unexpected 'async'; expected a method signature ('fn' or 'view fn') in the
+trait`), and `native async fn` is `unexpected 'async'; expected 'fn' after
+'native'`: the prototype has no async methods
+([samples/concurrency/README.md](../samples/concurrency/README.md), "What
+is not").
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/03-functions.md](language/03-functions.md)):
@@ -292,17 +309,30 @@ A parameter's type may start with its mode, `view` or `inout`
 reserved: besides a parameter's type, they only start a result's type
 (`-> view T`), a function type's parameter (`paramType`, below), a local
 borrow's type or a `match` binding's type (`borrowDecl` and `matchArm`,
-below), and `view` a `view fn`.  In any other
+below), the mode of a `lock` statement's binding (`lock c as v: inout {`,
+`lockStmt`, below), and `view` a `view fn`.  In any other
 position (a
 statement, a field's type, before the parameter's name) they are a syntax
 error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is
-allowed there (the parameter's type, an override) is Sema's job.
+allowed there (the parameter's type, an override) is Sema's job.  A mode
+is followed by a `typeAnnotation` (§5), a qualified one included: `n: view
+const N`, `-> view shared N` and `x: view shared N = e;` parse, and Sema
+rejects the qualifier on every borrow (`parameter 'n' is 'view const': a
+borrow carries no qualifier; a 'view' takes every form of the object
+(read-only through it) and an 'inout' a unique or 'shared' one, with no
+retain or release; write 'view T'`; `the result of 'f' is 'view shared':
+...`, `local 'x' is 'view shared': ...`).
 
 ## 5. Types
 
 ```
-typeAnnotation ::= primaryType ( "[" "]" | "[" ( INT | "_" ) "]" | "?" )*
+typeAnnotation ::= qualifier plainType
+                 | qualifier                    -- alone: the type is inferred (§6)
+                 | "atomic" typeAnnotation      -- a cell holding a number
+                 | plainType
+qualifier      ::= "const" | "shared" "const"? | "atomic" "const" | "locked"
+plainType      ::= primaryType ( "[" "]" | "[" ( INT | "_" ) "]" | "?" )*
 primaryType    ::= IDENT
                  | modulePath "::" IDENT
                  | IDENT "<" typeArgList ">"
@@ -354,6 +384,45 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   location, which Sema resolves (the class, struct or enum may be declared
   later in the file). A qualified name always becomes a stub named
   `module::Type`.
+- A qualifier ([design/concurrency.md](design/concurrency.md), the
+  concurrency prototype) says how the place of that type holds its object:
+  `const T` (one owner, read-only), `shared T` and `shared const T`
+  (aliases on one thread), `atomic const T` (frozen, shared across threads)
+  and `locked T` (a cell reached in `lock` blocks, §6).  It is a
+  `QualifiedType` node (the `Qualifier` and the inner type) around the
+  whole annotation, suffixes included: `shared N?` and `atomic const Str?`
+  are a `QualifiedType` over an `OptionalType`, and `shared N[3]` one over
+  a `FixedArrayType`, which Sema rejects as it does a qualifier on any
+  value type (`'shared' qualifies a reference; 'N[3]' is a value: box it
+  ('mem::Box<N[3]>') to share what it holds`, `'shared' qualifies a
+  reference; 'int' is a value`, `'const' applies to objects; 'int' is a
+  value, which 'let' fixes`).  A type takes one qualifier: a second one, or
+  `atomic`, after it is a syntax error at the second (`a type takes one
+  qualifier: 'const shared' is two`, `... 'shared atomic' is two`, `...
+  'locked atomic' is two` for `locked atomic const C`).  A qualifier parses
+  wherever a type does, a parameter's, a field's, a result's, a type
+  argument and a `match` binding's included; which places take which is
+  Sema's (a borrow takes none, §4; the prototype reads `List<shared N>` as
+  `List<N>` and does not act on a `match` binding's).
+- `atomic T` is a cell holding a number, which the variable or field of
+  that type names; a copy of it is another handle to the same cell.  It is
+  an `AtomicType` node over `T`, which at parse time is any annotation
+  (`atomic int?`, `atomic shared N` and `atomic atomic int` parse); Sema
+  holds `T` to a number type, `bool` or `char` (`'atomic' holds a number,
+  a 'bool' or a 'char', not 'int?' (the prototype has no atomic arrays)`).
+  `atomic` directly followed by `const` is the qualifier `atomic const`,
+  never a cell.
+- A qualifier alone (`x: shared = e;`, `let c: const = e;`, §6) is a
+  `QualifiedType` with no inner type: the type is the initializer's, which
+  Sema infers.  The recursive-descent frontend reads the bare qualifier
+  wherever `=`, `;`, `,` or `)` directly follows it, so a parameter `x:
+  shared`, a field `f: shared;`, a destructuring target and a `weak` or
+  borrow declaration's type parse too, and Sema allows it in a variable
+  declaration only (`'shared' needs a type here ('shared T'); only a
+  variable declaration infers it`).  Where anything else follows, the
+  qualifier needs a type (`fn f() -> shared {`: `unexpected '{'; expected a
+  type`), and `atomic` alone is never a type (`x: atomic = 0;`: `unexpected
+  '='; expected a type`).
 
 ## 6. Statements
 
@@ -377,6 +446,7 @@ statement ::= ";"
             | "break" ";"
             | "continue" ";"
             | matchStmt
+            | lockStmt
 
 assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
             | ">" ">="                   -- the two adjacent: ">>="
@@ -387,8 +457,9 @@ borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 ifStmt    ::= "if" expression block elseTail?
 elseTail  ::= "elif" expression block elseTail? | "else" block
 whileStmt ::= "while" expression block
-forStmt   ::= "for" ( IDENT | "_" ) ( ":" typeAnnotation )? "in" expression
-              ( ".." | "..=" ) expression ( "step" expression )? block
+forStmt   ::= "parallel"? "for" ( IDENT | "_" ) ( ":" typeAnnotation )? "in"
+              expression ( ".." | "..=" ) expression ( "step" expression )? block
+lockStmt  ::= "lock" expression "as" IDENT ":" ( "view" | "inout" ) block
 
 destructureTargets ::= destructureTarget ( "," destructureTarget )+
 destructureTarget  ::= IDENT | IDENT ":" typeAnnotation | "_"
@@ -443,6 +514,12 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   not written, is its initializer's.  It needs an initializer, is never
   `let` (`let x: view = e;`) and is not a destructuring target.  With the
   mode before the name (`view x = e;`) the syntax error shows the fix.
+- `x: shared = e;` and `let c: const = e;` declare a local with a
+  qualifier and no type (a `QualifiedType` with no inner type, §5): the
+  type is the initializer's, which Sema infers, as for a borrow.  Every
+  qualifier has the form (`y: shared const = e;`, `z: atomic const = e;`,
+  `w: locked = e;`); `atomic` alone has not (`x: atomic = 0;` is
+  `unexpected '='; expected a type`).
 - A condition is not parenthesised (`if x > 0 {`, `while i < n {`); it ends
   at the block's `{`, which no expression consumes outside brackets except a
   lambda's body.  Parentheses around it are a parenthesised expression, so
@@ -465,6 +542,26 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   range, one spelled `step` right after the range's end starts the step,
   and anywhere else each is an ordinary name (`for in in 0..step step step {`
   parses).  The step is null in the AST when it is not written.
+  `parallel for` runs the iterations in parallel
+  ([design/concurrency.md](design/concurrency.md), the concurrency
+  prototype): `parallel` sets `ForStmt::isParallel`, and the statement
+  still starts at `for`.  `parallel` before anything else is a syntax error
+  at the token found (`parallel while`: `unexpected 'while'; expected 'for'
+  after 'parallel'`).  What the body may do is Sema's.
+- A `lockStmt` (`LockStmt`) locks a `locked` cell (§5) for its block and
+  names the cell's contents: the cell is an expression, which ends at the
+  keyword `as`; the binding is a local borrow of the contents (`view`
+  reads them, `inout` changes them), a `VarDecl` with the mode and no type
+  that spans the name (Sema writes the contents' type); the statement
+  spans `lock` to the block.  Each missing piece is a syntax error at the
+  token found: `expected 'as' after the 'lock' statement's cell`,
+  `expected a name for the cell's contents after 'as'`, `expected ':'
+  after the name`, `expected 'view' or 'inout': how the block reaches the
+  cell's contents` and `expected '{' to open the 'lock' block`.  Sema takes
+  only a `locked` place as the cell (`'n' is not 'locked': a 'lock' block
+  takes a 'locked' variable, field or parameter`) and holds the block to
+  the design's rules (no `await`, `return`, `break`, `continue` or nested
+  `lock` in it).
 - Match arms: a wildcard `_`, a literal pattern, a type with an optional
   binding, in any order.  A literal pattern is a literal, or a negative
   number: `-` and an `INT` or a `FLOAT` (`-1`, `- 2.5`) is one
@@ -497,7 +594,7 @@ additive       ::= multiplicative ( ( "+" | "-" | "|" | "^" ) multiplicative )*
 multiplicative ::= shift ( ( "*" | "/" | "%" | "&" ) shift )*
 shift          ::= unary ( shiftOp unary )?       -- does not associate
 shiftOp        ::= "<<" | ">" ">"                  -- the two '>' adjacent
-unary          ::= ( "!" | "-" | "~" ) unary | postfix
+unary          ::= ( "!" | "-" | "~" | "move" | "await" ) unary | postfix
 
 postfix ::= primary postfixOp*
 postfixOp ::= "(" argumentList? ")"                -- call of a function value
@@ -548,9 +645,22 @@ x + 1`, the result type is the expression's, which Sema infers
 (`LambdaExpr::hasInferredResult`); it is not `void`.  The expression extends as
 far as an expression can, so `fn(x: int) => fn(y: int) => x + y` nests.
 
+`move e` transfers the value of a place out of it, and `await e` waits for
+a task's result ([design/concurrency.md](design/concurrency.md), the
+concurrency prototype).  Each is a `UnaryExpr` (`UnaryOpcode::Move`,
+`UnaryOpcode::Await`) spanning the keyword and its operand, a prefix
+operator at the level of `!`, `-` and `~`: the operand extends over its
+postfix suffixes and no further, so `move h.f` moves the field `h.f`,
+`await t.get()` awaits the call's result, `await t + 1` is `(await t) + 1`,
+and the operators nest in any order (`-move m`, `move -a`, `!await t`,
+`await move t`).  Without an operand each is a syntax error (`await;`:
+`unexpected ';'; expected an expression`).  `move x;` is an expression
+statement.  What `move` may take (a variable, a unique field of an owned
+one) and what `await` may take (a task) is Sema's.
+
 Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ - | ^`;
-`* / % &`; the shifts `<< >>`; unary `! - ~`; postfix. This is Swift's
-grouping, not C's: `a + b << 2` is `a + (b << 2)`, `a & b * c` is
+`* / % &`; the shifts `<< >>`; unary `! - ~ move await`; postfix. This is
+Swift's grouping, not C's: `a + b << 2` is `a + (b << 2)`, `a & b * c` is
 `(a & b) * c`, and `x & m == 0` is `(x & m) == 0`
 ([`design/bitwise.md`](design/bitwise.md)). Binary operators are
 left-associative except the relational operators and the shifts, which do
@@ -642,12 +752,18 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 - A `CompoundStmt`'s location is the empty range just after its `{`
   (the location of an empty production in an LALR parser), regardless of
   its contents.
+- A `LockStmt` spans `lock` to the `}` of its block, and its binding
+  `VarDecl` spans the name.  A `ForStmt` starts at `for`, with or without
+  `parallel` before it.  A `FuncDecl` starts at `async` when it has one.
 - The `TranslationUnit` spans `1:1` to the end of its last declaration;
   an empty file gives `<1:1-1:1>`.
 - Builtin and bootstrap types resolved at parse time (`int`, `Str`, ...)
   carry no location; `ClassType` stubs, `ArrayType` (`T[]`),
-  `FixedArrayType` (`T[n]`), `OptionalType`, `TupleType` and `GenericType`
-  nodes created by the parser carry the location of their annotation.
+  `FixedArrayType` (`T[n]`), `OptionalType`, `TupleType`, `GenericType`,
+  `QualifiedType` (from its qualifier to the end of the inner type, or the
+  qualifier alone when the type is inferred) and `AtomicType` (from
+  `atomic`) nodes created by the parser carry the location of their
+  annotation.
 
 ## 9. Diagnostics and recovery
 
@@ -668,8 +784,9 @@ statement boundary (`;`, or the `}` of the enclosing block, matching braces
 on the way), at the next class, struct, `impl` or trait member (`fn`,
 `view fn`, `static`, `;`, `}`) and at the next top-level declaration
 (`import`, `class`, `struct`, `enum`, `trait`, `impl`, `fn`, `view fn`,
-`native`), so one file can
-report several independent errors. Past the nesting limit it skips the
+`native`; an `async fn` at its `fn`), so one file can
+report several independent errors.  A `lock` statement and a `parallel
+for` recover as the other statements do. Past the nesting limit it skips the
 block, the brackets or the parentheses one level too deep whole, through
 their closer, and after an `if`'s or an `elif`'s block one level too deep
 the rest of its `elif` and `else` branches, deeper still, so the limit is
@@ -688,7 +805,8 @@ an `if` takes at most 510 `elif`s in a function's body, and the C of
 `impl` or trait body; the arms of a `match`; a parenthesised expression or
 a tuple's elements; the arguments
 of a call and the elements of an array literal; a subscript's index; the
-operand of a prefix operator (`!`, `-`, `~`); a conditional expression; a
+operand of a prefix operator (`!`, `-`, `~`, `move`, `await`); a
+conditional expression; a
 type application's arguments; a tuple type's elements; a function type's
 parameters and its result, and a lambda's result type; and each type
 suffix (`[]`, `[N]`, `?`), around the levels of the type it wraps, so that
@@ -790,3 +908,5 @@ specification does not. Every frontend must reject them (the
 - Shifts in the forms of other languages (§7, §9): a `>>` or `>>=` with a
   space or a newline between its two tokens (`a > > b`, `x > >= 1;`), a
   `>>>` (`a >>> b`), and a chain of shifts (`a << b << c`).
+- A run of qualifiers on one type, or `atomic` after one (§5): `const
+  shared N`, `shared atomic int`, `locked atomic const C`.

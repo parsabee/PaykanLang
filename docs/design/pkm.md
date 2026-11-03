@@ -866,17 +866,18 @@ A `stable` `field.load` or `ptr.load` (docs/pir.md §6) is written with
 the code 53 before its opcode, which no opcode has; a load without it is
 not stable, so a record written before the mark existed reads the same.
 A reader rejects the mark before any other opcode.  Likewise a `retain
-lend` is written with the code 56 before its opcode, and a call, vcall or
-icall that lends or passes on an argument (docs/pir.md §3, §6) with the
-code 55 and the ownership of those arguments, at least one, by increasing
-index into the arguments (a vcall's receiver and an icall's callee are
-arguments 0), before its opcode; every other argument is handed over, so
-a call whose arguments all are has no mark and is written as before.  A
-`retain nonnull` (docs/pir.md §6) has the code 57 right before its
-opcode, after a 56 when it is a `retain lend nonnull`.  A reader rejects
-56 and 57 before anything but a `retain`, 55 before anything but a call,
-an empty or unordered list, an index past the arguments and a kind other
-than 1 or 2.
+lend` is written with the code 56 before its opcode, and a call,
+`async_call`, vcall or icall that lends or passes on an argument
+(docs/pir.md §3, §6) with the code 55 and the ownership of those
+arguments, at least one, by increasing index into the arguments (a
+vcall's receiver and an icall's callee are arguments 0), before its
+opcode; every other argument is handed over, so a call whose arguments
+all are has no mark and is written as before.  A `retain nonnull`
+(docs/pir.md §6) has the code 57 right before its opcode, after a 56
+when it is a `retain lend nonnull`.  A reader rejects
+56 and 57 before anything but a `retain`, 55 before anything but a call
+(an `async_call` is one), an empty or unordered list, an index past the
+arguments and a kind other than 1 or 2.
 
 | op | PIR | per-opcode fields | args |
 |---|---|---|---|
@@ -920,7 +921,9 @@ than 1 or 2.
 | 57 | `nonnull`: marks the `retain` whose opcode follows as a `retain nonnull` (docs/pir.md §6), after a 56 when it is both; only there | | |
 | 58–60 | `and or xor` (docs/design/bitwise.md) | — | 2 |
 | 61, 62 | `shl shr`: the count's low six bits | — | 2 |
-| 63–255 | reserved | | |
+| 63 | `async_call` (the concurrency prototype, docs/pir.md §6): starts an `async fn` as a task, the `ptr` result | `str` callee | n |
+| 64 | `await`: the task's result | — (the result type is the result's) | 1 |
+| 65–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An
@@ -931,10 +934,24 @@ self-describing for the dump tool and the fuzzer.
 
 ```
 Block := uleb count ; Stmt[count]
-Stmt  := u8 tag: 0 instr InstrRec | 1 if Operand, Block then, u8 hasElse, [Block] | 2 while Block cond, Operand, Block body
+Stmt  := u8 tag: 0 instr InstrRec | 1 if Operand, Block then, u8 hasElse, [Block]
+         | 2 while Block cond, Operand, Block body, u8 parallel, [Parallel]
          | 3 break | 4 continue | 5 ret u8 hasValue, [Operand] | 6 unreachable
          | 7 switch Operand, uleb n, (Operand, Block)[n], u8 hasDefault, [Block]
+Parallel := uleb counter ; Operand count ; uleb nPrivates ; nPrivates × uleb local ; uleb nReductions ; nReductions × (uleb partial ; u8 op)
 ```
+
+A `while` record ends in a flag byte (0 or 1, as every flag byte), 1 when
+the loop carries the concurrency prototype's `parallel` annotation
+(docs/pir.md §6, `pir::Parallel`) and 0 otherwise.  After a 1 come the
+annotation's fields, in this order: the counter's local index; the count
+operand (an `i64`); the privates, their number then each one's local
+index; and the reductions, their number then, for each, the partial's
+local index and the code of its op (§5.5: 0 for `add`, 2 for `mul`).  A
+reader rejects a reserved code there (`reserved opcode in a reduction`)
+and leaves any other to the verifier (§5.12), which allows `add` and
+`mul` alone.  The flag byte is not optional: a `while` written without
+it does not read.
 
 Nesting depth is capped at 512 (the frontends' source-nesting bound; a
 lowering never produces deeper PIR from a bounded parse).
@@ -945,12 +962,12 @@ lowering never produces deeper PIR from a bounded parse).
 FunctionRec
   uleb recordLength      bytes that follow (lets SYMIDX point here and a reader skip or decode one function)
   str  name
-  u32  flags             bit0 extern ; bit1 hasModule ; bit2 hasSymbol ; bits3-4 linkage (0 external, 1 hidden, 2 internal; §9.3)
-                         bit5 linkonce (reserved, written 0; §4.5 makes it unnecessary) ; bit6 erased (obsolete, written 0: §4.5)
-                         bit7 noreturn ; bit8 inline ; bit9 noinline ; bit10 cold (#171) ; bit11 cExport (cName follows; #21) ; bit12 hasAttrs
+  u32  flags             bit0 extern ; bit1 hasModule ; bit2 hasSymbol ; bit3 shared (a copy of an instantiation, §4.8: `shared fn`, docs/pir.md §3)
+                         bit4 hasUses (a compiled declaration's `uses`, §5.13) ; bit5 async (an `async fn`, the concurrency prototype: docs/pir.md §3)
+                         others reserved, written 0 and rejected by a reader: the linkage classes of §9.3, #171's noreturn, inline, noinline and cold,
+                         #21's cExport (and its cName) and a forward-compatible bag of plugin-namespaced attributes take bits from 6 up when they are written
   sig  signature
-  [bit1] str module ; [bit2] str symbol ; [bit6] uleb nHiddenParams ; [bit11] str cName
-  [bit12] uleb nAttrs ; nAttrs × (str key ; str value)        forward-compatible bag for plugin-namespaced attributes (#171)
+  [bit1] str module ; [bit2] str symbol ; [bit4] uleb nUses ; nUses × str use     nUses ≥ 1: an empty list is written as no bit 4 (a reader rejects a count of 0)
   -- definitions only --
   uleb nConventions ; nConventions × u8   always 0 (#98 part 2 retired the per-parameter convention: §5.5's ownership of each call's arguments)
   uleb nParams ; nParams × (uleb id ; type ; str name)
@@ -958,7 +975,7 @@ FunctionRec
   uleb nextValueId       above every id of a parameter or a result (the verifier checks it)
   Block body
 ClassRec
-  str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton (obsolete, written 0: #168 is not planned) ; bit4 hasClassObj (obsolete, written 0: §4.5) ; bits5-6 linkage ; bit7 linkonce reserved)
+  str name ; u32 flags (bit0 extern ; bit1 shared (an instantiation's class, §4.8: `shared class`, docs/pir.md §3) ; others reserved, written 0 and rejected by a reader: #18's final and abstract, the linkage of §9.3)
   str super ("" = root) ; [bit0] str module
   uleb nFields ; nFields × (str name ; slot type)           layout order, ancestors first
   uleb nSlots  ; nSlots  × (str slot ; str target ("" = null) ; sig)
