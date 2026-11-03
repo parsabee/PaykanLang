@@ -19,6 +19,7 @@ PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanString_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanString_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanString_equals,
+    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
     [PAYKAN_SLOT_STRING_LENGTH] = (PaykanMethod)PaykanString_length,
     [PAYKAN_SLOT_STRING_CONCAT] = (PaykanMethod)PaykanString_concat_inplace,
 };

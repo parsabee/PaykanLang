@@ -85,6 +85,9 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanLockedNew,       reinterpret_cast<void *>(&PaykanLocked_new)},
     {kPaykanLockedLock,      reinterpret_cast<void *>(&PaykanLocked_lock)},
     {kPaykanLockedUnlock,    reinterpret_cast<void *>(&PaykanLocked_unlock)},
+    {kPaykanObjectWalk,      reinterpret_cast<void *>(&PaykanObject_walk)},
+    {kPaykanFreeze,          reinterpret_cast<void *>(&Paykan_freeze)},
+    {kPaykanFreezeMem,       reinterpret_cast<void *>(&Paykan_freeze_mem)},
 
     {kPaykanPanicDivByZero,  reinterpret_cast<void *>(&Paykan_panic_div_by_zero)},
     {kPaykanPanicDivOverflow, reinterpret_cast<void *>(&Paykan_panic_div_overflow)},

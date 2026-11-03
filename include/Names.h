@@ -96,6 +96,9 @@ inline constexpr const char *kMethodToString = "toString";
 /// Str's parse into an `int`, and an `unsigned`'s value as an `int?`.
 inline constexpr const char *kMethodToInt = "toInt";
 inline constexpr const char *kMethodEquals = "equals";
+/// The walk every class has after `equals` (the concurrency prototype):
+/// freezes what the object holds, for `atomic const`.
+inline constexpr const char *kMethodWalk = "__walk";
 
 // Traits
 inline constexpr const char *kTraitShow =
@@ -178,6 +181,11 @@ inline constexpr const char *kPaykanObjectNew = "PaykanObject_new";
 inline constexpr const char *kPaykanObjectDestroy = "PaykanObject_destroy";
 inline constexpr const char *kPaykanObjectToString = "PaykanObject_toString";
 inline constexpr const char *kPaykanObjectEquals = "PaykanObject_equals";
+inline constexpr const char *kPaykanObjectWalk = "PaykanObject_walk";
+// The concurrency prototype's freeze (`atomic const`): an object and what
+// it holds become immortal, counted nowhere.
+inline constexpr const char *kPaykanFreeze = "Paykan_freeze";
+inline constexpr const char *kPaykanFreezeMem = "Paykan_freeze_mem";
 inline constexpr const char *kPaykanObjectVtable = "PaykanObject_vtable";
 inline constexpr const char *kPaykanObjectNone = "PaykanObject_None";
 
@@ -443,6 +451,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanLockedNew,
     kPaykanLockedLock,
     kPaykanLockedUnlock,
+    kPaykanObjectWalk,
+    kPaykanFreeze,
+    kPaykanFreezeMem,
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,

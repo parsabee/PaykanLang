@@ -2146,6 +2146,15 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
     Val box = emitAsSharedRaw(expr, /*lend=*/false);
     return box ? callRuntime(names::kPaykanLockedNew, {box}, "cell") : box;
   }
+  // A unique value flowing into an `atomic const` slot: the object and
+  // everything it holds are frozen at this use (immortal, counted nowhere;
+  // the design counts the root atomically and thaws it).
+  if (expr->getMaterialize() == ast::QualForm::AtomicConst) {
+    Val box = emitAsSharedRaw(expr, /*lend=*/false);
+    if (box)
+      callRuntime(names::kPaykanFreeze, {emitSharedGet(box, "frozen")});
+    return box;
+  }
   // An optional value is never boxed (Sema lets none reach a box slot).
   if (valueOptionalType(expr)) {
     reportInternalError("an optional value where a box is due");

@@ -136,9 +136,13 @@ const char *ModuleLowering::builtinMethodSymbol(ast::ClassType *ct,
       return kPaykanObjectToString;
     if (name == kMethodEquals)
       return kPaykanObjectEquals;
+    if (name == kMethodWalk)
+      return kPaykanObjectWalk;
     return nullptr;
   }
   if (ct == ASTCtx.getStrTy()) {
+    if (name == kMethodWalk)
+      return kPaykanObjectWalk;
     if (name == kMethodDestroy)
       return kPaykanStringDestroy;
     if (name == kMethodToString)
@@ -243,7 +247,8 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
   // Method functions `Class.method(obj self, params...)`; `destroy` is the
   // synthetic destructor declared below.
   for (auto *funcDecl : node->getMethods()) {
-    if (funcDecl->getName() == kMethodDestroy)
+    if (funcDecl->getName() == kMethodDestroy ||
+        funcDecl->getName() == kMethodWalk)
       continue;
     if (auto *md = ct->findMethod(funcDecl->getName())) {
       pir::Function *fn =
@@ -258,6 +263,10 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
   pir::Function *dtor = getOrCreateFunction(
       node->getName() + kNameSep + kMethodDestroy, {{Type::Obj}, Type::Void});
   dtor->Params[0].Name = kSelf;
+  // The walk (the concurrency prototype): generated like the destructor.
+  pir::Function *walk = getOrCreateFunction(
+      node->getName() + kNameSep + kMethodWalk, {{Type::Obj}, Type::Void});
+  walk->Params[0].Name = kSelf;
   // Constructor `Class(initParams...) -> box`; an abstract class, which
   // nothing constructs, has none (its `__init__` is its subclasses').
   if (ct->isAbstract())
@@ -352,7 +361,8 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
 
   // 1. Method bodies.
   for (auto *funcDecl : node->getMethods()) {
-    if (funcDecl->getName() == kMethodDestroy)
+    if (funcDecl->getName() == kMethodDestroy ||
+        funcDecl->getName() == kMethodWalk)
       continue;
     auto *md = ct->findMethod(funcDecl->getName());
     if (!md)
@@ -387,8 +397,10 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
     emitImplicitReturn(fn->Sig);
   }
 
-  // 2. The synthetic destructor (so the destroy slot names it).
+  // 2. The synthetic destructor (so the destroy slot names it), and the
+  //    walk (the concurrency prototype).
   emitDestructor(node, ct);
+  emitWalk(node, ct);
 
   // 3. Vtable targets: the most-derived concrete function per slot.
   const auto &vtable = ct->getVTable();
@@ -418,6 +430,29 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
   }
   B.emitRet(shared);
   return Val();
+}
+
+// `void Class.__walk(obj self)` (the concurrency prototype): freezes what
+// the object holds, for Paykan_freeze: every reference field but a `weak`
+// one, and the references in every field held in memory.
+void ModuleLowering::emitWalk(ast::ClassDecl *node, ast::ClassType *ct) {
+  pir::Function *fn = FuncByName.at(node->getName() + kNameSep + kMethodWalk);
+  FunctionStateGuard fnState(*this, fn, nullptr, ct);
+  Val self(pir::Operand::value(fn->Params[0]), Type::Obj);
+  for (auto &[fname, fty] : allFieldsInOrder(ct)) {
+    if (ast::isMemType(fty)) {
+      if (memHoldsRefs(fty))
+        callRuntime(kPaykanFreezeMem,
+                    {emitTypeDescriptor(fty),
+                     B.fieldAddr(self, ct->getName(), fname, fname + ".addr")});
+      continue;
+    }
+    if (!ast::isRefType(fty) || ct->isWeakField(fname))
+      continue;
+    Val box = B.fieldLoad(self, ct->getName(), fname, Type::Box, fname);
+    callRuntime(kPaykanFreeze, {emitSharedGet(box, fname + ".obj")});
+  }
+  B.emitRetVoid();
 }
 
 // `void Class.destroy(obj self)`: the user `destroy` body (if any), then a

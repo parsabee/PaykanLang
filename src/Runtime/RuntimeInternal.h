@@ -24,6 +24,10 @@ static inline void Paykan_vcall_destroy(PaykanObject *self) {
   ((void (*)(PaykanObject *))Paykan_vtable_of(self)[PAYKAN_SLOT_DESTROY])(self);
 }
 
+static inline void Paykan_vcall_walk(PaykanObject *self) {
+  ((void (*)(PaykanObject *))Paykan_vtable_of(self)[PAYKAN_SLOT_WALK])(self);
+}
+
 static inline PaykanShared *Paykan_vcall_toString(PaykanObject *self) {
   return ((PaykanShared * (*)(PaykanObject *))
               Paykan_vtable_of(self)[PAYKAN_SLOT_TO_STRING])(self);

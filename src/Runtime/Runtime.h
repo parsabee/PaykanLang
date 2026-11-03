@@ -155,17 +155,20 @@ enum {
   PAYKAN_SLOT_TO_STRING = 1, // PaykanShared *(*)(PaykanObject *self)
   PAYKAN_SLOT_EQUALS = 2,    // int64_t (*)(PaykanObject *self,
                              //   PaykanShared *other, uint64_t owned)
-  PAYKAN_OBJECT_SLOTS = 3,
+  PAYKAN_SLOT_WALK = 3,      // void (*)(PaykanObject *self): freezes what
+                             //   the object holds (the prototype's
+                             //   `atomic const`, Paykan_freeze)
+  PAYKAN_OBJECT_SLOTS = 4,
   // String
-  PAYKAN_SLOT_STRING_LENGTH = 3, // int64_t (*)(PaykanObject *self)
-  PAYKAN_SLOT_STRING_CONCAT = 4, // void (*)(PaykanObject *self, *other)
-  PAYKAN_STRING_SLOTS = 5,
+  PAYKAN_SLOT_STRING_LENGTH = 4, // int64_t (*)(PaykanObject *self)
+  PAYKAN_SLOT_STRING_CONCAT = 5, // void (*)(PaykanObject *self, *other)
+  PAYKAN_STRING_SLOTS = 6,
   // File
-  PAYKAN_SLOT_FILE_WRITE = 3,     // void (*)(PaykanObject *self, *str)
-  PAYKAN_SLOT_FILE_READLN = 4,    // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_SLOT_FILE_READBYTES = 5, // PaykanShared *(*)(PaykanObject *, int64_t)
-  PAYKAN_SLOT_FILE_READ = 6,      // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_FILE_SLOTS = 7
+  PAYKAN_SLOT_FILE_WRITE = 4,     // void (*)(PaykanObject *self, *str)
+  PAYKAN_SLOT_FILE_READLN = 5,    // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_SLOT_FILE_READBYTES = 6, // PaykanShared *(*)(PaykanObject *, int64_t)
+  PAYKAN_SLOT_FILE_READ = 7,      // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_FILE_SLOTS = 8
 };
 
 struct PaykanObject {
@@ -200,6 +203,15 @@ static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
 // Constructor.  Test-only: generated code constructs `Obj()` through the
 // class machinery, never through this symbol.
 PaykanObject *PaykanObject_new(void);
+/// The walk of an object holding no references: nothing (the prototype).
+void PaykanObject_walk(PaykanObject *self);
+/// `atomic const` (the concurrency prototype): freezes @p obj and, through
+/// its walk slot, everything it holds: their counts become PAYKAN_REF_MAX,
+/// immortal, so any thread reads them with no count.  The design counts
+/// the root atomically and thaws it; the prototype never frees it.
+void Paykan_freeze(PaykanObject *obj);
+/// Freezes the references the value of PaykanType @p type at @p value holds.
+void Paykan_freeze_mem(const void *type, void *value);
 
 // Default method implementations.  Every `*_equals` takes `other` as its
 // slot does: a box that bit 0 of `owned` says is handed over (released by
@@ -736,6 +748,7 @@ typedef struct PaykanBuffer {
 extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
+void PaykanBuffer_walk(PaykanObject *self);         // the prototype's freeze
 int64_t PaykanBuffer_len(void *t, PaykanObject *b);
 /// PaykanBuffer_len's body, which the backends read in place: the C path
 /// calls this, the LLVM path loads `len` itself (ToLLVM.cpp).

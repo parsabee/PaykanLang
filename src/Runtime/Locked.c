@@ -37,6 +37,7 @@ PaykanMethod PaykanLocked_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanLocked_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanLocked_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanLocked_equals,
+    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
 };
 
 PaykanShared *PaykanLocked_new(PaykanShared *payload) {

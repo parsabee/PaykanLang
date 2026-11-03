@@ -45,7 +45,9 @@ ASTContext::ClassTypeBuilder &ASTContext::ClassTypeBuilder::objectSlots() {
       .method(names::kMethodToString, Ctx.StrTy, {},
               MethodDecl::View) // slot 1
       .method(names::kMethodEquals, Ctx.BoolTy, {Ctx.ObjTy},
-              MethodDecl::View); // slot 2
+              MethodDecl::View) // slot 2
+      .method(names::kMethodWalk, Ctx.VoidTy, {},
+              MethodDecl::View); // slot 3 (the concurrency prototype)
 }
 
 void ASTContext::buildObjectType() {

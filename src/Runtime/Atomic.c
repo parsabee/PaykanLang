@@ -38,6 +38,7 @@ PaykanMethod PaykanAtomic_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanAtomic_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanAtomic_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanAtomic_equals,
+    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
 };
 
 PaykanShared *PaykanAtomic_new(int64_t value) {
