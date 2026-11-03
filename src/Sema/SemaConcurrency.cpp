@@ -371,6 +371,24 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
   return false;
 }
 
+/// The `at` of `mem::Buffer<T>` when @p st is that struct (one field,
+/// `__data`, the runtime's buffer object as an `Obj`); nullptr otherwise.
+static const ast::MethodDecl *bufferAt(const ast::StructType *st,
+                                       const ast::ASTContext &ctx) {
+  const std::string &n = st->getName();
+  const size_t lt = n.find('<');
+  if (lt == std::string::npos)
+    return nullptr;
+  const std::string base = n.substr(0, lt);
+  const bool named =
+      base == "Buffer" ||
+      (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
+  if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
+      st->getElementTypes()[0] != ctx.getObjTy())
+    return nullptr;
+  return st->findMethod("at");
+}
+
 std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
                               const std::string &path) {
   auto at = [&](const std::string &what) {
@@ -388,6 +406,12 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
     return uncrossable(ft->getElementType(), q, path);
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    // `mem::Buffer<T>` crosses when `T` does (the design's table): its one
+    // field is the runtime's buffer object, whose walk freezes the
+    // elements (PaykanBuffer_walk), so the check is of `T`, by `at`'s
+    // result.
+    if (const ast::MethodDecl *at = bufferAt(st, Ctx))
+      return uncrossable(at->getReturnType(), {}, path);
     const auto &types = st->getElementTypes();
     for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
       const std::string &f = st->getFieldName(i);
@@ -883,26 +907,33 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
                                  ast::SourceLocation loc) {
   if (q.isUnique() || !inner)
     return true;
-  const bool ref = sharesStorage(inner);
+  // A struct, a tuple or an array is a value wherever it is, whatever it
+  // holds: it takes no qualifier.  One to share, or to freeze for every
+  // thread, goes in a `mem::Box<T>`, an object (`atomic const
+  // mem::Box<Buffer<float>>`).
+  const bool ref = ast::isRefType(inner);
+  const std::string value =
+      "'" + typeName(inner) + "' is a value" +
+      (sharesStorage(inner) ? ": box it ('mem::Box<" + typeName(inner) +
+                                  ">') to share what it holds"
+                            : "");
   switch (q.Form) {
   case ast::QualForm::Unique: // `const`
     if (!ref) {
-      error(loc, "'const' applies to objects; '" + typeName(inner) +
-                     "' is a value, which 'let' fixes");
+      error(loc, "'const' applies to objects; " + value +
+                     (sharesStorage(inner) ? "" : ", which 'let' fixes"));
       return false;
     }
     return true;
   case ast::QualForm::Shared:
     if (!ref) {
-      error(loc, "'shared' qualifies a reference; '" + typeName(inner) +
-                     "' is a value");
+      error(loc, "'shared' qualifies a reference; " + value);
       return false;
     }
     return true;
   case ast::QualForm::AtomicConst:
     if (!ref) {
-      error(loc, "'atomic const' qualifies a reference; '" + typeName(inner) +
-                     "' is a value (the prototype does not box values)");
+      error(loc, "'atomic const' qualifies a reference; " + value);
       return false;
     }
     return true;

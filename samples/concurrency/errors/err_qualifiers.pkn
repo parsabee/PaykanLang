@@ -1,6 +1,7 @@
 import ::io;
 
 class Node { id: int; name: Str; }
+struct Pair { left: Node; n: int; }
 
 fn change(n: Node) { n.id = 0; }
 
@@ -14,5 +15,6 @@ fn main() -> int {
   sc.name = "x";                        // error: const
   let k: const int = 1;                 // error: const applies to objects
   let w: shared int = 2;                // error: shared qualifies a reference
+  let p: atomic const Pair = Pair(Node(4, "p"), 1);   // error: a struct is a value: box it
   return 0;
 }

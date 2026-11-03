@@ -1,0 +1,39 @@
+// A dot product over two boxed, frozen heap buffers (see sum_buf).
+//   dot_buf <n> <reps>      n elements in each (32M: 512 MB in all)
+import ::io;
+import ::memory as mem;
+import bench;
+
+fn main(args: view Str[]) -> int {
+  let n = bench::arg(args, 1, 33554432);
+  let reps = bench::arg(args, 2, 3);
+  a = mem::Buffer<float>();
+  b = mem::Buffer<float>();
+  let ga = a.grow(unsigned<int>(n));
+  let gb = b.grow(unsigned<int>(n));
+  for i in 0..n {
+    let ea = a.set(unsigned<int>(i), float<int>(i % 7));
+    let eb = b.set(unsigned<int>(i), float<int>(i % 5));
+  }
+  let xs: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move a);
+  let ys: atomic const mem::Box<mem::Buffer<float>> = mem::Box(move b);
+  best = 0; total = 0; s = 0.0;
+  let c0 = bench::cpu();
+  let w0 = bench::now();
+  for r in 0..reps {
+    let t0 = bench::now();
+    s = 0.0;
+    parallel for i in 0..n {
+      let u = unsigned<int>(i);
+      s += xs.value().at(u) * ys.value().at(u);
+    }
+    let dt = bench::now() - t0;
+    total += dt;
+    if best == 0 || dt < best { best = dt; }
+  }
+  let cpu = bench::cpu() - c0;
+  let wall = bench::now() - w0;
+  io::println("dot_buf n=" + Str(n) + " reps=" + Str(reps) + " ns_min=" + Str(best) +
+              " ns_mean=" + Str(total / reps) + " wall_ns=" + Str(wall) + " cpu_ns=" + Str(cpu) + " check=" + Str(s));
+  return 0;
+}

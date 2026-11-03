@@ -56,7 +56,13 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   class's reference fields and every buffer's elements), after the send
   check of its contents; the handle then copies anywhere, and reads
   inside count nothing.  An `atomic` field of a frozen object still
-  changes.
+  changes.  A struct, a tuple or an array is a value wherever it is and
+  takes no qualifier; to freeze one, box it: `let xs: atomic const
+  mem::Box<mem::Buffer<float>> = mem::Box(move b)` freezes the box, the
+  buffer it holds (`mem::Buffer<T>` crosses when `T` does, the design's
+  table) and the elements, and a `parallel for` body reads it through
+  the box's `value()`, the prototype's way to data larger than a
+  fixed-size array (`benchmarks/sum_buf.pkn`).
 * **`atomic T`**: `T` any number type, `bool` or `char`; variables and
   class fields.  A read is an atomic load, `=` a store, `+=` and `-=` one
   atomic add (floats by a compare-and-swap loop, `f32` and `f16` rounded

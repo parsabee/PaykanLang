@@ -40,6 +40,9 @@ PAYKAN = ROOT / "build" / "bin" / "paykan"
 PROGRAMS = {
     "sum": (["16777216", "5"], "reduction, 16M loads of a 128 KB array"),
     "dot": (["16777216", "5"], "reduction, two loads per iteration"),
+    "sum_buf": (["67108864", "3"], "reduction over a frozen 512 MB buffer, one `at` per iteration"),
+    "sum_buf_1m": (["1048576", "5"], "the same over 8 MB, in L2"),
+    "dot_buf": (["33554432", "3"], "dot product over two frozen 256 MB buffers"),
     "compute": (["16384", "5", "2000"], "2000 multiply-adds per element"),
     "saxpy": (["16384", "1000"], "a 16K-element loop, a store per element"),
     "overhead": (["4096", "2000"], "a 4K-element loop: fork, chunk, join"),
@@ -48,9 +51,9 @@ PROGRAMS = {
     "atomic_counter_16": (["4194304", "5", "16"], "one atomic add per 16 iterations"),
     "atomic_counter_256": (["4194304", "5", "256"], "one atomic add per 256 iterations"),
 }
-# a row's program: the name up to a trailing `_<n>`
+# a row's program: the name up to a trailing `_<n>` or `_<n>m`
 def program_of(name):
-    m = re.match(r"(.*?)(_\d+)?$", name)
+    m = re.match(r"(.*?)(_\d+m?)?$", name)
     return m.group(1)
 
 
@@ -155,9 +158,12 @@ def main():
     ap.add_argument("--blocktime", help="KMP_BLOCKTIME for the runs (ms, or infinite): how long a "
                     "thread spins after a loop before it sleeps; libomp's default is 0 on a hybrid CPU")
     ap.add_argument("--repeat", type=int, default=3, help="process runs per point; the best is kept")
-    ap.add_argument("--out", default=platform.node().split(".")[0])
+    ap.add_argument("--out", help="the results' file name (default: the host, plus the "
+                    "programs' names when a selection is run)")
     a = ap.parse_args()
     names = a.names or list(PROGRAMS)
+    if not a.out:
+        a.out = platform.node().split(".")[0] + ("-" + "+".join(a.names) if a.names else "")
     threads_list = [int(t) for t in a.threads.split(",")]
     if not a.no_build:
         build(sorted({program_of(n) for n in names}))

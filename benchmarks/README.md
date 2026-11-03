@@ -14,16 +14,19 @@ and LLVM's OpenMP runtime (`libomp`) runs the chunks on a thread pool.
 Each program times its own loop with a monotonic clock
 (`bench.pkn`: `clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)` through a
 `native fn`), repeats it, and prints one line, `name k=v ... ns_min=N
-ns_mean=M check=C`.  The prototype's parallel bodies read fixed-size
-arrays (at most 16384 elements), so the streaming kernels go round a
-128 KB array that lives in L2; the memory-bound regime over DRAM-sized
-data is out of the prototype's reach (the design's `Buffer<T>` reads in
-a parallel body are not in it).
+ns_mean=M check=C`.  A parallel body reads fixed-size arrays (at most
+16384 elements), so the array kernels go round a 128 KB array that lives
+in L2; and it reads a frozen heap buffer in a box (`atomic const
+mem::Box<mem::Buffer<T>>`: a buffer is a struct, a value, and takes no
+qualifier of its own), which the `_buf` kernels use for data larger than
+any cache.
 
 | Program | Loop | What it shows |
 |---|---|---|
 | `sum.pkn` | `s += xs[i % 16384]` over n iterations | a reduction streaming a cache-resident array: one load per iteration |
 | `dot.pkn` | `s += xs[i % 16384] * ys[i % 16384]` | two loads and a multiply-add per iteration |
+| `sum_buf.pkn` | `s += xs.value().at(i)` over a frozen `atomic const mem::Box<mem::Buffer<float>>` of n elements | a reduction over a boxed heap buffer, 512 MB by default: data larger than any array, read with no counts; each element read is three calls |
+| `dot_buf.pkn` | the same over two boxed buffers | six calls and a multiply-add per iteration |
 | `compute.pkn` | `work` dependent multiply-adds per element, then `s += x` | compute bound: ideal scaling, and the performance/efficiency core mix |
 | `saxpy.pkn` | `ys[i] = a * xs[i] + ys[i]`, n ≤ 16384 | a store at the loop's index; whether so short a loop pays for its fork and join |
 | `overhead.pkn` | `reps` loops of n trivial iterations (n ≥ 4096, or the loop runs inline) | the cost of one `parallel for`: fork, chunking, join |
@@ -78,7 +81,8 @@ L1d, 16 MB L2 per performance cluster), macOS 26, 2026-11-02.  The full
 tables, with efficiency and the busy fraction, are in `results/`
 (`*-static.md`: the static schedule the prototype had before these
 benchmarks; `*.md`: the dynamic schedule it has now; `*-blocktime200.md`:
-the same with `KMP_BLOCKTIME=200`).  Each cell is the loop's best time and
+the same with `KMP_BLOCKTIME=200`; `*-buffers.md`: the boxed heap
+buffers, below).  Each cell is the loop's best time and
 its speedup over one thread.
 
 | program | schedule | 1 thr | 4 thr | 8 thr | 12 thr | 16 thr |
@@ -153,10 +157,38 @@ What the numbers say:
   writing these), so two threads write neighbouring elements only at a
   chunk boundary, 255 lines in a loop at most.
 
+**Boxed heap buffers** (`*-buffers.md`; the dynamic schedule, the
+default block time).  `sum_buf` reads 64M floats (512 MB), `sum_buf_1m`
+1M (8 MB, in L2), `dot_buf` 32M of each of two buffers:
+
+| program | 1 thr | 4 thr | 8 thr | 12 thr | 16 thr |
+|---|---|---|---|---|---|
+| sum_buf | 465.2 ms (1.0x) | 120.6 ms (3.9x) | 60.9 ms (7.6x) | 42.0 ms (11.1x) | 36.0 ms (12.9x) |
+| sum_buf_1m | 7.2 ms (1.0x) | 1.9 ms (3.8x) | 1.0 ms (7.4x) | 0.7 ms (10.4x) | 0.6 ms (11.7x) |
+| dot_buf | 475.9 ms (1.0x) | 122.9 ms (3.9x) | 62.1 ms (7.7x) | 42.8 ms (11.1x) | 36.7 ms (13.0x) |
+
+- They scale like the compute-bound kernel (12.9x and 13.0x on 16
+  threads, efficiency 0.81), because they *are* compute bound: an element
+  read costs 6.9 ns on one thread, against 0.6 ns for a fixed-array
+  element in `sum`, and the 8 MB buffer that fits in L2 reads no faster
+  than the 512 MB one.  512 MB in 36 ms is 14 GB/s, a small fraction of
+  what the memory system gives sixteen cores.  Where the time goes, in
+  the emitted IR: the body calls the box's `value()`, the buffer's `at`
+  (inlined) and the runtime's bounds-checked `PaykanBuffer_get`, and
+  `at`'s hand-over of the buffer's object to `_get` as a `view` is held
+  with a retain and a release: on a frozen object those read the count
+  and call the runtime, which leaves it alone, so no count is written and
+  no line bounces, but it is two calls and a compare per element.
+- So a frozen buffer in a parallel body is correct and scales, and is
+  the prototype's way to data larger than an array; measuring memory
+  bandwidth through it waits on an element read the lowering emits
+  itself (a bounds check and a load, as a fixed array gets) and on holds
+  skipped under a frozen root, both of which the design has (the
+  Counting section).
+
 The `busy` column is the process's CPU time over wall time x threads,
 from `clock()`: it counts the threads' work and their spinning alike, and
 it lags a little behind running threads, so it is indicative, not exact.
 
-What the prototype cannot measure yet: a loop over DRAM-sized data (its
-bodies read fixed-size arrays of at most 16384 elements), memory-bound
-scaling, and anything about the design's own runtime.
+What the prototype cannot measure yet: memory-bound scaling (a buffer
+read is call bound, above), and anything about the design's own runtime.

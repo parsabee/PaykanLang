@@ -628,6 +628,11 @@ Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
 }
 
 void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
+  // `move v` of a value held in memory (the prototype): the value as it
+  // is; Sema has ended `v`.
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    e = u->getOperand();
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
     emitMemOptionalWrap(e, dst);
     return;
