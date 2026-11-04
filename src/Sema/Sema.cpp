@@ -5725,8 +5725,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     ast::Type *expectedInit = declTy;
     if (!declTy || ast::isa<ast::AtomicType>(declTy)) {
       // An `atomic` variable, field or parameter named as the initializer
-      // (`let j = k`, `let n: atomic int = st.hits`): its handle.
-      WantAtomicHandle = isPlaceChain(node->getInitExpr());
+      // (`j = k`, `n: atomic int = st.hits`): its handle.  A `let` with no
+      // type (`let j = k`) is a read-only copy: it takes the value.
+      WantAtomicHandle =
+          isPlaceChain(node->getInitExpr()) && !(node->isLet() && !declTy);
       if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy))
         expectedInit = at->getInnerType();
     }
@@ -5881,6 +5883,25 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy))
     qual.Mut = true;
   node->setQualifier(qual);
+
+  // A `let` cell (the prototype): nothing changes it through its name, and
+  // an atomic matters only when threads change it.  Its value is the
+  // alternative where one can be taken: from a value or a place, not from
+  // a call's new cell.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy); at && node->isLet()) {
+    const ast::Expr *init = node->getInitExpr();
+    const bool valueForm =
+        init && (isPlaceChain(init) || !init->getResolvedType() ||
+                 !ast::isa<ast::AtomicType>(init->getResolvedType()));
+    warning(node->getLocation(),
+            "'" + node->getName() +
+                "' is a 'let' atomic: nothing changes it through its name, "
+                "and an atomic matters only when threads change it; declare "
+                "it without 'let'" +
+                (valueForm ? ", or as its value ('let " + node->getName() +
+                                 ": " + typeName(at->getInnerType()) + "')"
+                           : std::string()));
+  }
 
   // Register the variable in the current scope.  An inferred type (`let x =
   // e;`) is written back like an annotation's, for the lowering.

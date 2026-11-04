@@ -720,7 +720,7 @@ thread by its atomic operations:
 import ::io;
 
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   parallel for i in 0..10000 {
     if i % 10 == 0 { hits += 1; }     // an atomic add, from any thread
   }
@@ -930,8 +930,9 @@ atomic load and `=` an atomic store; `+=` and `-=` are one atomic add or subtrac
 integer wraps like `+`, a float adds by a compare-and-swap loop); `x.exchange(v)` stores
 `v` and returns the value found; `x.compareExchange(expected, desired)` stores `desired`
 only if the cell holds `expected`, and returns whether it did. A variable, a parameter, a
-result or a class field can be `atomic`. A copy of an atomic place (`m = n`, `let m = n`,
-an argument, a result, a field assigned in `__init__`) is another **handle** to the same cell;
+result or a class field can be `atomic`. A copy of an atomic place (`m = n`, an argument, a
+result, a field assigned in `__init__`) is another **handle** to the same cell, and `let m =
+n` a read-only copy of its value;
 a plain value flowing into an `atomic` slot makes a new cell:
 
 ```pkn
@@ -987,8 +988,11 @@ s served 3, done True
 A `let` atomic is never assigned to and never changes through its name: `=`, `+=` and `-=`
 on it are `'n' is declared with 'let' and cannot be reassigned`, and `exchange` or
 `compareExchange` `'n' is declared with 'let' and cannot be changed by 'exchange'`, so a
-cell that changes is declared without `let`. A cell field of a `let` object is the
-object's own, and changes (`st.served += 2` above). An operation
+cell that changes is declared without `let`. An atomic matters only when threads change
+it, so a `let` one is a warning, `'n' is a 'let' atomic: nothing changes it through its
+name, and an atomic matters only when threads change it; declare it without 'let', or as
+its value ('let n: int')`. A cell field of a `let` object is the object's own, and changes
+(`st.served += 2` above). An operation
 that would read the cell and write it separately is an error: a read of the place on the
 right of an assignment to it, and every compound operator but `+=` and `-=`. A cell takes no
 `mut`, since its operations are its writes (`atomic mut int` is a syntax error,
@@ -1361,8 +1365,9 @@ that the finished feature needs; what `parallel for` costs, and why, is in
   `await`, nested `lock`, `parallel for`, `return`, `break` or `continue` inside; `locked T`
   takes `view` blocks only.
 - `atomic T`: a read is a load, `=` a store, `+=` and `-=` atomic; `exchange(v)` and
-  `compareExchange(expected, desired) -> bool`. A copy of an atomic place is another handle;
-  a value makes a new cell. A cell takes no `mut`.
+  `compareExchange(expected, desired) -> bool`. A copy of an atomic place is another handle
+  (`let m = n` a read-only copy of the value); a value makes a new cell. A cell takes no
+  `mut`, and a `let` one is a warning: nothing changes it through its name.
 - `atomic shared T`: frozen with everything it holds after the send check; immutable
   access; its `atomic` fields still change; `atomic shared mem::Box<mem::Buffer<T>>`
   is a frozen buffer a `parallel for` reads through `value()`.
@@ -1553,8 +1558,8 @@ form of `T`; an `inout T` takes a `mut` or `shared mut` one.
   -> bool` stores `desired` if the cell holds `expected`. A read of the place on the right of
   an assignment to it, and every other compound operator, is an error, since it would read
   and write separately (`x = x + 1` is `x += 1`, the parser's rewriting). A copy of an atomic
-  place (a declaration, an argument, a result, `self.f = p` in `__init__`) is another handle
-  to the cell; any other value flowing into an `atomic` slot makes a new cell. A struct
+  place (a declaration without `let`, an argument, a result, `self.f = p` in `__init__`) is
+  another handle to the cell, a `let` declaration a copy of its value; any other value flowing into an `atomic` slot makes a new cell. A struct
   cannot hold an `atomic` field in this version; a class can.
 - **`atomic shared T`.** One qualifier of two words: `atomic`, the reference crosses
   threads; `shared`, the object has several owners, one on each thread at least. Nothing

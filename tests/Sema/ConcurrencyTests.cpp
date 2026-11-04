@@ -611,6 +611,9 @@ fn main() -> int {
 // `+=` and `-=` are assignments to it, and `exchange` and
 // `compareExchange` change it.  A cell that changes is declared without
 // `let`; a cell field of a `let` object is the object's own, and changes.
+// An atomic matters only when threads change it, so a `let` one warns,
+// naming its value as the alternative where one can be taken (not from a
+// call's new cell); `let k = m` is a read-only copy of the value, no cell.
 TEST(Concurrency, ALetCellIsNotChangedThroughItsName) {
   auto r = semaCheck(R"(class Stats { served: atomic int; }
 fn main() -> int {
@@ -626,9 +629,20 @@ fn main() -> int {
   m: atomic int = 1;
   m += 1;
   let k = m;
-  return n + m + k + st.served + old;
-})");
+  let c = fresh(2);
+  return n + m + k + c + st.served + old;
+}
+fn fresh(v: int) -> atomic int { return v; })");
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  const std::string letAtomic =
+      "' is a 'let' atomic: nothing changes it through its name, and an "
+      "atomic matters only when threads change it; declare it without 'let'";
+  for (const std::string &diag :
+       {":3:3: warning: 'n" + letAtomic + ", or as its value ('let n: int')",
+        ":15:3: warning: 'c" + letAtomic + "\n"})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(countWarnings(r), 2u) << r.Diagnostics;
   const std::string reassigned =
       ": error: 'n' is declared with 'let' and cannot be reassigned";
   expectErrors(
@@ -638,7 +652,7 @@ fn main() -> int {
           "'exchange'",
           ":8:12: error: 'n' is declared with 'let' and cannot be changed by "
           "'compareExchange'"});
-  expectCleanLines(r, {":9:", ":10:", ":11:", ":12:", ":13:", ":14:", ":15:"});
+  expectCleanLines(r, {":9:", ":10:", ":11:", ":12:", ":13:", ":14:", ":16:"});
 }
 
 // What an `atomic` place refuses: a `Str` (or any reference) inside, a

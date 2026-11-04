@@ -1308,8 +1308,10 @@ sequentially consistent.  An array is used by element: `a[i] += 1`,
 `a[i].exchange(v)`, `a.len()`.  (Owner, 2026-11-03: `let` follows its
 rule here too: a `let` atomic is never assigned to and never changes
 through its name, so `=`, `+=`, `-=`, `exchange` and `compareExchange` on
-it are errors and a cell that changes is declared without `let`; a cell
-field of a `let` object is the object's own, and changes.)
+it are errors and a cell that changes is declared without `let`; a `let`
+atomic is a warning, since an atomic matters only when threads change it;
+`let m = n` is a read-only copy of the value, `m = n` another handle; a
+cell field of a `let` object is the object's own, and changes.)
 
 ```pkn
 fn bump(b: inout bool) { b = True; }

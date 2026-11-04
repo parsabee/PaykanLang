@@ -54,8 +54,10 @@ samples/concurrency/README.md.
   `-=` one atomic operation; `exchange(v)` and `compareExchange(expected, desired) -> bool`.
   A `let` atomic is never assigned to and never changes through its name (`'n' is declared
   with 'let' and cannot be reassigned`, `'n' is declared with 'let' and cannot be changed by
-  'exchange'`); a cell field of a `let` object is the object's own, and changes.  A copy of an
-  atomic place, `m = n` as well as `let m = n`, is another handle to its cell.
+  'exchange'`), and since an atomic matters only when threads change it, a `let` one is a
+  warning; a cell field of a `let` object is the object's own, and changes.  A copy of an
+  atomic place (`m = n`) is another handle to its cell, and `let m = n` a read-only copy of
+  its value.
 - `atomic shared T`: an object frozen with everything it holds by `__walk`, the
   compiler-generated walk of a class's references in a slot of every vtable (*Changed*); read
   with no count, and immutable as every bare type is; `atomic shared mut T` is a parse error

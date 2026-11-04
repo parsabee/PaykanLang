@@ -18,7 +18,7 @@ fn main() -> int {
   b.n = b.n + 1;                          // fine: the parser rewrites it to "b.n += 1"
   b.n.compareExchange(1);                 // error: argument count
   hits += 1.5;                            // error: type
-  let fixed: atomic int = 1;
+  let fixed: atomic int = 1;              // warning: a 'let' atomic: nothing changes it
   fixed += 1;                             // error: a 'let' cell is not changed through its name
   let was = fixed.exchange(2);            // error: nor by 'exchange'
   return 0;

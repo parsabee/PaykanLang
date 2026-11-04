@@ -278,10 +278,11 @@ TEST(Concurrency, AtomicExchangeAndCompareExchange) {
   EXPECT_EQ(r.ExitCode, 0);
 }
 
-// A first assignment from an atomic place takes its handle, as `let m = n`
-// does: `m = n` shares n's cell, `h = st.served` the field's, `k =
-// fresh(3)` the new cell the call returns; a declaration typed with the
-// number (`x: int = n`) takes its value.  Cells are immortal: no heap check.
+// A first assignment from an atomic place takes its handle: `m = n`
+// shares n's cell, `h = st.served` the field's, `k = fresh(3)` the new cell
+// the call returns; a declaration typed with the number (`x: int = n`) and
+// a `let` one (`let v = n`, a read-only copy) take its value.  Cells are
+// immortal: no heap check.
 TEST(Concurrency, AFirstAssignmentOfAnAtomicPlaceTakesItsHandle) {
   auto r = compileAndRun(R"(import ::io;
     class Stats { served: atomic int; }
@@ -297,13 +298,15 @@ TEST(Concurrency, AFirstAssignmentOfAnAtomicPlaceTakesItsHandle) {
       k += 1;
       x: int = n;
       x += 10;
+      let v = n;
+      n += 1;
       io::println(Str(n) + " " + Str(m) + " " + Str(st.served) + " "
-          + Str(k) + " " + Str(x));
+          + Str(k) + " " + Str(x) + " " + Str(v));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "6 6 2 4 16\n");
+  EXPECT_EQ(r.StdOut, "7 7 2 4 16 6\n");
   EXPECT_EQ(r.ExitCode, 0);
 }
 
