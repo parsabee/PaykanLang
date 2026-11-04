@@ -18,10 +18,11 @@ target_include_directories(paykan_jit SYSTEM
 paykan_llvm_no_werror(paykan_jit)
 # The concurrency prototype's runtimes (docs/design/concurrency.md): MLIR's
 # async runtime and LLVM's OpenMP runtime, shared libraries of the LLVM the
-# compiler is built with, loaded when a program uses them.
+# compiler is built with (cmake/LLVMSetup.cmake), loaded when a program's
+# code calls them.
 target_compile_definitions(paykan_jit PRIVATE
-    PAYKAN_MLIR_ASYNC_RUNTIME="${LLVM_LIBRARY_DIR}/libmlir_async_runtime${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    PAYKAN_OPENMP_RUNTIME="${LLVM_LIBRARY_DIR}/libomp${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    PAYKAN_MLIR_ASYNC_RUNTIME="${PAYKAN_MLIR_ASYNC_RUNTIME_LIB}"
+    PAYKAN_OPENMP_RUNTIME="${PAYKAN_OPENMP_RUNTIME_LIB}"
 )
 target_link_libraries(paykan_jit
     PRIVATE paykan_runtime

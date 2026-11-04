@@ -105,6 +105,17 @@ samples/concurrency/README.md.
   threads allocate and free while the main thread does, and the counters' plain `+= 1` lost
   updates, so an async program that freed everything could report hundreds of live blocks.
   The counters are atomic (src/Runtime/Heap.c).
+- A program that runs tasks no longer crashes after `main` returns: the worker that made a
+  task's token available went on running the end of the task's coroutine, the JIT's code,
+  while `paykan run` freed it.  The JIT now waits for every worker of the async runtime to
+  leave its task first (src/Backends/LLVM/JIT/JIT.cpp).
+- `paykan run` and `paykan build` find LLVM's OpenMP runtime on Linux, in the release's
+  `lib/<target triple>/` (cmake/LLVMSetup.cmake), and `paykan build` links the concurrency
+  runtimes after the program's objects, which a linker keeping only the libraries a program
+  needs (Ubuntu's GCC) requires.
+- Only a program whose code calls the async runtime or the OpenMP runtime loads or links it:
+  the async-to-LLVM lowering declares the async runtime's interface in every module, and every
+  program linked it, so an installed `paykan` could not build one without its build tree.
 
 ### Removed
 

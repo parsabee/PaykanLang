@@ -218,6 +218,31 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)              # llvm_add_library, llvm_add_executable, etc.
 include(HandleLLVMOptions)    # Applies LLVM-recommended compiler flags
 
+# -- The concurrency prototype's runtimes -------------------------------------
+# MLIR's async runtime (tasks) and LLVM's OpenMP runtime (parallel loops),
+# shared libraries of the prebuilt LLVM, which `paykan run` loads and
+# `paykan build` links for a program whose code calls them
+# (src/Backends/LLVM/JIT, src/Backends/LLVM/CodeGen).  The OpenMP runtime is
+# in lib/ on macOS and in lib/<target triple>/ on Linux, the directory the
+# release gives its runtimes.
+set(PAYKAN_MLIR_ASYNC_RUNTIME_LIB
+    "${LLVM_LIBRARY_DIR}/libmlir_async_runtime${CMAKE_SHARED_LIBRARY_SUFFIX}")
+file(GLOB PAYKAN_OPENMP_RUNTIME_LIB
+    "${LLVM_LIBRARY_DIR}/libomp${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    "${LLVM_LIBRARY_DIR}/*/libomp${CMAKE_SHARED_LIBRARY_SUFFIX}")
+if(PAYKAN_OPENMP_RUNTIME_LIB)
+    list(GET PAYKAN_OPENMP_RUNTIME_LIB 0 PAYKAN_OPENMP_RUNTIME_LIB)
+else()
+    set(PAYKAN_OPENMP_RUNTIME_LIB
+        "${LLVM_LIBRARY_DIR}/libomp${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif()
+foreach(lib IN ITEMS ${PAYKAN_MLIR_ASYNC_RUNTIME_LIB} ${PAYKAN_OPENMP_RUNTIME_LIB})
+    if(NOT EXISTS "${lib}")
+        message(WARNING "${lib} is not there: a program using tasks or "
+                        "parallel loops will not run or link")
+    endif()
+endforeach()
+
 # -- paykan_llvm INTERFACE target ---------------------------------------------
 # Scoped alternative to global include_directories() / add_definitions().
 # Link only the targets that actually need LLVM headers & definitions.

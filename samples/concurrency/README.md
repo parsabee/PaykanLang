@@ -172,9 +172,15 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 * **Runtimes**: tasks run on MLIR's async runtime (`libmlir_async_runtime`:
   a thread pool and reference-counted token, value and group objects with
   awaiter callbacks; no event loop, timers, cancellation or channels),
-  parallel loops on LLVM's OpenMP runtime (`libomp`); both ship with the
-  LLVM the compiler is built against, and `paykan run` loads them into the
-  JIT when a program uses them (`paykan build` links them).  The prototype
+  parallel loops on LLVM's OpenMP runtime (`libomp`, in the release's
+  `lib/<target triple>/` on Linux); both ship with the LLVM the compiler is
+  built against, and `paykan run` loads them into the JIT when a program's
+  code calls them (`paykan build` links them, by path, after the program's
+  objects).  An installed `paykan` takes them from the build tree it was
+  built in, so a program using tasks or parallel loops runs from an
+  installation only while that tree is there.  After `main` returns, the
+  JIT waits for every worker of the async runtime to leave the task it ran
+  before it frees the program's code.  The prototype
   keeps that runtime; the finished feature needs Paykan's own, as the
   design's Runtime section describes.  The Paykan runtime's
   deferred-destroy state became thread-local; an `atomic` cell
@@ -225,7 +231,5 @@ unoptimized split; the design's own runtime replaces the lowering).
 Non-atomic
 reference counts are only safe because the checks keep references on one
 thread; a program that calls into non-thread-safe runtime pieces from a
-task (heap tracking, stdin) is not protected, and an object a task drops
-on a worker thread may sit in that thread's deferred-destroy list at
-exit, which `--track-heap` then counts as live (`09_send.pkn` shows two
-to four live blocks from run to run).
+task (stdin) is not protected.  `--track-heap` counts every thread's
+allocations: its counters are atomic.

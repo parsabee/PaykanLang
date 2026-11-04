@@ -194,7 +194,11 @@ def check(args, outdir):
         leaks = expects_leaks(sample)
         for b, (rc, out, err, live) in results.items():
             if live is None:
-                problems.append(f"{b}: no heap report (exit {rc})")
+                why = ""
+                if err.startswith("build failed:"):
+                    lines = [l for l in err.splitlines()[1:] if l.strip()]
+                    why = ": " + " / ".join(lines[-3:])
+                problems.append(f"{b}: no heap report (exit {rc}){why}")
             elif live != 0 and leaks is None:
                 problems.append(f"{b}: {live} live blocks")
             elif live == 0 and leaks is not None:

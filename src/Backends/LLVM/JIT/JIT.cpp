@@ -6,9 +6,12 @@
 #include "Runtime.h"
 
 #include <cassert>
+#include <condition_variable>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -200,6 +203,45 @@ namespace {
 
 extern "C" void exitOnAbort(int sig) { std::_Exit(128 + sig); }
 
+/// MLIR's async runtime runs a task's coroutine on a worker thread, and the
+/// worker that makes a task's token available (waking an `await` in `main`)
+/// goes on running the coroutine's last instructions, its frame's release
+/// and its return into the runtime, which are this session's code.  The
+/// session ends only once every worker is past them: one job per worker,
+/// each waiting until all of them run, holds every worker at once, so none
+/// is still in a coroutine.  (Ending sooner, the program's code is unmapped
+/// under a worker, which Linux showed as a crash after `main` returned.)
+void waitForAsyncWorkers() {
+  using Execute = void (*)(void *, void (*)(void *));
+  using WorkerCount = int64_t (*)();
+  auto *execute = reinterpret_cast<Execute>(
+      llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(
+          "mlirAsyncRuntimeExecute"));
+  auto *workerCount = reinterpret_cast<WorkerCount>(
+      llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(
+          "mlirAsyncRuntimGetNumWorkerThreads")); // (the runtime's spelling)
+  if (!execute || !workerCount)
+    return;
+  struct Gate {
+    std::mutex Mutex;
+    std::condition_variable Changed;
+    int64_t Workers = 0, Arrived = 0, Left = 0;
+  } gate;
+  gate.Workers = workerCount();
+  for (int64_t i = 0; i < gate.Workers; ++i)
+    execute(&gate, [](void *p) {
+      Gate &g = *static_cast<Gate *>(p);
+      std::unique_lock<std::mutex> lock(g.Mutex);
+      ++g.Arrived;
+      g.Changed.notify_all();
+      g.Changed.wait(lock, [&g] { return g.Arrived == g.Workers; });
+      ++g.Left;
+      g.Changed.notify_all();
+    });
+  std::unique_lock<std::mutex> lock(gate.Mutex);
+  gate.Changed.wait(lock, [&gate] { return gate.Left == gate.Workers; });
+}
+
 class AbortAsExitStatus {
 public:
   AbortAsExitStatus() : Prev(std::signal(SIGABRT, exitOnAbort)) {}
@@ -243,10 +285,11 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   // The concurrency prototype: tasks run on MLIR's async runtime and
   // parallel loops on LLVM's OpenMP runtime, shared libraries of the LLVM
   // this compiler was built with, loaded into this process when the code
-  // calls them and resolved by name.
+  // calls them and resolved by name.  (The async-to-LLVM lowering declares
+  // the async runtime's whole interface in every module, calls or not.)
   bool needsAsyncRuntime = false, needsOpenMP = false;
   for (const llvm::Function &f : module->functions()) {
-    if (!f.isDeclaration())
+    if (!f.isDeclaration() || f.use_empty())
       continue;
     if (f.getName().starts_with("mlirAsyncRuntime"))
       needsAsyncRuntime = true;
@@ -378,6 +421,7 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
 
   AbortAsExitStatus panicsExit;
 
+  int rc;
   if (mainParamCount == 2) {
     // main(args: view Str[]): a slice of the arguments' strings.
     std::vector<PaykanShared *> argv;
@@ -385,14 +429,16 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
     for (const auto &s : args)
       argv.push_back(PaykanShared_new((PaykanObject *)PaykanString_new(
           s.c_str(), static_cast<int64_t>(s.size()))));
-    int rc = mainAddr->toPtr<int (*)(void *, int64_t)>()(
+    rc = mainAddr->toPtr<int (*)(void *, int64_t)>()(
         argv.data(), static_cast<int64_t>(argv.size()));
     for (PaykanShared *arg : argv)
       Paykan_release(arg);
-    return rc;
+  } else {
+    rc = mainAddr->toPtr<int (*)()>()();
   }
-
-  return mainAddr->toPtr<int (*)()>()();
+  if (needsAsyncRuntime)
+    waitForAsyncWorkers();
+  return rc;
 }
 
 } // namespace paykan::jit
