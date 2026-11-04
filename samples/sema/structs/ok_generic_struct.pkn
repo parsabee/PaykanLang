@@ -38,7 +38,7 @@ fn hashOf<T: Hashable>(x: view T) -> int {
 
 fn main() -> int {
   p = Pair(1, "one");
-  q: Pair<int, Str> = Pair<int, Str>(2, "two");
+  q = Pair<int, Str>(2, "two");
   p.swapWith(q);
   let b = Box(Pair(3, 4));
   let bs: Box<int>[2] = [Box(1), Box(2)];

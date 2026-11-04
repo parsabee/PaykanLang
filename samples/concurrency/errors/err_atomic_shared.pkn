@@ -14,7 +14,7 @@ class Config {
 }
 
 fn main() -> int {
-  let cfg: atomic shared Config = Config("demo", Limits(0, 100));
+  let cfg: atomic shared = Config("demo", Limits(0, 100));
   cfg.limits.hi = 5;                 // error: frozen, through a field
   cfg.name = "x";                    // error: frozen
   cfg.rename("y");                   // error: `rename` is not a `view fn`

@@ -81,7 +81,7 @@ fn sameHash<T: Hashable>(a: view T, b: view T) -> bool {
 
 fn main() -> int {
   p = Pair(1, "one");                      // Pair<int, Str>
-  q: Pair<int, Str> = Pair<int, Str>(2, "two");
+  q = Pair<int, Str>(2, "two");
   p.swapWith(q);
   let f = p.flipped();                     // Pair<Str, int>
   io::println(p);

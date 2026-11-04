@@ -4,8 +4,8 @@
 // writes through the owner, `shared` several owners, `shared mut` several
 // owners with writes, `atomic shared` an object frozen for every thread,
 // `locked mut` an object written under a lock.  The conversions between
-// them; a `view` parameter taking every form; a `shared mut` field read
-// under a `mut` root and under an immutable one.
+// them; a `view` parameter taking every form; a `shared mut` field, which
+// keeps its writes under a `mut` root and under an immutable one.
 // expect-stdout: a #1
 // expect-stdout: a #1
 // expect-stdout: bb #22
@@ -36,29 +36,29 @@ fn main() -> int {
   let d: shared Node = move a;          // several owners, none of them writing
   io::println(describe(d));
 
-  let b: mut Node = Node(2, "b");       // `mut`: writes through the owner
+  let b: mut = Node(2, "b");            // `mut`: writes through the owner
   b.id = 22;
   let k: Node = move b;                 // a `mut Node` goes into a `Node` as it is...
   let w: mut Node = move k;             // ...and a `Node` gains `mut` only by `move`
   w.name = "bb";
   io::println(describe(w));
 
-  let s: shared mut Node = Node(2, "s");   // shared mut: aliases on this thread, each writing
-  let t = s;                               // t is shared mut too
+  let s: shared mut = Node(2, "s");     // shared mut: aliases on this thread, each writing
+  let t = s;                            // t is shared mut too
   t.id = 22;
   io::println(s.name + " " + Str(s.id));
 
   let p: mut = Pair(Node(3, "l"), Node(4, "r"));
-  let r = p.right;                      // a `shared mut` field keeps its writes under a `mut` root
+  let r = p.right;                      // a `shared mut` field keeps its writes through any root
   r.id = 44;
   io::println(Str(p.right.id));
   let q = Pair(Node(3, "l"), Node(4, "r"));
-  let ro = q.right;                     // under an immutable root it reads as `shared Node`
+  let ro = q.right;                     // an immutable root too: `ro` is `shared mut Node`
 
-  let f: atomic shared Node = Node(5, "f");   // frozen for every thread: from a temporary or by `move`
+  let f: atomic shared = Node(5, "f");  // frozen for every thread: from a temporary or by `move`
   io::println(describe(f));
 
-  let l: locked mut Node = Node(6, "l");      // written under its lock, in an `inout` block
+  let l: locked mut = Node(6, "l");     // written under its lock, in an `inout` block
   lock l as c: inout {
     c.id = 66;
   }

@@ -24,7 +24,7 @@ fn main() -> int {
   let c = Node(1, "c");                 // the bare type: immutable
   c.id = 5;                             // error: cannot assign to a field through it
   c.name.concat("!");                   // error: `concat` writes the string: not a `view fn`
-  n: Node = Node(2, "n");
+  n = Node(2, "n");
   change(n);                            // error: an `inout` parameter writes; `n` is immutable
   let g = Bag([1, 2, 3, 4]);
   g.items[0] = 9;                       // error: cannot assign to its elements
@@ -32,9 +32,9 @@ fn main() -> int {
   let m: mut Node = c;                  // error: a reference gains `mut` only by `move`
   let w: mut Node = move c;             // fine: moved in
   w.id = 7;
-  let s: shared Node = Node(3, "s");
+  let s: shared = Node(3, "s");
   let sm: shared mut Node = s;          // error: `shared` and `shared mut` convert only as they are
-  let sm2: shared mut Node = Node(4, "sm");
+  let sm2: shared mut = Node(4, "sm");
   let s2: shared Node = sm2;            // error: nor the other way
   let u: Node = s;                      // error: a `shared` reference never becomes unique
   let k: mut int = 1;                   // error: `mut` applies to objects; `let` fixes a value

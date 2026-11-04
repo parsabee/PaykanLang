@@ -86,9 +86,9 @@ fn main() -> int {
   io::println(g);               // abcdefabcdef
 
   io::println("=== Str<int> / Str<float> / Str<bool> builtins ===");
-  let si: Str = Str<int>(255);
-  let sf: Str = Str(3.14);
-  let sb: Str = Str<bool>(True);
+  let si = Str<int>(255);
+  let sf = Str(3.14);
+  let sb = Str<bool>(True);
   io::println(si);              // 255
   io::println(sf);              // 3.14
   io::println(sb);              // True

@@ -35,7 +35,7 @@ fn main() -> int {
   // HashMap<unsigned, int>: the top of the unsigned range hashes and
   // compares as its own value.
   top = collections::HashMap<unsigned, int>();
-  u: unsigned = unsigned(-1);
+  u = unsigned(-1);
   top.put(u, 1);
   top.put(u / 2, 2);
   top.put(0, 3);

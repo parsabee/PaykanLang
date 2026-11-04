@@ -23,8 +23,8 @@ fn main() -> int {
   let h: f16 = g16(1);
   let i = clamp(300, 0, 255);      // the literals are i32 arguments
   let j: i32? = 5;
-  let k: u8 = u8(300);             // 44: the low bits
-  let l: int = int(c) + 1;
+  let k = u8(300);             // 44: the low bits
+  let l = int(c) + 1;
   let m: f64 = float(g);           // f64 is float
   let n: unsigned? = "18446744073709551615".toUnsigned();
   let o = Str(a) + a.toString() + Str(g) + Str(e);
