@@ -396,7 +396,7 @@ fn main() -> int {
   let c = Color::Red;
   xs = [0.0; 100];
   ys = [0.0; 100];
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   let cfg: atomic shared Config = Config(0, 50);
   let counts: locked mut Counts = Counts(0);
   let st: atomic shared Stats = Stats(0);
@@ -507,7 +507,7 @@ fn main() -> int {
 TEST(Concurrency, AnAtomicChangedEveryIterationWarns) {
   auto r = semaCheck(R"(class Stats { served: atomic int; }
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   let st: atomic shared Stats = Stats(0);
   parallel for i in 0..100 {
     hits += 1;
@@ -516,7 +516,7 @@ fn main() -> int {
   }
   parallel for i in 0..100 {
     if i % 10 == 0 { hits += 1; st.served += 1; }
-    let mine: atomic int = 0;
+    mine: atomic int = 0;
     mine += 1;
     match i { 3 { hits += 1; } _ { } }
     for j in 0..2 { hits += 1; }
@@ -567,36 +567,36 @@ fn bump(c: atomic int, by: int) { c += by; }
 fn fresh(v: int) -> atomic int { return v; }
 fn same(c: atomic int) -> atomic int { return c; }
 fn main() -> int {
-  let a: atomic i8 = 120;
+  a: atomic i8 = 120;
   a += 10;
-  let u: atomic u8 = 250;
+  u: atomic u8 = 250;
   u -= 10;
-  let f: atomic f32 = 1.5;
+  f: atomic f32 = 1.5;
   f += 0.25;
-  let b: atomic bool = False;
+  b: atomic bool = False;
   let was: bool = b.exchange(True);
-  let c: atomic char = 'a';
+  c: atomic char = 'a';
   let old: char = c.exchange('b');
-  let n: atomic int = 5;
+  n: atomic int = 5;
   let swapped: bool = n.compareExchange(5, 9);
-  let m = n;
+  m = n;
   m += 1;
   bump(n, 10);
-  let k = fresh(3);
+  k = fresh(3);
   k += 1;
-  let k2 = same(k);
+  k2 = same(k);
   k2 -= 1;
   let shared_n: atomic int = 1;
   let st: atomic shared Stats = Stats("s", shared_n);
   let t1 = record(st, 1, 10);
   let ids = await t1;
   st.done = True;
-  let h = st.served;
+  h = st.served;
   h += 1;
   let v: int = st.served;
   let box = Box(0);
   box.n += 1;
-  let hn = box.n;
+  hn = box.n;
   hn = 4;
   let plain: int = n;
   let sum = n + m + plain + v + k + hn;
@@ -605,6 +605,40 @@ fn main() -> int {
 })");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+// A `let` cell is read through its name and never changed by it: `=`,
+// `+=` and `-=` are assignments to it, and `exchange` and
+// `compareExchange` change it.  A cell that changes is declared without
+// `let`; a cell field of a `let` object is the object's own, and changes.
+TEST(Concurrency, ALetCellIsNotChangedThroughItsName) {
+  auto r = semaCheck(R"(class Stats { served: atomic int; }
+fn main() -> int {
+  let n: atomic int = 1;
+  n = 2;
+  n += 1;
+  n -= 1;
+  let was = n.exchange(3);
+  let ok = n.compareExchange(3, 4);
+  let st = Stats(0);
+  st.served += 1;
+  let old = st.served.exchange(5);
+  m: atomic int = 1;
+  m += 1;
+  let k = m;
+  return n + m + k + st.served + old;
+})");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  const std::string reassigned =
+      ": error: 'n' is declared with 'let' and cannot be reassigned";
+  expectErrors(
+      r, {(":4:3" + reassigned).c_str(), (":5:3" + reassigned).c_str(),
+          (":6:3" + reassigned).c_str(),
+          ":7:13: error: 'n' is declared with 'let' and cannot be changed by "
+          "'exchange'",
+          ":8:12: error: 'n' is declared with 'let' and cannot be changed by "
+          "'compareExchange'"});
+  expectCleanLines(r, {":9:", ":10:", ":11:", ":12:", ":13:", ":14:", ":15:"});
 }
 
 // What an `atomic` place refuses: a `Str` (or any reference) inside, a
@@ -618,7 +652,7 @@ TEST(Concurrency, AtomicRules) {
 struct P { c: atomic int; }
 fn double(n: int) -> int { return n * 2; }
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   hits = hits * 2 + 1;
   hits *= 2;
   hits /= 2;
@@ -679,7 +713,7 @@ fn main() -> int {
 TEST(Concurrency, ExchangeAndCompareExchange) {
   auto r = semaCheck(R"(class Box { n: atomic int; }
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   let b = Box(0);
   let x = hits.load();
   b.n.compareExchange(1);
@@ -688,7 +722,7 @@ fn main() -> int {
   let e: bool = hits.exchange(5);
   let t = hits.exchange("s");
   let u = hits.compareExchange(1, True);
-  let f: atomic float = 1.0;
+  f: atomic float = 1.0;
   let w: bool = f.compareExchange(1.0, 2.0);
   return 0;
 })");

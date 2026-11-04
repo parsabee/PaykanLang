@@ -930,8 +930,8 @@ atomic load and `=` an atomic store; `+=` and `-=` are one atomic add or subtrac
 integer wraps like `+`, a float adds by a compare-and-swap loop); `x.exchange(v)` stores
 `v` and returns the value found; `x.compareExchange(expected, desired)` stores `desired`
 only if the cell holds `expected`, and returns whether it did. A variable, a parameter, a
-result or a class field can be `atomic`. A copy of an atomic place (`let m = n`, an
-argument, a result, a field assigned in `__init__`) is another **handle** to the same cell;
+result or a class field can be `atomic`. A copy of an atomic place (`m = n`, `let m = n`,
+an argument, a result, a field assigned in `__init__`) is another **handle** to the same cell;
 a plain value flowing into an `atomic` slot makes a new cell:
 
 ```pkn
@@ -948,27 +948,27 @@ fn bump(c: atomic int, by: int) { c += by; }   // a handle parameter: the caller
 fn fresh(v: int) -> atomic int { return v; }   // a value: a new cell
 
 fn main() -> int {
-  let a: atomic i8 = 120;
+  a: atomic i8 = 120;
   a += 10;                                     // wraps like i8 arithmetic
-  let f: atomic f32 = 1.5;
+  f: atomic f32 = 1.5;
   f += 0.25;
-  let c: atomic char = 'a';
+  c: atomic char = 'a';
   let old = c.exchange('b');
   io::println("i8 " + Str(a) + ", f32 " + Str(f) + ", char " + Str(c) + " (was " + Str(old) + ")");
 
-  let n: atomic int = 5;
+  n: atomic int = 5;
   let swapped = n.compareExchange(5, 9);       // True: 5 -> 9
   let missed = n.compareExchange(5, 1);        // False: it holds 9
-  let m = n;                                   // another handle to n's cell
+  m = n;                                       // another handle to n's cell
   m += 1;
   bump(n, 10);
-  let k = fresh(3);                            // its own cell
+  k = fresh(3);                                // its own cell
   k += 1;
   io::println("n " + Str(n) + " " + Str(swapped) + " " + Str(missed) + ", m " + Str(m) + ", k " + Str(k));
 
   let st = Stats("s", 0, False);               // fields: the object holds cells
   st.served += 2;
-  let h = st.served;                           // a handle to the field's cell
+  h = st.served;                               // a handle to the field's cell
   h += 1;
   st.done = True;                              // = is an atomic store
   io::println(st.name + " served " + Str(st.served) + ", done " + Str(st.done));
@@ -984,7 +984,11 @@ n 20 True False, m 20, k 4
 s served 3, done True
 ```
 
-`let` fixes the handle, not the cell, so `+=` and `=` work on a `let` atomic. An operation
+A `let` atomic is never assigned to and never changes through its name: `=`, `+=` and `-=`
+on it are `'n' is declared with 'let' and cannot be reassigned`, and `exchange` or
+`compareExchange` `'n' is declared with 'let' and cannot be changed by 'exchange'`, so a
+cell that changes is declared without `let`. A cell field of a `let` object is the
+object's own, and changes (`st.served += 2` above). An operation
 that would read the cell and write it separately is an error: a read of the place on the
 right of an assignment to it, and every compound operator but `+=` and `-=`. A cell takes no
 `mut`, since its operations are its writes (`atomic mut int` is a syntax error,
@@ -998,7 +1002,7 @@ struct P {
 }
 
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   hits = hits * 2 + 1;
   hits *= 2;
   let s: atomic Str = "a";

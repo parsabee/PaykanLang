@@ -102,10 +102,14 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   class fields.  A read is an atomic load, `=` a store, `+=` and `-=` one
   atomic add (floats by a compare-and-swap loop, `f32` and `f16` rounded
   on every store, narrow integers wrapping on reads); `x.exchange(v)` and
-  `x.compareExchange(expected, desired) -> bool`.  A copy of an atomic
-  place (`let j = k`, an argument, a result, `self.f = p` in `__init__`)
-  is another handle to the cell; any other value flowing into an `atomic`
-  slot makes a new cell.  `x = x * 2` and any other read of the place on
+  `x.compareExchange(expected, desired) -> bool`.  A `let` atomic is
+  never assigned to and never changes through its name (`'k' is declared
+  with 'let' and cannot be reassigned`, `... cannot be changed by
+  'exchange'`): a cell that changes is declared without `let`, and a cell
+  field of a `let` object is the object's own, which changes.  A copy of
+  an atomic place (`j = k`, `let j = k`, an argument, a result, `self.f =
+  p` in `__init__`) is another handle to the cell; any other value flowing
+  into an `atomic` slot makes a new cell.  `x = x * 2` and any other read of the place on
   the right of an assignment to it is an error (it would read and write
   separately); `x = x + 1` is `x += 1`, the parser's desugaring.
 * **Moves**: a forward "maybe moved" set over each body.  `move x` ends

@@ -639,7 +639,7 @@ TEST(Qualifier, AtomicHoldsAValueNotAnObject) {
   auto ok = semaCheck(R"(class Box { n: atomic int; done: atomic bool; }
 fn f(c: atomic int) -> int { return c; }
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   let b = Box(0, False);
   hits += 1;
   b.n += 2;
@@ -657,7 +657,7 @@ fn g() -> atomic Node { return Node(1); }
 fn main() -> int {
   let a: atomic Node = Node(2);
   let s: atomic Str = "s";
-  let k: atomic int = 3;
+  k: atomic int = 3;
   k += 1;
   return k;
 })");

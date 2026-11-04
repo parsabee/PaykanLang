@@ -1305,9 +1305,11 @@ the cell holds `expected` bit for bit, and otherwise writes the value found
 into `expected`, an `inout` argument, as C11 does, so a float's `-0.0` or
 NaN cannot fake a success (proposed; owner may change).  All are
 sequentially consistent.  An array is used by element: `a[i] += 1`,
-`a[i].exchange(v)`, `a.len()`.  A `let` fixes the handle, not the cell, so
-`=`, the operators and element stores work on a `let` atomic as through a
-`view`, an exception to the `let` rule (docs/language/02-basics.md:146-155).
+`a[i].exchange(v)`, `a.len()`.  (Owner, 2026-11-03: `let` follows its
+rule here too: a `let` atomic is never assigned to and never changes
+through its name, so `=`, `+=`, `-=`, `exchange` and `compareExchange` on
+it are errors and a cell that changes is declared without `let`; a cell
+field of a `let` object is the object's own, and changes.)
 
 ```pkn
 fn bump(b: inout bool) { b = True; }

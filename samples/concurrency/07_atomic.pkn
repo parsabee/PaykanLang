@@ -37,31 +37,31 @@ fn fresh(v: int) -> atomic int {
 
 fn main() -> int {
   // Every number type, bool and char
-  let a: atomic i8 = 120;
+  a: atomic i8 = 120;
   a += 10;                          // wraps like i8 arithmetic
-  let u: atomic u8 = 250;
+  u: atomic u8 = 250;
   u += 10;
-  let f: atomic f32 = 1.5;
+  f: atomic f32 = 1.5;
   f += 0.25;
-  let b: atomic bool = False;
+  b: atomic bool = False;
   let was = b.exchange(True);
-  let c: atomic char = 'a';
+  c: atomic char = 'a';
   let old = c.exchange('b');
   io::println("i8 " + Str(a) + ", u8 " + Str(u) + ", f32 " + Str(f) + ", bool "
       + Str(b) + " (was " + Str(was) + "), char " + Str(c) + " (was " + Str(old)
       + ")");
 
   // exchange and compareExchange on a variable
-  let n: atomic int = 5;
+  n: atomic int = 5;
   let swapped = n.compareExchange(5, 9);   // True: 5 -> 9
   let missed = n.compareExchange(5, 1);    // False: it holds 9
   io::println("n " + Str(n) + " " + Str(swapped) + " " + Str(missed));
 
   // handles: a copy of an atomic place is another handle to its cell
-  let m = n;
+  m = n;
   m += 1;
   bump(n, 10);
-  let k = fresh(3);
+  k = fresh(3);
   k += 1;
   io::println("n " + Str(n) + ", m " + Str(m) + ", k " + Str(k));
 
@@ -72,7 +72,7 @@ fn main() -> int {
   let t3 = record(st, 3, 1000);
   let ids = await t1 + await t2 + await t3;
   st.done = True;
-  let h = st.served;                        // a handle to the field's cell
+  h = st.served;                        // a handle to the field's cell
   h += 1;
   io::println(st.name + " served " + Str(st.served) + ", bytes " + Str(st.bytes)
       + ", done " + Str(st.done) + ", ids " + Str(ids));

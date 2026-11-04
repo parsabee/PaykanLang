@@ -214,6 +214,14 @@ Sema::checkAtomicValue(const ast::Expr *place, ast::Expr *value,
 }
 
 bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
+  // A `let` cell is read through its name and never changed by it: `=`,
+  // `+=` and `-=` assign to it.
+  if (varKind(node->getVarName()) == VarKind::Let) {
+    error(node->getLocation(), "'" + node->getVarName() +
+                                   "' is declared with 'let' and cannot be "
+                                   "reassigned");
+    return false;
+  }
   auto kind = checkAtomicValue(node->getLHS(), node->getValue(), at,
                                node->getLocation());
   if (!kind)
@@ -291,6 +299,16 @@ ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
     error(node->getLocation(), "'" + typeName(at) + "' has no method '" + m +
                                    "': an atomic place has 'exchange(v)' and "
                                    "'compareExchange(expected, desired)'");
+    return nullptr;
+  }
+  // Both change the cell, which a `let` variable's name never does (a cell
+  // field of a `let` object is the object's own, and changes).
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+      id && !id->isFunctionRef() && varKind(id->getName()) == VarKind::Let) {
+    error(node->getLocation(), "'" + id->getName() +
+                                   "' is declared with 'let' and cannot be "
+                                   "changed by '" +
+                                   m + "'");
     return nullptr;
   }
   const size_t want = exchange ? 1 : 2;

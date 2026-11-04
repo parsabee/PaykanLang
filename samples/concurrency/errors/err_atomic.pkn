@@ -8,7 +8,7 @@ struct P {
 }
 
 fn main() -> int {
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   hits = hits * 2 + 1;                    // error: reads and writes separately
   hits *= 2;                              // error: not an atomic operation
   let x = hits.load();                    // error: no method
@@ -18,5 +18,8 @@ fn main() -> int {
   b.n = b.n + 1;                          // fine: the parser rewrites it to "b.n += 1"
   b.n.compareExchange(1);                 // error: argument count
   hits += 1.5;                            // error: type
+  let fixed: atomic int = 1;
+  fixed += 1;                             // error: a 'let' cell is not changed through its name
+  let was = fixed.exchange(2);            // error: nor by 'exchange'
   return 0;
 }

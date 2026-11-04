@@ -218,21 +218,21 @@ TEST(Concurrency, ParallelForTripCounts) {
 TEST(Concurrency, AtomicCellsOfEveryType) {
   auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
-      let n: atomic int = 5;
+      n: atomic int = 5;
       n += 10;
       n -= 3;
-      let i: atomic i8 = 120;
+      i: atomic i8 = 120;
       i += 10;
-      let u: atomic u8 = 250;
+      u: atomic u8 = 250;
       u += 10;
-      let f: atomic float = 1.5;
+      f: atomic float = 1.5;
       f += 0.25;
       f -= 1.0;
-      let g: atomic f32 = 0.5;
+      g: atomic f32 = 0.5;
       g += 0.25;
-      let b: atomic bool = False;
+      b: atomic bool = False;
       b = True;
-      let c: atomic char = 'a';
+      c: atomic char = 'a';
       c = 'z';
       io::println(Str(n) + " " + Str(i) + " " + Str(u) + " " + Str(f) + " "
           + Str(g) + " " + Str(b) + " " + Str(c));
@@ -253,19 +253,19 @@ TEST(Concurrency, AtomicCellsOfEveryType) {
 TEST(Concurrency, AtomicExchangeAndCompareExchange) {
   auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
-      let n: atomic int = 5;
+      n: atomic int = 5;
       let old = n.exchange(100);
       let ok = n.compareExchange(100, 7);
       let no = n.compareExchange(100, 8);
       io::println(Str(old) + " " + Str(ok) + " " + Str(no) + " " + Str(n));
-      let f: atomic float = 2.0;
+      f: atomic float = 2.0;
       let fo = f.exchange(0.5);
       let fok = f.compareExchange(0.5, 4.0);
       io::println(Str(fo) + " " + Str(f) + " " + Str(fok));
-      let b: atomic bool = False;
+      b: atomic bool = False;
       let was = b.exchange(True);
       io::println(Str(was) + " " + Str(b));
-      let c: atomic char = 'a';
+      c: atomic char = 'a';
       let cok = c.compareExchange('a', 'b');
       let cno = c.compareExchange('a', 'c');
       let wc = c.exchange('q');
@@ -275,6 +275,35 @@ TEST(Concurrency, AtomicExchangeAndCompareExchange) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5 True False 7\n2 4 True\nFalse True\nq True False b\n");
+  EXPECT_EQ(r.ExitCode, 0);
+}
+
+// A first assignment from an atomic place takes its handle, as `let m = n`
+// does: `m = n` shares n's cell, `h = st.served` the field's, `k =
+// fresh(3)` the new cell the call returns; a declaration typed with the
+// number (`x: int = n`) takes its value.  Cells are immortal: no heap check.
+TEST(Concurrency, AFirstAssignmentOfAnAtomicPlaceTakesItsHandle) {
+  auto r = compileAndRun(R"(import ::io;
+    class Stats { served: atomic int; }
+    fn fresh(v: int) -> atomic int { return v; }
+    fn main() -> int {
+      n: atomic int = 5;
+      m = n;
+      m += 1;
+      st = Stats(0);
+      h = st.served;
+      h += 2;
+      k = fresh(3);
+      k += 1;
+      x: int = n;
+      x += 10;
+      io::println(Str(n) + " " + Str(m) + " " + Str(st.served) + " "
+          + Str(k) + " " + Str(x));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "6 6 2 4 16\n");
   EXPECT_EQ(r.ExitCode, 0);
 }
 
@@ -294,14 +323,14 @@ TEST(Concurrency, AtomicHandlesShareACell) {
       return n;
     }
     fn main() -> int {
-      let a: atomic int = 1;
-      let b = a;
+      a: atomic int = 1;
+      b = a;
       b += 10;
       a += 100;
       io::println(Str(a) + " " + Str(b));
       bump(a, 5);
       io::println(Str(a) + " " + Str(b) + " " + Str(read(b)));
-      let k = fresh(3);
+      k = fresh(3);
       k += 1;
       io::println(Str(k) + " " + Str(a));
       let st: atomic shared Stats = Stats("s", 0);
@@ -309,7 +338,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
       let t2 = hit(st, 500);
       let n = await t1 + await t2;
       st.served += 1;
-      let h = st.served;
+      h = st.served;
       h -= 2;
       io::println(st.name + " " + Str(st.served) + " " + Str(n));
       parallel for i in 0..1000 { if i % 10 == 0 { st.served += 1; } }

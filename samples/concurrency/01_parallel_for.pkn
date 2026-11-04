@@ -39,7 +39,7 @@ fn main() -> int {
   saxpy(2.0, xs, ys);
   io::println("ys[7] = " + Str(ys[7]));
 
-  let hits: atomic int = 0;
+  hits: atomic int = 0;
   parallel for i in 0..n {
     if i % 10 == 0 { hits += 1; }
   }

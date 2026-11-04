@@ -1074,6 +1074,19 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
   // An `atomic` variable (the prototype) changes by its operations.
   if (node->getAtomicKind() != ast::AssignStmt::AtomicKind::None)
     return emitAtomicAssign(node);
+  // A first assignment of an `atomic` handle (a place's, a call's result):
+  // the new variable holds the cell, as `let x = y` does (visitVarDecl).
+  if (ast::Type *vt = node->getValue()->getResolvedType();
+      vt && ast::isa<ast::AtomicType>(vt) &&
+      !CurrentScope->findOwner(node->getVarName())) {
+    Val cell = emitExpr(node->getValue());
+    if (!cell)
+      return cell;
+    pir::LocalId local = B.addLocal(node->getVarName(), Type::Box);
+    B.store(local, cell);
+    CurrentScope->declare(node->getVarName(), local, vt);
+    return Val();
+  }
   // A value held in memory: a new variable holding a copy, or its bytes
   // replaced.
   if (ast::Type *ty = node->getValue()->getResolvedType(); ast::isMemType(ty)) {

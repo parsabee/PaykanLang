@@ -4489,7 +4489,13 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                        CurrentScope->findOwner(node->getVarName()),
                        node->getLocation()))
     return false;
+  // A first assignment from an `atomic` place (`m = n`, `h = st.hits`)
+  // takes its handle, as `let m = n` does (visitVarDecl): a copy of an
+  // atomic place is another handle to its cell.
+  WantAtomicHandle = !CurrentScope->findOwner(node->getVarName()) &&
+                     isPlaceChain(node->getValue());
   auto *valTy = resolveExprType(node->getValue(), expected);
+  WantAtomicHandle = false;
   const auto &varName = node->getVarName();
   if (!valTy) {
     // The value's error was reported.  A first assignment still declares the
