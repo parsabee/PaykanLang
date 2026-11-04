@@ -109,7 +109,6 @@ constexpr Keyword kKeywords[] = {
     {"parallel", Tok::KwParallel},
     {"atomic", Tok::KwAtomic},
     {"shared", Tok::KwShared},
-    {"const", Tok::KwConst},
     {"locked", Tok::KwLocked},
     {"lock", Tok::KwLock},
     {"mut", Tok::KwMut},
@@ -201,8 +200,6 @@ const char *describe(Tok k) {
     return "'atomic'";
   case Tok::KwShared:
     return "'shared'";
-  case Tok::KwConst:
-    return "'const'";
   case Tok::KwLocked:
     return "'locked'";
   case Tok::KwLock:
@@ -385,8 +382,6 @@ const char *tokenKindName(Tok k) {
     return "KW_ATOMIC";
   case Tok::KwShared:
     return "KW_SHARED";
-  case Tok::KwConst:
-    return "KW_CONST";
   case Tok::KwLocked:
     return "KW_LOCKED";
   case Tok::KwLock:

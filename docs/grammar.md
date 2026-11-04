@@ -402,12 +402,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   reference; 'N[3]' is a value: box it ('mem::Box<N[3]>') to share what it
   holds`, `'shared mut' qualifies a reference; 'int' is a value`, `'mut'
   applies to objects; 'int' is a value: its storage is rewritten by
-  assignment, which 'let' fixes`).  `const` spells nothing any more: a
-  reference is immutable unless written `mut`, and a `const` anywhere in a
-  type (`const N`, `shared const N`, `atomic shared const N`, `atomic const
-  N`) is a syntax error at the `const`, `'const' is gone: a reference is
-  immutable unless written 'mut T' ('shared mut T', 'locked mut T')`.  The
-  writes come after the form: `mut shared N` is `'mut shared' is spelled
+  assignment, which 'let' fixes`).  A reference is immutable unless
+  written `mut`.  The writes come after the form: `mut shared N` is `'mut shared' is spelled
   'shared mut': the form first, then the writes`, and `mut locked N` the
   same with `locked`.  What nothing writes takes no `mut`: `atomic shared
   mut N` is `'atomic shared mut T' would be written from several threads

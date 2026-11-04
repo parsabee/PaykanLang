@@ -485,16 +485,6 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
              "unknown qualifier \"\" "},
         Case{"(qualified-type \"atomic\" (named-type \"int\"))",
              "unknown qualifier \"atomic\" "},
-        // `const` is gone, from every form it was written in.
-        Case{"(qualified-type \"const\" (named-type \"Node\"))",
-             "unknown qualifier \"const\" "},
-        Case{"(qualified-type \"shared const\" (named-type \"Node\"))",
-             "unknown qualifier \"shared const\" "},
-        Case{"(qualified-type \"atomic shared const\" (named-type "
-             "\"Node\"))",
-             "unknown qualifier \"atomic shared const\" "},
-        Case{"(qualified-type \"atomic const\" (named-type \"Node\"))",
-             "unknown qualifier \"atomic const\" "},
         // The forms the parser rejects are unknown here too: a frozen
         // object and a cell take no `mut`.
         Case{"(qualified-type \"atomic shared mut\" (named-type \"Node\"))",
@@ -529,8 +519,7 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
              "expected (qual view) or (qual inout)"}})
     expectRejected(paramOf(c.Type), c.Error);
   for (const char *spelling :
-       {"mutable", "", "atomic", "const", "shared const", "atomic shared const",
-        "atomic shared mut", "mut shared"})
+       {"mutable", "", "atomic", "atomic shared mut", "mut shared"})
     expectRejected(paramOf("(qualified-type \"" + std::string(spelling) +
                            "\" (named-type \"Node\"))"),
                    kForms);

@@ -14,9 +14,7 @@ samples/concurrency/README.md.
 ### Added
 
 - The keywords `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `mut`, `locked`
-  and `lock` (docs/grammar.md); `const` is reserved and rejected wherever it is written
-  (`'const' is gone: a reference is immutable unless written 'mut T' ('shared mut T',
-  'locked mut T')`).
+  and `lock` (docs/grammar.md).
 - Qualifiers on a reference, as a variable's, a parameter's, a field's or a result's type.
   The bare type is unique and immutable, the cheapest form, with zero overhead: through it
   there is no field assignment, no call of a method that is not a `view fn` and no passing to
@@ -34,8 +32,7 @@ samples/concurrency/README.md.
   into `T`; `T` gains `mut` only by `move` or straight from a temporary (`cannot store a 'T'
   in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`); `shared T` and
   `shared mut T`, a frozen object and a cell convert only as they are. The rejected
-  spellings: `const` in any position (`'const' is gone: a reference is immutable unless
-  written 'mut T' ('shared mut T', 'locked mut T')`), `mut` on a value (`'mut' applies to
+  spellings: `mut` on a value (`'mut' applies to
   objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes`),
   `atomic shared mut T` (freeze it as `atomic shared T`, or change it as `locked mut T`),
   `atomic mut T` (a cell changes by its operations), `mut shared T` and `mut locked T`

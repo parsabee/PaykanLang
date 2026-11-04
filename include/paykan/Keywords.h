@@ -24,8 +24,8 @@ inline constexpr std::string_view kKeywords[] = {
     "True", "False", "None", "_", "view", "inout", "let", "weak", "impl",
     "static", "trait",
     // The concurrency prototype (docs/design/concurrency.md).
-    "move", "async", "await", "parallel", "atomic", "shared", "const", "locked",
-    "lock", "mut"};
+    "move", "async", "await", "parallel", "atomic", "shared", "locked", "lock",
+    "mut"};
 
 /// Whether @p s is one of the grammar's keywords (kKeywords).
 inline bool isKeyword(std::string_view s) {

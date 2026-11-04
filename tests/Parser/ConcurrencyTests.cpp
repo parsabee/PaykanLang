@@ -4,7 +4,7 @@
 // (docs/design/concurrency.md, samples/concurrency/README.md): `async fn`,
 // `await` and `move`, `parallel for`, the `lock` block, and the qualifiers
 // in a type annotation (`mut`, `shared`, `shared mut`, `atomic shared`,
-// `locked`, `locked mut`; `const` is gone).  What the forms mean is
+// `locked`, `locked mut`).  What the forms mean is
 // Sema's (tests/Sema); here is what the parser takes, the AST it builds
 // and the error it gives.
 
@@ -706,44 +706,15 @@ fn main() -> int {
     expectRejected(atTopLevel(c[0]), c[1]);
 }
 
-// `const` is gone: the bare type is immutable, and a reference that is
-// written says so with `mut`.  The word is still a keyword, and a type
-// written with it, in any form and anywhere, is rejected at `const` with
-// the forms to write instead.
-TEST(Qualifiers, ConstIsGone) {
-  const char *const kGone =
-      "'const' is gone: a reference is immutable unless written 'mut T' "
-      "('shared mut T', 'locked mut T')";
-  for (const char *stmt :
-       {"x: const Node = a;", "let x: const Node = a;", "x: const = a;",
-        "x: shared const Node = a;", "x: shared const = a;",
-        "x: atomic shared const Node = a;", "x: atomic shared const = a;",
-        "x: locked const Node = a;", "x: atomic const Node = a;",
-        "x: atomic const = a;", "x: mut const Node = a;",
-        "x: const shared Node = a;", "x: const mut Node = a;"})
-    expectRejected(inMain(stmt), kGone);
-  const char *const topLevel[] = {
-      "fn f(x: const Node) { }",
-      "fn f() -> const Node { }",
-      "class C { n: const Node; }",
-      "fn f(x: shared const Node) { }",
-      "fn f() -> atomic shared const Node { }",
-      "class C { n: shared const Node; }",
-      "fn f(x: atomic const Node) { }",
-  };
-  for (const char *decl : topLevel)
-    expectRejected(atTopLevel(decl), kGone);
-}
-
 // -- The keywords
 
 // `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `mut`,
-// `const`, `locked` and `lock` are reserved: none names a variable, a
-// function, a parameter, a field, a class or a type.
+// `locked` and `lock` are reserved: none names a variable, a function, a
+// parameter, a field, a class or a type.
 TEST(ConcurrencyKeywords, AreNotIdentifiers) {
-  const char *const keywords[] = {"move",   "async",  "await", "parallel",
-                                  "atomic", "shared", "mut",   "const",
-                                  "locked", "lock"};
+  const char *const keywords[] = {"move",     "async",  "await",
+                                  "parallel", "atomic", "shared",
+                                  "mut",      "locked", "lock"};
   for (const char *kw : keywords) {
     const std::string k(kw);
     const std::string cases[] = {
@@ -760,8 +731,8 @@ TEST(ConcurrencyKeywords, AreNotIdentifiers) {
       EXPECT_FALSE(ok) << src;
     }
   }
-  // As a type: the qualifiers are one, `atomic` wants the cell's type and
-  // `const` is gone (the Qualifiers tests); the rest never name a type.
+  // As a type: the qualifiers are one and `atomic` wants the cell's type
+  // (the Qualifiers tests); the rest never name a type.
   for (const char *kw : {"move", "async", "await", "parallel", "lock"})
     expectRejected(
         inMain(("x: " + std::string(kw) + " = 1;").c_str()),
@@ -772,8 +743,6 @@ TEST(ConcurrencyKeywords, AreNotIdentifiers) {
        "unexpected 'shared'; expected an expression"},
       {"fn main() -> int { x = 1 + mut; return 0; }",
        "unexpected 'mut'; expected an expression"},
-      {"fn main() -> int { x = 1 + const; return 0; }",
-       "unexpected 'const'; expected an expression"},
       {"fn move() { }\nfn main() -> int { return 0; }",
        "unexpected 'move'; expected a function name after 'fn'"},
       {"fn mut() { }\nfn main() -> int { return 0; }",

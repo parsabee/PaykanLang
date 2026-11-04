@@ -245,27 +245,6 @@ a copy of the subject in the subject's form: it writes under a `mut` subject and
 a bare one, and an `inout` binding on a `mut` place ([Match statements](08-match.md))
 writes what it names with no copy.
 
-`mut` is the only spelling of the writes. `const` is gone: a reference is immutable unless
-it says `mut`, and `const T`, `shared const T` and `atomic shared const T` are syntax
-errors that say so:
-
-```pkn
-class Node {
-  id: int;
-}
-
-fn main() -> int {
-  let n: const Node = Node(1);
-  return 0;
-}
-```
-
-Error:
-
-```
-'const' is gone: a reference is immutable unless written 'mut T' ('shared mut T', 'locked mut T')
-```
-
 ## Values take no qualifier: `mem::Box`
 
 A struct, a tuple or an array is a value: it lives in its variable and is copied by
@@ -1359,7 +1338,7 @@ that the finished feature needs; what `parallel for` costs, and why, is in
 - Through an immutable reference (`T`, `shared T`, a frozen object) no field is assigned, no
   method but a `view fn` is called, and nothing is passed to `inout`; a unique field follows
   its root, a `shared mut` field keeps its writes through any root. `self` is mutable
-  in every method but a `view fn`. `const` is gone, a syntax error.
+  in every method but a `view fn`.
 - A `view T` parameter takes every form of the object, an `inout T` a `mut` or `shared mut`
   one; a borrow carries no qualifier, `mut` included.
 - `move x` ends `x`; reading it afterwards is an error, after a branch that moved it
@@ -1420,9 +1399,7 @@ spelled 'shared mut': the form first, then the writes`), and what nothing writes
 with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a
 lock`, and `atomic mut T` or `mut atomic T` is `an 'atomic' cell takes no 'mut': it changes
 by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut
-T'`. `const` is a keyword still, and every type that spells it is `'const' is gone: a
-reference is immutable unless written 'mut T' ('shared mut T', 'locked mut T')`. Those are
-syntax errors. `shared`, `shared mut` and `atomic shared` qualify a reference: on a value
+T'`. Those are syntax errors. `shared`, `shared mut` and `atomic shared` qualify a reference: on a value
 (`shared int`, `shared mut Point`, `shared int[2]`, `atomic shared Pair`) each is an error,
 and so is `mut` on one (`'mut' applies to objects; 'int' is a value: its storage is
 rewritten by assignment, which 'let' fixes`). `atomic` takes a number, `bool` or `char`
@@ -1632,7 +1609,7 @@ form of `T`; an `inout T` takes a `mut` or `shared mut` one.
 | Conversion refused | `let u: Node = s` with `s: shared Node`; `let m: mut Node = a` with `a` a `Node` read from a place (`a reference gains 'mut' only by 'move'`); a `shared mut` into a `shared` slot or back; a `shared` into an `atomic shared` slot; an `atomic shared` into anything but `atomic shared`; a `locked` into a `locked mut` slot |
 | Qualifier on a value | `shared int`, `shared mut Point`, `shared int[2]`, `atomic shared Pair`; `mut int`, `mut (int, int)` (`'mut' applies to objects; ... which 'let' fixes`) |
 | Qualifier on a borrow | `n: view mut Node`, `n: inout shared Node` |
-| Spelling (syntax errors) | `const Node`, `shared const Node`, `atomic shared const Node` (`'const' is gone`); `atomic shared mut N`; `mut shared N`, `mut locked N`; `atomic mut int`, `mut atomic int`; `shared mut shared N` and any second qualifier; `atomic N` with `N` a class (Sema's) |
+| Spelling (syntax errors) | `atomic shared mut N`; `mut shared N`, `mut locked N`; `atomic mut int`, `mut atomic int`; `shared mut shared N` and any second qualifier; `atomic N` with `N` a class (Sema's) |
 | Write through an immutable reference | `cfg.name = "x"` with `cfg` a `Config` (`'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its field 'name'`); `c.xs[0] = 1` (`cannot assign to its elements`); through a `shared` field (`field 'cache' is immutable (a 'shared Cache'; write 'shared mut Cache' to change it)`), a frozen object (`'cfg' is frozen (an 'atomic shared Config')`); `mark(cfg)` to an `inout` parameter (`it cannot be passed to 'inout' parameter 'n'`); a `match` binding |
 | Non-`view` method on an immutable reference | `cfg.rename("y")`, `ro.get()`, `s.concat("b")` with `s` a `Str` (`'s' is immutable (a 'Str'; write 'mut Str' to change it); 'concat' is not a 'view fn'`) |
 | `locked` without `mut` | `let c: locked Counts = ...` (a warning); `lock c as v: inout { }` on it (`'c' is 'locked Counts', whose contents are never written; declare it 'locked mut Counts' for a 'lock ... as v: inout' block`) |

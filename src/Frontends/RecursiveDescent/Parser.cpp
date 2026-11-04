@@ -2355,9 +2355,8 @@ Type *Parser::parsePrimaryType() {
 // concurrency.md); each word buys one thing at one cost: `mut`, writes
 // through the owner; `shared`, several owners; `atomic shared`, an object
 // frozen for every thread; `locked mut`, an object written under a lock.
-// `const` is gone (a reference is immutable unless written `mut`), `atomic
-// shared mut` and `atomic mut` are errors naming the forms that exist, and
-// `locked` without `mut` is a warning (Sema).
+// `atomic shared mut` and `atomic mut` are errors naming the forms that
+// exist, and `locked` without `mut` is a warning (Sema).
 //
 // A qualifier covers the whole type.  In a declaration it may stand alone,
 // with the type inferred (`x: shared = e;`).  A type takes one qualifier.
@@ -2365,20 +2364,13 @@ Type *Parser::parseTypeAnnotation() {
   SourceLocation start = cur().Loc;
   Qualifier qual;
   bool qualified = true;
-  auto constGone = [&] {
-    error(cur().Loc, "'const' is gone: a reference is immutable unless "
-                     "written 'mut T' ('shared mut T', 'locked mut T')");
-    return nullptr;
-  };
   auto cellTakesNoMut = [&] {
     error(cur().Loc, "an 'atomic' cell takes no 'mut': it changes by its "
                      "operations; an object crosses threads as 'atomic "
                      "shared T' (frozen) or 'locked mut T'");
     return nullptr;
   };
-  if (at(Tok::KwConst)) {
-    return constGone();
-  } else if (accept(Tok::KwMut)) {
+  if (accept(Tok::KwMut)) {
     if (at(Tok::KwShared) || at(Tok::KwLocked)) {
       const std::string form(cur().Text);
       error(cur().Loc, "'mut " + form + "' is spelled '" + form +
@@ -2408,9 +2400,6 @@ Type *Parser::parseTypeAnnotation() {
   } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwMut) {
     consume();
     return cellTakesNoMut();
-  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwConst) {
-    consume();
-    return constGone();
   } else if (accept(Tok::KwAtomic)) {
     // `atomic T`: a cell holding a number.
     Type *inner = parseTypeAnnotation();
@@ -2421,8 +2410,6 @@ Type *Parser::parseTypeAnnotation() {
     qualified = false;
   }
   if (qualified) {
-    if (at(Tok::KwConst))
-      return constGone();
     if (at(Tok::KwMut) || at(Tok::KwShared) || at(Tok::KwLocked) ||
         at(Tok::KwAtomic)) {
       error(cur().Loc, std::string("a type takes one qualifier: '") +

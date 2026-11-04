@@ -63,7 +63,6 @@ enum class Tok : uint8_t {
   KwParallel,
   KwAtomic,
   KwShared,
-  KwConst,
   KwLocked,
   KwMut,
   KwLock,

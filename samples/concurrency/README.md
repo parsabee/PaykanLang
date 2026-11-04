@@ -81,10 +81,8 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   several threads with no lock; write 'atomic shared T' to freeze it, or
   'locked mut T' to change it under a lock`, `atomic mut N` is `an
   'atomic' cell takes no 'mut': it changes by its operations; an object
-  crosses threads as 'atomic shared T' (frozen) or 'locked mut T'`, the
-  old `atomic const N` and `atomic shared const N` are `'const' is gone: a
-  reference is immutable unless written 'mut T' ('shared mut T', 'locked
-  mut T')`, and `atomic N` of a class is Sema's `'atomic' holds a number,
+  crosses threads as 'atomic shared T' (frozen) or 'locked mut T'`, and
+  `atomic N` of a class is Sema's `'atomic' holds a number,
   a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic
   shared N' (frozen) or 'locked mut N'`.
   A struct, a tuple or an array is a value wherever it is and
