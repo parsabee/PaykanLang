@@ -1,0 +1,63 @@
+// 90 — `mut T` of a template whose type argument is a value
+// Exercises: a template's `mut T` (and `mut T?`) joins its type argument's
+//            form (docs/design/concurrency.md, "Generics and Copyable"): a
+//            reference's writes for a class, the value itself for an `int`
+//            or a struct, as a template's `T?` of an optional T is that
+//            optional.  One `Vec<E>` hands out its elements writable
+//            (`-> mut E?`, a closure's `mut E`) for a class and as copies
+//            for a value.  `Vec<int>` was `'mut' applies to objects; 'int'
+//            is a value` at each `mut E`.
+// expect-stdout: 2 7 3
+import ::io;
+import ::memory as mem;
+
+class Node {
+  n: int;
+  fn bump() { self.n += 1; }
+}
+
+struct P {
+  x: int;
+}
+
+class Vec<E> {
+  storage: mem::Buffer<E>;
+}
+
+impl Vec<E> {
+  fn __init__()   { self.storage = mem::Buffer<E>(); }
+
+  fn append(e: E) { self.storage.push(e); }
+
+  fn at(i: int) -> mut E? {
+    if unsigned(i) >= self.storage.len() {
+      return None;
+    }
+    return self.storage.get(unsigned(i));
+  }
+
+  fn forEach(f: (mut E) -> void)
+                  { for i in 0..self.storage.len() { f(self.storage.get(i)); } }
+}
+
+fn main() -> int {
+  let nodes: mut = Vec<Node>();
+  nodes.append(Node(1));
+  nodes.forEach(fn(e: mut Node) { e.bump(); });
+
+  let sum: mut = mem::Box(0);
+  let ints: mut = Vec<int>();
+  ints.append(3);
+  ints.forEach(fn(e: int) { s: inout = sum.get(); s += e; });
+  let ps: mut = Vec<P>();
+  ps.append(P(4));
+  ps.forEach(fn(e: P) { s: inout = sum.get(); s += e.x; });
+
+  match nodes.at(0) {
+    n: Node { io::print(Str(n.n) + " "); }
+  }
+  match ints.at(0) {
+    k: int { io::println(Str(sum.value()) + " " + Str(k)); }
+  }
+  return 0;
+}

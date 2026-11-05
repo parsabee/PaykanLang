@@ -119,6 +119,12 @@ samples/concurrency/README.md.
 - Only a program whose code calls the async runtime or the OpenMP runtime loads or links it:
   the async-to-LLVM lowering declares the async runtime's interface in every module, and every
   program linked it, so an installed `paykan` could not build one without its build tree.
+- A template's `mut T` (and `mut T?`) instantiated with a value (`Vec<int>`, `Vec<P>` for a
+  struct `P`) is that value, as the design joins a template's qualifier with its type
+  argument's form (docs/design/concurrency.md, "Generics and Copyable"): it was `'mut'
+  applies to objects; 'int' is a value` at each `mut E` of the instantiation, so one
+  container could not hand out a class's elements writable and a value's as copies
+  (src/AST/AST.cpp, ASTCloner; samples/codegen/90_mut_type_parameter_of_a_value.pkn).
 
 ### Removed
 

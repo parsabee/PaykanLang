@@ -560,6 +560,21 @@ Type *ASTCloner::cloneType(Type *ty) {
   }
   if (auto *qt = dyn_cast<QualifiedType>(ty)) {
     Type *inner = qt->getInnerType() ? cloneType(qt->getInnerType()) : nullptr;
+    // `mut T` (or `mut T?`) of a type argument that is a value is that
+    // value: a template's `mut` joins T's own form, as its `T?` does T's
+    // None (docs/design/concurrency.md, "Generics and Copyable"), and a
+    // value's storage is rewritten by assignment, so it has no writes to add
+    // (a written `mut int` is still an error).  Only `mut` joins so:
+    // `shared` on a value stays an error.
+    const Type *written = qt->getInnerType();
+    if (const auto *ot = written ? dyn_cast<OptionalType>(written) : nullptr)
+      written = ot->getInnerType();
+    if (const auto *param = written ? dyn_cast<ClassType>(written) : nullptr;
+        param && Subst.count(param->getName()) &&
+        qt->getQualifier() == Qualifier{QualForm::Unique, true} && inner &&
+        !isRefType(inner) && !isa<AtomicType>(inner) &&
+        !isa<QualifiedType>(inner))
+      return inner;
     return Ctx.make<QualifiedType>(qt->getLocation(), qt->getQualifier(),
                                    inner);
   }
