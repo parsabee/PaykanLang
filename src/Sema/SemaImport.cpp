@@ -644,7 +644,9 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
     }
     return ctx;
   };
-  std::unordered_set<std::string_view> composite;
+  // The composite types already resolved.  It owns its names: the name
+  // checked is the record's with its qualifier taken off, a local.
+  std::unordered_set<std::string> composite;
   auto unknown = [&](const std::string &qualified) {
     std::string type;
     splitExportedQualifier(qualified, type);
@@ -660,7 +662,7 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
       return false;
     if (!resolveExportedType(context(), type))
       return true;
-    composite.insert(type);
+    composite.insert(std::move(type));
     return false;
   };
   auto unknownType = [](const std::string &what, const std::string &type) {
