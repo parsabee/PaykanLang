@@ -343,6 +343,14 @@ IfaceBlob
 | 5 | `INST` | yes | instantiations provided and requested (§4.5) |
 | 7 | `DIAG` | no | display file name (project-relative) and per-declaration positions for "declared here" notes (§8.6) |
 
+A qualifier (docs/language/19-concurrency.md) is part of the type of a
+parameter, a field or a result, and a string-typed record spells it before
+the type's name, as a declaration writes it: `mut Cell`, `shared mut
+Node?`, `atomic shared Config` (the bare form spells none).  An importer
+reads it back as the declaration's qualifier (`Sema::injectModule`), so a
+call of `fn make() -> mut Cell` writes through its result there as in the
+module.
+
 Parameter modes (`view`, `inout`) are appended to the string-typed records
 written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
 name)[n]` after a `FUNC` record's signature, and one such list per method

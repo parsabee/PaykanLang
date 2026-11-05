@@ -130,6 +130,10 @@ samples/concurrency/README.md.
   emitted by the module that calls it, as a shared copy: `mem::Buffer<Str>.grow` in a program
   that imports `::collections` was `internal compiler error: no function for method 'grow' of
   struct 'Buffer<Str>'` (src/Lowering; samples/codegen/91_method_an_import_dropped.pkn).
+- The qualifiers of a module's parameters, results and fields are part of its interface: an
+  importer read `fn make() -> mut Cell` as returning a `Cell`, which it could not write
+  through, a `shared mut` parameter as a unique one, and a `shared mut` field as a unique one
+  (src/Sema/SemaImport.cpp; samples/imports/24_qualified_signatures).
 
 ### Removed
 

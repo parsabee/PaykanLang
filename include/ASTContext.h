@@ -149,7 +149,7 @@ public:
 
     /// Add an instance field.
     ClassTypeBuilder &field(const std::string &name, Type *ty,
-                            bool weak = false);
+                            bool weak = false, Qualifier qual = {});
 
     /// Finish building, register in the context's class type registry, and
     /// return the ClassType.
