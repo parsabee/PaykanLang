@@ -134,6 +134,11 @@ samples/concurrency/README.md.
   importer read `fn make() -> mut Cell` as returning a `Cell`, which it could not write
   through, a `shared mut` parameter as a unique one, and a `shared mut` field as a unique one
   (src/Sema/SemaImport.cpp; samples/imports/24_qualified_signatures).
+- A `box` takes its reference with the inline fast path of a retain, as every other retain
+  does (docs/language/16-memory.md, "The Reference Counts"), not by a call of
+  `PaykanShared_new`: a `match` binding on an optional local made one on every arm it took
+  (src/Backends/MLIR/Lowering/PIRToStandard.cpp; tests/Backends/PIRLLVMTests.cpp,
+  `ABoxTakesItsReferenceInline`).
 
 ### Removed
 

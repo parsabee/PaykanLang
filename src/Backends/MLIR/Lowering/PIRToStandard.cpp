@@ -1381,8 +1381,13 @@ void FunctionLowering::lowerInstr(Operation *op) {
           call->setAttr(kNonNullAttr, B.getUnitAttr());
       })
       .Case([&](P::BoxOp) {
-        define(op, resultOf(callRuntime(names::kPaykanSharedNew, {obj}, {box},
-                                        {operand(0)})));
+        // A box is its object (Runtime.h, "Shared"), and boxing one takes a
+        // reference to it, as PaykanShared_new does: a retain, whose fast
+        // path each backend makes inline (docs/language/16-memory.md, "The
+        // Reference Counts": a retain is a few instructions, with no call).
+        Value b = P::CastOp::create(B, Loc, box, operand(0));
+        callRuntime(names::kPaykanRetain, {box}, {}, {b});
+        define(op, b);
       })
       .Case([&](P::UnboxOp) {
         // A box is its object (Runtime.h, "Shared").

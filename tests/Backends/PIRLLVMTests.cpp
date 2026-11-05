@@ -843,25 +843,57 @@ fn @main() -> i64 {
 )",
                                 err);
   ASSERT_FALSE(ir.empty()) << err;
-  // Each a test of the count, the common case weighted 2000 to 1: a
-  // retain's is a count below the limit (PAYKAN_REF_MAX - 1), a release's
-  // one in [2, PAYKAN_REF_MAX) as an unsigned compare of the count less 2
-  // (PAYKAN_REF_MAX itself is immortal, Runtime.h) ...
-  EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 3u) << ir;
-  EXPECT_EQ(linesWith(ir, ", 2147483646").size(), 1u) << ir;
+  // Two retains, the `box`'s and the `retain`'s (a box takes a reference,
+  // ABoxTakesItsReferenceInline), and two releases.  Each a test of the
+  // count, the common case weighted 2000 to 1: a retain's is a count below
+  // the limit (PAYKAN_REF_MAX - 1), a release's one in [2, PAYKAN_REF_MAX)
+  // as an unsigned compare of the count less 2 (PAYKAN_REF_MAX itself is
+  // immortal, Runtime.h) ...
+  EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 4u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 2147483646").size(), 2u) << ir;
   EXPECT_EQ(linesWith(ir, ", 2147483645").size(), 2u) << ir;
-  EXPECT_EQ(linesWith(ir, "!prof").size(), 3u) << ir;
+  EXPECT_EQ(linesWith(ir, "!prof").size(), 4u) << ir;
   EXPECT_FALSE(linesWith(ir, "!{!\"branch_weights\", i32 2000, i32 1}").empty())
       << ir;
   // ... an increment or a decrement of the count in place ...
-  EXPECT_EQ(linesWith(ir, "load i32, ptr").size(), 3u) << ir;
-  EXPECT_EQ(linesWith(ir, "add i32 ").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "load i32, ptr").size(), 4u) << ir;
+  EXPECT_EQ(linesWith(ir, "add i32 ").size(), 2u) << ir;
   EXPECT_EQ(linesWith(ir, "sub i32 ").size(), 4u)
       << ir; // the test and the decrement
-  EXPECT_EQ(linesWith(ir, "store i32 ").size(), 3u) << ir;
+  EXPECT_EQ(linesWith(ir, "store i32 ").size(), 4u) << ir;
   // ... and the runtime for the rest.
-  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 2u) << ir;
   EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
+}
+
+// A `box` takes a reference to its object, as PaykanShared_new does: a
+// retain, whose fast path is inline (docs/language/16-memory.md, "The
+// Reference Counts"), not a call of PaykanShared_new.  The box of a null
+// object is null and takes nothing.
+TEST(PIRLLVM, ABoxTakesItsReferenceInline) {
+  const std::string text = std::string(kCounted) + R"(
+fn @main() -> i64 {
+  %o = new C
+  %b = box %o
+  %c = box %o
+  %two = call @strong(%b)
+  release %b
+  release %c
+  %none = box null obj
+  release %none
+  ret %two
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(text, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_EQ(ir.find("PaykanShared_new"), std::string::npos) << ir;
+  EXPECT_EQ(linesWith(ir, ", 2147483646").size(), 3u) << ir;
+
+  auto r = runPIR(text);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 2);
+  EXPECT_EQ(r.Out, "destroyed\n");
 }
 
 // A `retain nonnull`, of a box that is never null (docs/pir.md §6), and a
@@ -889,15 +921,17 @@ fn @main() -> i64 {
   std::string err;
   std::string ir = translatePIR(program("retain nonnull"), err);
   ASSERT_FALSE(ir.empty()) << err;
-  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 1u) << ir;
+  // The `box`'s retain tests its box (ABoxTakesItsReferenceInline), and so
+  // does the release of %c.
+  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 2u) << ir;
   // The counts as before: a test of each, the call for the rest.
-  EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 3u) << ir;
-  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 4u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 2u) << ir;
   EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
   EXPECT_EQ(ir.find("nonnull"), std::string::npos) << ir;
   ir = translatePIR(program("retain"), err);
   ASSERT_FALSE(ir.empty()) << err;
-  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 3u) << ir;
+  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 4u) << ir;
 
   auto r = runPIR(program("retain nonnull"));
   ASSERT_TRUE(r.Ok) << r.Err;
