@@ -1482,6 +1482,11 @@ Val ModuleLowering::visitLockStmt(ast::LockStmt *node) {
   Val cell = emitExpr(node->getCell());
   if (!cell)
     return Val();
+  // A variable or parameter reads as the cell's object; a field
+  // (`lock self.cell as c`) as the box the object holds.  The cell is never
+  // freed, so the read needs no count of its own.
+  if (cell.Ty == Type::Box)
+    cell = B.unbox(cell, "cell.obj");
   Val payload = callRuntime(names::kPaykanLockedLock, {cell}, "payload");
   ScopeGuard guard(*this);
   const std::string &name = node->getBinding()->getName();

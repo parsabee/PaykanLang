@@ -425,6 +425,66 @@ TEST(Concurrency, AtomicSharedObjectIsReadByTasks) {
   EXPECT_EQ(r.ExitCode, 0);
 }
 
+// A unique object stored in an `atomic shared` field is frozen at the
+// store, with what it holds, and one stored in a `locked mut` field becomes
+// a cell there: in `__init__` and in a later assignment through a `mut`
+// reference, as in a variable or a parameter.  Tasks read the frozen field
+// and lock the cell; a `lock` block takes the field itself (`lock
+// self.account`, `lock b.account`).  The field stores once kept the object
+// as it was: a frozen field's object was counted from every thread and
+// freed with its holder, and a locked field held no cell.  The heap is
+// tracked (no task allocates): the three frozen items and the cell (its
+// mutex block and the account) are what stays live.
+TEST(Concurrency, AFieldStoreFreezesOrMakesACell) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Item { v: int; child: Item?; }
+    class Account { balance: int; }
+    class Bank {
+      catalog: atomic shared Item;
+      account: locked mut Account;
+      view fn deposit(n: int) -> int {
+        total = 0;
+        lock self.account as a: inout { a.balance += n; total = a.balance; }
+        return total;
+      }
+    }
+    impl Bank {
+      fn __init__() {
+        self.catalog = Item(1, Item(2, None));
+        self.account = Account(10);
+      }
+    }
+    async fn read(c: atomic shared Item) -> int {
+      match c.child {
+        ch: Item { return c.v + ch.v; }
+        None { return c.v; }
+      }
+    }
+    async fn work(acct: locked mut Account, n: int) -> int {
+      for i in 0..n { lock acct as a: inout { a.balance += 1; } }
+      return n;
+    }
+    fn main() -> int {
+      let b: mut = Bank();
+      let r0 = read(b.catalog);
+      let r1 = read(b.catalog);
+      let w0 = work(b.account, 500);
+      let w1 = work(b.account, 500);
+      let k = await r0 + await r1 + await w0 + await w1;
+      b.catalog = Item(4, None);
+      total = b.deposit(5);
+      lock b.account as v: view { total += v.balance; }
+      io::println(Str(k) + " " + Str(total) + " " + Str(b.catalog.v));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1006 2030 4\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(liveBlocksAfterRun(), 5);
+}
+
 // A buffer is a struct, a value, and takes no qualifier; boxed, the box is
 // frozen with the buffer and its elements, and a parallel body reads it
 // through the box's `value()`: the prototype's way to data larger than a

@@ -551,9 +551,18 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     // The slot owns a box (or, for a `weak` field, a weak reference):
     // retain/steal the new one, release the old one.
     Val newShared;
-    if (isNoneForOptional(node->getValue()))
+    // A unique value flowing into an `atomic shared` or `locked` field (the
+    // prototype) is frozen, or made a cell, at this store, as one flowing
+    // into a variable or a parameter of that form is (emitAsShared).
+    const ast::QualForm made = node->getValue()->getMaterialize();
+    if (made == ast::QualForm::AtomicShared || made == ast::QualForm::Locked) {
+      newShared = emitAsShared(node->getValue(), /*lend=*/false);
+      if (!newShared)
+        return Val();
+    } else if (isNoneForOptional(node->getValue()))
       newShared = Val::null(Type::Box);
-    if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
+    if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue());
+        rhsId && !newShared) {
       if (CurrentScope && holdsBox(rhsId->getName())) {
         newShared = loadVarBox(rhsId->getName());
         emitRetain(newShared, /*lend=*/false,

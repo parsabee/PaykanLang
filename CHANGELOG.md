@@ -147,6 +147,15 @@ samples/concurrency/README.md.
   or a loop that moved a variable declared one of that name before the next iteration
   (src/Sema: the states are keyed by name and declaring scope; tests/Sema/MoveTests.cpp,
   `AShadowingVariableIsAVariableOfItsOwn`).
+- A unique object stored in an `atomic shared` field is frozen at the store, and one stored in
+  a `locked mut` field becomes a cell there, as in a variable or a parameter of that form: a
+  field assignment (`self.catalog = Catalog(items)` in `__init__`, `b.catalog = Item(4)`)
+  stored the object as it was, so a "frozen" field's object was counted from every thread
+  that took its handle and freed with its holder, and a `locked` field held no cell
+  (src/Lowering/LoweringClass.cpp). A `lock` block on a field (`lock self.account as a:
+  inout { }`), which the chapter allows, was `PIR verification failed: argument 0 of
+  '@$rt.PaykanLocked_lock' has type box, expected obj` (src/Lowering/Lowering.cpp;
+  tests/CodeGen/ConcurrencyTests.cpp, `AFieldStoreFreezesOrMakesACell`).
 
 ### Removed
 
