@@ -176,6 +176,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The qualifier of each reference bound here (the prototype); absent
     /// for unique.
     StringMap<ast::Qualifier> Quals;
+    /// The scope's number, unique in the program (ScopeGuard): with a name,
+    /// the key of a variable's state (varKey).
+    unsigned Id = 0;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -197,6 +200,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   Scope *CurrentScope = nullptr;
+  /// The number the next scope takes (Scope::Id).
+  unsigned NextScopeId = 1;
 
   // -- Lambdas (SemaLambda.cpp, docs/language/14-function-types.md)
 
@@ -362,11 +367,22 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     std::string By;
   };
   using MovedMap = std::unordered_map<std::string, MovedState>;
-  /// The variables a `move` has ended, by name: a forward "maybe moved" set
-  /// over the body (the design's SemaMoves).
+  /// The variables a `move` has ended, by varKey: a forward "maybe moved"
+  /// set over the body (the design's SemaMoves).
   MovedMap MovedVars;
+  /// The key of the variable @p name that @p owner declares: the name and
+  /// the scope's number, so that a variable that shadows another (a block's
+  /// local, a `match` arm's or a `lock` block's binding) has a state of its
+  /// own in MovedVars, DeclLoopDepth and TaskLocals, and the one it shadows
+  /// keeps its own.
+  static std::string varKey(const Scope *owner, std::string_view name);
+  /// The key of the variable @p name names in the current scope.
+  std::string varKey(std::string_view name) const;
+  /// The name, and the number of the scope, that @p key was made from.
+  static std::string_view keyName(std::string_view key);
+  static unsigned keyScope(std::string_view key);
   /// The task handles of the function being checked (the prototype): its
-  /// locals and parameters of a `Task<T>` type, by name, with where each
+  /// locals and parameters of a `Task<T>` type, by varKey, with where each
   /// is declared.  A handle is spent by `await`, by `move`, or by its use
   /// as a value (checkQualifiedFlow), and every path spends it before its
   /// scope ends (checkTasksAwaited): the design's typestate, reduced to the
@@ -448,7 +464,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// an owned variable leaves its slot, and the variable ends.  The field's
   /// type, or nullptr after an error.
   ast::Type *checkPartialMove(ast::UnaryExpr *node, ast::MemberAccessExpr *ma);
-  /// The loop depth each variable was declared at, by name.
+  /// The loop depth each variable was declared at, by varKey.
   std::unordered_map<std::string, unsigned> DeclLoopDepth;
   /// Set while an expression that is an `atomic` variable's handle (not
   /// its value) is checked: an argument to an `atomic` parameter, the

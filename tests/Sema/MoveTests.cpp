@@ -621,3 +621,67 @@ fn main() -> int {
   EXPECT_EQ(r.Diagnostics.find("mem::replace(make().job"), std::string::npos)
       << r.Diagnostics;
 }
+
+// A variable that shadows another is a variable of its own: its moves and
+// awaits are its own, and the one it shadows keeps its state.  A `match`
+// arm's binding, a `lock` block's binding and a block's local named like a
+// variable moved or awaited before are live; moving the shadowing one
+// leaves the outer one as it was; after the shadow's scope the outer one
+// is moved still (both branches of an `if` declaring their own was a
+// use after move that passed); and a loop that moves an outer variable and
+// then declares its own of that name does not assign the outer one again.
+TEST(Move, AShadowingVariableIsAVariableOfItsOwn) {
+  auto r = semaCheck(R"(class Job {
+  name: Str;
+}
+class Account {
+  balance: int;
+}
+async fn run(j: Job) -> int { return j.name.len(); }
+fn keep(j: Job) -> int { return j.name.len(); }
+fn main() -> int {
+  let a = run(Job("a"));
+  n = await a;
+  let opt: Job? = Job("o");
+  match opt {
+    a: Job { n = n + keep(move a); }
+    None { }
+  }
+  let acct: locked mut = Account(1);
+  lock acct as a: view { n = n + a.balance; }
+  let b = Job("b");
+  n = n + keep(move b);
+  if n > 0 { let b = Job("bb"); n = n + keep(b); }
+  let c = Job("c");
+  match opt {
+    c: Job { n = n + keep(move c); }
+    None { }
+  }
+  n = n + keep(c);
+  let d = Job("d");
+  n = n + keep(move d);
+  if n > 0 { let d = Job("d1"); n = n + keep(d); } else { let d = Job("d2"); }
+  n = n + keep(d);
+  e = Job("e");
+  for i in 0..2 {
+    match opt {
+      e: Job { n = n + keep(move e); }
+      None { }
+    }
+  }
+  n = n + keep(e);
+  f = Job("f");
+  for i in 0..2 {
+    n = n + keep(move f);
+    let f = Job("ff");
+    n = n + keep(f);
+  }
+  return n;
+})");
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  expectErrors(
+      r, {":31:16: error: 'd' was moved at 29:16; it cannot be used after the "
+          "move",
+          ":42:18: error: 'f' is moved in the loop at 41:3 and not assigned "
+          "again before the next iteration"});
+}

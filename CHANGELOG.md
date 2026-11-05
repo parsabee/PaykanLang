@@ -139,6 +139,14 @@ samples/concurrency/README.md.
   `PaykanShared_new`: a `match` binding on an optional local made one on every arm it took
   (src/Backends/MLIR/Lowering/PIRToStandard.cpp; tests/Backends/PIRLLVMTests.cpp,
   `ABoxTakesItsReferenceInline`).
+- A variable that shadows another (a `match` arm's or a `lock` block's binding, a block's
+  local) has a move state of its own: the moves and awaits were tracked by name, so a binding
+  named like a task handle awaited before was `'a' was awaited at 9:11; a task handle is spent
+  by its 'await'`, moving the binding left the variable it shadows moved, and a use after a
+  move passed when both branches of an `if` declared a local of the moved variable's name,
+  or a loop that moved a variable declared one of that name before the next iteration
+  (src/Sema: the states are keyed by name and declaring scope; tests/Sema/MoveTests.cpp,
+  `AShadowingVariableIsAVariableOfItsOwn`).
 
 ### Removed
 

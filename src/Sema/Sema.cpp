@@ -56,6 +56,7 @@ Sema::Scope *Sema::Scope::findOwner(std::string_view name) {
 
 Sema::ScopeGuard::ScopeGuard(Sema &s)
     : S(s), ScopeObj(std::make_unique<Scope>(s.CurrentScope)) {
+  ScopeObj->Id = S.NextScopeId++;
   S.CurrentScope = ScopeObj.get();
 }
 
@@ -1979,7 +1980,7 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
         S.error(node->getLocation(), why + "; it cannot be awaited");
         return nullptr;
       }
-      S.MovedVars[id->getName()] =
+      S.MovedVars[S.varKey(id->getName())] =
           Sema::MovedState{node->getLocation(), false, "await"};
     }
     return tt->getInnerType();
@@ -4550,9 +4551,9 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       return false;
     }
     CurrentScope->set(varName, valTy);
-    DeclLoopDepth[varName] = LoopDepth;
+    DeclLoopDepth[varKey(CurrentScope, varName)] = LoopDepth;
     if (ast::isa<ast::TaskType>(valTy))
-      TaskLocals[varName] = node->getLocation();
+      TaskLocals[varKey(CurrentScope, varName)] = node->getLocation();
     // The prototype: the new variable adopts the value's qualifier.
     const ast::Qualifier q =
         sharesStorage(valTy) ? qualifierOf(node->getValue()) : ast::Qualifier{};
@@ -4569,7 +4570,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // prototype): a handle dropped unawaited has no one to wait for it.
   if (ast::Type *heldTy = owner->lookup(varName);
       heldTy && ast::isa<ast::TaskType>(heldTy)) {
-    auto spent = MovedVars.find(varName);
+    auto spent = MovedVars.find(varKey(owner, varName));
     if (spent == MovedVars.end() || spent->second.Maybe) {
       error(node->getLocation(),
             "task '" + varName +
@@ -4578,7 +4579,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       return false;
     }
   }
-  MovedVars.erase(varName); // assigned again after a move
+  MovedVars.erase(varKey(owner, varName)); // assigned again after a move
   auto *varTy = owner->lookup(varName);
 
   // A poisoned variable (its declaration failed) is re-declared by a valid
@@ -4848,7 +4849,7 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   if (node->isParallel())
     ParallelStack.push_back({node, CurrentScope});
   if (!discard)
-    DeclLoopDepth[name] = LoopDepth + 1;
+    DeclLoopDepth[varKey(CurrentScope, name)] = LoopDepth + 1;
   beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool bodyOk = visit(node->getBody());
@@ -4902,7 +4903,7 @@ bool Sema::visitLockStmt(ast::LockStmt *node) {
   CurrentScope->Kinds[b->getName()] = b->getMode() == ast::ParamMode::View
                                           ? VarKind::ViewLocal
                                           : VarKind::Inout;
-  DeclLoopDepth[b->getName()] = LoopDepth;
+  DeclLoopDepth[varKey(CurrentScope, b->getName())] = LoopDepth;
   ++LockDepth;
   const bool ok = visit(node->getBody());
   --LockDepth;
@@ -5438,7 +5439,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
         std::exchange(TaskLocals, {});
     for (size_t i = 0; i < node->getParams().size(); ++i)
       if (ast::isa<ast::TaskType>(paramTypes[i]))
-        TaskLocals[node->getParams()[i].getName()] = node->getParams()[i].Loc;
+        TaskLocals[varKey(CurrentScope, node->getParams()[i].getName())] =
+            node->getParams()[i].Loc;
     const bool savedAsync = std::exchange(InAsyncFn, node->isAsync());
     const ast::Qualifier savedResultQual =
         std::exchange(CurrentResultQual, node->getResultQual());
@@ -5449,7 +5451,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     const bool savedFlowEnded = std::exchange(FlowEnded, false);
     DeclLoopDepth.clear();
     for (const ast::Param &p : node->getParams())
-      DeclLoopDepth[p.getName()] = 0;
+      DeclLoopDepth[varKey(CurrentScope, p.getName())] = 0;
     bool ok = visitBody(node->getBody()->getStatements());
     // The function's task handles are spent where its body ends.
     if (ok && !FlowEnded)
@@ -5667,8 +5669,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (node->isLet())
     CurrentScope->Kinds[node->getName()] = VarKind::Let;
   // The concurrency prototype.
-  DeclLoopDepth[node->getName()] = LoopDepth;
-  MovedVars.erase(node->getName());
+  DeclLoopDepth[varKey(CurrentScope, node->getName())] = LoopDepth;
+  MovedVars.erase(varKey(CurrentScope, node->getName()));
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
@@ -5910,7 +5912,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   CurrentScope->declare(node->getName(), declTy);
   CurrentScope->Quals[node->getName()] = qual;
   if (ast::isa<ast::TaskType>(declTy))
-    TaskLocals[node->getName()] = node->getLocation();
+    TaskLocals[varKey(CurrentScope, node->getName())] = node->getLocation();
   return checkLocalBorrow(node) && viewOk;
 }
 

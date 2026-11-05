@@ -685,6 +685,26 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
 
 // -- Moves (docs/design/concurrency.md, "Use after move")
 
+std::string Sema::varKey(const Scope *owner, std::string_view name) {
+  std::string key(name);
+  key += '#';
+  key += std::to_string(owner ? owner->Id : 0);
+  return key;
+}
+
+std::string Sema::varKey(std::string_view name) const {
+  return varKey(CurrentScope ? CurrentScope->findOwner(name) : nullptr, name);
+}
+
+std::string_view Sema::keyName(std::string_view key) {
+  return key.substr(0, key.rfind('#'));
+}
+
+unsigned Sema::keyScope(std::string_view key) {
+  return static_cast<unsigned>(
+      std::stoul(std::string(key.substr(key.rfind('#') + 1))));
+}
+
 Sema::MatchMovesGuard::MatchMovesGuard(Sema &s, ast::MatchStmt *node) : S(s) {
   S.MatchMoveStack.push_back({node, S.MovedVars, {}, true});
 }
@@ -763,15 +783,22 @@ void Sema::finishLoopMoves() {
 }
 
 void Sema::checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc) {
-  for (const auto &[name, st] : MovedVars) {
-    if (loop.Entry.count(name))
+  // The scopes the loop stands in: their variables are the enclosing
+  // function's.  The body's own (its locals, an arm's or a lock block's
+  // binding) are declared anew each iteration.
+  std::set<unsigned> outer;
+  for (const Scope *s = loop.Outer; s; s = s->Parent)
+    outer.insert(s->Id);
+  for (const auto &[key, st] : MovedVars) {
+    if (loop.Entry.count(key))
       continue; // moved before the loop: reported at its use
-    // The body's own variables are declared anew each iteration.
-    if (auto d = DeclLoopDepth.find(name);
-        d != DeclLoopDepth.end() && d->second >= loop.Depth)
+    if (auto d = DeclLoopDepth.find(key);
+        (d != DeclLoopDepth.end() && d->second >= loop.Depth) ||
+        !outer.count(keyScope(key)))
       continue;
-    if (!LoopMovesReported.insert(name + "@" + at(loop.Loc)).second)
+    if (!LoopMovesReported.insert(key + "@" + at(loop.Loc)).second)
       continue;
+    const std::string name(keyName(key));
     error(st.At, "'" + name + "' is moved in the loop at " + at(loop.Loc) +
                      " and not assigned again before the next iteration" +
                      (at(loc) == at(loop.Loc)
@@ -840,7 +867,7 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
     error(loc, why + "; it cannot be moved out of");
     return nullptr;
   }
-  MovedVars[name] = MovedState{loc, false, ""};
+  MovedVars[varKey(name)] = MovedState{loc, false, ""};
   return ty;
 }
 
@@ -908,12 +935,12 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
   }
   // (A move in a loop of a variable declared outside it is checked at the
   // iteration's end: checkLoopIteration.)
-  MovedVars[name] = MovedState{node->getLocation(), false, ""};
+  MovedVars[varKey(name)] = MovedState{node->getLocation(), false, ""};
   return ty;
 }
 
 bool Sema::checkNotMoved(const std::string &name, ast::SourceLocation loc) {
-  auto moved = MovedVars.find(name);
+  auto moved = MovedVars.find(varKey(name));
   if (moved == MovedVars.end())
     return true;
   const MovedState &st = moved->second;
@@ -934,10 +961,10 @@ void Sema::checkTasksAwaited(const Scope *s, const char *exit,
   for (const auto &[name, ty] : s->Locals) {
     if (!ty || !ast::isa<ast::TaskType>(ty))
       continue;
-    auto moved = MovedVars.find(name);
+    auto moved = MovedVars.find(varKey(s, name));
     if (moved != MovedVars.end() && !moved->second.Maybe)
       continue;
-    auto decl = TaskLocals.find(name);
+    auto decl = TaskLocals.find(varKey(s, name));
     const ast::SourceLocation where = exit                       ? loc
                                       : decl != TaskLocals.end() ? decl->second
                                                                  : loc;
@@ -1120,7 +1147,7 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
     if (const auto *id = ast::dyn_cast<ast::Identifier>(src);
         id && !id->isFunctionRef() && CurrentScope &&
         CurrentScope->findOwner(id->getName()))
-      MovedVars[id->getName()] =
+      MovedVars[varKey(id->getName())] =
           MovedState{src->getLocation(), false, "its use as a value"};
   if (!ty || !sharesStorage(ty) || ast::isa<ast::PoisonType>(ty))
     return true; // a value is copied
