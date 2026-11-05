@@ -568,6 +568,19 @@ private:
   /// Put the methods of those copies in Bodies, as declareStruct and
   /// declareClass put this module's.
   void readImportedCopies();
+  /// The methods of the struct copies that the exporting module's code does
+  /// not define (its file keeps of a copy it does not expose only what its
+  /// own code reaches, docs/design/pkm.md §5.13), each with the struct it
+  /// is a method of: this module emits them, as shared copies
+  /// (declareDroppedCopyMethods, lowerDroppedCopyMethods).
+  std::vector<std::pair<ast::StructDecl *, ast::FuncDecl *>> DroppedCopyMethods;
+  /// The functions of DroppedCopyMethods, shared like this module's copies
+  /// (markShared).
+  std::unordered_set<std::string> DroppedCopyFunctions;
+  /// Declare DroppedCopyMethods, before any body is emitted.
+  void declareDroppedCopyMethods();
+  /// Emit their bodies.
+  void lowerDroppedCopyMethods();
   /// The class or struct whose method each body of Bodies is.
   std::unordered_map<const ast::FuncDecl *, ast::Type *> BodyOwners;
   /// The function or method named @p name in Bodies, or null.
@@ -1144,6 +1157,10 @@ private:
   /// Emit the bodies: each method, and the constructor (zero the value,
   /// then `__init__`).
   Val lowerStructDecl(ast::StructDecl *sd);
+  /// Emit the body of @p funcDecl, a method of @p sd's struct @p st, into
+  /// the function declareStruct declared for it.
+  void lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
+                         ast::FuncDecl *funcDecl);
   /// The struct type of @p e's value, canonical in this module, or nullptr.
   ast::StructType *getExprStructType(ast::Expr *e);
   /// `T` when @p st is the standard library's `mem::Buffer<T>` (one field,

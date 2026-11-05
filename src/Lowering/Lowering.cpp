@@ -573,6 +573,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // no field of a class this module declares, as its type arguments are
   // that module's (readImportedCopies).
   readImportedCopies();
+  declareDroppedCopyMethods();
   // Each body points into its own module's file, or into its template's
   // module's (warnings say where).
   auto from = [&](const ast::Decl *d) {
@@ -592,6 +593,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
     visitFuncDecl(fn);
   }
   Source = &SemaCtx.Source;
+  lowerDroppedCopyMethods();
   return Val();
 }
 

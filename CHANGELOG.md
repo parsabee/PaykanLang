@@ -125,6 +125,11 @@ samples/concurrency/README.md.
   applies to objects; 'int' is a value` at each `mut E` of the instantiation, so one
   container could not hand out a class's elements writable and a value's as copies
   (src/AST/AST.cpp, ASTCloner; samples/codegen/90_mut_type_parameter_of_a_value.pkn).
+- A method of an instantiation an import's interface gives, that the import's module file
+  does not keep (it keeps of a copy it does not expose only what its own code reaches), is
+  emitted by the module that calls it, as a shared copy: `mem::Buffer<Str>.grow` in a program
+  that imports `::collections` was `internal compiler error: no function for method 'grow' of
+  struct 'Buffer<Str>'` (src/Lowering; samples/codegen/91_method_an_import_dropped.pkn).
 
 ### Removed
 

@@ -94,34 +94,75 @@ void ModuleLowering::declareStruct(ast::StructDecl *sd) {
   ctor->Params.back().Name = "out";
 }
 
+void ModuleLowering::lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
+                                       ast::FuncDecl *funcDecl) {
+  auto *md = st->findMethod(funcDecl->getName());
+  if (!md)
+    return;
+  pir::Function *fn =
+      FuncByName.at(sd->getName() + kNameSep + funcDecl->getName());
+  FunctionStateGuard fnState(*this, fn, md->getReturnType(),
+                             /*methodClassTy=*/nullptr);
+  {
+    ScopeGuard guard(*this);
+    // `self` names the receiver's storage, as an `inout` parameter of the
+    // struct's type names its caller's.
+    declareMemParam(kSelf, fn->Params[0], st, ast::ParamMode::Inout);
+    size_t at = 1;
+    for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
+      at += declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
+                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
+    emitBody(funcDecl->getBody());
+  }
+  emitImplicitReturn(fn->Sig);
+}
+
+// A copy of an import's instantiation (readImportedCopies) is that module's,
+// which the program links, but its file keeps of a copy it does not expose
+// only what its own code reaches (docs/design/pkm.md §5.13): the
+// `mem::Buffer<Str>` behind `collections::List<Str>`'s private field has no
+// `grow`, which this module may call.  A method the exporting module does
+// not define is this module's to emit, from the copy Sema checked, as a
+// shared copy of its own: the program keeps one of each.
+void ModuleLowering::declareDroppedCopyMethods() {
+  for (ast::StructDecl *sd : SemaCtx.ImportedInstanceStructs) {
+    ast::StructType *st = ASTCtx.lookupStructType(sd->getName());
+    const std::string *origin = st ? typeOrigin(sd->getName()) : nullptr;
+    if (!origin || *origin == Mod.Name)
+      continue;
+    auto modIt = PL.ByName.find(*origin);
+    const pir::Module *def = modIt == PL.ByName.end() ? nullptr : modIt->second;
+    for (ast::FuncDecl *funcDecl : sd->getMethods()) {
+      ast::MethodDecl *md = st->findMethod(funcDecl->getName());
+      if (!md || !funcDecl->getBody())
+        continue;
+      const std::string symbol = sd->getName() + kNameSep + funcDecl->getName();
+      const pir::Function *f = def ? def->findFunction(symbol) : nullptr;
+      if ((f && def->defines(*f)) || FuncByName.count(symbol))
+        continue;
+      pir::Function *fn =
+          getOrCreateFunction(symbol, structMethodSignature(md));
+      fn->Params[0].Name = kSelf;
+      nameParams(*fn, 1, funcDecl->getParams());
+      DroppedCopyMethods.emplace_back(sd, funcDecl);
+      DroppedCopyFunctions.insert(symbol);
+    }
+  }
+}
+
+void ModuleLowering::lowerDroppedCopyMethods() {
+  for (auto &[sd, funcDecl] : DroppedCopyMethods)
+    lowerStructMethod(sd, ASTCtx.lookupStructType(sd->getName()), funcDecl);
+}
+
 Val ModuleLowering::lowerStructDecl(ast::StructDecl *sd) {
   auto *st = ASTCtx.lookupStructType(sd->getName());
   assert(st && "StructType must have been registered by Sema");
   declareStruct(sd);
 
   // 1. Method bodies.
-  for (auto *funcDecl : sd->getMethods()) {
-    auto *md = st->findMethod(funcDecl->getName());
-    if (!md)
-      continue;
-    pir::Function *fn =
-        FuncByName.at(sd->getName() + kNameSep + funcDecl->getName());
-    FunctionStateGuard fnState(*this, fn, md->getReturnType(),
-                               /*methodClassTy=*/nullptr);
-    {
-      ScopeGuard guard(*this);
-      // `self` names the receiver's storage, as an `inout` parameter of the
-      // struct's type names its caller's.
-      declareMemParam(kSelf, fn->Params[0], st, ast::ParamMode::Inout);
-      size_t at = 1;
-      for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
-        at +=
-            declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
-                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
-      emitBody(funcDecl->getBody());
-    }
-    emitImplicitReturn(fn->Sig);
-  }
+  for (auto *funcDecl : sd->getMethods())
+    lowerStructMethod(sd, st, funcDecl);
 
   // 2. The constructor: the value starts out all zero (so an optional field
   //    `__init__` leaves alone is None, and a reference field it assigns

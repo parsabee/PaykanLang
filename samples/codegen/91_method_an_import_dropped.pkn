@@ -1,0 +1,29 @@
+// 91 — a method of an imported instantiation that its module dropped
+// Exercises: an instantiation an import's interface gives (the
+//            `mem::Buffer<Str>` behind `::collections`' `List<Str>`) is
+//            that module's, which the program links, but its module file
+//            keeps only the methods its own code reaches of a copy it does
+//            not expose (docs/design/pkm.md §5.13): this module emits the
+//            methods it calls that the import's code does not define
+//            (`grow`, `reserve`, `copy`) as shared copies of its own.  It
+//            was `internal compiler error: no function for method 'grow' of
+//            struct 'Buffer<Str>'`.
+// expect-stdout: 3 b x 4
+import ::io;
+import ::collections as cl;
+import ::memory as mem;
+
+fn main() -> int {
+  b = mem::Buffer<Str>();
+  b.grow(2);
+  b.set(1, cl::substring("abc", 1, 2));
+  b.reserve(3);
+  b.set(2, "x");
+  match b.copy(1) {
+    s: Ok { io::print(Str(b.len()) + " " + s.value + " " + b.at(2)); }
+    Err { io::print("unset"); }
+  }
+  let words = cl::split("a b c d", " ");
+  io::println(" " + Str(words.len()));
+  return 0;
+}
