@@ -922,6 +922,16 @@ translateToLLVMIR(ModuleOp module, llvm::LLVMContext &ctx,
   auto llvmModule = translateModuleToLLVMIR(module, ctx, name);
   if (!llvmModule)
     return Status::error("MLIR -> LLVM IR translation failed:\n" + diagnostics);
+  // Paykan_malloc returns a block of its own every time (Runtime.h), which
+  // LLVM knows only from the declaration's attributes: without `noalias` it
+  // cannot tell two objects apart, so a store to one object's field forces
+  // a reload of every field of the other, and a loop over fields reached
+  // through another object keeps them in memory instead of in registers.
+  if (llvm::Function *malloc = llvmModule->getFunction(names::kPaykanMalloc)) {
+    malloc->addRetAttr(llvm::Attribute::NoAlias);
+    malloc->addFnAttr(
+        llvm::Attribute::getWithAllocSizeArgs(ctx, 0, std::nullopt));
+  }
   return llvmModule;
 }
 

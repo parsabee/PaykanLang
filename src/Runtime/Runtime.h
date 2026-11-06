@@ -34,6 +34,15 @@ extern "C" {
 #define PAYKAN_NORETURN _Noreturn
 #endif
 
+// An allocator: what it returns is a fresh block that no other pointer
+// reaches, of the size its first argument gives (the LLVM backend gives
+// Paykan_malloc's declaration the same attributes, ToLLVM.cpp).
+#if defined(__GNUC__) || defined(__clang__)
+#define PAYKAN_MALLOC __attribute__((malloc, alloc_size(1)))
+#else
+#define PAYKAN_MALLOC
+#endif
+
 // -- Runtime ABI version
 //
 // The ABI of the generated code (object layout, vtable slots, calling
@@ -962,7 +971,7 @@ typedef struct PaykanHeapStats {
 
 /// Allocate `size` bytes (a block of its own for 0 too), or panic when the
 /// memory is not there.
-void *Paykan_malloc(size_t size);
+PAYKAN_MALLOC void *Paykan_malloc(size_t size);
 
 /// Resize a block previously returned by Paykan_malloc/Paykan_realloc to
 /// `size` bytes, or panic when the memory is not there.  Passing NULL
