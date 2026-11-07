@@ -18,7 +18,7 @@ fn main() -> int {
   let ys: Node?[_] = [None, None];  // the None elements take the declared type
   match xs[0] {
     n: Node {
-      io::println(Str<int>(n.v));
+      io::println(Str(n.v));
     }
     None { io::println("none"); }
   }

@@ -2,7 +2,7 @@
 // other operand, and only int promotes to float.
 fn main() -> int {
   let a: i32 = 5;
-  let b: int = 6;
+  let b = 6;
   let c = a + b;    // error: operator '+' is not defined for types 'i32' and 'int' (the operands must have one type: convert one with 'i32(...)' or 'int(...)')
   let d: u8 = 1;
   let e = d < a;    // error: operator '<' is not defined for types 'u8' and 'i32' (the operands must have one type: convert one with 'u8(...)' or 'i32(...)')

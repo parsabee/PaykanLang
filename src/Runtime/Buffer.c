@@ -25,15 +25,28 @@
 #define PAYKAN_BUFFER_MIN_CAP 8
 
 static void PaykanBuffer_destroy(PaykanObject *self);
+static void PaykanBuffer_walk(PaykanObject *self);
 
 PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanBuffer_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanObject_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
+    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanBuffer_walk,
 };
 
 static void *buffer_value(const PaykanBuffer *buf, int64_t i) {
   return buf->data + (size_t)i * (size_t)buf->type->size;
+}
+
+/// The walk of a buffer (the prototype): freezes the references its live
+/// values hold (storage never set holds none).
+static void PaykanBuffer_walk(PaykanObject *self) {
+  PaykanBuffer *buf = (PaykanBuffer *)self;
+  for (int64_t i = 0; i < buf->len; ++i) {
+    void *v = buffer_value(buf, i);
+    if (!PaykanType_isUnset(buf->type, v))
+      Paykan_freeze_mem(buf->type, v);
+  }
 }
 
 /// Drop values [from, to): release the references they hold.

@@ -1,0 +1,80 @@
+// The concurrency prototype: precise moves (docs/design/concurrency.md).
+// A move on one path of an `if`, revival by an assignment, a move in a loop
+// assigned again before the next iteration, a `break` after a move, a
+// `match` whose arms all move, and a partial move `move h.job`.
+// expect-stdout: ran 1
+// expect-stdout: 2 ccc
+// expect-stdout: total 5 xy
+// expect-stdout: kk
+// expect-stdout: mm
+// expect-stdout: inner
+// expect-stdout: left
+
+import ::io;
+
+class Job {
+  name: Str;
+}
+class Holder {
+  job: Job;
+  tag: Str;
+}
+struct Pair {
+  left: Job;
+  n: int;
+}
+
+async fn run(j: Job) -> int { return j.name.len(); }
+
+fn keep(j: Job) -> int {
+  return j.name.len();
+}
+
+fn main() -> int {
+  // a move in one branch, a use on the other: fine
+  let a = Job("a");
+  let flag = True;
+  if flag {
+    let t = run(move a);
+    io::println("ran " + Str(await t));
+  } else {
+    io::println("kept " + a.name);
+  }
+  // revived by an assignment after the move
+  b = Job("bb");
+  let n = keep(move b);
+  b = Job("ccc");
+  io::println(Str(n) + " " + b.name);
+  // a loop that moves and assigns again before the next iteration
+  j = Job("x");
+  total = 0;
+  for i in 0..3 {
+    total += keep(move j);
+    j = Job("xy");
+  }
+  io::println("total " + Str(total) + " " + j.name);
+  // a break leaves with the move; an assignment revives before any use
+  k = Job("k");
+  while True {
+    keep(move k);
+    break;
+  }
+  k = Job("kk");
+  io::println(k.name);
+  // a match whose arms all move: the variable is gone after it
+  m = Job("m");
+  match 3 {
+    3 { keep(move m); }
+    _ { keep(move m); }
+  }
+  m = Job("mm");
+  io::println(m.name);
+  // a partial move: the field leaves, the holder ends
+  let h = Holder(Job("inner"), "t");
+  let inner = move h.job;
+  io::println(inner.name);
+  let p = Pair(Job("left"), 1);
+  let l = move p.left;
+  io::println(l.name);
+  return 0;
+}

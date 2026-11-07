@@ -255,11 +255,25 @@ A PIR program is a plain data structure
 ([`include/paykan/pir/PIR.h`](../include/paykan/pir/PIR.h)): modules hold
 globals, classes (full layout and vtable as data) and functions; a function
 holds parameters, `local` slots and a body of structured statements (`if`,
-`while`, `break`, `continue`, `ret`, `unreachable`, instructions). The
+`switch`, `while`, `break`, `continue`, `ret`, `unreachable`, instructions). The
 semantics of every item and instruction, the runtime ABI the generated code
 calls into, and the ownership rules the lowering has already applied are in
 [`pir.md`](pir.md). A backend may rely on everything the verifier checks
 (§9 there).
+
+The concurrency prototype adds three forms ([`pir.md`](pir.md) §6), none
+of which obliges a backend to run anything on a thread. A `while` may
+carry a `parallel` annotation: the loop is a counted loop whose iterations
+are independent, so a backend may run them in order, as the plain `while`
+they are, or on threads; one that splits the loop into chunks gives each
+chunk its own partial for every reduction, starting at the op's identity,
+and folds the partials with the op in chunk order, so a float sum is the
+same on every run. An `async_call` starts an `async fn` as a task, a
+`ptr` the backend's runtime owns, and an `await` is the task's result: a
+backend without an async runtime runs the callee at the `async_call` and
+makes the `await` its value, as the `mlir` backend's C path does
+(`src/Backends/MLIR/Lowering/PIRToStandard.cpp`, the `M.sequential()`
+branches).
 
 Generated code links `libpaykan_runtime.a` and uses `Runtime.h` (installed as
 `include/paykan/Runtime.h`); the runtime symbols a program may call are the

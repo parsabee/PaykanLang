@@ -28,15 +28,15 @@ fn mk() -> (Str, int) {
 
 fn main() -> int {
   let t = (1, "a");                  // literal with a Str element
-  let s: Str = t.1;                  // new owner of the element
+  let s = t.1;                       // new owner of the element
   str, n = mk();                     // destructure a returned temporary
   let nested = ((1, "x"), (2.5, t)); // nested tuple holding a copy of t
   io::println(nested);
   io::println(mk().0);               // call-rooted element read
-  let arr: (int, Str)[3] = [t, (2, "b"), mk_pair()];
-  let h: Holder = Holder(t);
+  let arr = [t, (2, "b"), mk_pair()];
+  let h = Holder(t);
   pair: view = h.get();         // a 'view' of h.pair
-  io::println(Str<bool>(t == (1, "a")));
+  io::println(Str(t == (1, "a")));
   let m = t;                     // a copy: retains t's Str again
   let ints = (1, (2, 3));        // only ints: nothing allocated
   io::println(m.1 + s + str + pair.1 + arr[2].1);

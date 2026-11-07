@@ -1,0 +1,32 @@
+// A `locked mut` cell's contents are reached in a `lock` block only, and
+// a `lock` block neither waits nor nests.  A `locked` object without `mut`
+// is one nothing writes (a warning at its declaration), so an `inout`
+// block on it is an error.  Each line marked `error` is rejected by Sema.
+import ::io;
+
+class Counts {
+  hits: int[16];
+  total: int;
+}
+
+async fn ping(n: int) -> int { return n; }
+
+// warning: `locked Counts` locks an object nothing writes
+fn bump(c: locked Counts) {
+  lock c as m: inout { m.total = 1; }   // error: an `inout` block needs `locked mut Counts`
+}
+
+fn main() -> int {
+  let counts: locked mut = Counts([0; 16], 0);
+  let t = counts.total;                 // error: locked: reach its contents in a lock block
+  lock counts as c: view {
+    c.total = 5;                        // error: view binding is read-only
+    let p = ping(1);
+    let r = await p;                    // error: await in a lock block
+    lock counts as d: inout { }         // error: nested lock
+  }
+  let n = 3;
+  lock n as m: inout { }                // error: not locked
+  let k: locked mut int = 1;            // error: the prototype locks objects
+  return 0;
+}

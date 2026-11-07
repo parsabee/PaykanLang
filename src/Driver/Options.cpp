@@ -56,6 +56,9 @@ constexpr Flag kFlags[] = {
      "Report how each imported module was resolved (on stderr)"},
     {"stats", &Options::Stats,
      "Report what the PIR passes did (on stderr), after the last one ran"},
+    {"strict-ownership", &Options::StrictOwnership,
+     "The concurrency prototype's copy rule: a unique reference read from "
+     "a place is moved ('move x'), never copied"},
     {"track-heap", &Options::TrackHeap,
      "Run with heap tracking and dump statistics (incl. leaks) at exit; "
      "a built program tracks its heap under PAYKAN_TRACK_HEAP"},
@@ -527,8 +530,11 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)
     os << "  --" << f.Name
-       << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
-       << f.Help << "\n";
+       << std::string(std::string_view(f.Name).size() < 16
+                          ? 16 - std::string_view(f.Name).size()
+                          : 1,
+                      ' ')
+       << "- " << f.Help << "\n";
   os << "  --emit-llvm       - Print the program's LLVM IR and exit "
         "(--emit-source)\n"
      << "  --emit-c          - Print the program's C and exit\n"

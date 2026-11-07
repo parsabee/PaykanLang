@@ -21,7 +21,7 @@ fn pass(n: Node?) -> Node? {
 fn main() -> int {
   a: Node? = None;
   let b: Node? = Node(1);
-  let n: Node = Node(2);
+  let n = Node(2);
   let c: Node? = n;            // Node widens to Node?
   a = b;
   a = None;

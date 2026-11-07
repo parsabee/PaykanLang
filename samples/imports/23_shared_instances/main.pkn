@@ -18,18 +18,18 @@ class Holder {
 
 fn reads(c: cells::Cell<Str>) -> Str => c.v + Str(c.size());
 
-fn replaces(c: cells::Cell<Str>) -> Str => c.v + Str(c.put("new" + "!"));
+fn replaces(c: mut cells::Cell<Str>) -> Str => c.v + Str(c.put("new" + "!"));
 
 fn readsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.size());
 
-fn setsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.set("other" + "?"));
+fn setsSlot(h: mut Holder) -> Str => h.slot.v + Str(h.slot.set("other" + "?"));
 
 fn main() -> int {
-  let c = cells::cellOf("old" + "?");
+  let c: mut = cells::cellOf("old" + "?");
   io::println(reads(c));
   io::println(replaces(c));
   io::println(reads(c));
-  let h = Holder(cells::slotOf("first" + "."));
+  let h: mut = Holder(cells::slotOf("first" + "."));
   io::println(readsSlot(h));
   io::println(setsSlot(h));
   io::println(readsSlot(h));

@@ -38,9 +38,9 @@ constexpr uint8_t kIndexTrailer[4] = {'Y', 'S', 'K', 'P'};
 constexpr uint32_t kKnownModuleFlags = kFlagNamesStripped | kFlagDefinesMain;
 constexpr uint32_t kFnExtern = 1u << 0, kFnHasModule = 1u << 1,
                    kFnHasSymbol = 1u << 2, kFnShared = 1u << 3,
-                   kFnHasUses = 1u << 4;
+                   kFnHasUses = 1u << 4, kFnAsync = 1u << 5;
 constexpr uint32_t kKnownFnFlags =
-    kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses;
+    kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses | kFnAsync;
 constexpr uint32_t kClassExtern = 1u << 0, kClassShared = 1u << 1;
 constexpr uint32_t kKnownClassFlags = kClassExtern | kClassShared;
 
@@ -273,6 +273,7 @@ private:
       type(in.CastTo);
       break;
     case Opcode::Call:
+    case Opcode::AsyncCall:
     case Opcode::FnAddr:
       str(in.Callee);
       break;
@@ -361,6 +362,22 @@ private:
         E.block(w.CondBlock.get());
         E.operand(w.Cond);
         E.block(w.Body.get());
+        // The `parallel` annotation (the concurrency prototype): the
+        // counter, the trip count, the privates, the reductions.
+        E.W.u8(w.Par ? 1 : 0);
+        if (w.Par) {
+          const Parallel &p = *w.Par;
+          E.W.uleb(p.Counter);
+          E.operand(p.Count);
+          E.W.uleb(p.Privates.size());
+          for (LocalId l : p.Privates)
+            E.W.uleb(l);
+          E.W.uleb(p.Reductions.size());
+          for (const Parallel::Reduction &r : p.Reductions) {
+            E.W.uleb(r.Partial);
+            E.W.u8(opcodeEntry(r.Op).Code);
+          }
+        }
       }
       void operator()(const Break &) const { E.W.u8(kStBreak); }
       void operator()(const Continue &) const { E.W.u8(kStContinue); }
@@ -395,7 +412,7 @@ private:
     str(f.Name);
     W.u32((f.IsExtern ? kFnExtern : 0) | (f.Module.empty() ? 0 : kFnHasModule) |
           (f.Symbol.empty() ? 0 : kFnHasSymbol) | (f.Shared ? kFnShared : 0) |
-          (f.Uses.empty() ? 0 : kFnHasUses));
+          (f.IsAsync ? kFnAsync : 0) | (f.Uses.empty() ? 0 : kFnHasUses));
     sig(f.Sig);
     if (!f.Module.empty())
       str(f.Module);
@@ -553,6 +570,7 @@ public:
       return R.fail("reserved function flag", R.offset() - 4);
     f.IsExtern = (flags & kFnExtern) != 0;
     f.Shared = (flags & kFnShared) != 0;
+    f.IsAsync = (flags & kFnAsync) != 0;
     if (!bodies)
       return true;
     if (!sig(f.Sig))
@@ -749,8 +767,8 @@ private:
     if (in.NonNull && in.Op != Opcode::Retain)
       return R.fail("a nonnull mark before an instruction that is no retain",
                     R.offset() - 1);
-    if (owns && in.Op != Opcode::Call && in.Op != Opcode::VCall &&
-        in.Op != Opcode::ICall)
+    if (owns && in.Op != Opcode::Call && in.Op != Opcode::AsyncCall &&
+        in.Op != Opcode::VCall && in.Op != Opcode::ICall)
       return R.fail("an ownership mark before an instruction that is no call",
                     R.offset() - 1);
     if (!R.uleb32(in.Result.Id))
@@ -778,6 +796,7 @@ private:
         return false;
       break;
     case Opcode::Call:
+    case Opcode::AsyncCall:
     case Opcode::FnAddr:
       if (!str(in.Callee))
         return false;
@@ -910,6 +929,33 @@ private:
       While w;
       if (!subBlock(w.CondBlock) || !operand(w.Cond) || !subBlock(w.Body))
         return false;
+      uint8_t parallel;
+      if (!flag(parallel))
+        return false;
+      if (parallel) {
+        Parallel p;
+        uint32_t n;
+        if (!R.uleb32(p.Counter) || !operand(p.Count) || !R.uleb32(n))
+          return false;
+        for (uint32_t i = 0; i < n; ++i) {
+          LocalId l;
+          if (!R.uleb32(l))
+            return false;
+          p.Privates.push_back(l);
+        }
+        if (!R.uleb32(n))
+          return false;
+        for (uint32_t i = 0; i < n; ++i) {
+          Parallel::Reduction r;
+          uint8_t code;
+          if (!R.uleb32(r.Partial) || !R.u8(code))
+            return false;
+          if (!opcodeFromCode(code, r.Op))
+            return R.fail("reserved opcode in a reduction");
+          p.Reductions.push_back(r);
+        }
+        w.Par = std::move(p);
+      }
       s = std::move(w);
       return true;
     }

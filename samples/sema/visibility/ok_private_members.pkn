@@ -9,8 +9,11 @@ class Counter {
   fn __bump(by: int)     { self.__count = self.__count + by; }
 }
 impl Counter {
-  static fn make(n: int) -> Counter
-                               { let c = Counter(0, n); c.__bump(1); return c; }
+  static fn make(n: int) -> Counter {
+    let c: mut = Counter(0, n);
+    c.__bump(1);
+    return c;
+  }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
 }
 trait Named {
@@ -33,7 +36,7 @@ fn _helper(n: view _Node) -> int {
   return n.v;
 }
 fn main() -> int {
-  let c = Counter::make(3);
+  let c: mut = Counter::make(3);
   c.tick();
   p = P(1);
   p.bump();

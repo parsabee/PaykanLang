@@ -272,7 +272,9 @@ and loads it back. Each task is one line, `<done>|<priority>|<title>`:
 `done <number>` or `list`. It loads `tasks.txt`, runs the command, and saves the list when
 the command changed it. The modules `task`, `text` and `list` are the ones from
 [Modules](../language/15-modules.md#project-tasks-as-a-multi-file-program), with one
-addition to `TaskList`: `addTask`, for adding an existing `Task` while loading.
+addition to `TaskList`: `addTask`, for adding an existing `Task` while loading, which stores
+it with `move`, as the slot is the list's to change
+([Generics](../language/13-generics.md#project-undo-with-a-generic-stack)).
 
 <details markdown="block">
 <summary>The modules <code>task</code>, <code>text</code> and <code>list</code></summary>
@@ -370,7 +372,7 @@ class TaskList {
 
   fn addTask(t: task::Task) -> bool {
     if self.count == self.tasks.len() { return False; }
-    self.tasks[self.count] = t;
+    self.tasks[self.count] = move t;
     self.count = self.count + 1;
     return True;
   }
@@ -420,7 +422,7 @@ import ::io;
 import tasks::{task, text, list};
 
 fn load(path: Str) -> list::TaskList {
-  let tasks = list::TaskList();
+  let tasks: mut = list::TaskList();
   match io::open(path, "r") {
     r: Ok {
       while True {
@@ -435,14 +437,14 @@ fn load(path: Str) -> list::TaskList {
   return tasks;
 }
 
-fn addLine(tasks: list::TaskList, line: Str) {
+fn addLine(tasks: mut list::TaskList, line: Str) {
   done, rest = text::splitOnce(line, '|');
   priority, title = text::splitOnce(rest, '|');
   if title == "" || (done != "0" && done != "1") {
     io::printerrln("skipping bad line: " + line);
     return;
   }
-  let t = task::Task(title, task::parsePriority(priority));
+  let t: mut = task::Task(title, task::parsePriority(priority));
   t.done = done == "1";
   if !tasks.addTask(t) { io::printerrln("the list is full, skipping: " + line); }
 }
@@ -507,7 +509,7 @@ fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
 fn main(args: view Str[]) -> int {
   if args.len() < 2 { return usage(); }
   let path = "tasks.txt";
-  let tasks: list::TaskList = store::load(path);
+  let tasks: mut list::TaskList = store::load(path);
   changed = False;
   match args[1] {
     "add" {

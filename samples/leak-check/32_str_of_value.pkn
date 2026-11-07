@@ -78,12 +78,12 @@ class A {
 }
 
 // The next `toString()` of `h.c` replaces `h.c`, which holds it alone.
-fn arm(h: H, n: int) {
+fn arm(h: mut H, n: int) {
   let v = h;
   h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
 }
 
-fn armB(b: B, n: int) {
+fn armB(b: mut B, n: int) {
   let v = b;
   b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
 }
@@ -104,7 +104,7 @@ fn main() -> int {
       + " " + Str(None));
 
   // Of a call, a field, a list's element and a generic value.
-  let bx = Box(make(9), "x");
+  let bx: mut = Box(make(9), "x");
   xs = collections::List<Node>();
   xs.push(make(10));
   io::println(Str(make(8)) + " " + Str(bx.node) + " " + Str(xs.at(0)) + " "
@@ -118,12 +118,12 @@ fn main() -> int {
   io::println(pair.0 + " " + kept + " " + bx.text);
 
   // An object its own toString() lets go of.
-  let h = H(C("one" + Str(1), fn() {}));
+  let h: mut = H(C("one" + Str(1), fn() {}));
   arm(h, 1);
   let first = Str(h.c);
   arm(h, 2);
   io::println(first + " " + h.c.toString());
-  let a = A(B(C("one" + Str(1), fn() {})));
+  let a: mut = A(B(C("one" + Str(1), fn() {})));
   armB(a.b, 3);
   let third = Str(a.b.c);
   armB(a.b, 4);

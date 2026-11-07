@@ -125,7 +125,7 @@ fn main() -> int {
   l.a.y = 0;                               // a field of a field
   io::println(show(l) + " " + Str(l.length2()));
 
-  let s = Shape(Point::origin());
+  let s: mut = Shape(Point::origin());
   s.at.shift(3, 4);
   io::println(s.at.moved(1, 1));
 
@@ -136,7 +136,7 @@ fn main() -> int {
   io::println(item);
   io::println(copy);
 
-  ps: Point[3] = [Point(1, 1), Point(4, 4), Point(2, 2)];
+  ps = [Point(1, 1), Point(4, 4), Point(2, 2)];
   ps[2].x = 9;                             // an element's field, in place
   io::println(farthest(ps));
   far = farthest(ps);
@@ -145,7 +145,7 @@ fn main() -> int {
 
   let pair = twice(p);                     // (Point, Point)
   let b = Box(Point(2, 3));
-  let t: (Point, Str) = (b.get(), "boxed");
+  let t = (b.get(), "boxed");
   io::println(Str(pair.1.sum()) + " " + Str(t.0.y) + " " + t.1 + " "
       + Str(hashOf(p) == Point(6, 2).hash()));
   return p.sum() + ps[2].x;

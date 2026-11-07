@@ -99,6 +99,22 @@ std::optional<int64_t> ForStmt::constantStep() const {
   return negated ? -lit->getValue() : lit->getValue();
 }
 
+// -- Qualifier
+
+const char *Qualifier::spelling() const {
+  switch (Form) {
+  case QualForm::Unique:
+    return Mut ? "mut" : "";
+  case QualForm::Shared:
+    return Mut ? "shared mut" : "shared";
+  case QualForm::AtomicShared:
+    return "atomic shared";
+  case QualForm::Locked:
+    return Mut ? "locked mut" : "locked";
+  }
+  return "";
+}
+
 // -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
@@ -109,6 +125,10 @@ const char *UnaryExpr::getOpcodeStr() const {
     return "!";
   case UnaryOpcode::BitNot:
     return "~";
+  case UnaryOpcode::Move:
+    return "move";
+  case UnaryOpcode::Await:
+    return "await";
   case UnaryOpcode::Count:
     break;
   }
@@ -447,6 +467,12 @@ uint64_t ASTCloner::paramsNamed(const Type *ty) const {
     return paramsNamed(ft->getElementType());
   if (const auto *ot = dyn_cast<OptionalType>(ty))
     return paramsNamed(ot->getInnerType());
+  if (const auto *at = dyn_cast<AtomicType>(ty))
+    return paramsNamed(at->getInnerType());
+  if (const auto *tt = dyn_cast<TaskType>(ty))
+    return paramsNamed(tt->getInnerType());
+  if (const auto *qt = dyn_cast<QualifiedType>(ty))
+    return qt->getInnerType() ? paramsNamed(qt->getInnerType()) : 0;
   uint64_t named = 0;
   if (const auto *gt = dyn_cast<GenericType>(ty)) {
     for (const Type *a : gt->getArgs())
@@ -519,6 +545,38 @@ Type *ASTCloner::cloneType(Type *ty) {
                          : ty;
     noteTypeArgs(copy, gt->getArgs());
     return copy;
+  }
+  if (auto *at = dyn_cast<AtomicType>(ty)) {
+    Type *inner = cloneType(at->getInnerType());
+    if (inner == at->getInnerType() && !Foreign)
+      return ty;
+    return Ctx.make<AtomicType>(at->getLocation(), inner);
+  }
+  if (auto *tt = dyn_cast<TaskType>(ty)) {
+    Type *inner = cloneType(tt->getInnerType());
+    if (inner == tt->getInnerType() && !Foreign)
+      return ty;
+    return Ctx.make<TaskType>(tt->getLocation(), inner);
+  }
+  if (auto *qt = dyn_cast<QualifiedType>(ty)) {
+    Type *inner = qt->getInnerType() ? cloneType(qt->getInnerType()) : nullptr;
+    // `mut T` (or `mut T?`) of a type argument that is a value is that
+    // value: a template's `mut` joins T's own form, as its `T?` does T's
+    // None (docs/design/concurrency.md, "Generics and Copyable"), and a
+    // value's storage is rewritten by assignment, so it has no writes to add
+    // (a written `mut int` is still an error).  Only `mut` joins so:
+    // `shared` on a value stays an error.
+    const Type *written = qt->getInnerType();
+    if (const auto *ot = written ? dyn_cast<OptionalType>(written) : nullptr)
+      written = ot->getInnerType();
+    if (const auto *param = written ? dyn_cast<ClassType>(written) : nullptr;
+        param && Subst.count(param->getName()) &&
+        qt->getQualifier() == Qualifier{QualForm::Unique, true} && inner &&
+        !isRefType(inner) && !isa<AtomicType>(inner) &&
+        !isa<QualifiedType>(inner))
+      return inner;
+    return Ctx.make<QualifiedType>(qt->getLocation(), qt->getQualifier(),
+                                   inner);
   }
   if (auto *ot = dyn_cast<OptionalType>(ty)) {
     Type *inner = cloneType(ot->getInnerType());
@@ -696,8 +754,8 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     auto *l = cast<LambdaExpr>(e);
     std::vector<Param> params;
     for (const Param &p : l->getParams())
-      params.push_back(
-          Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Loc});
+      params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode,
+                             p.Qual, p.Loc});
     auto *copy = Ctx.make<LambdaExpr>(loc, std::move(params),
                                       cloneType(l->getReturnType()),
                                       cloneCompound(l->getBody()));
@@ -745,6 +803,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     nvd->setLet(vd->isLet());
     nvd->setWeak(vd->isWeak());
     nvd->setMode(vd->getMode());
+    nvd->setQualifier(vd->getQualifier());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
   case ASTNode::NK_ExprStmt:
@@ -759,6 +818,15 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     auto *w = cast<WhileStmt>(s);
     return Ctx.make<WhileStmt>(loc, cloneExpr(w->getCondition()),
                                cloneStmt(w->getBody()));
+  }
+  case ASTNode::NK_LockStmt: {
+    auto *l = cast<LockStmt>(s);
+    VarDecl *b = l->getBinding();
+    auto *nb =
+        Ctx.make<VarDecl>(b->getLocation(), in(b->getName()), nullptr, nullptr);
+    nb->setMode(b->getMode());
+    return Ctx.make<LockStmt>(loc, cloneExpr(l->getCell()), nb,
+                              cast<CompoundStmt>(cloneStmt(l->getBody())));
   }
   case ASTNode::NK_ForStmt: {
     auto *f = cast<ForStmt>(s);
@@ -838,7 +906,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
     params.push_back(
-        Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Loc});
+        Param{&in(p.getName()), cloneType(p.ParamType), p.Mode, p.Qual, p.Loc});
   auto *clone = Ctx.make<FuncDecl>(
       fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));

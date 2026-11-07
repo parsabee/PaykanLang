@@ -1,7 +1,7 @@
 // ERROR: non-void method does not always return
 class A {
   fn compute() -> int {
-    let x: int = 1;
+    let x = 1;
     // missing return statement
   }
 }

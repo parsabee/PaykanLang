@@ -133,7 +133,7 @@ class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
   items: Foo[2];
-  fn second() -> int { return self.items[1].v; }   // subscript a member-access array
+  view fn second() -> int { return self.items[1].v; }   // subscript a member-access array
 }
 
 impl Box {
@@ -156,7 +156,7 @@ TEST(RefField, NestedArrayOfArraysField) {
   auto r = compileAndRun(R"(import ::io;
 class Grid {
   rows: int[3][3];
-  fn at(r: int, c: int) -> int {
+  view fn at(r: int, c: int) -> int {
     row: int[3] = self.rows[r];   // subscript the outer 2-D field
     return row[c];
   }
@@ -233,12 +233,12 @@ class Store {
 impl Store {
   fn __init__(){ self.saved = ""; }
 }
-fn stash(st: Store) {
+fn stash(st: mut Store) {
   nm: Named = Named("hello");
   st.keep(nm.name);   // member access as class arg; nm dies at return
 }
 fn main() -> int {
-  st: Store = Store();
+  st: mut Store = Store();
   stash(st);
   stash(st);                 // second call would crash if the first over-freed
   io::println(st.get());         // "hello"
@@ -266,7 +266,7 @@ impl Box {
   fn __init__(){ self.items = [Foo(1), Foo(2)]; }
 }
 fn main() -> int {
-  b: Box = Box();
+  b: mut Box = Box();
   b.set1(Foo(99));
   io::println(Str<int>(b.get1()));   // 99
   return 0;
@@ -284,7 +284,7 @@ TEST(ArrayPromotion, IntElementsIntoFloatArray) {
   auto r = compileAndRun(R"(import ::io;
     class C {
       fs: float[2];
-      fn sum(ys: view float[]) -> float { return ys[0] + ys[1]; }
+      view fn sum(ys: view float[]) -> float { return ys[0] + ys[1]; }
     }
 
     impl C {

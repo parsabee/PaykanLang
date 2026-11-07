@@ -56,6 +56,7 @@ Sema::Scope *Sema::Scope::findOwner(std::string_view name) {
 
 Sema::ScopeGuard::ScopeGuard(Sema &s)
     : S(s), ScopeObj(std::make_unique<Scope>(s.CurrentScope)) {
+  ScopeObj->Id = S.NextScopeId++;
   S.CurrentScope = ScopeObj.get();
 }
 
@@ -70,8 +71,11 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
 
 void Sema::declareFunction(std::string_view name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys, bool isBuiltin) {
-  FunctionTable[std::string(name)] = {
-      retTy, std::move(paramTys), isBuiltin, {}};
+  FunctionSig sig;
+  sig.ReturnType = retTy;
+  sig.ParamTypes = std::move(paramTys);
+  sig.IsBuiltin = isBuiltin;
+  FunctionTable[std::string(name)] = std::move(sig);
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(std::string_view name) const {
@@ -341,6 +345,14 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 }
 
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
+  // A value into a slot of an `atomic` type (the prototype): the slot takes
+  // a new cell holding it (an `atomic` place's handle is passed as it is).
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(dst);
+      at && srcTy && !ast::isa<ast::AtomicType>(srcTy) &&
+      isAssignable(at->getInnerType(), srcTy)) {
+    src->setNewAtomicCell(at);
+    return true;
+  }
   // `None` into an optional slot: statically the literal is `Obj` (a design
   // decision — see docs/language/12-optionals.md), but in this position it
   // denotes the absent `T?` value.  Record that contextual type on the
@@ -744,8 +756,55 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       ResolvedTypes.insert(canonical);
     return canonical;
   };
+  // A qualified type (the concurrency prototype): the inner type, its
+  // qualifier left for the declaration to take (takeQualifier).
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    if (!qt->getInnerType()) {
+      error(loc, std::string("'") + qt->getQualifier().spelling() +
+                     "' needs a type here ('" + qt->getQualifier().spelling() +
+                     " T'); only a variable declaration infers it");
+      return nullptr;
+    }
+    FixedArrayAllowed = allowFixed;
+    InferredLengthAllowed = allowInferred;
+    SliceAllowed = allowSlice;
+    NoArrayHolder = noArray;
+    ast::Type *inner = resolveType(qt->getInnerType(), loc, context);
+    if (!inner || !checkQualifierApplies(qt->getQualifier(), inner, loc))
+      return nullptr;
+    LastQualifier = qt->getQualifier();
+    return inner;
+  }
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
+  // `atomic T` (the concurrency prototype): T is a number, `bool` or
+  // `char` (the design's fixed arrays of them are not in the prototype).
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
+    ast::Type *inner = resolveType(at->getInnerType(), loc, context);
+    if (!inner)
+      return nullptr;
+    auto *bt = ast::dyn_cast<ast::BuiltinType>(inner);
+    if (!bt || bt->getTypeKind() == ast::BuiltinType::Void) {
+      std::string msg = "'atomic' holds a number, a 'bool' or a 'char', not '";
+      msg += typeName(inner);
+      msg += "'";
+      if (ast::isRefType(inner)) {
+        // An object crosses threads frozen or behind a lock.
+        msg += ": an object crosses threads as 'atomic shared ";
+        msg += typeName(inner);
+        msg += "' (frozen) or 'locked mut ";
+        msg += typeName(inner);
+        msg += "'";
+      } else {
+        msg += " (the prototype has no atomic arrays)";
+      }
+      error(loc, msg);
+      return nullptr;
+    }
+    return Ctx.getAtomicType(inner);
+  }
+  if (ast::isa<ast::TaskType>(ty))
+    return ty; // canonical already: never written by a program
   // A parameter's slice, resolved already.
   if (ast::isa<ast::SliceType>(ty))
     return ty;
@@ -1126,6 +1185,7 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
       msg = inoutPlaceError(subject, "bound by " + what);
     if (msg.empty()) {
       CurrentScope->Kinds[name] = VarKind::Inout;
+      CurrentScope->Quals[name] = ast::Qualifier{ast::QualForm::Unique, true};
       return true;
     }
     error(subject->getLocation(), msg);
@@ -1136,6 +1196,10 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     else if (MatchSubjectIsView) {
       CurrentScope->Kinds[name] = VarKind::ViewBinding;
       CurrentScope->ViewSubjects[name] = subject;
+    } else {
+      // A plain binding is a copy of the subject's reference and keeps its
+      // form (the prototype): a `mut` subject's object stays writable.
+      CurrentScope->Quals[name] = qualifierOf(subject);
     }
     return true;
   }
@@ -1558,6 +1622,21 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
   }
   S.checkNotBorrowed(node->getName(), node->getLocation());
   ast::Type *ty = S.checkIdentLive(node->getName(), node->getLocation());
+  // The concurrency prototype: not after a `move`, only values and handles
+  // in a `parallel for` body, and an `atomic` variable's read is its
+  // value unless its handle is wanted.
+  if (ty && !S.checkNotMoved(node->getName(), node->getLocation()))
+    return nullptr;
+  if (ty && !S.ParallelStack.empty() &&
+      !S.checkParallelRead(node->getName(), ty, node->getLocation()))
+    return nullptr;
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
+    if (std::exchange(S.WantAtomicHandle, false)) {
+      node->setAtomicHandle(true);
+      return at;
+    }
+    return at->getInnerType();
+  }
   // Inside a lambda, a variable of the function it is written in is
   // captured (by copy) when it is first used.
   if (ty && !S.LambdaStack.empty() &&
@@ -1864,6 +1943,53 @@ Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
 
 ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   ast::Expr *operand = node->getOperand();
+  // The concurrency prototype: `await t` is the task's result, `move x`
+  // x's value, which x no longer holds.
+  if (node->getOpcode() == ast::UnaryOpcode::Await) {
+    S.LiteralExpectation = nullptr;
+    S.VariantExpectation = nullptr;
+    if (!S.ParallelStack.empty()) {
+      S.error(node->getLocation(),
+              "'await' cannot be used in a 'parallel for' body");
+      return nullptr;
+    }
+    if (S.LockDepth > 0) {
+      S.error(node->getLocation(), "'await' cannot be used in a 'lock' "
+                                   "block: a wait holding a lock");
+      return nullptr;
+    }
+    ast::Type *t = visit(operand);
+    if (!t)
+      return nullptr;
+    auto *tt = ast::dyn_cast<ast::TaskType>(t);
+    if (!tt) {
+      S.error(node->getLocation(),
+              "'await' takes a task (the result of calling an 'async fn'), "
+              "not a '" +
+                  typeName(t) + "'");
+      return nullptr;
+    }
+    // `await t` spends the variable's handle (the prototype's typestate):
+    // a second await, or any use after, is an error, as after a move.
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(operand);
+        id && !id->isFunctionRef() && id->getName() != names::kSelf &&
+        S.CurrentScope->findOwner(id->getName())) {
+      if (!S.checkMovable(id->getName(), node->getLocation(), "await"))
+        return nullptr;
+      if (std::string why = S.viewedBy(id->getName()); !why.empty()) {
+        S.error(node->getLocation(), why + "; it cannot be awaited");
+        return nullptr;
+      }
+      S.MovedVars[S.varKey(id->getName())] =
+          Sema::MovedState{node->getLocation(), false, "await"};
+    }
+    return tt->getInnerType();
+  }
+  if (node->getOpcode() == ast::UnaryOpcode::Move) {
+    S.LiteralExpectation = nullptr;
+    S.VariantExpectation = nullptr;
+    return S.checkMove(node);
+  }
   const bool negation = node->getOpcode() == ast::UnaryOpcode::Neg;
   // `-5` flowing into a sized numeric slot: the negated literal takes the
   // slot's type when it fits (`-128` fits an `i8`, `-1` no `u8`).
@@ -1933,6 +2059,8 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     return operandTy;
   case ast::UnaryOpcode::Not:
     return S.Ctx.getBoolTy();
+  case ast::UnaryOpcode::Move:  // handled above
+  case ast::UnaryOpcode::Await: // handled above
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -1946,8 +2074,15 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
   std::vector<ast::Expr *> links;
   for (ast::Expr *x = operand; ast::chainOperand(x); x = ast::chainOperand(x))
     links.push_back(x);
-  for (auto it = links.rbegin(); it != links.rend(); ++it)
+  for (auto it = links.rbegin(); it != links.rend(); ++it) {
+    // The link that takes this one: a method call on an `atomic` place
+    // takes its handle (the prototype).
+    ast::Expr *outer = std::next(it) == links.rend() ? e : *std::next(it);
+    S.WantAtomicHandle =
+        ast::isa<ast::MethodCallExpr>(outer) && Sema::isPlaceChain(*it);
     ChainTypes[*it] = visit(*it);
+    S.WantAtomicHandle = false;
+  }
 }
 
 namespace {
@@ -2406,9 +2541,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         expectedArgs = init->getParamTypes();
   std::vector<ast::Type *> argTypes;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    // An `atomic` parameter takes an `atomic` place's handle (the
+    // prototype); any other value makes a new cell (checkAssignable).
+    S.WantAtomicHandle = i < expectedArgs.size() &&
+                         ast::isa<ast::AtomicType>(expectedArgs[i]) &&
+                         Sema::isPlaceChain(node->getArguments()[i]);
     auto *ty =
         visitExpecting(node->getArguments()[i],
                        i < expectedArgs.size() ? expectedArgs[i] : nullptr);
+    S.WantAtomicHandle = false;
     argTypes.push_back(ty);
   }
 
@@ -2617,7 +2758,27 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                   sliceArgNote(sig->ParamTypes[i], argTypes[i]));
     }
   }
+  // An async call starts a task: what it takes across is moved or copied
+  // (the concurrency prototype's send check).
+  if (sig->Async && !S.checkSendArgs(node, *sig))
+    return nullptr;
   const std::string callee = displayName(node->getCalleeName());
+  // A by-value parameter is an owning slot (the prototype): what flows
+  // into it converts and, under the copy rule, moves.  A builtin borrows.
+  if (!sig->IsBuiltin)
+    for (size_t i = 0; i < argTypes.size() && i < sig->ParamTypes.size(); ++i)
+      if (argTypes[i] && sig->Modes.mode(i) == ast::ParamMode::Value &&
+          !S.checkQualifiedFlow(i < sig->ParamQuals.size() ? sig->ParamQuals[i]
+                                                           : ast::Qualifier{},
+                                node->getArguments()[i],
+                                "parameter " + std::to_string(i + 1) + " of '" +
+                                    callee + "'",
+                                node->getArguments()[i]->getLocation()))
+        return nullptr;
+  // A borrow takes the qualifier its parameter says (the prototype).
+  if (!sig->IsBuiltin && !S.checkBorrowQualifiers(sig->Modes, sig->ParamQuals,
+                                                  node->getArguments(), callee))
+    return nullptr;
   S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
                    callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
@@ -2629,10 +2790,24 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
-  // Resolve receiver type.
+  // Resolve receiver type.  A method call on an `atomic` place (the
+  // prototype) takes its handle, not its value.
+  S.WantAtomicHandle = Sema::isPlaceChain(node->getReceiver());
   auto *recvTy = visit(node->getReceiver());
+  S.WantAtomicHandle = false;
   if (!recvTy)
     return nullptr;
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(recvTy))
+    return S.checkAtomicMethodCall(node, at);
+  if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
+    return nullptr;
+  // A `mem::Buffer<T>` of the enclosing function in a `parallel for` body
+  // (the prototype): reads, and `set` at the loop's variable.
+  if (!S.ParallelStack.empty() && S.bufferElementType(recvTy))
+    if (const auto *rid = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+        rid && S.isOuterScope(S.CurrentScope->findOwner(rid->getName())) &&
+        !S.checkParallelBufferCall(node, rid->getName()))
+      return nullptr;
 
   // A method cannot be called on an optional receiver (it may be None),
   // but for the builtin `Show`'s `toString()` of an optional whose value
@@ -2809,7 +2984,12 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    // An `atomic` parameter takes an `atomic` place's handle (the
+    // prototype); any other value makes a new cell (checkAssignable).
+    S.WantAtomicHandle =
+        ast::isa<ast::AtomicType>(paramTys[i]) && Sema::isPlaceChain(argExpr);
     auto *argTy = visitExpecting(argExpr, paramTys[i]);
+    S.WantAtomicHandle = false;
     if (!argTy)
       continue;
     if (!S.checkAssignable(paramTys[i], argTy, argExpr) &&
@@ -2822,6 +3002,18 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   sliceArgNote(paramTys[i], argTy));
     }
   }
+  for (size_t i = 0; i < node->getNumArguments(); ++i)
+    if (node->getArguments()[i]->getResolvedType() &&
+        method->getParamModes().mode(i) == ast::ParamMode::Value &&
+        !S.checkQualifiedFlow(method->getParamQual(i), node->getArguments()[i],
+                              "parameter " + std::to_string(i + 1) + " of '" +
+                                  node->getMethodName() + "'",
+                              node->getArguments()[i]->getLocation()))
+      return nullptr;
+  // A borrow takes the qualifier its parameter says (the prototype).
+  if (!S.checkBorrowQualifiers(method->getParamModes(), method->getParamQuals(),
+                               node->getArguments(), node->getMethodName()))
+    return nullptr;
   S.checkInoutArgs(node, method->getParamModes(), paramTys,
                    node->getArguments(), node->getMethodName(),
                    node->getReceiver(), method);
@@ -2863,6 +3055,8 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   auto *recvTy = visit(node->getReceiver());
   if (!recvTy)
     return nullptr;
+  if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
+    return nullptr;
 
   // A field cannot be read through an optional receiver (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
@@ -2899,6 +3093,17 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
     if (!S.checkMemberAccess(S.fieldOwner(ct, node->getFieldName()),
                              node->getFieldName(), node->getLocation()))
       return nullptr;
+    // An `atomic` field (the prototype): its handle where one is wanted,
+    // otherwise its value, read atomically.
+    if (auto *at = ast::dyn_cast<ast::AtomicType>(fty)) {
+      if (std::exchange(S.WantAtomicHandle, false)) {
+        node->setAtomicHandle(true);
+        node->setResolvedType(at);
+        return at;
+      }
+      node->setResolvedType(at->getInnerType());
+      return at->getInnerType();
+    }
     node->setResolvedType(fty);
     return fty;
   }
@@ -2992,6 +3197,14 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     S.checkAssignable(elemTy, elemTys[i], node->getElements()[i]);
     S.checkViewNotStored(node->getElements()[i], elemTys[i]);
   }
+  // `[v; n]` copies its value n times (the copy rule, --strict-ownership).
+  if (std::string part; node->isRepeat() && node->getLength() > 1 &&
+                        S.StrictOwnership && !S.isCopyable(elemTy, &part)) {
+    S.error(node->getLocation(), "'[v; n]' copies its value: '" +
+                                     typeName(elemTy) + "' is not Copyable" +
+                                     (part.empty() ? "" : " (" + part + ")"));
+    return nullptr;
+  }
   node->setResolvedType(fixed);
   return fixed;
 }
@@ -3016,6 +3229,14 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
             "array literal has " + std::to_string(node->getLength()) +
                 " element(s), but '" + typeName(fixed) + "' has " +
                 std::to_string(fixed->getLength()));
+    return nullptr;
+  }
+  // `[v; n]` copies its value n times (the copy rule, --strict-ownership).
+  if (std::string part; node->isRepeat() && node->getLength() > 1 &&
+                        S.StrictOwnership && !S.isCopyable(elemTy, &part)) {
+    S.error(node->getLocation(), "'[v; n]' copies its value: '" +
+                                     typeName(elemTy) + "' is not Copyable" +
+                                     (part.empty() ? "" : " (" + part + ")"));
     return nullptr;
   }
   bool ok = true;
@@ -3073,6 +3294,8 @@ bool Sema::checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index) {
 ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   auto *arrayTy = visit(node->getArray());
   if (!arrayTy)
+    return nullptr;
+  if (!S.checkNotLocked(node->getArray(), node->getLocation()))
     return nullptr;
 
   // An optional array / string cannot be indexed (it may be None).
@@ -4073,7 +4296,10 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
         sig->Modes.mode(0) == ast::ParamMode::View)
       if (auto *st = ast::dyn_cast<ast::SliceType>(sig->ParamTypes[0]))
         params = st->getElementType() == Ctx.getStrTy();
-    if (sig->ReturnType == Ctx.getIntTy() && params)
+    ast::Type *ret = sig->ReturnType;
+    if (auto *tt = ast::dyn_cast<ast::TaskType>(ret))
+      ret = tt->getInnerType(); // `async fn main` (the prototype)
+    if (ret == Ctx.getIntTy() && params)
       return true;
     std::string actual = "fn main(";
     for (size_t i = 0; i < sig->ParamTypes.size(); ++i) {
@@ -4152,7 +4378,12 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
 
 bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
-  return visitStatements(node->getStatements());
+  const bool ok = visitStatements(node->getStatements());
+  // The block's task handles are spent where it ends (the prototype); a
+  // `return`, `break` or `continue` that left it checked them itself.
+  if (ok && !FlowEnded)
+    checkTasksAwaited(CurrentScope, nullptr, node->getLocation());
+  return ok;
 }
 
 bool Sema::visitDeclStmt(ast::DeclStmt *node) {
@@ -4235,6 +4466,16 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
 }
 
 bool Sema::visitAssignStmt(ast::AssignStmt *node) {
+  // The concurrency prototype: an `atomic` variable changes by its
+  // operations; a variable of the function around a `parallel for` only by
+  // a reduction.
+  if (auto *owner = CurrentScope->findOwner(node->getVarName())) {
+    ast::Type *varTy = owner->lookup(node->getVarName());
+    if (auto *at = ast::dyn_cast<ast::AtomicType>(varTy))
+      return checkAtomicAssign(node, at);
+    if (isOuterScope(owner))
+      return checkParallelAssign(node, varTy);
+  }
   // An existing variable's type is the value's expected type.
   ast::Type *expected = nullptr;
   if (auto *existing = CurrentScope->findOwner(node->getVarName()))
@@ -4249,7 +4490,13 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                        CurrentScope->findOwner(node->getVarName()),
                        node->getLocation()))
     return false;
+  // A first assignment from an `atomic` place (`m = n`, `h = st.hits`)
+  // takes its handle, as `let m = n` does (visitVarDecl): a copy of an
+  // atomic place is another handle to its cell.
+  WantAtomicHandle = !CurrentScope->findOwner(node->getVarName()) &&
+                     isPlaceChain(node->getValue());
   auto *valTy = resolveExprType(node->getValue(), expected);
+  WantAtomicHandle = false;
   const auto &varName = node->getVarName();
   if (!valTy) {
     // The value's error was reported.  A first assignment still declares the
@@ -4304,11 +4551,35 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       return false;
     }
     CurrentScope->set(varName, valTy);
+    DeclLoopDepth[varKey(CurrentScope, varName)] = LoopDepth;
+    if (ast::isa<ast::TaskType>(valTy))
+      TaskLocals[varKey(CurrentScope, varName)] = node->getLocation();
+    // The prototype: the new variable adopts the value's qualifier.
+    const ast::Qualifier q =
+        sharesStorage(valTy) ? qualifierOf(node->getValue()) : ast::Qualifier{};
+    CurrentScope->Quals[varName] = q;
+    if (!checkQualifiedFlow(q, node->getValue(), "variable '" + varName + "'",
+                            node->getLocation()))
+      return false;
     return viewOk;
   }
 
   if (!checkReassignable(varName, node->getLocation()))
     return false;
+  // A task handle is spent before the variable takes another (the
+  // prototype): a handle dropped unawaited has no one to wait for it.
+  if (ast::Type *heldTy = owner->lookup(varName);
+      heldTy && ast::isa<ast::TaskType>(heldTy)) {
+    auto spent = MovedVars.find(varKey(owner, varName));
+    if (spent == MovedVars.end() || spent->second.Maybe) {
+      error(node->getLocation(),
+            "task '" + varName +
+                "' is replaced before it is awaited: await it (or move it) "
+                "first");
+      return false;
+    }
+  }
+  MovedVars.erase(varKey(owner, varName)); // assigned again after a move
   auto *varTy = owner->lookup(varName);
 
   // A poisoned variable (its declaration failed) is re-declared by a valid
@@ -4326,13 +4597,30 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                                      "'");
     return false;
   }
+  if (!checkQualifiedFlow(qualifierOfVar(varName), node->getValue(),
+                          "variable '" + varName + "'", node->getLocation()))
+    return false;
 
   return viewOk;
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
+  if (!ParallelStack.empty()) {
+    error(node->getLocation(), "'return' cannot leave a 'parallel for' body");
+    return false;
+  }
+  if (LockDepth > 0) {
+    error(node->getLocation(), "'return' cannot leave a 'lock' block");
+    return false;
+  }
   if (node->getReturnValue()) {
+    // An `atomic` result (the prototype) takes an `atomic` place's handle;
+    // any other value makes a new cell (checkAssignable).
+    WantAtomicHandle = CurrentReturnType &&
+                       ast::isa<ast::AtomicType>(CurrentReturnType) &&
+                       isPlaceChain(node->getReturnValue());
     auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
+    WantAtomicHandle = false;
     if (!valTy)
       return false;
     // A function that returns nothing returns no value, not one of `void`
@@ -4353,6 +4641,11 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
+    // The result is an owning slot of the caller's (the prototype).
+    if (CurrentResult.Mode == ast::ParamMode::Value &&
+        !checkQualifiedFlow(CurrentResultQual, node->getReturnValue(),
+                            "the result", node->getLocation()))
+      return false;
     // A borrowed result is a borrow of what the function was given.
     if (CurrentResult.Mode != ast::ParamMode::Value) {
       std::string why = borrowedResultError(node->getReturnValue());
@@ -4371,6 +4664,10 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
       error(node->getReturnValue()->getLocation(), why);
       return false;
     }
+    // Every task handle of the function is spent before it returns (the
+    // prototype); the result's own flow spent one returned as it is.
+    checkTasksAwaitedUpTo(FunctionScope ? FunctionScope->Parent : nullptr,
+                          "return", node->getLocation());
     return checkViewNotReturned(node->getReturnValue(), valTy);
   }
   // void return
@@ -4378,6 +4675,8 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     error(node->getLocation(), "non-void function must return a value");
     return false;
   }
+  checkTasksAwaitedUpTo(FunctionScope ? FunctionScope->Parent : nullptr,
+                        "return", node->getLocation());
   return true;
 }
 
@@ -4393,12 +4692,27 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
   }
 
   bool ok = true;
+  // Each branch starts from the moves before the `if`; what follows the
+  // `if` joins the branches that reach it (the prototype's move analysis).
+  const MovedMap before = MovedVars;
+  std::vector<MovedMap> paths;
   // Type-check the then branch.
+  FlowEnded = false;
   if (!visit(node->getThenBranch()))
     ok = false;
+  const bool thenEnded = FlowEnded;
+  if (!thenEnded)
+    paths.push_back(MovedVars);
   // Type-check the else branch (if present).
+  MovedVars = before;
+  FlowEnded = false;
   if (node->hasElse() && !visit(node->getElseBranch()))
     ok = false;
+  const bool elseEnded = node->hasElse() && FlowEnded;
+  if (!elseEnded)
+    paths.push_back(std::move(MovedVars));
+  joinMoves(paths, "if", node->getLocation());
+  FlowEnded = thenEnded && elseEnded;
   return ok;
 }
 
@@ -4414,9 +4728,11 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   }
 
   // Type-check the body inside a loop context.
+  beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool ok = visit(node->getBody());
   --LoopDepth;
+  finishLoopMoves();
   return ok;
 }
 
@@ -4524,10 +4840,74 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   }
   if (!discard)
     CurrentScope->Kinds[name] = VarKind::ForVar;
+  // A `parallel for` (the concurrency prototype): its variable, and what
+  // its body declares, are an iteration's own.
+  if (node->isParallel() && LockDepth > 0) {
+    error(node->getLocation(), "a 'parallel for' cannot run in a 'lock' block");
+    return false;
+  }
+  if (node->isParallel())
+    ParallelStack.push_back({node, CurrentScope});
+  if (!discard)
+    DeclLoopDepth[varKey(CurrentScope, name)] = LoopDepth + 1;
+  beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool bodyOk = visit(node->getBody());
   --LoopDepth;
+  finishLoopMoves();
+  if (node->isParallel())
+    ParallelStack.pop_back();
   return ok && bodyOk;
+}
+
+// `lock c as v: inout|view { }` (the concurrency prototype): the cell is a
+// `locked` place; the binding is a local borrow of its contents for the
+// block, which holds the lock to its end.
+bool Sema::visitLockStmt(ast::LockStmt *node) {
+  if (LockDepth > 0) {
+    error(node->getLocation(), "a 'lock' block cannot hold another 'lock'");
+    return false;
+  }
+  LockOperand = true;
+  ast::Type *cellTy = resolveExprType(node->getCell());
+  LockOperand = false;
+  if (!cellTy)
+    return false;
+  const ast::Qualifier cellQ = qualifierOf(node->getCell());
+  if (cellQ.Form != ast::QualForm::Locked) {
+    error(node->getCell()->getLocation(),
+          "'" + placeText(node->getCell()) +
+              "' is not 'locked': a 'lock' block takes a 'locked' variable, "
+              "field or parameter");
+    return false;
+  }
+  ast::VarDecl *b = node->getBinding();
+  if (!checkBinderName(b->getName(), b->getLocation()) ||
+      !checkNotSelf(b->getName(), b->getLocation()))
+    return false;
+  // The lock buys the writes: an `inout` block takes a `locked mut` cell.
+  if (b->getMode() == ast::ParamMode::Inout && !cellQ.Mut) {
+    error(b->getLocation(),
+          "'" + placeText(node->getCell()) + "' is 'locked " +
+              typeName(cellTy) +
+              "', whose contents are never written; declare it 'locked mut " +
+              typeName(cellTy) + "' for a 'lock ... as " + b->getName() +
+              ": inout' block");
+    return false;
+  }
+  b->setType(cellTy);
+  ScopeGuard guard(*this);
+  CurrentScope->declare(b->getName(), cellTy);
+  CurrentScope->Quals[b->getName()] = ast::Qualifier{
+      ast::QualForm::Unique, b->getMode() == ast::ParamMode::Inout};
+  CurrentScope->Kinds[b->getName()] = b->getMode() == ast::ParamMode::View
+                                          ? VarKind::ViewLocal
+                                          : VarKind::Inout;
+  DeclLoopDepth[varKey(CurrentScope, b->getName())] = LoopDepth;
+  ++LockDepth;
+  const bool ok = visit(node->getBody());
+  --LockDepth;
+  return ok;
 }
 
 bool Sema::visitBreakStmt(ast::BreakStmt *node) {
@@ -4535,6 +4915,23 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
     error(node->getLocation(), "'break' outside of a loop");
     return false;
   }
+  if (LockDepth > 0) {
+    error(node->getLocation(), "'break' cannot leave a 'lock' block");
+    return false;
+  }
+  if (!ParallelStack.empty()) {
+    error(node->getLocation(),
+          "'break' cannot be used in a 'parallel for' body (the prototype)");
+    return false;
+  }
+  // The moves so far leave the loop by this path; the task handles of the
+  // scopes inside the loop are spent before it (the prototype).
+  if (!LoopMoveStack.empty()) {
+    checkTasksAwaitedUpTo(LoopMoveStack.back().Outer, "break",
+                          node->getLocation());
+    LoopMoveStack.back().Breaks.push_back(MovedVars);
+  }
+  FlowEnded = true;
   return true;
 }
 
@@ -4543,6 +4940,23 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
     error(node->getLocation(), "'continue' outside of a loop");
     return false;
   }
+  if (LockDepth > 0) {
+    error(node->getLocation(), "'continue' cannot leave a 'lock' block");
+    return false;
+  }
+  if (!ParallelStack.empty()) {
+    error(node->getLocation(), "'continue' cannot be used in a 'parallel "
+                               "for' body (the prototype)");
+    return false;
+  }
+  // The next iteration starts here; the task handles of the scopes inside
+  // the loop are spent before it (the prototype).
+  if (!LoopMoveStack.empty()) {
+    checkTasksAwaitedUpTo(LoopMoveStack.back().Outer, "continue",
+                          node->getLocation());
+    checkLoopIteration(LoopMoveStack.back(), node->getLocation());
+  }
+  FlowEnded = true;
   return true;
 }
 
@@ -4686,6 +5100,15 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName());
       return false;
     }
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, node->getResultMode(),
+                                "the result of '" + node->getName() + "'",
+                                node->getLocation())) {
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
+      node->setResultQual(q);
+    }
     node->setReturnType(retTy);
   }
 
@@ -4711,6 +5134,14 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     if (!ty) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
+    }
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
+                                p.Loc)) {
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
+      p.Qual = q;
     }
     p.ParamType = ty;
     paramTypes.push_back(ty);
@@ -4738,14 +5169,68 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     return false;
   }
 
+  // An `async fn` (the concurrency prototype): a call of it is a task of
+  // its result, which is a number, bool, char, a reference, or nothing;
+  // its parameters are by value, since the task outlives the call.
+  ast::Type *callTy = retTy;
+  if (node->isAsync()) {
+    if (retTy && !ast::isa<ast::BuiltinType>(retTy) && !ast::isRefType(retTy)) {
+      error(node->getLocation(),
+            "an 'async fn' returns a number, bool, char, a reference or "
+            "nothing in the prototype, not '" +
+                typeName(retTy) + "'");
+      ErroneousNames.insert(node->getName());
+      return false;
+    }
+    // Its result crosses back to the awaiting thread: the send check.
+    if (std::string why = uncrossable(retTy, node->getResultQual(), "");
+        !why.empty()) {
+      error(node->getLocation(),
+            "the result of 'async fn' '" + node->getName() + "' (a '" +
+                qualifiedName(node->getResultQual(), retTy) +
+                "') cannot cross to the task's "
+                "awaiter: " +
+                why);
+      ErroneousNames.insert(node->getName());
+      return false;
+    }
+    // A value held in memory is passed by its address, which the task
+    // would read after the caller's frame moved on: not in the prototype.
+    for (size_t i = 0; i < paramTypes.size(); ++i)
+      if (ast::isMemType(paramTypes[i])) {
+        const ast::Param &p = node->getParams()[i];
+        error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +
+                         node->getName() + "' has type '" +
+                         typeName(paramTypes[i]) +
+                         "', a value held in memory: the prototype passes "
+                         "numbers, references and handles to a task (hold "
+                         "the value in a class)");
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
+    for (const ast::Param &p : node->getParams())
+      if (p.Mode != ast::ParamMode::Value) {
+        error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +
+                         node->getName() + "' cannot be '" +
+                         ast::paramModeName(p.Mode) +
+                         "': a task outlives the call that starts it");
+        ErroneousNames.insert(node->getName());
+        return false;
+      }
+    callTy = Ctx.getTaskType(retTy);
+  }
   // Register the function in the function table.
-  declareFunction(node->getName(), retTy, paramTypes);
+  declareFunction(node->getName(), callTy, paramTypes);
   if (inferred)
     InferredFunctions[node->getName()] = {node, Inference::Pending, nullptr};
   FunctionSig &sig = FunctionTable[node->getName()];
   sig.Modes = ast::paramModes(node->getParams());
   sig.Modes.Result = node->getResultMode();
   sig.Native = node->isNative();
+  sig.Async = node->isAsync();
+  for (const ast::Param &p : node->getParams())
+    sig.ParamQuals.push_back(p.Qual);
+  sig.ResultQual = node->getResultQual();
   return checkResultDecl(node, /*method=*/false);
 }
 
@@ -4938,10 +5423,46 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   CurrentReturnType = retTy;
   {
     ScopeGuard guard(*this);
-    for (size_t i = 0; i < node->getParams().size(); ++i)
-      CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
+    for (size_t i = 0; i < node->getParams().size(); ++i) {
+      const ast::Param &p = node->getParams()[i];
+      CurrentScope->declare(p.getName(), paramTypes[i]);
+      ast::Qualifier q = p.Qual;
+      if (p.Mode == ast::ParamMode::Inout)
+        q.Mut = true; // the borrow's writes
+      CurrentScope->Quals[p.getName()] = q;
+    }
     declareParamKinds(node);
+    // The concurrency prototype: the function's own moves, task handles,
+    // loop depths and result qualifier.
+    Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+    std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+        std::exchange(TaskLocals, {});
+    for (size_t i = 0; i < node->getParams().size(); ++i)
+      if (ast::isa<ast::TaskType>(paramTypes[i]))
+        TaskLocals[varKey(CurrentScope, node->getParams()[i].getName())] =
+            node->getParams()[i].Loc;
+    const bool savedAsync = std::exchange(InAsyncFn, node->isAsync());
+    const ast::Qualifier savedResultQual =
+        std::exchange(CurrentResultQual, node->getResultQual());
+    // (A generic instance is checked in the middle of another body: that
+    // body's state comes back after.)
+    MovedMap savedMoves = std::exchange(MovedVars, {});
+    std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+    const bool savedFlowEnded = std::exchange(FlowEnded, false);
+    DeclLoopDepth.clear();
+    for (const ast::Param &p : node->getParams())
+      DeclLoopDepth[varKey(CurrentScope, p.getName())] = 0;
     bool ok = visitBody(node->getBody()->getStatements());
+    // The function's task handles are spent where its body ends.
+    if (ok && !FlowEnded)
+      checkTasksAwaited(CurrentScope, nullptr, node->getLocation());
+    FunctionScope = savedFunctionScope;
+    TaskLocals = std::move(savedTasks);
+    MovedVars = std::move(savedMoves);
+    LoopMoveStack = std::move(savedLoopMoves);
+    FlowEnded = savedFlowEnded;
+    InAsyncFn = savedAsync;
+    CurrentResultQual = savedResultQual;
     CurrentReturnType = savedRetTy;
     CurrentResult = savedResult;
     if (!ok)
@@ -5147,9 +5668,33 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
   if (node->isLet())
     CurrentScope->Kinds[node->getName()] = VarKind::Let;
+  // The concurrency prototype.
+  DeclLoopDepth[varKey(CurrentScope, node->getName())] = LoopDepth;
+  MovedVars.erase(varKey(CurrentScope, node->getName()));
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
+  // The qualifier (the concurrency prototype): the annotation's, or, in
+  // `x: shared = e;`, written alone with the type inferred.
+  ast::Qualifier qual;
+  bool qualified = false;
+  // Whether the qualifier stands alone (`x: shared = e;`): an annotation
+  // with a type has its qualifier checked as the type resolves.
+  bool bareQual = false;
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(node->getType());
+      qt && !qt->getInnerType()) {
+    qual = qt->getQualifier();
+    qualified = true;
+    bareQual = true;
+    node->setType(nullptr);
+    // As an annotation's qualifier is checked below: a borrow carries none.
+    if (!checkBorrowQualifier(qual, node->getMode(),
+                              "local '" + node->getName() + "'",
+                              node->getLocation())) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+  }
 
   if (node->getType()) {
     FixedArrayAllowed = true; // a local may be a fixed-size array
@@ -5162,6 +5707,14 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       return false;
     }
     node->setType(declTy); // canonical write-back (see VarDecl::setType)
+    qual = takeQualifier();
+    qualified = true;
+    if (!checkBorrowQualifier(qual, node->getMode(),
+                              "local '" + node->getName() + "'",
+                              node->getLocation())) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
   }
 
   // Check the initializer type.
@@ -5169,7 +5722,20 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   bool weakOfView = false;
   if (node->getInitExpr()) {
     unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
-    auto *initTy = resolveExprType(node->getInitExpr(), declTy);
+    // An `atomic` variable (the prototype) starts as a new cell holding
+    // the value, or as another handle to an `atomic` variable's cell.
+    ast::Type *expectedInit = declTy;
+    if (!declTy || ast::isa<ast::AtomicType>(declTy)) {
+      // An `atomic` variable, field or parameter named as the initializer
+      // (`j = k`, `n: atomic int = st.hits`): its handle.  A `let` with no
+      // type (`let j = k`) is a read-only copy: it takes the value.
+      WantAtomicHandle =
+          isPlaceChain(node->getInitExpr()) && !(node->isLet() && !declTy);
+      if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy))
+        expectedInit = at->getInnerType();
+    }
+    auto *initTy = resolveExprType(node->getInitExpr(), expectedInit);
+    WantAtomicHandle = false;
     // A `_` length is the initializer's: a literal fills it in as it is
     // checked (checkFixedArrayLiteral), anything else has it in its type.
     const bool inferred = declTy && hasInferredLength(declTy);
@@ -5216,7 +5782,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       weakOfView =
           sharesStorage(initTy) && !viewOf(node->getInitExpr()).empty();
     if (declTy) {
-      if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
+      auto *atomic = ast::dyn_cast<ast::AtomicType>(declTy);
+      if (atomic && initTy == atomic->getInnerType()) {
+        // A new cell holding the value (the prototype).
+      } else if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
         if (!diagnoseOptionalNarrowing(node->getLocation(), declTy, initTy))
           error(node->getLocation(),
                 "initializer of type '" + typeName(initTy) +
@@ -5277,11 +5846,73 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         weakOfView ? VarKind::WeakView : VarKind::Weak;
   }
 
+  // The qualifier (the prototype): a value has none; an inferred one adopts
+  // the initializer's (a copy of a `shared` reference is `shared`); a
+  // qualified slot takes what converts into it.
+  if (!sharesStorage(declTy) || node->isWeak()) {
+    // One written alone (`x: shared = 1;`, `weak w: shared = n;`) is
+    // checked as an annotation's is (resolveValueType).
+    if (!qual.isUnique() && node->isWeak()) {
+      error(node->getLocation(),
+            "weak variable '" + node->getName() +
+                "' takes no qualifier: a weak reference counts nothing");
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    if (bareQual && !checkQualifierApplies(qual, declTy, node->getLocation())) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    // A weak variable holds nothing: what it views is written as its
+    // owner's form allows (the prototype), so it takes the initializer's.
+    qual = node->isWeak() && node->getInitExpr()
+               ? qualifierOf(node->getInitExpr())
+               : ast::Qualifier{};
+  } else if (!qualified && node->getInitExpr()) {
+    qual = qualifierOf(node->getInitExpr());
+  }
+  if (bareQual && !checkQualifierApplies(qual, declTy, node->getLocation())) {
+    declarePoisoned(CurrentScope, node->getName());
+    return false;
+  }
+  if (node->getInitExpr() && node->getMode() == ast::ParamMode::Value &&
+      !node->isWeak() &&
+      !checkQualifiedFlow(qual, node->getInitExpr(),
+                          "variable '" + node->getName() + "'",
+                          node->getLocation()))
+    viewOk = false;
+  // An `inout` local is the borrow's writes.
+  if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy))
+    qual.Mut = true;
+  node->setQualifier(qual);
+
+  // A `let` cell (the prototype): nothing changes it through its name, and
+  // an atomic matters only when threads change it.  Its value is the
+  // alternative where one can be taken: from a value or a place, not from
+  // a call's new cell.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy); at && node->isLet()) {
+    const ast::Expr *init = node->getInitExpr();
+    const bool valueForm =
+        init && (isPlaceChain(init) || !init->getResolvedType() ||
+                 !ast::isa<ast::AtomicType>(init->getResolvedType()));
+    warning(node->getLocation(),
+            "'" + node->getName() +
+                "' is a 'let' atomic: nothing changes it through its name, "
+                "and an atomic matters only when threads change it; declare "
+                "it without 'let'" +
+                (valueForm ? ", or as its value ('let " + node->getName() +
+                                 ": " + typeName(at->getInnerType()) + "')"
+                           : std::string()));
+  }
+
   // Register the variable in the current scope.  An inferred type (`let x =
   // e;`) is written back like an annotation's, for the lowering.
   if (!node->getType())
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
+  CurrentScope->Quals[node->getName()] = qual;
+  if (ast::isa<ast::TaskType>(declTy))
+    TaskLocals[varKey(CurrentScope, node->getName())] = node->getLocation();
   return checkLocalBorrow(node) && viewOk;
 }
 
@@ -5360,11 +5991,13 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   }
 
   ast::Type *fieldTy = nullptr;
+  ast::Qualifier fieldQual; // the prototype
   if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
     // A struct's fields can be assigned, in place, where the struct is
     // changeable: not through a `view`, and not in a `let` local, whose
     // fields are part of its value.
     fieldTy = st->findField(node->getFieldName());
+    fieldQual = st->findFieldQualifier(node->getFieldName());
     if (!fieldTy) {
       if (ErroneousClasses.count(st->getName()))
         ++SuppressedFollowOns; // the struct declaration was already reported
@@ -5413,6 +6046,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
     // Look up the field in the class hierarchy.
     fieldTy = ct->findField(node->getFieldName());
+    fieldQual = ct->findFieldQualifier(node->getFieldName());
     if (!fieldTy) {
       if (isErroneousClass(ct)) // the class declaration was already reported
         ++SuppressedFollowOns;
@@ -5426,10 +6060,21 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
       return false;
   }
 
-  if (!checkChangeable(node->getReceiver(),
-                       "cannot assign to its field '" + node->getFieldName() +
-                           "'",
-                       node->getLocation()))
+  // An `atomic` field (the prototype) is a cell: the assignment is one
+  // atomic operation on it, through any receiver that reaches the field
+  // (an immutable or a frozen object's cells are usable).
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldTy))
+    return checkAtomicMemberAssign(node, at);
+
+  const bool path = ast::isa<ast::MemberAccessExpr>(node->getReceiver()) ||
+                    ast::isa<ast::SubscriptExpr>(node->getReceiver()) ||
+                    ast::isa<ast::TupleIndexExpr>(node->getReceiver());
+  if (!checkChangeable(
+          node->getReceiver(),
+          path ? "cannot assign to '" + placeText(node->getReceiver()) + "." +
+                     node->getFieldName() + "'"
+               : "cannot assign to its field '" + node->getFieldName() + "'",
+          node->getLocation()))
     return false;
 
   // The copy of the target in a compound assignment's value would report
@@ -5449,6 +6094,10 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                 node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
     return false;
   }
+  if (!checkQualifiedFlow(fieldQual, node->getValue(),
+                          "field '" + node->getFieldName() + "'",
+                          node->getLocation()))
+    return false;
 
   return checkViewNotStored(node->getValue(), valTy);
 }
@@ -5476,6 +6125,29 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
           "array index must be 'int', got '" + typeName(idxTy) + "'");
   } else if (idxTy && fixed && !checkFixedIndex(fixed, node->getIndex())) {
     return false;
+  }
+  // A `parallel for` body (the prototype) writes an array of the enclosing
+  // function at the loop's variable only (its first index, for an array of
+  // arrays): no two iterations then write one element.
+  if (!ParallelStack.empty()) {
+    const ast::Expr *arr = node->getArray();
+    const ast::Expr *first = node->getIndex();
+    while (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(arr)) {
+      first = se->getIndex();
+      arr = se->getArray();
+    }
+    const auto *root = ast::dyn_cast<ast::Identifier>(arr);
+    const auto *idx = ast::dyn_cast<ast::Identifier>(first);
+    const std::string &var = ParallelStack.back().Loop->getVar()->getName();
+    if (root && isOuterScope(CurrentScope->findOwner(root->getName())) &&
+        (!idx || idx->getName() != var)) {
+      error(first->getLocation(),
+            "'" + root->getName() +
+                "' is written in a 'parallel for' body at an index other "
+                "than the loop's variable '" +
+                var + "': two iterations could write one element");
+      return false;
+    }
   }
   // An error in the array or the index, as a read of them reports it.
   const bool targetFailed =
@@ -5508,6 +6180,12 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(elemTy) + "'");
     return false;
   }
+  // An element is a bare reference (an array of references takes no
+  // qualifier); the array's writability is checked above.
+  if (!checkQualifiedFlow(ast::Qualifier{}, node->getValue(),
+                          "an element of '" + placeText(node->getArray()) + "'",
+                          node->getLocation()))
+    return false;
   return checkViewNotStored(node->getValue(), valTy);
 }
 
@@ -5531,6 +6209,7 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
     }
 
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;
@@ -5601,6 +6280,7 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
     }
 
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;
@@ -5704,6 +6384,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   // particular, distinguish an enum subject from a class subject).
   node->getSubject()->setResolvedType(subjectTy);
 
+  // The arms' moves join after the match (the prototype's move analysis).
+  MatchMovesGuard matchMoves(*this, node);
+
   // A match is value-mode when its subject resolves to a builtin primitive
   // (int/float/bool/char) or to Str.  In value-mode, arms compare the subject
   // against literal patterns instead of dispatching on runtime type.  Str is a
@@ -5758,6 +6441,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 
     // Open a new scope for each arm (the binding, if any, lives here).
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;
@@ -5873,6 +6557,7 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
 
     // Open a new scope for each arm (the binding, if any, lives here).
     ScopeGuard armGuard(*this);
+    ArmMovesGuard armMoves(*this);
 
     if (arm->isWildcard()) {
       seenWildcard = true;

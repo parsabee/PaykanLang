@@ -1,0 +1,38 @@
+// The concurrency prototype: a `locked` cell (docs/design/concurrency.md).
+// A unique value flowing into a `locked mut` slot becomes a cell; its handle
+// copies into tasks, and its contents are reached only in a `lock` block.
+// expect-stdout: total 3000, sum 3000, ids 6
+// expect-leaks: the locked cell is immortal in the prototype
+
+import ::io;
+
+class Counts {
+  hits: int[16];
+  total: int;
+}
+
+// The cell crosses as a handle; the tasks bump buckets under its lock.
+async fn record(counts: locked mut Counts, id: int, n: int) -> int {
+  for i in 0..n {
+    lock counts as c: inout {
+      c.hits[(id + i) % 16] += 1;
+      c.total += 1;
+    }
+  }
+  return id;
+}
+
+fn main() -> int {
+  let counts: locked mut = Counts([0; 16], 0);      // a unique value becomes a cell here
+  let a = record(counts, 1, 1000);                  // handles copied into the tasks
+  let b = record(counts, 2, 1000);
+  let c = record(counts, 3, 1000);
+  let ids = await a + await b + await c;
+  sum = 0;
+  lock counts as v: view {
+    for i in 0..16 { sum += v.hits[i]; }
+    io::println("total " + Str(v.total) + ", sum " + Str(sum) + ", ids "
+        + Str(ids));
+  }
+  return 0;
+}

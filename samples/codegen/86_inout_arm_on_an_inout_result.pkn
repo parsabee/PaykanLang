@@ -75,7 +75,7 @@ fn pick(x: inout E, y: inout E, first: bool) -> inout E {
   return if first then x else y;
 }
 
-fn early(b: B) -> Str {
+fn early(b: mut B) -> Str {
   match b.slot() {
     r: inout R {
       r.w += 1;
@@ -92,13 +92,13 @@ fn viaParam(b: inout B) {
   }
 }
 
-fn reset(h: H) {
+fn reset(h: mut H) {
   h.b = B(E::A, Animal(0), None, 0);
   h.s = S(E::A);
 }
 
 fn main() -> int {
-  let b = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
+  let b: mut = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
   match b.slot() {
     r: inout R {
       r.w += 100;
@@ -118,7 +118,7 @@ fn main() -> int {
   io::println(Str(b.a.n) + " " + Str(b.q) + " " + Str(b.calls));
   io::println(early(b) + " " + Str(b.e) + " " + Str(b.calls));
   // On an `inout` parameter, and written back on `continue` and `break`.
-  b2 = B(E::R(2, "c" + ""), Animal(0), None, 0);
+  b2: mut = B(E::R(2, "c" + ""), Animal(0), None, 0);
   viaParam(b2);
   i = 0;
   while i < 3 {
@@ -143,7 +143,7 @@ fn main() -> int {
     A { io::print("A "); }
   }
   io::println(Str(b2.e) + " " + Str(x) + " " + Str(y));
-  let c = Cell<E>(E::R(4, "c" + ""));
+  let c: mut = Cell(E::R(4, "c" + ""));
   match c.slot() {
     r: inout R { r.w = 40; }
     A { }
@@ -155,7 +155,8 @@ fn main() -> int {
   }
   io::println(Str(c.v) + " " + Str(s.e));
   // Another reference replaces what the storage is in while the arm runs.
-  let h = H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
+  let h: mut =
+      H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
   let g = h;
   match h.b.slot() {
     r: inout R {

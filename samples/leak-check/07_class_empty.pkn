@@ -11,6 +11,6 @@ impl Box {
 }
 
 fn main() -> int {
-  let b: Box = Box();
+  let b = Box();
   return 0;
 }

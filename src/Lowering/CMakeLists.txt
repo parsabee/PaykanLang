@@ -15,7 +15,9 @@ add_library(paykan_lowering STATIC
     LoweringProgram.cpp
 )
 target_include_directories(paykan_lowering
-    PUBLIC ${CMAKE_SOURCE_DIR}/include
+    PUBLIC  ${CMAKE_SOURCE_DIR}/include
+    # Runtime.h: the layouts the generated code reads directly (PaykanBuffer)
+    PRIVATE ${PROJECT_SOURCE_DIR}/src/Runtime
 )
 target_link_libraries(paykan_lowering
     PUBLIC  paykan_sema

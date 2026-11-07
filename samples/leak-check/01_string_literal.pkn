@@ -6,6 +6,6 @@
 // falls out of scope at the end of main).
 
 fn main() -> int {
-  let s: Str = "hello";
+  let s = "hello";
   return 0;
 }

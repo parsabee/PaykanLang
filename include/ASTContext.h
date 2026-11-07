@@ -70,6 +70,9 @@ class ASTContext {
   // The inner Type* must be canonical, so `Node?`
   // resolves to one node everywhere and identity is pointer identity.
   std::unordered_map<Type *, OptionalType *> OptionalTypes;
+  // Canonical AtomicType and TaskType per inner type (the prototype).
+  std::unordered_map<Type *, AtomicType *> AtomicTypes;
+  std::unordered_map<Type *, TaskType *> TaskTypes;
 
   // -- Tuples
   // Canonical TupleType per element-type list (lazily created by
@@ -146,7 +149,7 @@ public:
 
     /// Add an instance field.
     ClassTypeBuilder &field(const std::string &name, Type *ty,
-                            bool weak = false);
+                            bool weak = false, Qualifier qual = {});
 
     /// Finish building, register in the context's class type registry, and
     /// return the ClassType.
@@ -185,6 +188,10 @@ public:
   /// Sema resolves every parser-emitted (source-located) OptionalType to this
   /// node.
   OptionalType *getOptionalType(Type *innerTy);
+  /// The canonical `atomic T` / task of @p innerTy (canonical), created on
+  /// first use (the concurrency prototype).
+  AtomicType *getAtomicType(Type *innerTy);
+  TaskType *getTaskType(Type *innerTy);
 
   /// Return the canonical TupleType with the given element types, creating
   /// it on first use.  Each element must itself be canonical (see

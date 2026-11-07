@@ -34,6 +34,15 @@ extern "C" {
 #define PAYKAN_NORETURN _Noreturn
 #endif
 
+// An allocator: what it returns is a fresh block that no other pointer
+// reaches, of the size its first argument gives (the LLVM backend gives
+// Paykan_malloc's declaration the same attributes, ToLLVM.cpp).
+#if defined(__GNUC__) || defined(__clang__)
+#define PAYKAN_MALLOC __attribute__((malloc, alloc_size(1)))
+#else
+#define PAYKAN_MALLOC
+#endif
+
 // -- Runtime ABI version
 //
 // The ABI of the generated code (object layout, vtable slots, calling
@@ -133,7 +142,10 @@ typedef struct PaykanObject PaykanWeak;
 //                 PaykanWeak* references.  The memory is freed when both are
 //                 zero.
 //
-// A count that would pass PAYKAN_REF_MAX panics rather than wrap.
+// A strong count that would reach PAYKAN_REF_MAX panics rather than wrap:
+// PAYKAN_REF_MAX itself marks an immortal object (the concurrency
+// prototype's cells and frozen objects, which no retain or release
+// counts).  A weak count that would pass PAYKAN_REF_MAX panics.
 //
 // Every constructor (the runtime's and the generated class constructors)
 // initialises `strong` and `weak` to 0: a new object is unowned until it is
@@ -155,17 +167,20 @@ enum {
   PAYKAN_SLOT_TO_STRING = 1, // PaykanShared *(*)(PaykanObject *self)
   PAYKAN_SLOT_EQUALS = 2,    // int64_t (*)(PaykanObject *self,
                              //   PaykanShared *other, uint64_t owned)
-  PAYKAN_OBJECT_SLOTS = 3,
+  PAYKAN_SLOT_WALK = 3,      // void (*)(PaykanObject *self): freezes what
+                             //   the object holds (the prototype's
+                             //   `atomic shared`, Paykan_freeze)
+  PAYKAN_OBJECT_SLOTS = 4,
   // String
-  PAYKAN_SLOT_STRING_LENGTH = 3, // int64_t (*)(PaykanObject *self)
-  PAYKAN_SLOT_STRING_CONCAT = 4, // void (*)(PaykanObject *self, *other)
-  PAYKAN_STRING_SLOTS = 5,
+  PAYKAN_SLOT_STRING_LENGTH = 4, // int64_t (*)(PaykanObject *self)
+  PAYKAN_SLOT_STRING_CONCAT = 5, // void (*)(PaykanObject *self, *other)
+  PAYKAN_STRING_SLOTS = 6,
   // File
-  PAYKAN_SLOT_FILE_WRITE = 3,     // void (*)(PaykanObject *self, *str)
-  PAYKAN_SLOT_FILE_READLN = 4,    // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_SLOT_FILE_READBYTES = 5, // PaykanShared *(*)(PaykanObject *, int64_t)
-  PAYKAN_SLOT_FILE_READ = 6,      // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_FILE_SLOTS = 7
+  PAYKAN_SLOT_FILE_WRITE = 4,     // void (*)(PaykanObject *self, *str)
+  PAYKAN_SLOT_FILE_READLN = 5,    // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_SLOT_FILE_READBYTES = 6, // PaykanShared *(*)(PaykanObject *, int64_t)
+  PAYKAN_SLOT_FILE_READ = 7,      // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_FILE_SLOTS = 8
 };
 
 struct PaykanObject {
@@ -200,6 +215,16 @@ static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
 // Constructor.  Test-only: generated code constructs `Obj()` through the
 // class machinery, never through this symbol.
 PaykanObject *PaykanObject_new(void);
+/// The walk of an object holding no references: nothing (the prototype).
+void PaykanObject_walk(PaykanObject *self);
+/// `atomic shared` (the concurrency prototype): freezes @p obj and,
+/// through its walk slot, everything it holds: their counts become
+/// PAYKAN_REF_MAX, immortal, so any thread reads them with no count.  The
+/// design counts the root atomically and thaws it; the prototype never frees
+/// it.
+void Paykan_freeze(PaykanObject *obj);
+/// Freezes the references the value of PaykanType @p type at @p value holds.
+void Paykan_freeze_mem(const void *type, void *value);
 
 // Default method implementations.  Every `*_equals` takes `other` as its
 // slot does: a box that bit 0 of `owned` says is handed over (released by
@@ -475,20 +500,24 @@ void Paykan_weak_release(PaykanWeak *weak);
 // call no C library function (see Paykan_vtable_of), only runtime functions
 // that take a box, which no native function binds.
 
-/// Paykan_retain, inline.
+/// Paykan_retain, inline: a count below the limit (PAYKAN_REF_MAX - 1)
+/// is incremented here; the limit and the immortal sentinel are the
+/// function's.
 static inline void Paykan_retain_inline(PaykanShared *shared) {
   if (shared) {
-    if (shared->strong != PAYKAN_REF_MAX)
+    if (shared->strong < PAYKAN_REF_MAX - 1)
       ++shared->strong;
     else
       Paykan_retain(shared);
   }
 }
 
-/// Paykan_release, inline while the object stays alive.
+/// Paykan_release, inline while the object stays alive.  A count of
+/// PAYKAN_REF_MAX is immortal (the prototype's atomic cells): the function
+/// leaves it alone.
 static inline void Paykan_release_inline(PaykanShared *shared) {
   if (shared) {
-    if (shared->strong > 1)
+    if (shared->strong > 1 && shared->strong != PAYKAN_REF_MAX)
       --shared->strong;
     else
       Paykan_release(shared);
@@ -501,7 +530,7 @@ static inline void Paykan_release_inline(PaykanShared *shared) {
 /// path on which the box is NULL, which GCC's -Warray-bounds would follow
 /// to a later write into the object.
 static inline void Paykan_retain_nonnull_inline(PaykanShared *shared) {
-  if (shared->strong != PAYKAN_REF_MAX)
+  if (shared->strong < PAYKAN_REF_MAX - 1)
     ++shared->strong;
   else
     Paykan_retain(shared);
@@ -510,7 +539,7 @@ static inline void Paykan_retain_nonnull_inline(PaykanShared *shared) {
 /// Paykan_release_inline of a box that is never NULL (the value a `retain
 /// nonnull` retains).
 static inline void Paykan_release_nonnull_inline(PaykanShared *shared) {
-  if (shared->strong > 1)
+  if (shared->strong > 1 && shared->strong != PAYKAN_REF_MAX)
     --shared->strong;
   else
     Paykan_release(shared);
@@ -673,6 +702,65 @@ PaykanString *PaykanEnum_toString(const void *value, const int64_t *layout);
 /// equal fields (compared as PaykanStruct_equals does).
 int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
 
+// -- Atomic cell (the concurrency prototype, docs/design/concurrency.md)
+//
+// `atomic T`, T a number, `bool` or `char`: one heap cell holding 64 bits
+// (an integer, or a double's bits) that any thread reads and changes by
+// atomic operations; a copy of the variable is another handle to the cell.
+// The prototype never counts a cell: it is immortal (its strong count is
+// PAYKAN_REF_MAX, which retains and releases leave alone), so a handle
+// crosses threads with no atomic count.  The design counts cells
+// atomically.  All operations are sequentially consistent.
+
+/// The kind of value a cell holds, for its text and a float's rounding.
+enum PaykanAtomicKind {
+  PAYKAN_ATOMIC_INT = 0,
+  PAYKAN_ATOMIC_UINT = 1,
+  PAYKAN_ATOMIC_BOOL = 2,
+  PAYKAN_ATOMIC_CHAR = 3,
+  PAYKAN_ATOMIC_F64 = 16, // this and above: a double's bits
+  PAYKAN_ATOMIC_F32 = 17,
+  PAYKAN_ATOMIC_F16 = 18,
+};
+
+/// A new cell holding the integer @p value, as an owned box.
+PaykanShared *PaykanAtomic_new(int64_t value, int64_t kind);
+/// The cell's value, read atomically.
+int64_t PaykanAtomic_load(PaykanObject *cell);
+/// Stores @p value in the cell atomically.
+void PaykanAtomic_store(PaykanObject *cell, int64_t value);
+/// Adds @p delta to the cell's value atomically; the value found.
+int64_t PaykanAtomic_add(PaykanObject *cell, int64_t delta);
+/// Stores @p value; the value found.
+int64_t PaykanAtomic_exchange(PaykanObject *cell, int64_t value);
+/// Stores @p desired when the cell holds @p expected; whether it did.
+int64_t PaykanAtomic_compare_exchange(PaykanObject *cell, int64_t expected,
+                                      int64_t desired);
+/// The same on a cell holding a float, rounded to its kind (f32, f16) on
+/// every store; a compare is of the bits.  `fadd` is a compare-and-swap
+/// loop.
+PaykanShared *PaykanAtomic_fnew(double value, int64_t kind);
+double PaykanAtomic_fload(PaykanObject *cell);
+void PaykanAtomic_fstore(PaykanObject *cell, double value);
+double PaykanAtomic_fadd(PaykanObject *cell, double delta);
+double PaykanAtomic_fexchange(PaykanObject *cell, double value);
+int64_t PaykanAtomic_fcompare_exchange(PaykanObject *cell, double expected,
+                                       double desired);
+
+// -- Locked cell (the concurrency prototype, docs/design/concurrency.md)
+//
+// `locked T`: one heap cell holding an object's box behind a mutex, reached
+// only in `lock` blocks.  Immortal, as an atomic cell is (src/Runtime/
+// Locked.c).
+
+/// A new cell holding @p payload (an owned box the cell takes), as an
+/// owned box.
+PaykanShared *PaykanLocked_new(PaykanShared *payload);
+/// Takes the cell's mutex; the address of its payload slot (a box).
+void *PaykanLocked_lock(PaykanObject *cell);
+/// Releases the cell's mutex.
+void PaykanLocked_unlock(PaykanObject *cell);
+
 // -- Buffer
 //
 // The storage of the standard library's memory::Buffer<T>: `len` live values
@@ -786,6 +874,10 @@ double Paykan_uint_to_f32(int64_t bits);
 /// Print a diagnostic naming @p index and @p len and abort: a fixed-size
 /// array's element read or written at an index outside 0..len-1.
 PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
+/// Print a diagnostic naming @p index (unsigned, as PaykanBuffer_get prints
+/// it) and @p len and abort: a buffer's element read in place by the
+/// generated code (the concurrency prototype) at an index outside 0..len-1.
+PAYKAN_NORETURN void Paykan_panic_buffer_index(int64_t index, int64_t len);
 
 /// Print a diagnostic and abort: a `for` loop whose step, computed when the
 /// loop starts, is 0 (a constant 0 is a compile error).
@@ -879,7 +971,7 @@ typedef struct PaykanHeapStats {
 
 /// Allocate `size` bytes (a block of its own for 0 too), or panic when the
 /// memory is not there.
-void *Paykan_malloc(size_t size);
+PAYKAN_MALLOC void *Paykan_malloc(size_t size);
 
 /// Resize a block previously returned by Paykan_malloc/Paykan_realloc to
 /// `size` bytes, or panic when the memory is not there.  Passing NULL

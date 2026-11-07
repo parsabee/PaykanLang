@@ -54,7 +54,7 @@ fn same(x: f32, o: f32?) -> Str {
 }
 
 fn main() -> int {
-  let inputs: Str[5] = ["10", "x", "20", "", "30"];
+  let inputs = ["10", "x", "20", "", "30"];
   sum = 0;
   invalid = 0;
   for i in 0..inputs.len() {

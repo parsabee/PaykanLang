@@ -21,12 +21,12 @@ paykan_test_suite(parser PAYKAN_TEST_SUITE_parser)
 if(PAYKAN_TEST_SUITE_parser)
 add_executable(parser_tests
     Parser/ArithTests.cpp
+    Parser/ConcurrencyTests.cpp
     Parser/FuncTests.cpp
     Parser/ControlFlowTests.cpp
     Parser/ClassTests.cpp
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
-    Parser/MovTests.cpp
     Parser/NativeTests.cpp
     Parser/GenericsTests.cpp
     Parser/ConversionTests.cpp
@@ -67,6 +67,9 @@ paykan_test_suite(sema PAYKAN_TEST_SUITE_sema)
 if(PAYKAN_TEST_SUITE_sema)
 add_executable(sema_tests
     Sema/ArithTests.cpp
+    Sema/ConcurrencyTests.cpp
+    Sema/MoveTests.cpp
+    Sema/QualifierTests.cpp
     Sema/FuncTests.cpp
     Sema/NativeTests.cpp
     Sema/ControlFlowTests.cpp
@@ -127,6 +130,7 @@ if(PAYKAN_TEST_SUITE_codegen)
 # emits for the samples is checked by CStrictC11 below.
 add_executable(codegen_tests
     CodeGen/ArithTests.cpp
+    CodeGen/ConcurrencyTests.cpp
     CodeGen/FuncTests.cpp
     CodeGen/ControlFlowTests.cpp
     CodeGen/ClassTests.cpp
@@ -181,6 +185,7 @@ target_link_libraries(codegen_tests
 # (The mlir plugin itself is linked whole, with the others, below.)
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
+            ${CMAKE_SOURCE_DIR}/src/Backends/LLVM/CodeGen
 )
 target_include_directories(codegen_tests SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
@@ -188,6 +193,7 @@ target_include_directories(codegen_tests SYSTEM
 paykan_llvm_no_werror(codegen_tests)
 target_link_libraries(codegen_tests
     PRIVATE paykan_jit
+            paykan_llvm_codegen
             ${TEST_LLVM_LIBS}
 )
 paykan_link_plugins(codegen_tests)
@@ -232,6 +238,7 @@ paykan_test_suite(pir-mlir PAYKAN_TEST_SUITE_pir_mlir)
 if(PAYKAN_TEST_SUITE_pir_mlir)
     add_executable(pir_mlir_tests
         Backends/PIRMLIRTests.cpp
+        Backends/ParallelLoweringTests.cpp
     )
     target_include_directories(pir_mlir_tests
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -265,6 +272,7 @@ paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
     PIR/BinaryTests.cpp
+    PIR/ParallelTests.cpp
     PIR/DeadCodeTests.cpp
     PIR/LendTests.cpp
     PIR/MoveAtLastUseTests.cpp
@@ -334,6 +342,7 @@ paykan_test_suite(ast-interchange PAYKAN_TEST_SUITE_ast_interchange)
 if(PAYKAN_TEST_SUITE_ast_interchange)
 add_executable(ast_interchange_tests
     AST/InterchangeTests.cpp
+    AST/ConcurrencyInterchangeTests.cpp
 )
 target_compile_definitions(ast_interchange_tests
     PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
@@ -476,7 +485,10 @@ endif()
 paykan_test_suite(runtime PAYKAN_TEST_SUITE_runtime)
 if(PAYKAN_TEST_SUITE_runtime)
 add_executable(runtime_tests
+    Runtime/AtomicTests.cpp
     Runtime/BufferTests.cpp
+    Runtime/FreezeTests.cpp
+    Runtime/LockedTests.cpp
     Runtime/DeferredDestroyTests.cpp
     Runtime/EqualsNullTests.cpp
     Runtime/ObjectTests.cpp

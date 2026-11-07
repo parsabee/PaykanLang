@@ -213,6 +213,7 @@ private:
   ast::Stmt *parseIfStmt();
   ast::Stmt *parseWhileStmt();
   ast::Stmt *parseForStmt();
+  ast::Stmt *parseLockStmt();
   ast::Stmt *parseMatchStmt();
   ast::MatchArm *parseMatchArm();
   bool ifStartsStatement();

@@ -35,7 +35,7 @@ fn main() -> int {
   // HashMap<unsigned, int>: the top of the unsigned range hashes and
   // compares as its own value.
   top = collections::HashMap<unsigned, int>();
-  u: unsigned = unsigned(-1);
+  u = unsigned(-1);
   top.put(u, 1);
   top.put(u / 2, 2);
   top.put(0, 3);
@@ -61,8 +61,8 @@ fn main() -> int {
       + " " + Str(buf.len()));
 
   // Box<f32>: one rounded value shared through two names.
-  ratio = memory::Box<f32>(0.1);
-  alias = ratio;
+  ratio: mut = memory::Box<f32>(0.1);
+  alias: mut = ratio;
   r: inout f32 = alias.get();
   r = r * 3;
   io::println(Str(ratio.get()) + " " + Str(ratio.get() == 0.3));
@@ -78,7 +78,7 @@ fn main() -> int {
   io::println(Str(bigs.pop()) + " " + Str(bigs.pop()));
 
   // A LinkedList<i32> and a Stack<u8>.
-  ints = collections::LinkedList<i32>();
+  ints: mut = collections::LinkedList<i32>();
   ints.pushBack(-2147483648);
   ints.pushFront(2147483647);
   io::println(Str(ints.front()) + " " + Str(ints.back()) + " "

@@ -97,7 +97,7 @@ A free function may also leave the type out (see [Untyped Parameters](#untyped-p
 
 How an argument is passed depends on its type, and a [mode](#parameter-modes-view-and-inout)
 can change it. Without a mode, the call passes a copy of a value type and a reference to an
-object or a string:
+object or a string, which the function can change only where the parameter says `mut`:
 
 ```pkn
 import ::io;
@@ -110,7 +110,7 @@ impl P {
   fn __init__() { self.x = 0; }
 }
 
-fn f(n: int, s: Str, p: P) {
+fn f(n: int, s: Str, p: mut P) {
   n = 5;        // the function's own copy
   p.x = 7;      // the caller's object
   p = P();      // the function's own reference, now to another object
@@ -121,7 +121,7 @@ fn f(n: int, s: Str, p: P) {
 fn main() -> int {
   let n = 1;
   let s = "mine";
-  let p = P();
+  let p: mut = P();
   f(n, s, p);
   io::println(Str(n) + " " + s + " " + Str(p.x));
   return 0;
@@ -143,12 +143,17 @@ the function's copy only.
 ### Class / Str parameters (`s: Str`, `p: Point`)
 
 Strings and objects are passed by reference: the function receives the same object as its
-caller, so a field it assigns or a method that changes the object is seen by the caller.
-A caller that keeps the object alive for the whole call lends it, and the function changes
-no reference count unless it keeps the object (see
-[Borrowed parameters](16-memory.md#borrowed-parameters)).
-Assigning to the parameter makes it refer to another object; the caller's variable is
-unaffected. More in [Classes](05-classes.md) and [Memory](16-memory.md).
+caller. A plain `p: P` parameter reads it: no field can be assigned through it and only a
+`view fn` can be called on it (`'p' is immutable (a 'P'; write 'mut P' to change it);
+cannot assign to its field 'x'`), and a `P` or a `mut P` argument fits it. A `p: mut P`
+parameter may change the object, and a field it assigns or a method that changes the
+object is seen by the caller; its argument is a `mut P` too, or a temporary such as `P()`
+(`cannot store a 'P' in parameter 3 of 'f', a 'mut P': a reference gains 'mut' only by
+'move'`; [Variables](02-basics.md#variables--declarations)). A caller that keeps the object
+alive for the whole call lends it, and the function changes no reference count unless it
+keeps the object (see [Borrowed parameters](16-memory.md#borrowed-parameters)). Assigning
+to the parameter makes it refer to another object; the caller's variable is unaffected.
+More in [Classes](05-classes.md) and [Memory](16-memory.md).
 
 ### Array parameters (`a: int[3]`, `xs: view int[]`)
 
@@ -227,7 +232,8 @@ A `view` parameter cannot be changed: it cannot be assigned or be a destructurin
 (`cannot assign to 'view' parameter 'x'`), and it cannot be passed to an `inout`
 parameter (`'x' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`).
 It is passed like a parameter without a mode, so any argument of its type will do: a
-literal, an expression, a `let` local, an object of a subclass.
+literal, an expression, a `let` local, a `mut` object or an immutable one, an object of a
+subclass.
 
 A `view` parameter of a value type is a copy, which may be assigned to a variable or
 returned. One of an object, string, array, tuple or optional shares what the caller
@@ -258,7 +264,7 @@ fn show(c: view Counter, label: view Str) {
 }
 
 fn main() -> int {
-  let c = Counter();
+  let c: mut = Counter();
   c.tick();
   show(c, "ticks");
   return 0;
@@ -329,8 +335,8 @@ fn swap(a: inout Str, b: inout Str) {
 }
 
 fn main() -> int {
-  x = "left";
-  y = "right";
+  x: mut = "left";
+  y: mut = "right";
   swap(x, y);
   io::println(x + " " + y);
   return 0;
@@ -346,10 +352,11 @@ right left
 The argument must be one of:
 
 - a local variable (not a `let` one: `'k' is declared with 'let' and cannot be passed to
-  'inout' parameter 'n'`);
-- a plain (by-value) parameter;
+  'inout' parameter 'n'`), declared `mut` when it holds an object or a string (`x: mut =
+  "left";` above);
+- a plain (by-value) parameter, a `mut` one when it holds an object or a string;
 - another `inout` parameter, whose address is passed on;
-- a field of an object: `obj.f`, `self.f`, or a chain such as `a.b.f`.
+- a field of a `mut` object: `obj.f`, `self.f`, or a chain such as `a.b.f`.
 
 It must have exactly the parameter's type: an `int` variable does not go to an
 `x: inout float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
@@ -361,6 +368,7 @@ it. Anything else is an error:
 |---|---|
 | a literal or another expression (`bump(3)`, `bump(k + 1)`) | `argument 1 of 'bump' must be a variable or a field: parameter 'n' is 'inout'` |
 | a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
+| a variable holding an object or a string that is not `mut`, or a field of such an object (`swap(x, y)` with `x = "left";`, `hit(c.hits, c)` with `let c = Counter();`) | `'x' is immutable (a 'Str'; write 'mut Str' to change it); it cannot be passed to 'inout' parameter 'a'`, `'c' is immutable (a 'Counter'; write 'mut Counter' to change it); it cannot be passed to 'inout' parameter 'n'` |
 | an array element (`bump(xs[0])`) | `an array element cannot be passed to 'inout' parameter 'n' yet` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
 | `self` (`reset(self)`) | `'self' cannot be passed to 'inout' parameter 'c': the method would no longer know its object` |
@@ -387,7 +395,7 @@ fn hit(n: inout int, c: Counter) {
 }
 
 fn main() -> int {
-  let c = Counter();
+  let c: mut = Counter();
   hit(c.hits, c);
   io::println(Str(c.hits));
   return 0;
@@ -535,7 +543,7 @@ fn shout(s: inout Str) -> Str {
 }
 
 fn main() -> int {
-  s = "hi";
+  s: mut = "hi";
   let t = s + shout(s); // the s read before shout changes it
   io::println(t + " " + s);
   return 0;
@@ -564,13 +572,13 @@ class Shelf {
   box: Box;
 }
 
-fn swap(s: Shelf) -> Str {
+fn swap(s: mut Shelf) -> Str {
   s.box = Box("new");
   return "!";
 }
 
 fn main() -> int {
-  let shelf = Shelf(Box("old"));
+  let shelf: mut = Shelf(Box("old"));
   let t = shelf.box.label + swap(shelf); // the label read before swap replaces the box
   io::println(t + " " + shelf.box.label);
   return 0;
@@ -726,7 +734,7 @@ fn pick(a: inout int, b: inout int, first: bool) -> inout int {
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let b = Box();
+  let b: mut = Box();
   x: inout = b.num();
   x = x + 10;      // writes b.k
   bump(b.num());   // passed on as b.k's storage
@@ -764,7 +772,9 @@ Output:
   is last used`).
 - The receiver of a method returning `inout` is a variable or a field, which outlives the
   call: `Box().num()` is an error (`the receiver of 'num' must be a variable or a field:
-  its 'inout' result is part of it`).
+  its 'inout' result is part of it`). The method is not a `view fn`, so the receiver is a
+  `mut` object (`b` above; `'b' is immutable (a 'Box'; write 'mut Box' to change it); 'num'
+  is not a 'view fn'`).
 - While the result is used, its caller keeps alive what it is part of: the receiver, the
   objects holding the `inout` arguments, and the objects those arguments hold
   (`return b.k;` with `b: inout B`). So the result must be in that storage, as the next
@@ -854,7 +864,7 @@ fn countOf(c: inout Counter) -> inout int { return c.n; }
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let p = Panel(Counter(1), 10);
+  let p: mut = Panel(Counter(1), 10);
   bump(p.total());        // in p
   bump(p.c.count());      // in p.c, the receiver
   bump(countOf(p.c));     // in the object the argument refers to

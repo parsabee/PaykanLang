@@ -392,7 +392,7 @@ TEST(FunctionType, OptionalFunctionsUnwrapWithMatch) {
   auto r = semaCheck(R"(import ::io;
 class Button { onClick: ((Str) -> void)?; }
 fn main() -> int {
-  b = Button(None);
+  b: mut = Button(None);
   b.onClick = fn(s: Str) { io::println(s); };
   match b.onClick {
     f: (Str) -> void { f("hi"); }
@@ -449,7 +449,7 @@ fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
   sq = ops::square;
   t = ops::twice(sq);
-  b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
   k: (int) -> int = ops::twice(fn(x: int) -> int { return x + 1; });

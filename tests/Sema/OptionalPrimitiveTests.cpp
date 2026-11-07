@@ -48,7 +48,7 @@ TEST(OptionalPrimitive, ParamsReturnsFieldsArraysTuples) {
     fn half(n: int) -> int? { if n % 2 != 0 { return None; } return n / 2; }
     fn take(x: float?) -> bool { return x == None; }
     fn main() -> int {
-      h = H();                               // optional fields start as None
+      h: mut = H();                          // optional fields start as None
       h.n = 3;
       h.c = None;
       r = half(4);
@@ -149,9 +149,9 @@ TEST(OptionalPrimitive, GenericsInstantiateWithOptionalPrimitives) {
     impl Slot<T> { fn __init__() { } }
     fn wrap<T>(x: T) -> T? { return x; }
     fn main() -> int {
-      c = Cell<int?>(None);
+      c: mut = Cell<int?>(None);
       c.v = 4;
-      s = Slot<float>();
+      s: mut = Slot<float>();
       s.put(1);
       w: int? = wrap(3);
       return 0;

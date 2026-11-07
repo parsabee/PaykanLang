@@ -97,12 +97,12 @@ fn main() -> int {
   io::println("light = " + (if light == Light::Green then "Green" else "?")
       + ", x = " + Str(x));
 
-  let stats = Stats();
+  let stats: mut = Stats();
   stats.record(10);
   stats.record(k * 10);
   total = 0;
   start = 3;
-  let m = Meter(start);
+  let m: mut = Meter(start);
   m.add(total, 4);
   io::println("hits = " + Str(stats.hits) + ", total = " + Str(total));
 

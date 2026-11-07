@@ -41,8 +41,8 @@ class Hooked {
 // its `equals` is called.
 fn emptiedByEquals() -> collections::List<Hooked> {
   xs = collections::List<Hooked>();
-  let shared = memory::Box(xs);
-  xs.push(Hooked(1, fn() -> int { shared.get().clear(); return 0; }));
+  let alias = memory::Box(xs);
+  xs.push(Hooked(1, fn() -> int { alias.get().clear(); return 0; }));
   xs.push(Hooked(2, None));
   return xs;
 }
@@ -52,9 +52,9 @@ fn emptiedByEquals() -> collections::List<Hooked> {
 // itself.
 fn shrunkByEquals() -> collections::List<Hooked> {
   xs = collections::List<Hooked>();
-  let shared = memory::Box(xs);
+  let alias = memory::Box(xs);
   xs.push(Hooked(1, None));
-  xs.push(Hooked(2, fn() -> int { shared.get().removeAt(0); return 0; }));
+  xs.push(Hooked(2, fn() -> int { alias.get().removeAt(0); return 0; }));
   xs.push(Hooked(3, None));
   return xs;
 }
@@ -63,9 +63,9 @@ fn shrunkByEquals() -> collections::List<Hooked> {
 // `equals` is called.  Its hook holds the list: clear it when done.
 fn swappedByEquals() -> collections::List<Hooked> {
   xs = collections::List<Hooked>();
-  let shared = memory::Box(xs);
+  let alias = memory::Box(xs);
   xs.push(Hooked(1, None));
-  xs.push(Hooked(2, fn() -> int { shared.get().swap(1, 2); return 0; }));
+  xs.push(Hooked(2, fn() -> int { alias.get().swap(1, 2); return 0; }));
   xs.push(Hooked(3, None));
   return xs;
 }
@@ -131,7 +131,7 @@ fn main() -> int {
   // the first.  100,000 elements take time linear in the text, where putting
   // it together with `+` copied it per element.
   let none = collections::List<int>();
-  let first = collections::listToString(none);
+  let first: mut = collections::listToString(none);
   let second = collections::listToString(none);
   first.concat("!");
   io::println(first + " " + second);

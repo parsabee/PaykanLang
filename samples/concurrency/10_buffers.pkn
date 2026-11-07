@@ -1,0 +1,32 @@
+// The concurrency prototype: heap buffers in a `parallel for`.  A
+// `mem::Buffer<T>` of numbers that the enclosing function owns is read at
+// any index and written at the loop's variable only; a frozen one, boxed
+// (`atomic shared mem::Box<mem::Buffer<T>>`), is read by every thread with
+// no reference counting.  Element reads are a bounds check and a load.
+// expect-stdout: sum 1.49998e+10 of 100000 elements
+// expect-leaks: the frozen box and its buffer are immortal in the prototype
+
+import ::io;
+import ::memory as mem;
+
+fn main() -> int {
+  let n = 100000;
+  xs = mem::Buffer<float>();
+  let grown = xs.grow(unsigned(n));
+  for i in 0..n { let e = xs.set(unsigned(i), float(i)); }
+  ys = mem::Buffer<float>();
+  let grown2 = ys.grow(unsigned(n));
+  // Written at the loop's variable: no two iterations touch one element.
+  parallel for i in 0..n {
+    let e = ys.set(unsigned(i), xs.at(unsigned(i)) * 2.0);
+  }
+  // Frozen in a box: a handle every thread reads.
+  let frozen: atomic shared = mem::Box(move xs);
+  s = 0.0;
+  parallel for i in 0..n {
+    let u = unsigned(i);
+    s += frozen.value().at(u) + ys.at(u);
+  }
+  io::println("sum " + Str(s) + " of " + Str(ys.len()) + " elements");
+  return 0;
+}

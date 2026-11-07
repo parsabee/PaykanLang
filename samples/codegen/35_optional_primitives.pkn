@@ -38,7 +38,7 @@ fn digit(c: char) -> int? {
 }
 
 fn digitValue(c: char) -> int {
-  let digits: Str = "0123456789";
+  let digits = "0123456789";
   i = 0;
   while i < 10 {
     if digits[i] == c { return i; }
@@ -140,7 +140,7 @@ fn main() -> int {
   io::print("first vowel of 'paykan' -> ");
   io::println(firstVowel("paykan"));
 
-  let q = Question("ready?");
+  let q: mut = Question("ready?");
   q.answer = True;
   io::print("answered: ");
   io::println(q.answer);
@@ -170,7 +170,7 @@ fn main() -> int {
     None { }
   }
 
-  let c = Cache<int>();
+  let c: mut = Cache<int>();
   let before = show(c.get());
   c.put(square(7));
   io::println("cache: " + before + " then " + show(c.get()));

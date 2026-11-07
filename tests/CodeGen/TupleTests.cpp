@@ -294,7 +294,7 @@ TEST(Tuple, TupleFieldInClass) {
       fn __init__(p: (int, Str)) { self.pair = p; }
     }
     fn main() -> int {
-      h: Holder = Holder((9, "nine"));
+      h: mut Holder = Holder((9, "nine"));
       a, b = h.get();
       io::println(Str<int>(a) + b);
       io::println(h.pair);
@@ -329,11 +329,11 @@ TEST(Tuple, ClassInstanceElements) {
       fn __init__(x: int, y: int) { self.x = x; self.y = y; }
     }
     fn main() -> int {
-      t = ("origin", Point(0, 0));
+      t: (Str, shared mut Point) = ("origin", Point(0, 0));
       io::println(t);
       io::println(t.1.toString());
       io::println(Str<int>(t.1.x));
-      p: Point = t.1;
+      p: shared mut Point = t.1;
       p.x = 7;                  // shared object: visible through the tuple
       io::println(Str<int>(t.1.x));
       return 0;
@@ -449,7 +449,7 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
       nb: int? = None;
       tbl: (Str, int?)[3] = [("a", 1), ("b", nb), ("c", None)];
       io::println(val(tbl[0].1) + " " + val(tbl[1].1) + " " + val(tbl[2].1));
-      h = Holder();
+      h: mut = Holder();
       h.put([("m", 4), ("n", nb), ("q", 6)]);
       h.t[1] = ("o", 5);
       h.t[2] = ("p", None);
@@ -518,7 +518,7 @@ TEST(Tuple, ArrayOfTuplesWithReferenceElements) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"(import ::io;
     fn main() -> int {
-      xs: (Str, Node)[3] = [("a", Node(1)), ("b", Node(2)), ("c", Node(3))];
+      xs: (Str, shared mut Node)[3] = [("a", Node(1)), ("b", Node(2)), ("c", Node(3))];
       io::println(xs[1]);
       io::println(xs[2].0 + Str<int>(xs[2].1.v));
       t = xs[1];                     // a copy: survives the store below
@@ -527,7 +527,7 @@ TEST(Tuple, ArrayOfTuplesWithReferenceElements) {
       io::println(t);
       io::println(xs[0]);
       io::println(xs[1]);
-      n: Node = xs[1].1;
+      n: shared mut Node = xs[1].1;
       n.v = 7;                       // the Node is shared, not copied
       io::println(xs[1]);
       i: int = 0;
@@ -576,12 +576,12 @@ TEST(Tuple, TupleFieldIsReleasedWithItsObject) {
     }
     impl Holder { fn __init__(s: Str) { self.t = (s, Node(1)); self.n = 0; } }
     fn make(s: Str) -> Holder {
-      h = Holder(s + "!");
+      h: mut = Holder(s + "!");
       h.t = (h.t.0 + "?", None);
       return h;
     }
     fn main() -> int {
-      h = Holder("a");
+      h: mut = Holder("a");
       io::println(h.t);
       h.t = ("b", Node(2));
       io::println(h.t);
@@ -605,7 +605,7 @@ TEST(Tuple, NestedTuplesHoldingReferences) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"(import ::io;
     fn main() -> int {
-      t = (("in", Node(1)), (Node(2), "out", 3));
+      t: ((Str, shared mut Node), (Node, Str, int)) = (("in", Node(1)), (Node(2), "out", 3));
       u = t;
       inner = t.1;
       io::println(t);
@@ -613,7 +613,7 @@ TEST(Tuple, NestedTuplesHoldingReferences) {
       io::println(Str<bool>(t == u));    // the same Nodes
       w = (("in", Node(1)), (Node(2), "out", 3));
       io::println(Str<bool>(t == w));    // other Nodes: identity equals
-      n: Node = t.0.1;
+      n: shared mut Node = t.0.1;
       n.v = 5;
       io::println(u.0);
       return inner.2;
@@ -713,7 +713,7 @@ TEST(Tuple, GenericClassOfATuple) {
     }
     impl Box<T> { fn __init__(v: T) { self.item = v; } }
     fn main() -> int {
-      b = Box<(Str, int)>(("a" + "b", 1));
+      b: mut = Box<(Str, int)>(("a" + "b", 1));
       io::println(b.get());
       io::println(b.get().0);
       b.put(("c", 2));
@@ -807,7 +807,7 @@ TEST(Tuple, ReturnedFromAMethod) {
     }
     impl Counter { fn __init__(name: Str) { self.n = 0; self.name = name; } }
     fn main() -> int {
-      c = Counter("c");
+      c: mut = Counter("c");
       i, s = c.next();
       io::println(Str<int>(i) + s);
       io::println(c.next());

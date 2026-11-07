@@ -341,6 +341,11 @@ bool Sema::checkInitFieldsAssigned(
       // `while True` with no `break` out of it is left only by a return.
       return {in, detail::stmtAlwaysReturns(ws)};
     }
+    if (auto *ls = ast::dyn_cast<ast::LockStmt>(s)) {
+      // A lock block runs once, to its end (it cannot return).
+      checkUses(ls->getCell(), in, false);
+      return {analyzeStmt(ls->getBody(), in).Assigned, false};
+    }
     if (auto *fs = ast::dyn_cast<ast::ForStmt>(s)) {
       // As a while loop's: the range may be empty.
       checkUses(fs->getStart(), in, false);
@@ -600,6 +605,8 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
+    const ast::Qualifier fieldQual = takeQualifier(); // the prototype
+    field->setQualifier(fieldQual);
     field->setType(fty); // canonical write-back for the lowering
     if (field->isWeak() &&
         !checkWeakType(fty, field->getLocation(),
@@ -608,7 +615,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
-    ct->addField(field->getName(), fty, field->isWeak());
+    ct->addField(field->getName(), fty, field->isWeak(), fieldQual);
     // A public field of a public class cannot hand an importer a type it
     // could not name (an instantiation's fields are the template's).
     if (!names::isPrivateName(field->getName()) &&
@@ -772,9 +779,16 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
       while (!used.insert(name).second)
         name += "_";
       const std::string &interned = Ctx.intern(name);
-      params.push_back(
-          {&interned, superInit->getParamTypes()[i], modes.mode(i), loc});
-      args.push_back(Ctx.make<ast::Identifier>(loc, interned));
+      params.push_back({&interned, superInit->getParamTypes()[i], modes.mode(i),
+                        superInit->getParamQual(i), loc});
+      // A move-only argument is passed on by `move` (the prototype's copy
+      // rule, --strict-ownership); a Copyable one as it is (an `atomic`
+      // handle copies into the cell's handle, not a new cell).
+      ast::Expr *arg = Ctx.make<ast::Identifier>(loc, interned);
+      if (modes.mode(i) == ast::ParamMode::Value &&
+          !isCopyable(superInit->getParamTypes()[i]))
+        arg = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, arg);
+      args.push_back(arg);
     }
     body.push_back(Ctx.make<ast::ExprStmt>(
         loc, Ctx.make<ast::CallExpr>(loc, Ctx.intern(names::kMethodSuper),
@@ -782,10 +796,16 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
   }
   for (auto &[name, type] : ct->getFields()) {
     const std::string &interned = Ctx.intern(name);
-    params.push_back({&interned, type, ast::ParamMode::Value, loc});
+    params.push_back({&interned, type, ast::ParamMode::Value,
+                      ct->findFieldQualifier(name), loc});
+    // The field takes the parameter: a move-only one by `move` (the
+    // prototype's copy rule), a Copyable one as it is.
+    ast::Expr *value = Ctx.make<ast::Identifier>(loc, interned);
+    if (!isCopyable(type))
+      value = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, value);
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
-        Ctx.make<ast::Identifier>(loc, interned)));
+        value));
   }
 
   return Ctx.make<ast::FuncDecl>(
@@ -847,6 +867,13 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     if (!retTy || !checkFixedResult(retTy, method->getResultMode(),
                                     method->getLocation()))
       return nullptr;
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, method->getResultMode(),
+                                "the result of '" + method->getName() + "'",
+                                method->getLocation()))
+        return nullptr;
+      method->setResultQual(q);
+    }
     method->setReturnType(retTy);
   }
   // Resolve parameter types.
@@ -875,6 +902,12 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                      method->getName(), "' in '", className, "'"}));
     if (!pty)
       return nullptr;
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
+                                p.Loc))
+        return nullptr;
+      p.Qual = q;
+    }
     p.ParamType = pty;
     paramTys.push_back(pty);
   }
@@ -938,6 +971,11 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   for (const ast::Param &p : method->getParams())
     names.push_back(p.Name);
   mdecl->setParamNames(std::move(names));
+  std::vector<ast::Qualifier> quals; // the prototype
+  for (const ast::Param &p : method->getParams())
+    quals.push_back(p.Qual);
+  mdecl->setParamQuals(std::move(quals));
+  mdecl->setResultQual(method->getResultQual());
   mdecl->setModulePrivateInit(method->isModulePrivateInit());
   return mdecl;
 }
@@ -952,8 +990,10 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
   assert(!lookupFunction(cd->getName()) &&
          "constructor would overwrite a registered function");
   declareFunction(cd->getName(), ct, ctorParams);
-  if (initDecl)
+  if (initDecl) {
     FunctionTable[cd->getName()].Modes = initDecl->getParamModes();
+    FunctionTable[cd->getName()].ParamQuals = initDecl->getParamQuals();
+  }
 }
 
 void Sema::reportAbstractConstruction(const ast::ClassType *ct,
@@ -1032,6 +1072,15 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
 }
 
 bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
+  // A class's `__walk` (the prototype) is emitted for it too: the walk of
+  // its references that freezes an `atomic shared` object.
+  if (fn->getName() == names::kMethodWalk) {
+    error(fn->getLocation(),
+          "'__walk' is reserved for the compiler-generated walk and cannot "
+          "be declared in " +
+              std::string(typeKindWord(owner)) + " '" + typeName(owner) + "'");
+    return true;
+  }
   // A class's `destroy` is emitted for it (releasing the fields and freeing
   // the object) and is final; a struct, a value, is never destroyed.
   if (fn->getName() != names::kMethodDestroy)
@@ -1271,9 +1320,20 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     {
       ScopeGuard guard(*this);
       CurrentScope->declare(names::kSelf, ct);
-      for (size_t i = 0; i < method->getParams().size(); ++i)
-        CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+      // `self` is written in every method but a `view fn` (`__init__`
+      // builds it); an `inout` parameter is the borrow's writes.
+      CurrentScope->Quals[names::kSelf] =
+          ast::Qualifier{ast::QualForm::Unique, !method->isView()};
+      for (size_t i = 0; i < method->getParams().size(); ++i) {
+        const ast::Param &p = method->getParams()[i];
+        CurrentScope->declare(p.getName(), paramTys[i]);
+        ast::Qualifier q = p.Qual;
+        if (p.Mode == ast::ParamMode::Inout)
+          q.Mut = true;
+        CurrentScope->Quals[p.getName()] = q;
+      }
       declareParamKinds(method);
+      CurrentResultQual = method->getResultQual(); // the prototype
 
       // What the body does to `self`, for warnMissingViewFns.
       if (method->getName() != names::kMethodInit) {
@@ -1282,7 +1342,28 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         CurrentMethodUse->Decl = method;
       }
 
+      // The method's moves, task handles and loop depths are its own (the
+      // prototype); a generic instance's methods are checked in the middle
+      // of another body, whose state comes back after.
+      Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+      std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+          std::exchange(TaskLocals, {});
+      MovedMap savedMoves = std::exchange(MovedVars, {});
+      std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+      const bool savedFlowEnded = std::exchange(FlowEnded, false);
+      std::unordered_map<std::string, unsigned> savedDeclDepths =
+          std::exchange(DeclLoopDepth, {});
+      const unsigned savedLoopDepth = std::exchange(LoopDepth, 0u);
       bool bodyOk = visitBody(method->getBody()->getStatements());
+      if (bodyOk && !FlowEnded)
+        checkTasksAwaited(CurrentScope, nullptr, method->getLocation());
+      LoopDepth = savedLoopDepth;
+      DeclLoopDepth = std::move(savedDeclDepths);
+      FlowEnded = savedFlowEnded;
+      LoopMoveStack = std::move(savedLoopMoves);
+      MovedVars = std::move(savedMoves);
+      FunctionScope = savedFunctionScope;
+      TaskLocals = std::move(savedTasks);
       CurrentMethodUse = nullptr;
 
       if (!bodyOk) {
@@ -2335,6 +2416,11 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
                       InferenceConflict &conflict) {
   if (!pattern || !actual)
     return true;
+  // `mut T`, `shared T` & co. (the prototype): the form is the slot's, the
+  // type parameter is the plain type.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(pattern))
+    return unifyTypes(qt->getInnerType(), actual, typeParams, bindings,
+                      conflict);
 
   if (auto *ct = ast::dyn_cast<ast::ClassType>(pattern)) {
     // A type parameter binds to the argument type; a second occurrence must

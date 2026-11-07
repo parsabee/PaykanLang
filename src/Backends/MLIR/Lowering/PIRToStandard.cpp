@@ -39,12 +39,15 @@
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/TypeSwitch.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
+#include <mlir/Dialect/Async/IR/Async.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/Builders.h>
+#include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/IRMapping.h>
 #include <mlir/IR/Matchers.h>
 #include <mlir/IR/SymbolTable.h>
+#include <mlir/Interfaces/FunctionInterfaces.h>
 
 #include <cstdio>
 #include <limits>
@@ -140,16 +143,19 @@ enum Flag : int64_t {
 
 class ModuleLowering;
 
-/// The lowering of one pir.func into a func.func.
+/// The lowering of one pir.func into a func.func (or, for an `async fn` on
+/// the LLVM path, an async.func).
 class FunctionLowering {
 public:
-  FunctionLowering(ModuleLowering &m, P::FuncOp src, func::FuncOp dst);
+  FunctionLowering(ModuleLowering &m, P::FuncOp src, FunctionOpInterface dst,
+                   bool isAsync);
   void run();
 
 private:
   ModuleLowering &M;
   P::FuncOp Src;
-  func::FuncOp Dst;
+  FunctionOpInterface Dst;
+  bool IsAsync; // an `async fn` (the concurrency prototype)
   OpBuilder B;
   Location Loc;
   IRMapping Map;
@@ -222,6 +228,27 @@ private:
                 llvm::function_ref<Value(Region *)> fill);
   void lowerWhile(P::WhileOp op);
   void lowerInstr(Operation *op);
+
+  // -- The concurrency prototype (docs/design/concurrency.md)
+
+  /// The function's return of @p r (null for none): an async.func returns
+  /// the 64 bits of its result; on the C path an `async fn` returns them
+  /// in a `ptr`.
+  void makeReturn(Value r);
+  /// After an async function's execute region @p exec (null for none): the
+  /// await of its value, returned.
+  void finishAsync(async::ExecuteOp exec);
+  /// A task carries its result as 64 bits (an i64): a value as those bits,
+  /// and back.
+  Value toBits(Value v);
+  Value fromBits(Value bits, Type t);
+  /// A pir.parallel: in order on the C path; else the iterations in up to
+  /// A light body's loop runs inline below this many iterations
+  /// (lowerParallel).
+  static constexpr int64_t kInlineBelow = 4096;
+  /// 256 chunks, an scf.parallel loop over them, each chunk's partials
+  /// combined in chunk order after it.
+  void lowerParallel(P::ParallelOp op);
   void define(Operation *src, Value v) {
     if (v)
       Map.map(src->getResult(0), v);
@@ -237,10 +264,15 @@ private:
 /// The lowering of one module.
 class ModuleLowering {
 public:
-  explicit ModuleLowering(ModuleOp module)
-      : Mod(module), Ctx(module.getContext()), B(Ctx), Loc(module.getLoc()) {}
+  explicit ModuleLowering(ModuleOp module, bool sequential = false)
+      : Mod(module), Ctx(module.getContext()), B(Ctx), Loc(module.getLoc()),
+        Sequential(sequential) {}
 
   LogicalResult run();
+
+  /// The C path (the concurrency prototype): a pir.parallel runs in order
+  /// and an `async fn` is a plain function.
+  bool sequential() const { return Sequential; }
 
   // -- What FunctionLowering looks up
   std::string functionLinkName(StringRef pirName) const {
@@ -277,6 +309,7 @@ private:
   llvm::StringMap<ClassLayout> Layouts;
   llvm::StringMap<func::FuncOp> Declared; // link name -> declaration
   std::string Error;
+  bool Sequential;
 
   std::string definedName(StringRef name) const {
     if (IsMain && name == "main")
@@ -386,7 +419,7 @@ LogicalResult ModuleLowering::run() {
   }
 
   // Declarations, then definitions (bodies may call anything declared).
-  std::vector<std::pair<P::FuncOp, func::FuncOp>> bodies;
+  std::vector<std::tuple<P::FuncOp, FunctionOpInterface, bool>> bodies;
   for (auto f : body->getOps<P::FuncOp>()) {
     std::string link = FunctionNames[f.getSymName()];
     erase.push_back(f);
@@ -401,13 +434,30 @@ LogicalResult ModuleLowering::run() {
         decl->setAttr(kDropAttr, UnitAttr::get(Ctx));
       continue;
     }
-    auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());
+    // An `async fn` (the concurrency prototype): an async.func whose
+    // result is the task's 64 bits, or on the C path a function returning
+    // them in a `ptr`.
+    const bool isAsync = f->hasAttr(kAsyncAttr);
+    FunctionOpInterface fn;
+    if (isAsync && !Sequential) {
+      Type av = async::ValueType::get(B.getI64Type());
+      fn = async::FuncOp::create(
+          B, Loc, link,
+          B.getFunctionType(f.getFunctionType().getInputs(), TypeRange{av}));
+    } else if (isAsync) {
+      fn = func::FuncOp::create(
+          B, Loc, link,
+          B.getFunctionType(f.getFunctionType().getInputs(),
+                            TypeRange{P::PtrType::get(Ctx)}));
+    } else {
+      fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());
+    }
     if (::paykan::pir::isDropName(f.getSymName()))
       fn->setAttr(kDropAttr, UnitAttr::get(Ctx));
-    bodies.emplace_back(f, fn);
+    bodies.emplace_back(f, fn, isAsync);
   }
-  for (auto &[src, dst] : bodies)
-    FunctionLowering(*this, src, dst).run();
+  for (auto &[src, dst, isAsync] : bodies)
+    FunctionLowering(*this, src, dst, isAsync).run();
   for (Operation *op : erase)
     op->erase();
   Mod->removeAttr(kMainModuleAttr);
@@ -420,8 +470,9 @@ LogicalResult ModuleLowering::run() {
 // -- FunctionLowering
 
 FunctionLowering::FunctionLowering(ModuleLowering &m, P::FuncOp src,
-                                   func::FuncOp dst)
-    : M(m), Src(src), Dst(dst), B(dst.getContext()), Loc(src.getLoc()) {
+                                   FunctionOpInterface dst, bool isAsync)
+    : M(m), Src(src), Dst(dst), IsAsync(isAsync), B(dst->getContext()),
+      Loc(src.getLoc()) {
   auto results = src.getFunctionType().getResults();
   if (!results.empty())
     RetType = results.front();
@@ -489,6 +540,18 @@ void FunctionLowering::run() {
   for (auto [from, to] : llvm::zip(body.getArguments(), entry->getArguments()))
     Map.map(from, to);
 
+  // An `async fn` on the LLVM path (the concurrency prototype): its body is
+  // an async.execute region, which the async runtime hands to its worker
+  // pool, so a call returns at once with the task; the function awaits the
+  // region's value (a suspension point) and returns it.  A bare async.func
+  // would run its body on the caller's thread.
+  async::ExecuteOp exec;
+  if (IsAsync && !M.sequential()) {
+    exec = async::ExecuteOp::create(B, Loc, TypeRange{B.getI64Type()},
+                                    ValueRange{}, ValueRange{});
+    B.setInsertionPointToEnd(&exec.getBodyRegion().front());
+  }
+
   // The locals are slots at the top of the function, as PIR declares them.
   for (auto l : body.getOps<P::LocalOp>()) {
     Type slot = l.getSlot().getType().getSlot();
@@ -503,8 +566,8 @@ void FunctionLowering::run() {
   Src.walk(
       [&](Operation *o) { loopExits |= isa<P::BreakOp, P::ContinueOp>(o); });
   if (!loopExits && tailOnly(body)) {
-    Value r = lowerTail(body);
-    func::ReturnOp::create(B, Loc, r ? ValueRange(r) : ValueRange());
+    makeReturn(lowerTail(body));
+    finishAsync(exec);
     return;
   }
   ExitSlot = P::AllocaOp::create(B, Loc, 1, 1, "exit");
@@ -514,11 +577,228 @@ void FunctionLowering::run() {
     RetSlot = P::AllocaOp::create(B, Loc, size, align, "ret");
   }
   lowerBlock(body);
-  if (RetType)
-    func::ReturnOp::create(
-        B, Loc, ValueRange(P::PtrLoadOp::create(B, Loc, RetType, RetSlot)));
+  makeReturn(RetType ? Value(P::PtrLoadOp::create(B, Loc, RetType, RetSlot))
+                     : Value());
+  finishAsync(exec);
+}
+
+void FunctionLowering::finishAsync(async::ExecuteOp exec) {
+  if (!exec)
+    return;
+  B.setInsertionPointAfter(exec);
+  Value bits =
+      async::AwaitOp::create(B, Loc, exec.getBodyResults()[0])->getResult(0);
+  async::ReturnOp::create(B, Loc, ValueRange(bits));
+}
+
+void FunctionLowering::makeReturn(Value r) {
+  if (!IsAsync) {
+    func::ReturnOp::create(B, Loc, r ? ValueRange(r) : ValueRange());
+    return;
+  }
+  Value bits = r ? toBits(r) : i64(0);
+  if (M.sequential())
+    func::ReturnOp::create(B, Loc,
+                           ValueRange(P::CastOp::create(
+                               B, Loc, P::PtrType::get(B.getContext()), bits)));
   else
-    func::ReturnOp::create(B, Loc);
+    async::YieldOp::create(B, Loc, ValueRange(bits)); // the execute region's
+}
+
+Value FunctionLowering::toBits(Value v) {
+  Type t = v.getType(), i64Ty = B.getI64Type();
+  if (t == i64Ty)
+    return v;
+  if (isa<FloatType>(t))
+    return arith::BitcastOp::create(B, Loc, i64Ty, v);
+  if (isa<IntegerType>(t))
+    return arith::ExtUIOp::create(B, Loc, i64Ty, v);
+  if (isa<P::BoxType, P::ObjType, P::PtrType, P::WeakType>(t))
+    return P::CastOp::create(B, Loc, i64Ty, v);
+  M.fail("a task's result is an optional value (the prototype carries a "
+         "task's result in 64 bits)");
+  return i64(0);
+}
+
+Value FunctionLowering::fromBits(Value bits, Type t) {
+  if (t == B.getI64Type())
+    return bits;
+  if (isa<FloatType>(t))
+    return arith::BitcastOp::create(B, Loc, t, bits);
+  if (isa<IntegerType>(t))
+    return arith::TruncIOp::create(B, Loc, t, bits);
+  if (isa<P::BoxType, P::ObjType, P::PtrType, P::WeakType>(t))
+    return P::CastOp::create(B, Loc, t, bits);
+  M.fail("a task's result is an optional value (the prototype carries a "
+         "task's result in 64 bits)");
+  return zeroOf(t);
+}
+
+void FunctionLowering::lowerParallel(P::ParallelOp op) {
+  Type i64Ty = B.getI64Type(), idx = B.getIndexType();
+  auto toIndex = [&](Value v) -> Value {
+    return arith::IndexCastOp::create(B, Loc, idx, v);
+  };
+  auto toI64 = [&](Value v) -> Value {
+    return arith::IndexCastOp::create(B, Loc, i64Ty, v);
+  };
+  auto cst = [&](int64_t v) -> Value {
+    return arith::ConstantIndexOp::create(B, Loc, v);
+  };
+  Value count = lookup(op.getCount());
+  Block &body = op.getBody().front();
+  Value index = body.getArgument(0);
+  std::vector<Value> partials(op.getPartials().begin(), op.getPartials().end());
+  ArrayRef<int64_t> reductions = op.getReductions();
+  auto slotOf = [&](Value local) { return SlotTypes.lookup(local); };
+  auto identity = [&](Type t, bool mul) -> Value {
+    if (!mul)
+      return zeroOf(t);
+    if (auto f = dyn_cast<FloatType>(t))
+      return arith::ConstantFloatOp::create(B, Loc, f, llvm::APFloat(1.0));
+    return arith::ConstantIntOp::create(B, Loc, t, 1);
+  };
+  auto combine = [&](Value a, Value b, bool mul) -> Value {
+    if (isa<FloatType>(a.getType()))
+      return mul ? Value(arith::MulFOp::create(B, Loc, a, b))
+                 : Value(arith::AddFOp::create(B, Loc, a, b));
+    return mul ? Value(arith::MulIOp::create(B, Loc, a, b))
+               : Value(arith::AddIOp::create(B, Loc, a, b));
+  };
+
+  // The loop run in order on the calling thread: the C path's, and a light
+  // body's below the threshold.
+  auto emitSequential = [&] {
+    auto loop = scf::ForOp::create(B, Loc, cst(0), toIndex(count), cst(1));
+    OpBuilder::InsertionGuard guard(B);
+    B.setInsertionPointToStart(loop.getBody());
+    Map.map(index, toI64(loop.getInductionVar()));
+    lowerBlock(body);
+  };
+  if (M.sequential()) {
+    emitSequential();
+    P::PtrStoreOp::create(B, Loc, lookup(op.getCounter()), count);
+    return;
+  }
+
+  // A light body, one with no call and no loop of its own, runs a few
+  // nanoseconds an iteration: below kInlineBelow iterations the fork and
+  // the join of a parallel loop cost more than the loop (benchmarks/
+  // README.md), so such a loop runs inline, decided by its trip count at
+  // run time.  A body with a call or a loop may be heavy however short the
+  // loop, and forks.
+  bool light = true;
+  op.getBody().walk([&](Operation *o) {
+    if (auto c = dyn_cast<P::CallOp>(o)) {
+      StringRef callee = c.getCallee();
+      if (!callee.starts_with("$rt.") && !callee.starts_with("$c."))
+        light = false; // the runtime's own (a bounds check's panic) is not
+    } else if (isa<P::VCallOp, P::ICallOp, P::AsyncCallOp, P::WhileOp,
+                   P::ParallelOp>(o)) {
+      light = false;
+    }
+  });
+  // K = min(count, 256) chunks: chunk c runs [c*q + min(c, r), + q + (c <
+  // r)) with q = count / K and r = count % K (docs/design/concurrency.md,
+  // "Reproducible chunking").
+  Value k = arith::MinSIOp::create(B, Loc, count, i64(256));
+  Value kSafe = arith::MaxSIOp::create(B, Loc, k, i64(1));
+  Value q = arith::DivSIOp::create(B, Loc, count, kSafe);
+  Value r = arith::RemSIOp::create(B, Loc, count, kSafe);
+  // Each reduction's 256 chunk partials (allocated before the choice of
+  // path, where every alloca of the function is).
+  std::vector<Value> arrays;
+  for (Value p : partials) {
+    auto [size, align] = sizeAlign(slotOf(p));
+    arrays.push_back(
+        P::AllocaOp::create(B, Loc, 256 * size, align, "partials"));
+  }
+  scf::IfOp small;
+  if (light) {
+    Value few = arith::CmpIOp::create(B, Loc, arith::CmpIPredicate::slt, count,
+                                      i64(kInlineBelow));
+    small = scf::IfOp::create(B, Loc, few, /*withElseRegion=*/true);
+    {
+      OpBuilder::InsertionGuard guard(B);
+      B.setInsertionPoint(small.thenBlock()->getTerminator());
+      emitSequential();
+    }
+    B.setInsertionPoint(small.elseBlock()->getTerminator());
+  }
+  auto par = scf::ParallelOp::create(
+      B, Loc, ValueRange{cst(0)}, ValueRange{toIndex(k)}, ValueRange{cst(1)});
+  {
+    OpBuilder::InsertionGuard guard(B);
+    B.setInsertionPoint(par.getBody()->getTerminator());
+    Value c = toI64(par.getInductionVars()[0]);
+    Value lo =
+        arith::AddIOp::create(B, Loc, arith::MulIOp::create(B, Loc, c, q),
+                              arith::MinSIOp::create(B, Loc, c, r));
+    Value extra = arith::ExtUIOp::create(
+        B, Loc, i64Ty,
+        arith::CmpIOp::create(B, Loc, arith::CmpIPredicate::slt, c, r));
+    Value hi = arith::AddIOp::create(
+        B, Loc, arith::AddIOp::create(B, Loc, lo, q), extra);
+    // The chunk's own slots for an iteration's locals and the partials.
+    std::vector<std::pair<Value, Value>> saved;
+    auto remap = [&](Value local, StringRef name) {
+      auto [size, align] = sizeAlign(slotOf(local));
+      Value a = P::AllocaOp::create(B, Loc, size, align, name);
+      saved.emplace_back(local, Map.lookupOrNull(local));
+      Map.map(local, a);
+      return a;
+    };
+    for (Value p : op.getPrivates())
+      remap(p, "private");
+    std::vector<Value> chunkPartials;
+    for (auto [i, p] : llvm::enumerate(partials)) {
+      Value a = remap(p, "partial");
+      P::PtrStoreOp::create(B, Loc, a, identity(slotOf(p), reductions[i] == 1));
+      chunkPartials.push_back(a);
+    }
+    auto inner = scf::ForOp::create(B, Loc, toIndex(lo), toIndex(hi), cst(1));
+    {
+      OpBuilder::InsertionGuard g(B);
+      B.setInsertionPointToStart(inner.getBody());
+      Map.map(index, toI64(inner.getInductionVar()));
+      lowerBlock(body);
+    }
+    for (auto [i, p] : llvm::enumerate(partials)) {
+      Type t = slotOf(p);
+      auto [size, align] = sizeAlign(t);
+      Value v = P::PtrLoadOp::create(B, Loc, t, chunkPartials[i]);
+      Value at = P::PtrAddOp::create(
+          B, Loc, arrays[i], arith::MulIOp::create(B, Loc, c, i64(size)));
+      P::PtrStoreOp::create(B, Loc, at, v);
+    }
+    for (auto &[local, old] : saved) {
+      if (old)
+        Map.map(local, old);
+      else
+        Map.erase(local);
+    }
+  }
+  // The chunks' partials, combined in chunk order into the function's.
+  auto fold = scf::ForOp::create(B, Loc, cst(0), toIndex(k), cst(1));
+  {
+    OpBuilder::InsertionGuard guard(B);
+    B.setInsertionPointToStart(fold.getBody());
+    Value c = toI64(fold.getInductionVar());
+    for (auto [i, p] : llvm::enumerate(partials)) {
+      Type t = slotOf(p);
+      auto [size, align] = sizeAlign(t);
+      Value slot = lookup(p);
+      Value cur = P::PtrLoadOp::create(B, Loc, t, slot);
+      Value v = P::PtrLoadOp::create(
+          B, Loc, t,
+          P::PtrAddOp::create(B, Loc, arrays[i],
+                              arith::MulIOp::create(B, Loc, c, i64(size))));
+      P::PtrStoreOp::create(B, Loc, slot, combine(cur, v, reductions[i] == 1));
+    }
+  }
+  if (small)
+    B.setInsertionPointAfter(small);
+  P::PtrStoreOp::create(B, Loc, lookup(op.getCounter()), count);
 }
 
 Value FunctionLowering::zeroOf(Type t) {
@@ -761,6 +1041,8 @@ void FunctionLowering::lowerOp(Operation *op) {
     return lowerSwitch(s);
   if (auto w = dyn_cast<P::WhileOp>(op))
     return lowerWhile(w);
+  if (auto p = dyn_cast<P::ParallelOp>(op))
+    return lowerParallel(p);
   if (isa<P::BreakOp>(op))
     return setFlag(kBreaking);
   if (isa<P::ContinueOp>(op))
@@ -1022,6 +1304,39 @@ void FunctionLowering::lowerInstr(Operation *op) {
         }
         define(op, P::CastOp::create(B, Loc, to, v));
       })
+      // The concurrency prototype: a task is an async.value on the LLVM
+      // path, cast to a ptr while PIR holds it; on the C path the call's
+      // result, 64 bits in a ptr.
+      .Case([&](P::AsyncCallOp o) {
+        std::string link = M.functionLinkName(o.getCallee());
+        std::vector<Value> args = mapped(o.getArgs());
+        if (M.sequential()) {
+          define(op, func::CallOp::create(B, Loc, link, TypeRange{ptr}, args)
+                         .getResult(0));
+          return;
+        }
+        Type av = async::ValueType::get(B.getI64Type());
+        Value t = async::CallOp::create(B, Loc, link, TypeRange{av}, args)
+                      ->getResult(0);
+        define(op, UnrealizedConversionCastOp::create(B, Loc, TypeRange{ptr},
+                                                      ValueRange{t})
+                       .getResult(0));
+      })
+      .Case([&](P::AwaitOp o) {
+        if (M.sequential()) {
+          define(op,
+                 fromBits(P::CastOp::create(B, Loc, B.getI64Type(), operand(0)),
+                          o.getType()));
+          return;
+        }
+        Type av = async::ValueType::get(B.getI64Type());
+        Value t = UnrealizedConversionCastOp::create(B, Loc, TypeRange{av},
+                                                     ValueRange{operand(0)})
+                      .getResult(0);
+        Value bits = async::AwaitOp::create(B, Loc, t)->getResult(0);
+        async::RuntimeDropRefOp::create(B, Loc, t, B.getI64IntegerAttr(1));
+        define(op, fromBits(bits, o.getType()));
+      })
       // Calls.
       .Case([&](P::CallOp o) {
         define(op, resultOf(func::CallOp::create(
@@ -1066,8 +1381,13 @@ void FunctionLowering::lowerInstr(Operation *op) {
           call->setAttr(kNonNullAttr, B.getUnitAttr());
       })
       .Case([&](P::BoxOp) {
-        define(op, resultOf(callRuntime(names::kPaykanSharedNew, {obj}, {box},
-                                        {operand(0)})));
+        // A box is its object (Runtime.h, "Shared"), and boxing one takes a
+        // reference to it, as PaykanShared_new does: a retain, whose fast
+        // path each backend makes inline (docs/language/16-memory.md, "The
+        // Reference Counts": a retain is a few instructions, with no call).
+        Value b = P::CastOp::create(B, Loc, box, operand(0));
+        callRuntime(names::kPaykanRetain, {box}, {}, {b});
+        define(op, b);
       })
       .Case([&](P::UnboxOp) {
         // A box is its object (Runtime.h, "Shared").
@@ -1158,12 +1478,19 @@ struct PIRToStandardPass
     : public PassWrapper<PIRToStandardPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PIRToStandardPass)
 
+  bool Sequential = false;
+  PIRToStandardPass() = default;
+  explicit PIRToStandardPass(bool sequential) : Sequential(sequential) {}
+  PIRToStandardPass(const PIRToStandardPass &other)
+      : PassWrapper(other), Sequential(other.Sequential) {}
+
   StringRef getArgument() const override { return "pir-to-standard"; }
   StringRef getDescription() const override {
     return "Lower the pir dialect to func, scf, arith and the pir memory ops";
   }
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<func::FuncDialect, scf::SCFDialect, arith::ArithDialect>();
+    registry.insert<func::FuncDialect, scf::SCFDialect, arith::ArithDialect,
+                    async::AsyncDialect>();
   }
 
   void runOnOperation() override {
@@ -1174,22 +1501,23 @@ struct PIRToStandardPass
     for (auto nested : top.getOps<ModuleOp>())
       modules.push_back(nested);
     for (ModuleOp m : modules)
-      if (failed(lowerToStandard(m)))
+      if (failed(lowerToStandard(m, Sequential)))
         return signalPassFailure();
   }
 };
 
 } // namespace
 
-LogicalResult lowerToStandard(ModuleOp module) {
-  return ModuleLowering(module).run();
+LogicalResult lowerToStandard(ModuleOp module, bool sequential) {
+  return ModuleLowering(module, sequential).run();
 }
 
-std::unique_ptr<Pass> createPIRToStandardPass() {
-  return std::make_unique<PIRToStandardPass>();
+std::unique_ptr<Pass> createPIRToStandardPass(bool sequential) {
+  return std::make_unique<PIRToStandardPass>(sequential);
 }
 
 void loadStandardDialects(MLIRContext &ctx) {
+  ctx.getOrLoadDialect<async::AsyncDialect>();
   ctx.getOrLoadDialect<func::FuncDialect>();
   ctx.getOrLoadDialect<scf::SCFDialect>();
   ctx.getOrLoadDialect<arith::ArithDialect>();

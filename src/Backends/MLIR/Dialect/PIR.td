@@ -723,4 +723,61 @@ def PIR_WeakReleaseOp : PIR_Op<"weak_release"> {
   let assemblyFormat = "$weak attr-dict";
 }
 
+//===----------------------------------------------------------------------===//
+// The concurrency prototype (docs/design/concurrency.md)
+//===----------------------------------------------------------------------===//
+
+def PIR_AsyncCallOp : PIR_Op<"async_call"> {
+  let summary = "start a task running an `async fn` (PIR's `async_call`)";
+  let description = [{
+    The result is the task, a `ptr`, whose `pir.await` is the function's
+    result.  The LLVM path makes it an `async.call` on MLIR's async
+    runtime; the C path calls the function and carries its result in the
+    pointer.
+  }];
+  let arguments = (ins FlatSymbolRefAttr:$callee, Variadic<PIR_Arg>:$args);
+  let results = (outs PIR_PtrType:$result);
+  let assemblyFormat = [{
+    $callee `(` $args `)` attr-dict `:` functional-type($args, results)
+  }];
+}
+
+def PIR_AwaitOp : PIR_Op<"await"> {
+  let summary = "a task's result, waited for (PIR's `await`)";
+  let arguments = (ins PIR_PtrType:$task);
+  let results = (outs PIR_Value:$result);
+  let assemblyFormat = "$task attr-dict `:` type($result)";
+}
+
+def PIR_ParallelOp : PIR_Op<"parallel", [NoTerminator, RecursiveMemoryEffects,
+                                         AttrSizedOperandSegments,
+                                         OpAsmOpInterface]> {
+  let summary = "a counted loop whose iterations are independent (`parallel for`)";
+  let description = [{
+    The body runs once per index from 0 below `count`, its one block
+    argument; the iterations may run on several threads.  `counter` is the
+    loop's counter local, left at `count`; `privates` are the locals of
+    one iteration, fresh for each; each of `partials` holds a reduction's
+    accumulator, which the body reads and writes and which starts at the
+    identity of its operation in `reductions` (0 add, 1 mul): the partials
+    of parallel chunks combine with that operation, in chunk order, into
+    the local.  The LLVM path runs the chunks as an `scf.parallel` loop,
+    lowered to OpenMP; the C path runs the loop in order.
+  }];
+  let arguments = (ins I64:$count, PIR_LocalType:$counter,
+                       Variadic<PIR_LocalType>:$privates,
+                       Variadic<PIR_LocalType>:$partials,
+                       DenseI64ArrayAttr:$reductions);
+  let regions = (region SizedRegion<1>:$body);
+  let assemblyFormat = [{
+    $count `counter` $counter `:` qualified(type($counter))
+    (`privates` `(` $privates^ `:` qualified(type($privates)) `)`)?
+    (`partials` `(` $partials^ `:` qualified(type($partials)) `)`)?
+    `reductions` $reductions $body attr-dict
+  }];
+  let extraClassDeclaration = [{
+    static ::llvm::StringRef getDefaultDialect() { return "pir"; }
+  }];
+}
+
 #endif // PAYKAN_PIR_TD

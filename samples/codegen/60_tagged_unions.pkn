@@ -138,7 +138,7 @@ fn main() -> int {
   io::println(if check() then "caught" else "missed");
 
   // Held by an object, and an enum without fields shown by name.
-  let h = Holder(MyType::NoElement);
+  let h: mut = Holder(MyType::NoElement);
   h.held = MyType::WithObject(Node(9), "held");
   let d = Dir::West;
   io::println(d.toString() + " " + Dir::East.toString() + " | "

@@ -114,7 +114,7 @@ class Derived : Base {
 }
 
 impl Derived {
-  fn __init__(h: Holder) { __super__(h.p, reset(h)); self.y = 0; }
+  fn __init__(h: mut Holder) { __super__(h.p, reset(h)); self.y = 0; }
 }
 
 class Calls {
@@ -138,15 +138,15 @@ class Arrays {
 fn sum(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2];
 fn ends(ss: view Str[], x: int) -> Str => ss[0] + ss[2];
 
-fn resetArrays(a: Arrays) -> int {
+fn resetArrays(a: mut Arrays) -> int {
   a.xs = [9, 9, 9];
   a.ss = ["z" + Str(1), "z" + Str(2), "z" + Str(3)];
   return 0;
 }
 
-fn sumOn(xs: view int[], a: Arrays) -> int => sum(xs, resetArrays(a));
-fn endsOn(ss: view Str[], a: Arrays) -> Str => ends(ss, resetArrays(a));
-fn firstOn(ss: view Str[], a: Arrays) -> Str {
+fn sumOn(xs: view int[], a: mut Arrays) -> int => sum(xs, resetArrays(a));
+fn endsOn(ss: view Str[], a: mut Arrays) -> Str => ends(ss, resetArrays(a));
+fn firstOn(ss: view Str[], a: mut Arrays) -> Str {
   let f = fn(ts: view Str[], x: int) -> Str => ts[0] + "";
   return f(ss, resetArrays(a));
 }
@@ -164,10 +164,10 @@ impl Kept {
   fn __init__(ss: view Str[], x: int) { self.s = ss[1] + ""; }
 }
 
-fn pickOn(ss: view Str[], a: Arrays) -> Str {
+fn pickOn(ss: view Str[], a: mut Arrays) -> Str {
   return Picker(0).pick(ss, resetArrays(a));
 }
-fn keptOn(ss: view Str[], a: Arrays) -> Str => Kept(ss, resetArrays(a)).s;
+fn keptOn(ss: view Str[], a: mut Arrays) -> Str => Kept(ss, resetArrays(a)).s;
 
 fn arrays() -> Arrays => Arrays([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
 
@@ -203,9 +203,9 @@ impl Ticker {
 }
 
 fn boxed() -> Boxed => Boxed(P(1), E::A(1), Wrap(P(1), 1));
-fn lookOn(p: view P, b: Boxed) -> int => look(p, b.resetW());
+fn lookOn(p: view P, b: mut Boxed) -> int => look(p, b.resetW());
 
-fn reset(h: Holder) -> int {
+fn reset(h: mut Holder) -> int {
   h.p = P(9);
   h.named = Named("z" + Str(9), 9);
   return 0;
@@ -236,7 +236,7 @@ fn bumpN(n: inout int) -> int {
   return 0;
 }
 
-fn recount(c: Counted) -> int {
+fn recount(c: mut Counted) -> int {
   c.counter = Counter(9);
   return 0;
 }
@@ -245,7 +245,7 @@ fn fresh() -> Holder => Holder(P(1), Named("a" + Str(1), 1), 1);
 
 fn main() -> int {
   // Read through an object that a later call, given the object, writes.
-  h = fresh();
+  h: mut = fresh();
   let a = first(h.p, reset(h));
   h = fresh();
   let c = first(h.p, first(h.p, reset(h)));
@@ -275,7 +275,7 @@ fn main() -> int {
   let r = Reader(0);
   h = fresh();
   let m1 = r.first(h.p, reset(h));
-  let counted = Counted(Counter(1));
+  let counted: mut = Counted(Counter(1));
   let m2 = counted.counter.get(recount(counted));
   pair = Pair(P(1), P(2));
   let m3 = first(pair.q, pair.bumpQ()) - 1;
@@ -295,14 +295,14 @@ fn main() -> int {
   p = P(1);
   let f2 = g(p, bump(p));
   h = fresh();
-  let later = fn() -> int => reset(h);
+  let later = fn() -> int { h.p = P(9); return 0; };
   let f3 = first(h.p, later());
   io::println("function value: " + Str(f1) + " " + Str(f2) + " " + Str(f3));
 
   // A `view` parameter and a slice see the value read too.
   h = fresh();
   let v1 = look(h.p, reset(h));
-  arrs = arrays();
+  arrs: mut = arrays();
   let v2 = total(arrs.xs, resetArrays(arrs));
   io::println("view: " + Str(v1) + " " + Str(v2));
 
@@ -331,7 +331,7 @@ fn main() -> int {
   slot = Slot(P(1), P(2));
   let o2 = first(slot.slot(), bump(slot.p));
   h = fresh();
-  let o3 = first(h.p, apply(fn() -> int => reset(h)));
+  let o3 = first(h.p, apply(fn() -> int { h.p = P(9); return 0; }));
   io::println("more: " + Str(d.p.a) + " " + Str(o1) + " " + Str(o2) + " "
       + Str(o3));
 
@@ -353,14 +353,14 @@ fn main() -> int {
   // A method that writes a field through an `inout` local or a `match`
   // arm's binding, one that writes the field holding a `view` parameter's
   // value, and one that writes another object's field (no copy).
-  b = boxed();
+  b: mut = boxed();
   let y1 = first(b.p, b.viaLocal());
   b = boxed();
   let y2 = tag(b.e, b.viaArm());
   b = boxed();
   let y3 = lookOn(b.w.p, b);
   b = boxed();
-  let ticker = Ticker(0);
+  let ticker: mut = Ticker(0);
   let y4 = first(b.p, ticker.next());
   io::println("through a name for a field: " + Str(y1) + " " + y2 + " "
       + Str(y3) + " " + Str(y4));

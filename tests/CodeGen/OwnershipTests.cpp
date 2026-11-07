@@ -45,7 +45,7 @@ TEST(Ownership, ReturnSelf) {
       fn __init__() { self.x = 1; }
     }
     fn main() -> int {
-      b: B = B();
+      b: mut B = B();
       c: B = b.me();
       io::println(Str<int>(c.x));
       return 0;
@@ -70,7 +70,7 @@ TEST(Ownership, ReturnSelfChained) {
       fn __init__() { self.x = 0; }
     }
     fn main() -> int {
-      b: B = B();
+      b: mut B = B();
       c: B = b.bump().bump().bump();
       io::println(Str<int>(c.x));
       return 0;
@@ -96,7 +96,7 @@ TEST(Ownership, PassSelfAsArgument) {
     }
     fn probe(b: B) { io::println(Str<int>(b.x)); }
     fn main() -> int {
-      b: B = B();
+      b: mut B = B();
       b.send();
       return 0;
     }
@@ -123,7 +123,7 @@ TEST(Ownership, AssignSelfToLocal) {
       fn __init__() { self.x = 7; }
     }
     fn main() -> int {
-      a: A = A();
+      a: mut A = A();
       n: int = a.grab();
       io::println(Str<int>(n));
       io::println(Str<int>(a.x));
@@ -247,7 +247,7 @@ TEST(Ownership, MatchBindingMemberAssign) {
     }
     fn main() -> int {
       o: Obj = A();
-      h: Holder = Holder(A());
+      h: mut Holder = Holder(A());
       match o {
         b: A { h.a = b; }
         _ { io::println("no"); }
@@ -363,7 +363,7 @@ TEST(Ownership, ArrayFieldReassign) {
       fn __init__(a: Str[2]) { self.arr = a; }
     }
     fn main() -> int {
-      h: H = H([Str(1), Str(2)]);
+      h: mut H = H([Str(1), Str(2)]);
       h.arr = [Str(7), h.arr[0]];
       io::println(h.arr[0] + h.arr[1] + Str<int>(h.arr.len()));
       return 0;
@@ -442,7 +442,7 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
       fn __init__(a0: A) { self.a = a0; }
     }
     fn main() -> int {
-      h: H = H(A());
+      h: mut H = H(A());
       io::println(Str<int>(h.a.x));
       h.a.x = 9;
       io::println(Str<int>(h.a.x));
@@ -464,21 +464,21 @@ TEST(Ownership, AssignNarrowsBaseVar) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Animal {
-      fn speak() -> Str { return "..."; }
+      view fn speak() -> Str { return "..."; }
     }
 
     impl Animal {
       fn __init__() {}
     }
     class Dog : Animal {
-      fn speak() -> Str { return "woof"; }
+      view fn speak() -> Str { return "woof"; }
     }
 
     impl Dog {
       fn __init__() { __super__(); }
     }
     fn main() -> int {
-      d: Dog = Dog();
+      d: mut Dog = Dog();
       a: Animal = Animal();
       a = d;
       io::println(a.speak());
@@ -508,36 +508,36 @@ TEST(Ownership, ReadsThroughObjectsACallReplacesStayAlive) {
       s: Str;
       a: int[3];
       names: Str[2];
-      fn m(h: H) -> Str {
+      fn m(h: mut H) -> Str {
         swap(h);
         return self.s;
       }
     }
     class H { b: B; }
-    fn swap(h: H) {
+    fn swap(h: mut H) {
       h.b = B("other" + Str(9), [7, 8, 9], ["p" + Str(0), "q"]);
       y = B("reused" + Str(1), [4, 5, 6], ["r" + Str(1), "t"]);
     }
-    fn g(h: H) -> Str {
+    fn g(h: mut H) -> Str {
       swap(h);
       return "!";
     }
-    fn same(h: H) -> Str {
+    fn same(h: mut H) -> Str {
       swap(h);
       return "first" + Str(1);
     }
-    fn gi(h: H) -> int {
+    fn gi(h: mut H) -> int {
       swap(h);
       return 1;
     }
-    fn made(h: H) -> Str {
+    fn made(h: mut H) -> Str {
       s = "x" + Str(5);
       swap(h);
       return s;
     }
     fn mk() -> H { return H(B("first" + Str(1), [1, 2, 3], ["n" + Str(1), "o"])); }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       io::println("receiver: " + h.b.m(h));
       h = mk();
       io::println("operand: " + (h.b.s + g(h)));
@@ -582,7 +582,7 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
       fire: () -> void;
       fn drop() -> Str {
         match self.parent {
-          p: Holder { p.node = Node("other" + Str(0), None, fn() {}); }
+          p: inout Holder { p.node = Node("other" + Str(0), None, fn() {}); }
           None { }
         }
         y = Node("y" + Str(9), None, fn() {});
@@ -595,11 +595,11 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
     }
     class Holder { node: Node; }
     fn main() -> int {
-      h = Holder(Node("first" + Str(1), None, fn() {}));
+      h: mut = Holder(Node("first" + Str(1), None, fn() {}));
       h.node.parent = h;
       io::println("method: " + h.node.drop());
       h.node.parent = None;
-      w = Holder(Node("one" + Str(1), None, fn() {}));
+      w: mut = Holder(Node("one" + Str(1), None, fn() {}));
       v = w;
       w.node = Node("two" + Str(2), None, fn() {
         v.node = Node("three" + Str(3), None, fn() {});
@@ -625,7 +625,7 @@ TEST(Ownership, StorageInAnObjectACallReplacesStaysAlive) {
   auto r = compileAndRun(R"(import ::io;
     struct S { v: Str; }
     impl S {
-      view fn take(h: H) -> Str {
+      view fn take(h: mut H) -> Str {
         swap(h);
         return self.v + "";
       }
@@ -634,34 +634,34 @@ TEST(Ownership, StorageInAnObjectACallReplacesStaysAlive) {
       arr: Str[2];
       s: S;
       k: Str;
-      fn slot(h: H) -> inout Str {
+      fn slot(h: mut H) -> inout Str {
         swap(h);
         return self.k;
       }
       fn key() -> inout Str { return self.k; }
     }
     class H { a: A; }
-    fn swap(h: H) {
+    fn swap(h: mut H) {
       h.a = A(["p" + Str(0), "q"], S("zero" + Str(0)), "zk" + Str(0));
       y = A(["r" + Str(1), "t"], S("three" + Str(3)), "tk" + Str(3));
     }
-    fn first(xs: view Str[], h: H) -> Str {
+    fn first(xs: view Str[], h: mut H) -> Str {
       swap(h);
       return xs[0] + "";
     }
     fn copied(s: S, t: Str) -> Str { return s.v + t; }
-    fn bang(h: H) -> Str {
+    fn bang(h: mut H) -> Str {
       swap(h);
       return "!";
     }
-    fn put(x: inout Str, h: H) {
+    fn put(x: inout Str, h: mut H) {
       swap(h);
       x = "five" + Str(5);
     }
     fn pick(x: inout Str) -> inout Str { return x; }
     fn mk() -> H { return H(A(["one" + Str(1), "two"], S("one" + Str(1)), "k" + Str(1))); }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       io::println("slice: " + first(h.a.arr, h));
       h = mk();
       io::println("by value: " + copied(h.a.s, bang(h)));
@@ -716,19 +716,19 @@ TEST(Ownership, MatchedAndComparedStorageACallReplacesStaysAlive) {
       arr: Str[2];
     }
     class D { c: C; }
-    fn swap(d: D) -> (Str, int) {
+    fn swap(d: mut D) -> (Str, int) {
       d.c = C(T(Box("zero" + Str(0))), ("zp" + Str(0), 0), ["za" + Str(0), "zb"]);
       y = C(T(Box("three" + Str(3))), ("tp" + Str(3), 3), ["ta" + Str(3), "tb"]);
       return ("one" + Str(1), 1);
     }
-    fn fresh(d: D) -> Str[2] {
+    fn fresh(d: mut D) -> Str[2] {
       xs = ["new" + Str(1), "x"];
       swap(d);
       return xs;
     }
     fn mk() -> D { return D(C(T(Box("one" + Str(1))), ("one" + Str(1), 1), ["a" + Str(1), "b"])); }
     fn main() -> int {
-      d = mk();
+      d: mut = mk();
       e = d;
       match d.c.t.b {
         n: inout Box {
@@ -763,7 +763,7 @@ TEST(Ownership, CallersStorageACallReplacesStaysAlive) {
     class A {
       k: Str;
       arr: Str[2];
-      fn slot(h: H) -> inout Str {
+      fn slot(h: mut H) -> inout Str {
         h.a = A("zk" + Str(0), ["p" + Str(0), "q"]);
         y = A("tk" + Str(3), ["r" + Str(1), "t"]);
         return self.k;
@@ -777,33 +777,33 @@ TEST(Ownership, CallersStorageACallReplacesStaysAlive) {
     struct S { v: Str; }
     class G { s: S; }
     impl S {
-      view fn both(g: G) -> Str { return self.v + reset(g); }
+      view fn both(g: mut G) -> Str { return self.v + reset(g); }
     }
-    fn reset(g: G) -> Str {
+    fn reset(g: mut G) -> Str {
       g.s = S("zero" + Str(0));
       y = S("three" + Str(3));
       return "!";
     }
-    fn bump(h: H) -> Str {
+    fn bump(h: mut H) -> Str {
       h.a.k = "zk" + Str(0);
       h.a.arr[0] = "p" + Str(0);
       h.s = "zs" + Str(0);
       y = "tk" + Str(3);
       return "!";
     }
-    fn index(h: H) -> int {
+    fn index(h: mut H) -> int {
       bump(h);
       return 1;
     }
-    fn param(x: inout Str, h: H) -> Str { return x + bump(h); }
-    fn slice(xs: view Str[], h: H) -> Str { return xs[0] + bump(h); }
+    fn param(x: inout Str, h: mut H) -> Str { return x + bump(h); }
+    fn slice(xs: view Str[], h: mut H) -> Str { return xs[0] + bump(h); }
     fn mk() -> H { return H(A("k" + Str(1), ["one" + Str(1), "two"]), "ab" + Str(1)); }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       io::println("inout parameter: " + param(h.a.k, h));
       h = mk();
       io::println("slice: " + slice(h.a.arr, h));
-      g = G(S("one" + Str(1)));
+      g: mut = G(S("one" + Str(1)));
       io::println("struct self: " + g.s.both(g));
       h = mk();
       io::println("native: " + Str(charAt(h.s, index(h))));
@@ -831,14 +831,14 @@ TEST(Ownership, AFieldOfWhatALastUseHandedOnStaysAlive) {
     class Node { name: Str; }
     class Holder { node: Node; }
     fn take(n: Node) -> Str { return "took"; }
-    fn replace(h: Holder) -> Str {
+    fn replace(h: mut Holder) -> Str {
       h.node = Node("other");
       return "!";
     }
-    fn use(h: Holder) -> Str { return h.node.name + replace(h); }
+    fn use(h: mut Holder) -> Str { return h.node.name + replace(h); }
     fn main() -> int {
       a = Node("first" + Str(1));
-      h = Holder(a);
+      h: mut = Holder(a);
       t = take(a);
       io::println(t + " " + use(h));
       return 0;
@@ -871,13 +871,13 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
       fn pick(b: inout B) -> inout Str { return b.k; }
     }
     fn pick(b: inout B) -> inout Str { return b.k; }
-    fn put(x: inout Str, h: H) -> Str {
+    fn put(x: inout Str, h: mut H) -> Str {
       h.b = B("zero" + Str(0));
       y = B("three" + Str(3));
       x = "five" + Str(5);
       return y.k;
     }
-    fn passOn(b: inout B, c: H) -> Str {
+    fn passOn(b: inout B, c: mut H) -> Str {
       x: inout = pick(b);
       c.b = B("zero" + Str(0));
       y = B("three" + Str(3));
@@ -886,8 +886,8 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
     }
     fn mk() -> H { return H(B("one" + Str(1)), X(B("two" + Str(2)))); }
     fn main() -> int {
-      h = mk();
-      c = h;
+      h: mut = mk();
+      c: mut = h;
       x: inout = pick(h.b);
       c.b = B("zero" + Str(0));
       y = B("three" + Str(3));
@@ -897,7 +897,7 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
       io::println("passed on: " + put(pick(h.b), h) + " " + h.b.k);
       h = mk();
       c = h;
-      p = P(1);
+      p: mut = P(1);
       m: inout = p.pick(h.b);
       c.b = B("zero" + Str(0));
       w = B("three" + Str(3));
@@ -947,7 +947,7 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
     fn pick(s: inout S) -> inout Str { return s.b.k; }
     fn first(t: inout (B, int)) -> inout Str { return t.0.k; }
     fn last(a: inout B[6]) -> inout Str { return a[5].k; }
-    fn put(x: inout Str, h: H) -> Str {
+    fn put(x: inout Str, h: mut H) -> Str {
       h.s = S(B("zero" + Str(0)), 0);
       y = B("three" + Str(3));
       x = "five" + Str(5);
@@ -958,7 +958,7 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
       return H(S(B("one" + Str(1)), 1), (B("one" + Str(1)), 1), six("one" + Str(1)));
     }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       c = h;
       x: inout = pick(h.s);
       c.s = S(B("zero" + Str(0)), 0);
@@ -1026,15 +1026,15 @@ TEST(Ownership, AnInoutResultInAnObjectReachedThroughAFieldIsAnError) {
         fn slot() -> inout Str { )") +
                            ret + R"( }
       }
-      fn put(x: inout Str, h: H) {
+      fn put(x: inout Str, h: mut H) {
         h.c = C("zero" + Str(0));
         y = C("three" + Str(3));
         x = "five" + Str(5);
       }
       fn main() -> int {
-        h = H(C("one" + Str(1)));
+        h: mut = H(C("one" + Str(1)));
         put(h.slot(), h);
-        d = h;
+        d: mut = h;
         x: inout = h.slot();
         d.c = C("zero" + Str(0));
         y = C("three" + Str(3));
@@ -1091,24 +1091,24 @@ TEST(Ownership, AnAccessorOfTheObjectItselfKeepsItAlive) {
     }
     fn pick(c: inout C) -> inout Str { return c.slot(); }
     fn viaS(s: inout S) -> inout Str { return s.slot(); }
-    fn swap(h: H) -> Str {
+    fn swap(h: mut H) -> Str {
       h.c = C("zero" + Str(0));
       h.s = S(C("zero" + Str(0)), 0);
       y = C("three" + Str(3));
       return y.k;
     }
-    fn put(x: inout Str, h: H) -> Str {
+    fn put(x: inout Str, h: mut H) -> Str {
       t = swap(h);
       x = "five" + Str(5);
       return t;
     }
-    fn show(s: view Str, h: H) -> Str {
+    fn show(s: view Str, h: mut H) -> Str {
       t = swap(h);
       return s + " " + t;
     }
     fn mk() -> H { return H(C("one" + Str(1)), "k" + Str(1), S(C("one" + Str(1)), 1)); }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       io::println("accessor: " + put(h.c.slot(), h) + " " + h.c.k);
       h = mk();
       c = h;
@@ -1181,28 +1181,28 @@ TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
       fn get() -> inout C { return self.w.get(); }
     }
     fn key(s: inout S) -> inout Str { return s.ref().k; }
-    fn swap(h: H) -> Str {
+    fn swap(h: mut H) -> Str {
       h.s = S(C("zero" + Str(0), 0), 0);
       h.w = W<C>(C("zero" + Str(0), 0));
       y = C("three" + Str(3), 3);
       return y.k;
     }
-    fn putN(x: inout int, h: H) -> Str {
+    fn putN(x: inout int, h: mut H) -> Str {
       t = swap(h);
       x = 5;
       return t;
     }
-    fn putS(x: inout S, h: H) -> Str {
+    fn putS(x: inout S, h: mut H) -> Str {
       t = swap(h);
       x = S(C("five" + Str(5), 5), 5);
       return t;
     }
-    fn putC(x: inout C, h: H) -> Str {
+    fn putC(x: inout C, h: mut H) -> Str {
       t = swap(h);
       x = C("five" + Str(5), 5);
       return t;
     }
-    fn putK(x: inout Str, h: H) -> Str {
+    fn putK(x: inout Str, h: mut H) -> Str {
       t = swap(h);
       x = "five" + Str(5);
       return t;
@@ -1211,7 +1211,7 @@ TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
       return H(S(C("one" + Str(1), 1), 1), W<C>(C("one" + Str(1), 1)));
     }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       io::println("struct's field: " + putN(h.num(), h) + " " + Str(h.s.n));
       h = mk();
       io::println("struct: " + putS(h.whole(), h) + " " + h.s.c.k);
@@ -1257,7 +1257,7 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
       fn virt(h: H) -> Str { return self.s; }
     }
     class D : B {
-      fn virt(h: H) -> Str { return clear(h) + self.s; }
+      fn virt(h: mut H) -> Str { return clear(h) + self.s; }
     }
     impl B {
       view fn count() -> int { return self.n; }
@@ -1265,19 +1265,19 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
         self.n = self.n + 1;
         return self.count();
       }
-      view fn viaFree(h: H) -> Str {
+      view fn viaFree(h: mut H) -> Str {
         t = clear(h);
         return t + self.s;
       }
-      view fn ping(k: int, h: H) -> Str {
+      view fn ping(k: int, h: mut H) -> Str {
         if k == 0 {
           t = clear(h);
           return t + self.s;
         }
         return self.pong(k - 1, h);
       }
-      view fn pong(k: int, h: H) -> Str { return self.ping(k, h); }
-      view fn rec(k: int, h: H) -> Str {
+      view fn pong(k: int, h: mut H) -> Str { return self.ping(k, h); }
+      view fn rec(k: int, h: mut H) -> Str {
         if k == 0 {
           h.b = B("other" + Str(9), 9);
           y = B("reuse" + Str(1), 1);
@@ -1307,14 +1307,14 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
       c: B;
     }
     class W { s: S; }
-    fn clear(h: H) -> Str {
+    fn clear(h: mut H) -> Str {
       h.b = B("other" + Str(9), 9);
       y = B("reuse" + Str(1), 1);
       return "!";
     }
     fn mk() -> H { return H(B("first" + Str(1), 1), B("c", 3)); }
     fn main() -> int {
-      h = mk();
+      h: mut = mk();
       io::println("free: " + h.b.viaFree(h));
       h = mk();
       io::println("mutual: " + h.b.ping(3, h));
@@ -1325,7 +1325,7 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
       h = mk();
       h.b = D("first" + Str(1), 1);
       io::println("virtual: " + h.b.viaVirt(h));
-      w = W(S(B("first" + Str(1), 1)));
+      w: mut = W(S(B("first" + Str(1), 1)));
       io::println("struct: " + w.s.b.s + w.s.reset() + w.s.b.s);
       h = mk();
       io::println("number: " + h.b.s + Str(h.b.bump()) + Str(h.b.count()));
@@ -1383,7 +1383,7 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
         }
       }
     }
-    fn reset(h: Holder) -> int {
+    fn reset(h: mut Holder) -> int {
       match h.b {
         d: inout Derived<int> { d = Derived<int>(1, 9); }
         _ { }
@@ -1391,25 +1391,25 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
       return 7;
     }
     class Wrap { h: Holder; }
-    fn clobber(w: Wrap) -> int {
+    fn clobber(w: mut Wrap) -> int {
       w.h.b = Base(100);
       return 5;
     }
-    fn use(x: inout Plain, w: Wrap) -> int { return x.m(clobber(w)); }
+    fn use(x: inout Plain, w: mut Wrap) -> int { return x.m(clobber(w)); }
     class Node { name: Str; }
     class Pair { node: Node; }
-    fn replace(p: Pair) -> Str {
+    fn replace(p: mut Pair) -> Str {
       p.node = Node("o" + Str(2));
       return "!";
     }
-    fn local(p: Pair) -> Str { return p.node.name + replace(p); }
+    fn local(p: mut Pair) -> Str { return p.node.name + replace(p); }
     fn main() -> int {
-      h = Holder();
+      h: mut = Holder();
       r = h.run();
       io::println("arm: " + Str(r) + " " + h.state());
-      h2 = Holder();
+      h2: mut = Holder();
       h2.b = Plain(1, "abc");
-      w = Wrap(h2);
+      w: mut = Wrap(h2);
       match h2.b {
         s: inout Plain {
           s = Plain(2, "fresh");
@@ -1533,9 +1533,9 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
     }
     class Quiet { fn run(h: Holder) -> int { return 1; } }
     class Hush : Quiet { fn run(h: Holder) -> int { return 2; } }
-    class Loud { fn run(h: Holder) -> int; }
+    class Loud { fn run(h: mut Holder) -> int; }
     class Shout : Loud {
-      fn run(h: Holder) -> int {
+      fn run(h: mut Holder) -> int {
         h.item = Item("new" + Str(1));
         return 3;
       }
@@ -1568,7 +1568,7 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       }
     }
     fn main() -> int {
-      h = Holder(Item("old" + Str(0)), Hush(), Shout());
+      h: mut = Holder(Item("old" + Str(0)), Hush(), Shout());
       p = Probe(h.item);
       io::println(h.viaQuiet() + " " + p.state());
       io::println(h.viaLoud() + " " + p.state() + " " + h.item.name);
@@ -1709,21 +1709,21 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
     }
     class A { f: Item; }
     impl A {
-      fn __init__(other: A?) {
+      fn __init__(other: mut A?) {
         self.f = Item("original" + Str(100));
         match other {
-          o: A { o.f = Item("replaced" + Str(2)); }
+          o: inout A { o.f = Item("replaced" + Str(2)); }
           None { }
         }
       }
       fn run() -> Str { return self.f.tag(remake(self)); }
     }
-    fn remake(a: A) -> int {
+    fn remake(a: mut A) -> int {
       b = A(a);
       return 1;
     }
     fn main() -> int {
-      a = A(None);
+      a: mut = A(None);
       io::println(a.run());
       io::println(a.f.s);
       return 0;
@@ -1764,7 +1764,7 @@ TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
       }
     }
     class Late { a: int; o: Node?; }
-    fn fill(l: Late, n: Node) -> Node { l.o = n; return Node("result"); }
+    fn fill(l: mut Late, n: Node) -> Node { l.o = n; return Node("result"); }
     impl Late {
       fn __init__(n: Node, w: view Watcher) {
         self.a = 1;
@@ -1828,7 +1828,7 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
       a: Str[2];
     }
     class H { b: B; }
-    fn g(h: H) -> int {
+    fn g(h: mut H) -> int {
       h.b = B("XY" + Str(9), ["X" + Str(9), "Y"]);
       y = "QQ" + Str(8);
       return 0;
@@ -1839,11 +1839,11 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
       return 0;
     }
     fn main() -> int {
-      h = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
+      h: mut = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
       c1 = h.b.a[g(h)];
       h.b = B("ab" + Str(1), ["a" + Str(1), "b"]);
       c2 = h.b.s[g(h)];
-      t = "ab" + Str(1);
+      t: mut = "ab" + Str(1);
       c3 = t[bump(t)];
       io::println(c1 + " " + Str(c2) + " " + Str(c3) + " " + h.b.s + " " + t);
       return 0;
@@ -1883,7 +1883,7 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
     class Holder { n: Node?; }
     impl Holder {
       fn take(n: Node) { self.n = n; }
-      view fn relay(n: Node, other: Holder) { other.take(n); }
+      view fn relay(n: Node, other: mut Holder) { other.take(n); }
     }
     class B { name: Str; }
     class A { b: B; }
@@ -1891,13 +1891,13 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
       a: A;
       fn m() -> Str { return self.a.b.name + g(self); }
     }
-    fn g(x: X) -> Str {
+    fn g(x: mut X) -> Str {
       x.a = A(B("new"));
       return "!";
     }
     fn main() -> int {
-      h = Holder(None);
-      k = Holder(None);
+      h: mut = Holder(None);
+      k: mut = Holder(None);
       n = Node("n");
       probe = Probe(n);
       h.take(n);
@@ -1914,7 +1914,7 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
       h.take(last);
       h.n = None;
       io::println("handed over: " + lastProbe.state() + " " + n.name);
-      x = X(A(B("old" + "name")));
+      x: mut = X(A(B("old" + "name")));
       io::println(x.m() + " now " + x.a.b.name);
       return 0;
     }

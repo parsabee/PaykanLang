@@ -10,8 +10,8 @@
 import ::io;
 
 fn main(args: view Str[]) -> int {
-  io::println("argc: " + Str<int>(args.len()));
-  i: int = 0;
+  io::println("argc: " + Str(args.len()));
+  i = 0;
   while i < args.len() {
     io::println("  args[" + Str(i) + "] = " + args[i]);
     i = i + 1;

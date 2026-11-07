@@ -96,6 +96,12 @@ inline constexpr const char *kMethodToString = "toString";
 /// Str's parse into an `int`, and an `unsigned`'s value as an `int?`.
 inline constexpr const char *kMethodToInt = "toInt";
 inline constexpr const char *kMethodEquals = "equals";
+/// An `atomic` place's operations (the concurrency prototype).
+inline constexpr const char *kMethodExchange = "exchange";
+inline constexpr const char *kMethodCompareExchange = "compareExchange";
+/// The walk every class has after `equals` (the concurrency prototype):
+/// freezes what the object holds, for `atomic shared`.
+inline constexpr const char *kMethodWalk = "__walk";
 
 // Traits
 inline constexpr const char *kTraitShow =
@@ -105,6 +111,12 @@ inline constexpr const char *kTraitHashable =
 /// No methods: the types held in place and copied whole, which a class
 /// cannot implement.
 inline constexpr const char *kTraitValueType = "ValueType";
+/// No methods: the types a read from a place copies (the concurrency
+/// prototype, docs/design/concurrency.md "Copies and `move`"): a number,
+/// bool, char, an enum of Copyable payloads, a tuple, struct, fixed array
+/// or optional of Copyable parts, an `atomic` handle.  Structural, never
+/// implemented.
+inline constexpr const char *kTraitCopyable = "Copyable";
 inline constexpr const char *kMethodHash = "hash";
 /// The built-in traits an `impl ... for` block gives a class or a struct, so
 /// the conformances a module interface records (pkm IMPL,
@@ -178,6 +190,11 @@ inline constexpr const char *kPaykanObjectNew = "PaykanObject_new";
 inline constexpr const char *kPaykanObjectDestroy = "PaykanObject_destroy";
 inline constexpr const char *kPaykanObjectToString = "PaykanObject_toString";
 inline constexpr const char *kPaykanObjectEquals = "PaykanObject_equals";
+inline constexpr const char *kPaykanObjectWalk = "PaykanObject_walk";
+// The concurrency prototype's freeze (`atomic shared`): an object and
+// what it holds become immortal, counted nowhere.
+inline constexpr const char *kPaykanFreeze = "Paykan_freeze";
+inline constexpr const char *kPaykanFreezeMem = "Paykan_freeze_mem";
 inline constexpr const char *kPaykanObjectVtable = "PaykanObject_vtable";
 inline constexpr const char *kPaykanObjectNone = "PaykanObject_None";
 
@@ -253,6 +270,27 @@ inline constexpr BufferFunction kPaykanBufferFunctions[] = {
     {kPaykanBufferTryReserve, false},
 };
 
+// The concurrency prototype's `atomic int` cell (src/Runtime/Atomic.c).
+inline constexpr const char *kPaykanAtomicNew = "PaykanAtomic_new";
+inline constexpr const char *kPaykanAtomicLoad = "PaykanAtomic_load";
+inline constexpr const char *kPaykanAtomicStore = "PaykanAtomic_store";
+inline constexpr const char *kPaykanAtomicAdd = "PaykanAtomic_add";
+inline constexpr const char *kPaykanAtomicExchange = "PaykanAtomic_exchange";
+inline constexpr const char *kPaykanAtomicCompareExchange =
+    "PaykanAtomic_compare_exchange";
+// The same cell holding a float's bits.
+inline constexpr const char *kPaykanAtomicFNew = "PaykanAtomic_fnew";
+inline constexpr const char *kPaykanAtomicFLoad = "PaykanAtomic_fload";
+inline constexpr const char *kPaykanAtomicFStore = "PaykanAtomic_fstore";
+inline constexpr const char *kPaykanAtomicFAdd = "PaykanAtomic_fadd";
+inline constexpr const char *kPaykanAtomicFExchange = "PaykanAtomic_fexchange";
+inline constexpr const char *kPaykanAtomicFCompareExchange =
+    "PaykanAtomic_fcompare_exchange";
+// The prototype's `locked` cell (src/Runtime/Locked.c).
+inline constexpr const char *kPaykanLockedNew = "PaykanLocked_new";
+inline constexpr const char *kPaykanLockedLock = "PaykanLocked_lock";
+inline constexpr const char *kPaykanLockedUnlock = "PaykanLocked_unlock";
+
 // The standard library's ::io (stdlib/io.pkn): reached only through its
 // `native fn`s
 inline constexpr const char *kPaykanIoOpen = "Paykan_io_open";
@@ -306,6 +344,10 @@ inline constexpr const char *kPaykanRoundF16 = "Paykan_round_f16";
 inline constexpr const char *kPaykanIntToF32 = "Paykan_int_to_f32";
 inline constexpr const char *kPaykanUintToF32 = "Paykan_uint_to_f32";
 inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
+/// A buffer's element read in place (the concurrency prototype) at an
+/// index outside 0..len-1: the runtime's own message, the index unsigned.
+inline constexpr const char *kPaykanPanicBufferIndex =
+    "Paykan_panic_buffer_index";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -426,6 +468,24 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanWeakNew,
     kPaykanWeakLoad,
     kPaykanWeakRelease,
+    kPaykanAtomicNew,
+    kPaykanAtomicLoad,
+    kPaykanAtomicStore,
+    kPaykanAtomicAdd,
+    kPaykanAtomicExchange,
+    kPaykanAtomicCompareExchange,
+    kPaykanAtomicFNew,
+    kPaykanAtomicFLoad,
+    kPaykanAtomicFStore,
+    kPaykanAtomicFAdd,
+    kPaykanAtomicFExchange,
+    kPaykanAtomicFCompareExchange,
+    kPaykanLockedNew,
+    kPaykanLockedLock,
+    kPaykanLockedUnlock,
+    kPaykanObjectWalk,
+    kPaykanFreeze,
+    kPaykanFreezeMem,
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,
@@ -434,6 +494,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicIntToChar,
     kPaykanPanicToChar,
     kPaykanPanicIndex,
+    kPaykanPanicBufferIndex,
     kPaykanPanicForStep,
     kPaykanPanicPureVirtual,
     // String
@@ -483,8 +544,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
 inline constexpr const char *kNoReturnRuntimeFunctions[] = {
     kPaykanPanicDivByZero,   kPaykanPanicDivOverflow, kPaykanPanicFloatToInt,
     kPaykanPanicFloatToType, kPaykanPanicIntToChar,   kPaykanPanicToChar,
-    kPaykanPanicIndex,       kPaykanPanicForStep,     kPaykanPanicPureVirtual,
-    kPaykanPanicMessage,     kPaykanPanicValue,       kPaykanUnreachableView,
+    kPaykanPanicIndex,       kPaykanPanicBufferIndex, kPaykanPanicForStep,
+    kPaykanPanicPureVirtual, kPaykanPanicMessage,     kPaykanPanicValue,
+    kPaykanUnreachableView,
 };
 /// The runtime functions that write no memory a program can reach: they
 /// read memory, and the panic of a bad index or an unset slot writes only

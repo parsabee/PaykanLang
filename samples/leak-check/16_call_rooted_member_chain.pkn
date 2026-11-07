@@ -38,11 +38,11 @@ fn makeO() -> O {
 fn main() -> int {
   let x = makeH().a;     // chain used as a value
   io::println(x);
-  let n: int = makeH().a.len(); // chain used as a receiver
-  io::println(Str<int>(n));
+  let n = makeH().a.len(); // chain used as a receiver
+  io::println(Str(n));
   let y = makeO().h.a;   // nested chain
   io::println(y);
-  let h: H = H();
+  let h = H();
   let z = h.a;           // borrowed field read acquired by a new owner
   io::println(z);
   return 0;

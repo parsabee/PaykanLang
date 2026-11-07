@@ -64,7 +64,7 @@ jobs:
   # ---------------------------------------------------------------------------
   lint:
     name: Lint | clang-format + clang-tidy + actionlint
-    runs-on: macos-14
+    runs-on: macos-15
     needs: changes
     env:
       PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
@@ -123,7 +123,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-test-macos:
     name: Debug | macOS ARM64
-    runs-on: macos-14
+    runs-on: macos-15
     needs: changes
     env:
       PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
@@ -157,7 +157,7 @@ jobs:
   # ---------------------------------------------------------------------------
   asan-macos:
     name: ASan+LSan | macOS ARM64
-    runs-on: macos-14
+    runs-on: macos-15
     needs: changes
     env:
       PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
@@ -216,7 +216,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ubsan-macos:
     name: UBSan | macOS ARM64
-    runs-on: macos-14
+    runs-on: macos-15
     needs: changes
     env:
       PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
@@ -325,7 +325,7 @@ jobs:
   # ---------------------------------------------------------------------------
   coverage:
     name: Coverage | macOS ARM64
-    runs-on: macos-14
+    runs-on: macos-15
     needs: changes
     # The coverage floor is over the whole suite: every suite or none.
     if: needs.changes.outputs.tests != ''

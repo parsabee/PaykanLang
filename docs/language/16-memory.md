@@ -34,16 +34,21 @@ In detail:
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
 independent values. A reference type has identity: assigning one variable to another makes both
-names refer to the **same** object, and a mutation through one name is visible through the other.
+names refer to the **same** object, and a change through one name is visible through the other.
+A reference is **immutable unless it is written `mut`**: through a plain `Point` the object's
+fields are read and its `view fn`s called, and nothing is assigned; a `mut Point` is the
+reference that changes it. A `mut` reference is handed on as a plain one freely, and a plain
+one becomes `mut` only by `move` ([Objects are references](05-classes.md#objects-are-references);
+[Concurrency](19-concurrency.md) has the qualifiers in full).
 
 ```pkn
 a: int = 1;
 b: int = a;      // independent copy
 b = 2;           // a is still 1
 
-p: Point = Point(1, 2);
-q: Point = p;    // same object — both names share it
-q.x = 99;        // p.x is now 99 too
+p: mut Point = Point(1, 2);
+q: Point = p;    // same object — both names share it, and p is the one that changes it
+p.x = 99;        // q.x is now 99 too
 ```
 
 An array is a value: `ys = xs` copies its elements, so a later `ys[0] = 99` leaves `xs[0]` as
@@ -68,7 +73,7 @@ object: { vtable pointer, strong count, weak count, fields… }
 ```
 
 The header is 16 bytes: the 8-byte vtable pointer and two 32-bit counts. An object can have up to
-2,147,483,647 references of each kind; one more stops the program with `paykan: too many strong
+2,147,483,646 strong and 2,147,483,647 weak references; one more stops the program with `paykan: too many strong
 references to one object (the limit is 2147483647)` rather than corrupting the count.
 
 Two operations maintain the strong count:
@@ -195,8 +200,8 @@ impl Person {
 }
 
 fn main() -> int {
-  a = Person("Ada");
-  b = Person("Grace");
+  let a: mut = Person("Ada");
+  let b: mut = Person("Grace");
   a.friend = b;
   b.friend = a;          // a -> b -> a: a cycle
   io::println(a.name + " and " + b.name + " are friends");
@@ -239,8 +244,8 @@ impl Person {
 }
 
 fn main() -> int {
-  let a = Person("Ada");
-  b = Person("Grace");
+  let a: mut = Person("Ada");
+  b: mut = Person("Grace");      // mut: the back links are assigned
   a.friend = b;
   b.friend = a;
   io::println(a.name + " and " + a.friendName() + " are friends");
@@ -293,22 +298,22 @@ impl Node {
     self.first = None;
     self.next = None;
   }
-  fn add(child: Node) {
+  fn add(child: mut Node) {
     child.parent = self;
     child.next = self.first;
     self.first = child;
   }
-  fn path() -> Str {
+  view fn path() -> Str {
     match self.parent {
-      p: Node { return p.path() + "/" + self.name; }
-      None { return self.name; }
+      p: Node { return p.path() + "/" + self.name; }   // p reads the parent
+      None { return self.name.toString(); }            // a string of its own
     }
   }
 }
 
 fn main() -> int {
-  root = Node("root");
-  let a = Node("a");
+  root: mut = Node("root");
+  let a: mut = Node("a");   // add writes its parent and next
   root.add(a);
   weak w: Node? = root;   // reads as root while something holds it
   weak u = a;             // inferred Node?
@@ -350,7 +355,13 @@ lambda the captured variable is read-only, as any capture is.
 
 A weak reference is not a place a strong reference could be written to, so it cannot be passed
 to an `inout` parameter, named by an `inout` local, or bound by an `inout` match arm. It can be
-`view`ed, since a view only reads it. For now `weak` applies to locals and class fields: not to
+`view`ed, since a view only reads it. What it reads is immutable as well: a `weak` takes no
+qualifier (`weak variable 'w' takes no qualifier: a weak reference counts nothing`), and the
+`T` a `match` arm binds from it is a plain reference, which is read or passed on but never
+written through (`'n' is immutable (a 'Node'; write 'mut Node' to change it); cannot assign to
+its field 'name'`); the object is changed through the `mut` reference that holds it. So `path`
+above is a `view fn`, which `p`, the plain `Node` its `match` binds, can call, and it returns
+a string of its own. For now `weak` applies to locals and class fields: not to
 struct fields, tuple or array elements, parameters or results.
 
 A `weak` local may name what a `view` names: a `view` parameter, or part of `self` in a
@@ -469,15 +480,10 @@ A hand-off of the variable while a `weak` local made from it (`weak u = n;`) is 
 copy, whether or not that local is read again, so the local reads the object until the
 variable's scope ends.
 
-Earlier releases had a `mov` keyword for this. It was removed in v0.2.0: `mov` is still a
-reserved word, and writing `t = mov s` is an error:
-
-```
-error: 'mov' was removed in v0.2.0; ownership transfers are inferred
-```
-
-Drop the keyword: `t = mov s;` becomes `t = s;`. The program prints the same output and frees
-the same objects. The variable `s` simply stays readable afterwards.
+An explicit transfer is written `move`: `t = move s;` hands the reference to `t`, and `s`
+cannot be read again. It is also how a plain reference becomes a `mut` one, `m: mut Node =
+move n;`, since the object then has no other name it could be read through while `m`
+changes it ([`move`](19-concurrency.md#move-an-explicit-transfer)).
 
 ## Reference counts the compiler removes
 
@@ -508,13 +514,13 @@ class List {
   head: Node?;
 }
 
-fn clear(l: List) -> int {
+fn clear(l: mut List) -> int {
   l.head = None;
   return 0;
 }
 
 fn main() -> int {
-  let l = List(Node("first"));
+  let l: mut = List(Node("first"));
   match l.head {
     n: Node {
       let k = clear(l);
@@ -552,7 +558,8 @@ function's release could never be the last: a `match` binding passed on in its a
 object the matched value holds until the `match` ends (`x: Node { c = c + count(x); }` costs
 no count but the matched value's), or a copy of a variable the caller reads again (`u = t;
 count(u);`). Which way an argument goes is decided at each call; nothing in the function's
-declaration says it.
+declaration says it. Nor does `mut`: `keep` below takes a `mut Holder` because it assigns a
+field of it, which says what the function may change, not how the reference is counted.
 
 ```pkn
 import ::io;
@@ -582,7 +589,7 @@ class Holder {
 }
 
 // Keeps its parameter: the field takes a reference of its own.
-fn keep(h: Holder, n: Node) {
+fn keep(h: mut Holder, n: Node) {
   h.n = n;
 }
 
@@ -590,7 +597,7 @@ fn main() -> int {
   let a = Node("a");
   let w = Watcher(a);
   show(a);                    // lent: main reads a again below
-  let h = Holder(None);
+  let h: mut = Holder(None);
   keep(h, a);                 // lent too
   h.n = None;
   io::println("after the field let go: " + state(w));
@@ -619,7 +626,10 @@ objects. `--stats` counts the arguments lent and the parameters
 ## Strings, Arrays and Tuples
 
 `Str` is a heap, reference-counted class. String literals and the results of `+` concatenation
-are reference-counted objects like any other.
+are reference-counted objects like any other. A string is an object, so it is written through
+a `mut Str` only: `concat` appends to it in place (`let s = "a"; s.concat("b");` is `'s' is
+immutable (a 'Str'; write 'mut Str' to change it); 'concat' is not a 'view fn'`), where
+`s + "b"` reads `s` and makes a new string.
 
 An array `T[n]` is a value, not an object: it has no box and no count of its own, and lives
 where its variable or field does, inline in the stack frame or in the object. How it treats its
@@ -720,6 +730,11 @@ execution, which is all the language offers today. Thread-safe ARC — counts th
 shared safely across threads — is part of the language's stated direction toward safe
 concurrency and heterogeneous execution, and is on the roadmap rather than in this release.
 Do not assume that sharing a reference-counted object across threads is safe today.
+The concurrency prototype's checks keep each counted reference on one thread at a time: a
+plain or `mut` reference crosses by `move`; an object every thread reads is frozen first, as
+an `atomic shared T`, and one several threads write is a `locked mut T`, written under its
+lock; an `atomic` cell and a frozen object are not counted. [Concurrency](19-concurrency.md)
+describes which references may cross a thread.
 
 ## What You Can Rely On
 
@@ -728,6 +743,10 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 - You never write `free`, and you cannot double-free or use-after-free a value through ordinary
   language constructs — ownership is tracked by the compiler.
 - A reference keeps its object alive for exactly as long as it is reachable.
+- A reference changes its object only when it is written `mut`: through a plain `T` the
+  object is read, its `view fn`s are called and it is never passed to an `inout` parameter,
+  so an object no `mut` reference names is not changed
+  ([Objects are references](05-classes.md#objects-are-references)).
 - `destroy` runs automatically and releases everything an object owns, transitively.
 - A `weak` reference never keeps an object alive and never dangles: it reads as `None` once
   the object is gone.
@@ -744,4 +763,5 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 
 The two things the model does **not** do for you today are collecting reference cycles (break
 them with `weak`) and making reference counting safe across threads — both are known and on
-the roadmap.
+the roadmap. Which references the concurrency prototype lets cross a thread, and the checks that
+keep the counts on one thread, are in [Concurrency](19-concurrency.md).

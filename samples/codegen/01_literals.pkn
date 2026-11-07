@@ -6,41 +6,41 @@ import ::io;
 
 fn main() -> int {
   // ---- Integer literals ----------------------------------------------------
-  let a: int = 0;
-  let b: int = 1;
-  let c: int = 42;
-  let d: int = 9223372036854775807;   // INT64_MAX
-  let neg: int = 0 - 2147483648; // large negative via unary-minus at runtime
-  io::println("int 0:    " + Str<int>(a));
+  let a = 0;
+  let b = 1;
+  let c = 42;
+  let d = 9223372036854775807;   // INT64_MAX
+  let neg = 0 - 2147483648; // large negative via unary-minus at runtime
+  io::println("int 0:    " + Str(a));
   io::println("int 1:    " + Str(b));
-  io::println("int 42:   " + Str<int>(c));
+  io::println("int 42:   " + Str(c));
   io::println("INT64_MAX:" + Str(d));
-  io::println("neg large:" + Str<int>(neg));
+  io::println("neg large:" + Str(neg));
 
   // ---- Float literals -------------------------------------------------------
-  let f0: float = 0.0;
-  let f1: float = 1.0;
-  let pi: float = 3.14159;
-  let neg_f: float = 0.0 - 2.718;
+  let f0 = 0.0;
+  let f1 = 1.0;
+  let pi = 3.14159;
+  let neg_f = 0.0 - 2.718;
   io::println("float 0:  " + Str(f0));
-  io::println("float 1:  " + Str<float>(f1));
+  io::println("float 1:  " + Str(f1));
   io::println("pi:       " + Str(pi));
-  io::println("neg float:" + Str<float>(neg_f));
+  io::println("neg float:" + Str(neg_f));
 
   // ---- Bool literals --------------------------------------------------------
-  let t: bool = True;
-  let f: bool = False;
+  let t = True;
+  let f = False;
   io::println("True:     " + Str(t));
-  io::println("False:    " + Str<bool>(f));
+  io::println("False:    " + Str(f));
 
   // ---- String literals -------------------------------------------------------
   // Direct literal passed to println()
   io::println("raw literal");
   // Assigned to a Str variable (exercises VarDecl shared-box path)
-  let s: Str = "hello world";
+  let s = "hello world";
   io::println(s);
   // Empty string
-  let empty: Str = "";
+  let empty = "";
   io::println("empty='" + empty + "'");
 
   // ---- None literal ---------------------------------------------------------

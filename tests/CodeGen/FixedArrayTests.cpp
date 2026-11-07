@@ -285,7 +285,7 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
       rename(ns);
       zoo: Animal[2] = [Dog("rex"), Animal("cat")];
       zoo[1] = Dog("fido");
-      k = Kennel(zoo);
+      k: mut = Kennel(zoo);
       p = k.pair(ns);
       io::println(zoo[1].speak() + ", " + p[0] + ", " + p[1] + ", " +
               k.pair(["x", "y"])[1]);
@@ -331,7 +331,7 @@ TEST(FixedArray, Fields) {
     fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
     fn clear(ts: inout Str[2]) { ts = ["", ts[0]]; }
     fn main() -> int {
-      g = Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]);
+      g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]);
       g.set(1, 2, 60);
       g.rename(0, "P" + g.tags[1]);
       io::println(Str(g.at(1, 2)) + " " + g.tags[0] + " " +
@@ -405,7 +405,7 @@ TEST(FixedArray, SliceParameters) {
       ss: Str[2] = ["ab", "c"];
       rename(ss, "zzz");
       io::println(Str(first(ss)) + " " + ss[1] + " " + Str(first(["hello"])));
-      c = Counter(b);
+      c: mut = Counter(b);
       rename(c.tags, "B" + c.tags[1]);
       grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
       io::println(Str(c.total(a)) + " " + Str(c.total([1])) + " " + c.tags[1] +
@@ -598,7 +598,7 @@ TEST(FixedArray, RepeatLiteralsOfReferences) {
         n: Node { io::println("node " + Str(n.v)); }
         None { io::println("none"); }
       }
-      c = Counter(0);
+      c: mut = Counter(0);
       tens = [c.next(); 4];
       io::println(Str(c.n) + " " + Str(tens[0] + tens[3]));
       return 0;

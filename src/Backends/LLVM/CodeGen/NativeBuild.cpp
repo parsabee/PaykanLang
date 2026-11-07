@@ -17,6 +17,7 @@
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/CodeGen.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetOptions.h>
@@ -25,6 +26,7 @@
 
 #include <optional>
 #include <sstream>
+#include <utility>
 
 namespace paykan::llvm_codegen {
 
@@ -203,10 +205,29 @@ StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
   return *result;
 }
 
+// The concurrency prototype: the runtimes the program's code calls (MLIR's
+// async runtime for tasks, LLVM's OpenMP runtime for parallel loops), noted
+// when its object is emitted and linked by buildHostExecutable.
+namespace {
+bool g_linkAsyncRuntime = false;
+bool g_linkOpenMP = false;
+} // namespace
+
 Status emitHostObject(llvm::Module &module, unsigned optLevel,
                       const std::string &path) {
   if (Status s = addEntryPoint(module); !s)
     return s;
+  // A runtime function the code calls: the async-to-LLVM lowering declares
+  // the async runtime's whole interface in every module, calls or not.
+  for (const llvm::Function &f : module.functions()) {
+    if (!f.isDeclaration() || f.use_empty())
+      continue;
+    if (f.getName().starts_with("mlirAsyncRuntime"))
+      g_linkAsyncRuntime = true;
+    else if (f.getName().starts_with("__kmpc_") ||
+             f.getName().starts_with("omp_"))
+      g_linkOpenMP = true;
+  }
   return emitHostModuleObject(module, optLevel, path);
 }
 
@@ -242,8 +263,22 @@ Status buildHostExecutable(
   if (tmp.Path.empty())
     return Status::error("cannot create a temporary directory");
   std::string object = tmp.Path + "/program.o";
+  g_linkAsyncRuntime = g_linkOpenMP = false;
   if (Status s = emitObject(object); !s)
     return s;
+  // Emitting the object noted the runtimes its code calls (emitHostObject).
+  // Each is linked by its path after the objects, since a linker that keeps
+  // only the libraries a program needs (Ubuntu's does) drops one named
+  // before the objects calling it, and found at run time in its directory.
+  for (const auto &[used, lib] :
+       {std::pair{g_linkAsyncRuntime, PAYKAN_MLIR_ASYNC_RUNTIME},
+        std::pair{g_linkOpenMP, PAYKAN_OPENMP_RUNTIME}}) {
+    if (!used)
+      continue;
+    tc.ExtraFlags.push_back("-Wl,-rpath," +
+                            llvm::sys::path::parent_path(lib).str());
+    tc.ExtraObjects.emplace_back(lib);
+  }
   if (!toolchain::linkExecutable({object}, output, tc, errs))
     return failed();
   return Status::ok();

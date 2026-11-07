@@ -160,7 +160,7 @@ fn main() -> int {
   // =========================================================================
 
   // --- B1: Str literal match (content comparison) ---
-  let greeting: Str = "World";
+  let greeting = "World";
   match greeting {
     "Hello" {
       io::println("B1: got Hello");
@@ -174,7 +174,7 @@ fn main() -> int {
   }
 
   // --- B2: Str match falls through to wildcard ---
-  let nope: Str = "Nope";
+  let nope = "Nope";
   match nope {
     "Hello" {
       io::println("B2: got Hello");
@@ -188,7 +188,7 @@ fn main() -> int {
   }
 
   // --- B3: int literal match ---
-  let n: int = 2;
+  let n = 2;
   match n {
     1 { io::println("B3: one"); }
     2 { io::println("B3: two"); }
@@ -197,7 +197,7 @@ fn main() -> int {
   }
 
   // --- B4: float literal match ---
-  let pi: float = 2.5;
+  let pi = 2.5;
   match pi {
     1.0 { io::println("B4: one"); }
     2.5 {
@@ -207,7 +207,7 @@ fn main() -> int {
   }
 
   // --- B5: char literal match ---
-  let ch: char = 'b';
+  let ch = 'b';
   match ch {
     'a' { io::println("B5: a"); }
     'b' { io::println("B5: b"); }
@@ -215,7 +215,7 @@ fn main() -> int {
   }
 
   // --- B6: bool literal match — exhaustive, no wildcard needed ---
-  let flag: bool = False;
+  let flag = False;
   match flag {
     True { io::println("B6: yes"); }
     False { io::println("B6: no"); }

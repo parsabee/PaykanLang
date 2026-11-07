@@ -48,6 +48,12 @@ pir::Type pirType(const ast::ASTContext &ctx, ast::Type *ty) {
   if (ast::isValueOptional(ty))
     return pir::optionalOf(
         pirType(ctx, ast::cast<ast::OptionalType>(ty)->getInnerType()));
+  // The concurrency prototype: an `atomic` variable is a cell, held as a
+  // box; a task is an opaque pointer.
+  if (ast::isa<ast::AtomicType>(ty))
+    return Type::Box;
+  if (ast::isa<ast::TaskType>(ty))
+    return Type::Ptr;
   if (ast::isRefType(ty))
     return Type::Box;
   // Never a value: a fixed-size array or a tuple is held in a `mem` slot

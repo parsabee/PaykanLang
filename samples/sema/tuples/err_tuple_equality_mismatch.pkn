@@ -2,6 +2,6 @@
 fn main() -> int {
   let a = (1, "x");
   let b = (1, 2);
-  let eq: bool = a == b;
+  let eq = a == b;
   return 0;
 }

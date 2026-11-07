@@ -9,7 +9,7 @@ impl Point {
 }
 
 fn main() -> int {
-  let pts: Point[2] = [Point(1, 2), Point(3, 4)];
-  let n: int = pts.len();
+  let pts = [Point(1, 2), Point(3, 4)];
+  let n = pts.len();
   return 0;
 }

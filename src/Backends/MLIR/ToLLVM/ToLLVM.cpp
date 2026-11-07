@@ -23,17 +23,24 @@
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Conversion/ArithToLLVM/ArithToLLVM.h>
+#include <mlir/Conversion/AsyncToLLVM/AsyncToLLVM.h>
 #include <mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h>
 #include <mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h>
 #include <mlir/Conversion/LLVMCommon/ConversionTarget.h>
 #include <mlir/Conversion/LLVMCommon/TypeConverter.h>
+#include <mlir/Conversion/OpenMPToLLVM/ConvertOpenMPToLLVM.h>
 #include <mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h>
 #include <mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h>
+#include <mlir/Conversion/SCFToOpenMP/SCFToOpenMP.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
+#include <mlir/Dialect/Async/IR/Async.h>
+#include <mlir/Dialect/Async/Passes.h>
 #include <mlir/Dialect/ControlFlow/IR/ControlFlow.h>
 #include <mlir/Dialect/ControlFlow/IR/ControlFlowOps.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
+#include <mlir/Dialect/MemRef/IR/MemRef.h>
+#include <mlir/Dialect/OpenMP/OpenMPDialect.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/Iterators.h>
@@ -41,8 +48,10 @@
 #include <mlir/Rewrite/PatternApplicator.h>
 #include <mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h>
+#include <mlir/Target/LLVMIR/Dialect/OpenMP/OpenMPToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Export.h>
 #include <mlir/Transforms/DialectConversion.h>
+#include <mlir/Transforms/RegionUtils.h>
 
 #include <cstddef>
 #include <iterator>
@@ -493,6 +502,109 @@ struct SCFToCFPass : public PassWrapper<SCFToCFPass, OperationPass<ModuleOp>> {
   }
 };
 
+// -- Alloca scopes
+//
+// convert-scf-to-openmp wraps a parallel loop's body in a memref.alloca_scope
+// (the body's allocas are the iteration's), whose region is one block, so
+// scf cannot become cf inside it.  Each scope becomes its block inlined
+// between a stack save and a stack restore, before scf becomes cf.
+struct InlineAllocaScopesPass
+    : public PassWrapper<InlineAllocaScopesPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InlineAllocaScopesPass)
+
+  StringRef getArgument() const override { return "pir-inline-alloca-scopes"; }
+  StringRef getDescription() const override {
+    return "Inline memref.alloca_scope as a stack save and restore";
+  }
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<LLVM::LLVMDialect>();
+  }
+
+  void runOnOperation() override {
+    std::vector<memref::AllocaScopeOp> scopes;
+    getOperation().walk(
+        [&](memref::AllocaScopeOp op) { scopes.push_back(op); });
+    // Innermost last in a walk's post-order: inlined first, each into a
+    // parent that is still a scope's block or a plain one.
+    for (memref::AllocaScopeOp op : llvm::reverse(scopes)) {
+      Location loc = op.getLoc();
+      Block &body = op.getBodyRegion().front();
+      auto ret = cast<memref::AllocaScopeReturnOp>(body.getTerminator());
+      OpBuilder b(op);
+      Value saved = LLVM::StackSaveOp::create(b, loc, llvmPtr(op.getContext()));
+      op.replaceAllUsesWith(ret.getOperands());
+      ret.erase();
+      Block *parent = op->getBlock();
+      parent->getOperations().splice(op->getIterator(), body.getOperations());
+      LLVM::StackRestoreOp::create(b, loc, saved);
+      op.erase();
+    }
+  }
+};
+
+// -- The schedule of a parallel loop's chunks
+//
+// convert-scf-to-openmp leaves a worksharing loop's schedule to the
+// runtime's default, static: every thread takes the same number of the
+// loop's 256 chunks, so a thread on a slow core (an efficiency core of a
+// hybrid CPU) sets the loop's time (benchmarks/README.md).  A dynamic
+// schedule hands the chunks out as threads come free.  The result is the
+// same whichever thread runs a chunk: each chunk's partials are its own,
+// folded in chunk order afterwards (PIRToStandard.cpp, lowerParallel).
+struct DynamicSchedulePass
+    : public PassWrapper<DynamicSchedulePass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(DynamicSchedulePass)
+
+  StringRef getArgument() const override { return "pir-dynamic-schedule"; }
+  StringRef getDescription() const override {
+    return "Schedule a parallel loop's chunks dynamically, one at a time";
+  }
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<omp::OpenMPDialect, arith::ArithDialect>();
+  }
+
+  void runOnOperation() override {
+    getOperation().walk([&](omp::WsloopOp op) {
+      if (op.getScheduleKind())
+        return;
+      OpBuilder b(op);
+      Value one =
+          arith::ConstantIntOp::create(b, op.getLoc(), b.getI64Type(), 1);
+      op.setScheduleKind(omp::ClauseScheduleKind::Dynamic);
+      op.getScheduleChunkMutable().assign(one);
+    });
+  }
+};
+
+// -- Dead code the conversions leave
+//
+// The coroutine lowering of an async function (the concurrency prototype)
+// may leave a block nothing branches to, which the conversion driver does
+// not legalize: its async ops, and the casts of the coroutine's id and
+// handle they use, would reach the translation.  Every unreachable block
+// goes, then every cast nothing uses.
+struct DropDeadCodePass
+    : public PassWrapper<DropDeadCodePass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(DropDeadCodePass)
+
+  StringRef getArgument() const override { return "pir-drop-dead-code"; }
+  StringRef getDescription() const override {
+    return "Erase unreachable blocks and unused unrealized casts";
+  }
+
+  void runOnOperation() override {
+    IRRewriter rewriter(&getContext());
+    (void)eraseUnreachableBlocks(rewriter, getOperation()->getRegions());
+    std::vector<UnrealizedConversionCastOp> dead;
+    getOperation().walk([&](UnrealizedConversionCastOp cast) {
+      if (cast->use_empty())
+        dead.push_back(cast);
+    });
+    for (UnrealizedConversionCastOp cast : dead)
+      cast.erase();
+  }
+};
+
 // -- The LLVM dialect
 
 struct ConvertToLLVMPass
@@ -515,7 +627,15 @@ struct ConvertToLLVMPass
     RewritePatternSet patterns(ctx);
     arith::populateArithToLLVMConversionPatterns(types, patterns);
     cf::populateControlFlowToLLVMConversionPatterns(types, patterns);
+    // The concurrency prototype: an await outside a coroutine (a blocking
+    // one) checks the task for an error with cf.assert.
+    cf::populateAssertToLLVMConversionPattern(types, patterns,
+                                              /*abortOnFailure=*/true);
     populateFuncToLLVMConversionPatterns(types, patterns);
+    // The concurrency prototype: OpenMP's ops stay for the translation,
+    // their operands and regions converted.
+    configureOpenMPToLLVMConversionLegality(target, types);
+    populateOpenMPToLLVMConversionPatterns(types, patterns);
     patterns
         .add<AllocaLowering, PtrLoadLowering, PtrStoreLowering, PtrAddLowering,
              MemCopyLowering, MemZeroLowering, AddressOfLowering,
@@ -690,11 +810,18 @@ struct InlineReferenceCountsPass
       return LLVM::ConstantOp::create(b, loc, count,
                                       b.getIntegerAttr(count, v));
     };
-    Value common = retain
-                       ? LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::ne,
-                                              n, constant(PAYKAN_REF_MAX))
-                       : LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::sgt,
-                                              n, constant(1));
+    // A count of PAYKAN_REF_MAX is immortal (the prototype's cells and
+    // frozen objects, Runtime.h), and PAYKAN_REF_MAX - 1 the limit: a
+    // retain's fast path is a count below the limit, a release's one in
+    // [2, PAYKAN_REF_MAX); the function handles the rest.
+    Value common =
+        retain ? LLVM::ICmpOp::create(
+                     b, loc, LLVM::ICmpPredicate::ult, n,
+                     constant(static_cast<int64_t>(PAYKAN_REF_MAX) - 1))
+               : LLVM::ICmpOp::create(
+                     b, loc, LLVM::ICmpPredicate::ult,
+                     LLVM::SubOp::create(b, loc, n, constant(2)),
+                     constant(static_cast<int64_t>(PAYKAN_REF_MAX) - 2));
     // The call is the rare path: laid out away from the common one.
     LLVM::CondBrOp::create(b, loc, common, ValueRange(), ValueRange(),
                            b.getDenseI32ArrayAttr({2000, 1}), fast, slow);
@@ -754,15 +881,31 @@ void loadLLVMDialects(MLIRContext &ctx) {
   DialectRegistry registry;
   registerBuiltinDialectTranslation(registry);
   registerLLVMDialectTranslation(registry);
+  registerOpenMPDialectTranslation(registry);
   ctx.appendDialectRegistry(registry);
   ctx.getOrLoadDialect<LLVM::LLVMDialect>();
   ctx.getOrLoadDialect<cf::ControlFlowDialect>();
+  ctx.getOrLoadDialect<omp::OpenMPDialect>();
+  ctx.getOrLoadDialect<async::AsyncDialect>();
 }
 
 void addLLVMDialectPasses(PassManager &pm) {
+  // The concurrency prototype (docs/design/concurrency.md): a parallel
+  // loop's scf.parallel becomes OpenMP (its runtime is libomp); an
+  // async.func, the async.execute region that is its body, its async.call
+  // and its awaits become coroutines on MLIR's async runtime (the pass
+  // lowers the scf around an await to cf itself, as a suspension point
+  // splits blocks); then the rest of scf becomes cf.
+  pm.addPass(createConvertSCFToOpenMPPass());
+  pm.addPass(std::make_unique<DynamicSchedulePass>());
+  pm.addPass(std::make_unique<InlineAllocaScopesPass>());
+  pm.addPass(createAsyncFuncToAsyncRuntimePass());
+  pm.addPass(createAsyncToAsyncRuntimePass());
+  pm.addPass(createConvertAsyncToLLVMPass());
   pm.addPass(std::make_unique<SCFToCFPass>());
   pm.addPass(std::make_unique<ConvertToLLVMPass>());
   pm.addPass(createReconcileUnrealizedCastsPass());
+  pm.addPass(std::make_unique<DropDeadCodePass>());
   pm.addPass(std::make_unique<InlineReferenceCountsPass>());
   pm.addPass(std::make_unique<InlineBufferLengthsPass>());
 }
@@ -779,6 +922,16 @@ translateToLLVMIR(ModuleOp module, llvm::LLVMContext &ctx,
   auto llvmModule = translateModuleToLLVMIR(module, ctx, name);
   if (!llvmModule)
     return Status::error("MLIR -> LLVM IR translation failed:\n" + diagnostics);
+  // Paykan_malloc returns a block of its own every time (Runtime.h), which
+  // LLVM knows only from the declaration's attributes: without `noalias` it
+  // cannot tell two objects apart, so a store to one object's field forces
+  // a reload of every field of the other, and a loop over fields reached
+  // through another object keeps them in memory instead of in registers.
+  if (llvm::Function *malloc = llvmModule->getFunction(names::kPaykanMalloc)) {
+    malloc->addRetAttr(llvm::Attribute::NoAlias);
+    malloc->addFnAttr(
+        llvm::Attribute::getWithAllocSizeArgs(ctx, 0, std::nullopt));
+  }
   return llvmModule;
 }
 

@@ -126,7 +126,7 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
     fn at<T>(xs: view T[], i: view int) -> T { return xs[i]; }
     fn main() -> int {
       let k = 3;
-      c: Counter = Twice(k);
+      c: mut Counter = Twice(k);
       ns: int[2] = [4, 5];
       io::println(Str(c.add(k)) + " " + Str(scale(1.5, 2)) + " " +
               name(Color::Green, True, '!') + " " + Str(at(ns, 1)) + " " +
@@ -194,14 +194,14 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
   auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
-      fn take(to: inout int) { to = to + self.n; }
+      view fn take(to: inout int) { to = to + self.n; }
     }
 
     impl Counter {
       fn __init__(start: inout int) { self.n = start; start = 0; }
     }
     class Twice : Counter {
-      fn take(to: inout int) { to = to + 2 * self.n; }
+      view fn take(to: inout int) { to = to + 2 * self.n; }
     }
 
     impl Twice {
@@ -232,7 +232,7 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
   auto r = compileAndRun(R"(import ::io;
     class Inner {
       n: int;
-      fn addTo(t: inout int) { t = t + 1; }
+      view fn addTo(t: inout int) { t = t + 1; }
     }
 
     impl Inner {
@@ -252,11 +252,11 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
       io::println("seen " + Str(h.total));
       t = t + 1;
     }
-    fn replace(n: inout int, h: Holder) { h.inner = Inner(); n = 99; }
+    fn replace(n: inout int, h: mut Holder) { h.inner = Inner(); n = 99; }
     fn make() -> Holder { return Holder(); }
     fn twice(x: inout float) { x = x * 2; }
     fn main() -> int {
-      h = Holder();
+      h: mut = Holder();
       bump(h.total);
       watch(h.total, h);
       h.selfBump();
@@ -266,7 +266,7 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
       hs = [Holder(), Holder()];
       bump(hs[1].total);
       twice(h.f);
-      let p = Holder();
+      let p: mut = Holder();
       bump(p.total);
       io::println(Str(h.total) + " " + Str(h.inner.n) + " " + Str(hs[1].total) +
               " " + Str(h.f) + " " + Str(p.total));
@@ -302,7 +302,7 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
     }
     fn size<T>(xs: view T[]) -> int { return xs.len(); }
     fn main() -> int {
-      c = Counter(30);
+      c: mut = Counter(30);
       c.tick();
       names: Str[2] = ["a", "b"];
       cs: Counter[3] = [c, c, c];
@@ -359,30 +359,30 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
       return other.n;
     }
     fn main() -> int {
-      x = Counter(1);
+      x: mut = Counter(1);
       same(x);
       k = keep(x);
       pass(x);
-      f: Counter = Fast(3);
+      f: mut Counter = Fast(3);
       f.adopt(x);
-      a = "a"; b = "b";
+      a: mut = "a"; b: mut = "b";
       swap(a, b);
       flip(a, b);
       i = 1; j = 2;
       swap(i, j);
-      p = Counter(7); q = Counter(8);
+      p: mut = Counter(7); q: mut = Counter(8);
       swap(p, q);
-      o: Counter? = Counter(3);
+      o: mut Counter? = Counter(3);
       clear(o);
       fill(o);
       t = (1, "t");
       pair(t);
       xs: int[2] = [1, 7];
       refill(xs);
-      y = Counter(4);
+      y: mut = Counter(4);
       z = y;
       w = seen(y, z);
-      h = Holder();
+      h: mut = Holder();
       reset(h.c);
       swap(h.c, p);
       io::println(Str(k.n) + " " + Str(x.n) + " " + a + b + " " + Str(i) +
@@ -503,7 +503,7 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
   auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
-      fn get() -> int { return self.n; }
+      view fn get() -> int { return self.n; }
     }
 
     impl Counter {
@@ -527,13 +527,13 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
       f = 1.5;
       g: inout float = f;
       g = g * 2;
-      s = "hi";
+      s: mut = "hi";
       t: inout = s;
       t = t + "!";
-      c = Counter(1);
+      c: mut = Counter(1);
       cc: inout = c;
       cc = Counter(7);
-      h = Holder();
+      h: mut = Holder();
       hc: inout = h.c;
       hc = Counter(9);
       ht: inout = h.total;
@@ -543,7 +543,7 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
       ys: inout = xs;
       ys[1] = 3;
       ys = [ys[1], 8];
-      o: Counter? = None;
+      o: mut Counter? = None;
       oo: inout = o;
       oo = Counter(4);
       m: inout = make().total;
@@ -627,7 +627,7 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
       }
     }
     fn main() -> int {
-      a: Animal = Dog(5);
+      a: mut Animal = Dog(5);
       keep = a;
       match a {
         d: inout Dog {
@@ -639,12 +639,12 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
         _ { }
       }
       io::print(Str(a.get()) + " " + Str(keep.get()) + " ");
-      h = Home();
+      h: mut = Home();
       match h.pet {
         d: inout Dog { d = Dog(42); }
         _ { }
       }
-      o: Animal? = Animal(3);
+      o: mut Animal? = Animal(3);
       match o {
         x: inout Animal { x = Dog(7); }
         None { }
@@ -682,24 +682,24 @@ TEST(LocalBorrow, InoutArmsSurviveAChangeThroughAnotherReference) {
       s: Sh;
       p: P?;
       a: A;
-      fn poke(other: H) {
+      fn poke(other: mut H) {
         match self.s { l: inout L { other.s = Sh::E; io::print(l.s + " "); } _ { } }
       }
     }
     impl H {
       fn __init__() { self.s = Sh::L("x" + "y"); self.p = P("a" + "b"); self.a = B(1, "b" + "x"); }
     }
-    fn f(x: inout Sh, o: H) {
+    fn f(x: inout Sh, o: mut H) {
       match x { l: inout L { o.s = Sh::E; io::print(l.s + " "); } _ { } }
     }
-    fn firstL(x: inout Sh, o: H) -> Str {
+    fn firstL(x: inout Sh, o: mut H) -> Str {
       while True {
         match x { l: inout L { o.s = Sh::E; l.s = l.s + "!"; return l.s; } _ { break; } }
       }
       return "none";
     }
     fn main() -> int {
-      h = H();
+      h: mut = H();
       g = h;
       match h.s { l: inout L { g.s = Sh::E; io::print(l.s + " "); } _ { } }
       match h.p { q: inout P { g.p = None; q.y = q.y + "c"; io::print(q.y + " "); } None { } }
@@ -738,7 +738,7 @@ TEST(LocalBorrow, InoutPlacesInAStructKeepItsObject) {
     class O { h: H; }
     fn fresh(t: Str) -> H { return H(P(Sh::L(t + ""), Q(t + "q"), Box(t + "b"))); }
     fn main() -> int {
-      o = O(fresh("x"));
+      o: mut = O(fresh("x"));
       g = o;
       match o.h.p.s { l: inout L { g.h = fresh("y"); l.s = l.s + "!"; } _ { } }
       match o.h.p.q { q: inout Q { g.h = fresh("z"); q.n = q.n + "!"; } None { } }
@@ -766,7 +766,7 @@ TEST(LocalBorrow, InoutArmsGoBackAtTheirLastUse) {
     enum Sh { E, L(s: Str) }
     class H { s: Sh; }
     fn main() -> int {
-      h = H(Sh::L("x" + "y"));
+      h: mut = H(Sh::L("x" + "y"));
       g = h;
       match h.s { l: inout L { l.s = l.s + "1"; h.s = Sh::E; } _ { } }
       io::print(h.s.toString() + " ");
@@ -802,7 +802,7 @@ TEST(LocalBorrow, ABorrowEndsBeforeABinderOfItsName) {
     class B { e: E; }
     class N { s: Str; }
     fn main() -> int {
-      let b = B(E::R(1, "a" + "b"));
+      let b: mut = B(E::R(1, "a" + "b"));
       match b.e {
         r: inout R {
           r.w += 100;
@@ -865,11 +865,11 @@ TEST(LocalBorrow, InoutArmsFindTheirSubjectOnce) {
     }
     class H { s: Sh; }
     fn mk(t: Str) -> H { io::print("mk "); return H(Sh::L(t + "")); }
-    fn first(b: B) -> Str {
+    fn first(b: mut B) -> Str {
       match b.next().s { l: inout L { l.s = l.s + "?"; return l.s; } _ { return "-"; } }
     }
     fn main() -> int {
-      b = B(W(Sh::L("a" + ""), Animal(1), Q("p" + "")), W(Sh::E, Dog(2), None), 0);
+      b: mut = B(W(Sh::L("a" + ""), Animal(1), Q("p" + "")), W(Sh::E, Dog(2), None), 0);
       match b.next().s { l: inout L { l.s = l.s + "!"; } _ { } }
       match b.next().a { d: inout Dog { d = Dog(d.n + 5); } _ { io::print("not a dog "); } }
       match b.next().q { q: inout Q { q.y = q.y + "!"; } None { } }
@@ -916,20 +916,20 @@ TEST(LocalBorrow, InoutArmsMatchAnInoutResult) {
     fn pick(x: inout E, y: inout E, first: bool) -> inout E {
       return if first then x else y;
     }
-    fn early(b: B) -> Str {
+    fn early(b: mut B) -> Str {
       match b.slot() { r: inout R { r.w += 1; return Str(r.w); } A { return "-"; } }
     }
     fn viaParam(b: inout B) { match b.slot() { r: inout R { r.w += 10; } A { } } }
-    fn reset(h: H) { h.b = B(E::A, Animal(0), None, 0); h.s = S(E::A); }
+    fn reset(h: mut H) { h.b = B(E::A, Animal(0), None, 0); h.s = S(E::A); }
     fn main() -> int {
-      let b = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
+      let b: mut = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
       match b.slot() { r: inout R { r.w += 100; r.s = r.s + "!"; } A { } }
       io::println(Str(b.e) + " " + Str(b.calls));
       match b.pet() { d: inout Dog { d = Dog(d.n + 5); } _ { } }
       match b.opt() { q: inout Q { q.y = q.y + "?"; } None { } }
       io::println(Str(b.a.n) + " " + Str(b.q) + " " + Str(b.calls));
       io::println(early(b) + " " + Str(b.e) + " " + Str(b.calls));
-      b2 = B(E::R(2, "c" + ""), Animal(0), None, 0);
+      b2: mut = B(E::R(2, "c" + ""), Animal(0), None, 0);
       viaParam(b2);
       i = 0;
       while i < 3 {
@@ -944,11 +944,11 @@ TEST(LocalBorrow, InoutArmsMatchAnInoutResult) {
       match pick(x, y, True) { r: inout R { r.w = 7; } A { } }
       match pick(x, y, False) { r: inout R { r.w = 8; } A { io::print("A "); } }
       io::println(Str(b2.e) + " " + Str(x) + " " + Str(y));
-      let c = Cell<E>(E::R(4, "c" + ""));
+      let c: mut = Cell<E>(E::R(4, "c" + ""));
       match c.slot() { r: inout R { r.w = 40; } A { } }
       s = S(E::R(3, "s" + ""));
       match s.slot() { r: inout R { r.w *= 2; } A { } }
-      let h = H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
+      let h: mut = H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
       let g = h;
       match h.b.slot() { r: inout R { g.b = B(E::A, Animal(1), None, 0); r.w = 9; } A { } }
       match h.s.slot() { r: inout R { reset(g); r.w = 60; } A { } }
@@ -1035,7 +1035,7 @@ TEST(BorrowedResult, InoutResultsWriteThrough) {
     }
     fn bump(n: inout int) { n = n + 1; }
     fn main() -> int {
-      b = Box();
+      b: mut = Box();
       x: inout = b.num();
       x = x + 10;
       b.counter().tick();
@@ -1091,8 +1091,8 @@ TEST(BorrowedResult, AFieldOfAConditionalIsWrittenThrough) {
     fn bump(n: inout int) { n += 1; }
     fn add(s: inout Str) { s = s + "+"; }
     fn main() -> int {
-      a = K(1, "a" + "");
-      b = K(2, "b" + "");
+      a: mut = K(1, "a" + "");
+      b: mut = K(2, "b" + "");
       p: inout = pick(a, b, True);
       p = p + 10;
       bump(pick(a, b, False));
@@ -1100,21 +1100,21 @@ TEST(BorrowedResult, AFieldOfAConditionalIsWrittenThrough) {
       q = q + "!";
       add(pickS(a, b, True));
       io::println(Str(a.n) + " " + Str(b.n) + " " + a.s + " " + b.s);
-      d = K(3, "d" + "");
+      d: mut = K(3, "d" + "");
       bump(nest(a, b, d, True, False));
       bump(nest(a, b, d, False, True));
       t = (K(4, "t" + ""), 0);
       u = (K(5, "u" + ""), 0);
       bump(tup(t, u, False));
       io::println(Str(b.n) + " " + Str(d.n) + " " + Str(t.0.n) + " " + Str(u.0.n));
-      let x = T(6, K(0, "x" + ""));
-      y = T(7, K(0, "y" + ""));
+      let x: mut = T(6, K(0, "x" + ""));
+      y: mut = T(7, K(0, "y" + ""));
       bump(x.either(y, True));
       bump(x.either(y, False));
       io::println(Str(x.n) + " " + Str(y.n) + " " + x.name(y, False) + x.name(y, True));
-      let h = H(K(8, "h" + ""));
+      let h: mut = H(K(8, "h" + ""));
       let g = h;
-      e = K(9, "e" + "");
+      e: mut = K(9, "e" + "");
       r: inout = pickS(h.k, e, True);
       g.k = K(0, "new" + "");
       r = r + "?";
@@ -1152,7 +1152,7 @@ TEST(BorrowedResult, InoutTupleResultsWriteThrough) {
     fn set(x: inout (int, Str)) { x = (9, "nine"); }
     fn show(v: view (int, Str)) -> Str { return Str(v.0) + v.1; }
     fn main() -> int {
-      h = H((1, "one"), ((2, "two"), "x"));
+      h: mut = H((1, "one"), ((2, "two"), "x"));
       copy = h.get();
       io::println(h.get().1 + " " + h.nested().0.1 + h.nested().1);
       set(h.get());

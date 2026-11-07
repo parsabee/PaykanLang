@@ -87,7 +87,7 @@ std::vector<std::string> loadCorpus() {
 
 const char *const kFragments[] = {
     "fn",    "class", "enum",   "import",
-    "match", "mov",   "if",     "then",
+    "match", "move",  "if",     "then",
     "else",  "while", "return", "break",
     "::",    "->",    "<",      ">",
     "(",     ")",     "{",      "}",
@@ -187,7 +187,7 @@ TEST(FuzzSmoke, RandomTokens) {
 }
 
 TEST(FuzzSmoke, PathologicalNesting) {
-  for (const char *open : {"(", "[", "{", "if (", "-", "!", "mov ", "Box<"}) {
+  for (const char *open : {"(", "[", "{", "if (", "-", "!", "move ", "Box<"}) {
     std::string s = "import ::io; fn main() -> int { x = ";
     for (int i = 0; i < 20000; ++i)
       s += open;

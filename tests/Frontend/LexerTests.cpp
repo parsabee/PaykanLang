@@ -118,6 +118,19 @@ TEST(Lexer, ParamModeAndLetKeywords) {
   EXPECT_EQ(d.Lines[5], "1:30-1:34 IDENT lets");
 }
 
+// The qualifiers of the concurrency prototype are keywords, `mut` among
+// them; a word that starts with one is an identifier, and `const` is one.
+TEST(Lexer, QualifierKeywords) {
+  auto d = dump("mut shared locked atomic mutable const");
+  ASSERT_EQ(d.Lines.size(), 7u);
+  EXPECT_EQ(d.Lines[0], "1:1-1:4 KW_MUT mut");
+  EXPECT_EQ(d.Lines[1], "1:5-1:11 KW_SHARED shared");
+  EXPECT_EQ(d.Lines[2], "1:12-1:18 KW_LOCKED locked");
+  EXPECT_EQ(d.Lines[3], "1:19-1:25 KW_ATOMIC atomic");
+  EXPECT_EQ(d.Lines[4], "1:26-1:33 IDENT mutable");
+  EXPECT_EQ(d.Lines[5], "1:34-1:39 IDENT const");
+}
+
 TEST(Lexer, NumberLiterals) {
   auto d = dump("1 1.5 1. 1e5 1.e5 1E+2 2e-3 1e 1.5e");
   std::vector<std::string> expected = {

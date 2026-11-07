@@ -26,7 +26,7 @@ import ::io;
 
 class Node {
   v: int;
-  view fn toString() -> Str { return "N" + Str<int>(self.v); }
+  view fn toString() -> Str { return "N" + Str(self.v); }
 }
 
 impl Node {
@@ -115,7 +115,7 @@ fn main() -> int {
       [("a", (1, None)), ("b", (nb, Node(4)))];
   io::println(nested[0].toString() + " " + nested[1].toString());
 
-  let s = Slot();
+  let s: mut = Slot();
   s.p = (None, 7);
   io::println(s.p);
 

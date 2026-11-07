@@ -282,9 +282,9 @@ fn pick(x: inout E, y: inout E, first: bool) -> inout E {
 fn mk() -> E { return E::A; }
 )";
   auto ok = semaCheck(decls + wrapMain(R"(
-    k = K(E::B(1, "a"));
+    k: mut = K(E::B(1, "a"));
     match k.slot() { b: inout B { b.x += 100; b.s = b.s + "!"; } _ { } }
-    h = H(K(E::A));
+    h: mut = H(K(E::A));
     match h.k.slot() { b: inout B { b.x = 2; } _ { } }
     s = S(E::B(3, "s"));
     match s.slot() { b: inout B { b.x *= 2; } A { } C { } }
@@ -296,7 +296,7 @@ fn mk() -> E { return E::A; }
   )"));
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
   auto r = semaCheck(decls + wrapMain(R"(
-    k = K(E::B(1, "a"));
+    k: mut = K(E::B(1, "a"));
     match k.slot() { b: inout B { io::println(k.e); b.x = 1; } _ { } }
     match mk() { b: inout B { } _ { } }
     match k.peek() { b: inout B { } _ { } }

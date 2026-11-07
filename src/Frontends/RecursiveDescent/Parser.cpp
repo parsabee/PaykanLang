@@ -509,6 +509,13 @@ TranslationUnit *Parser::parseTranslationUnit() {
         break;
       }
       [[fallthrough]]; // `view fn`: Sema says only a method can be one
+    case Tok::KwAsync:
+      if (kind() == Tok::KwAsync && kind(1) != Tok::KwFn) {
+        errorAtCurrent("expected 'fn' after 'async'");
+        ok = false;
+        break;
+      }
+      [[fallthrough]]; // `async fn`: a task (the concurrency prototype)
     case Tok::KwFn:
       if (auto *d = parseFuncDecl())
         (d->isGeneric() ? genericFuncs : funcs).push_back(d);
@@ -1125,7 +1132,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
           &name,
           Ctx.make<ClassType>(span(nameTok.Loc),
                               intern(names::untypedParamType(name)), nullptr),
-          ParamMode::Value, nameTok.Loc});
+          ParamMode::Value, Qualifier{}, nameTok.Loc});
       continue;
     }
     if (!expect(Tok::Colon, "after the parameter name"))
@@ -1138,7 +1145,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty, mode, span(nameTok.Loc)});
+    out.push_back(Param{&name, ty, mode, Qualifier{}, span(nameTok.Loc)});
   } while (accept(Tok::Comma));
   return true;
 }
@@ -1166,6 +1173,8 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   const bool native = kind == FuncKind::Native;
   const bool requirement = kind == FuncKind::Requirement;
   SourceLocation start = cur().Loc;
+  // `async fn` (the concurrency prototype): a free function that is a task.
+  const bool async = !native && accept(Tok::KwAsync);
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
   if (native && !expect(Tok::KwFn, "after 'native'"))
@@ -1280,6 +1289,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr);
     fn->setView(view);
+    fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
     return fn;
@@ -1331,6 +1341,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr, std::move(typeParams));
     fn->setView(view);
+    fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
     fn->setTypeParamBounds(std::move(bounds));
@@ -1368,6 +1379,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
                                 body, std::move(typeParams));
   fn->setInferredResult(expressionBody && !retTy);
   fn->setView(view);
+  fn->setAsync(async);
   fn->setResultMode(resultMode);
   fn->setModulePrivateInit(modulePrivateInit);
   fn->setTypeParamBounds(std::move(bounds));
@@ -1463,6 +1475,23 @@ bool Parser::parseStatement(Stmt *&out) {
   case Tok::KwFor:
     out = parseForStmt();
     return out != nullptr;
+
+  case Tok::KwLock:
+    out = parseLockStmt();
+    return out != nullptr;
+
+  case Tok::KwParallel:
+    // `parallel for` (the concurrency prototype).
+    consume();
+    if (!at(Tok::KwFor)) {
+      errorAtCurrent("expected 'for' after 'parallel'");
+      return false;
+    }
+    out = parseForStmt();
+    if (!out)
+      return false;
+    cast<ForStmt>(out)->setParallel(true);
+    return true;
 
   case Tok::KwElif:
     errorAtCurrent("an 'elif' follows the block of an 'if' or another "
@@ -2046,6 +2075,43 @@ Stmt *Parser::parseForStmt() {
                            body);
 }
 
+// lockStmt ::= "lock" expression "as" IDENT ":" ( "view" | "inout" ) block
+// (the concurrency prototype)
+Stmt *Parser::parseLockStmt() {
+  SourceLocation start = consume().Loc; // "lock"
+  Expr *cell = parseExpression();
+  if (!cell)
+    return nullptr;
+  if (!expect(Tok::KwAs, "after the 'lock' statement's cell"))
+    return nullptr;
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a name for the cell's contents after 'as'");
+    return nullptr;
+  }
+  Token name = consume();
+  if (!expect(Tok::Colon, "after the name"))
+    return nullptr;
+  ParamMode mode = ParamMode::View;
+  if (accept(Tok::KwInout)) {
+    mode = ParamMode::Inout;
+  } else if (!accept(Tok::KwView)) {
+    errorAtCurrent("expected 'view' or 'inout': how the block reaches the "
+                   "cell's contents");
+    return nullptr;
+  }
+  if (!at(Tok::LBrace)) {
+    errorAtCurrent("expected '{' to open the 'lock' block");
+    return nullptr;
+  }
+  CompoundStmt *body = parseBlock();
+  if (!body)
+    return nullptr;
+  auto *binding =
+      Ctx.make<VarDecl>(span(name.Loc), intern(name.Text), nullptr, nullptr);
+  binding->setMode(mode);
+  return Ctx.make<LockStmt>(span(start), cell, binding, body);
+}
+
 // matchStmt ::= "match" expression "{" matchArm+ "}"
 Stmt *Parser::parseMatchStmt() {
   SourceLocation start = consume().Loc; // "match"
@@ -2280,8 +2346,85 @@ Type *Parser::parsePrimaryType() {
   return Ctx.make<ClassType>(span(start), intern(name), nullptr);
 }
 
+// typeAnnotation ::= qualifier? primaryType suffixes
+// qualifier      ::= "mut" | "shared" "mut"? | "atomic" "shared"
+//                  | "locked" "mut"?
+//                  | "atomic"                     -- a cell of a number
+//
+// The bare type is immutable and the cheapest form (docs/design/
+// concurrency.md); each word buys one thing at one cost: `mut`, writes
+// through the owner; `shared`, several owners; `atomic shared`, an object
+// frozen for every thread; `locked mut`, an object written under a lock.
+// `atomic shared mut` and `atomic mut` are errors naming the forms that
+// exist, and `locked` without `mut` is a warning (Sema).
+//
+// A qualifier covers the whole type.  In a declaration it may stand alone,
+// with the type inferred (`x: shared = e;`).  A type takes one qualifier.
 Type *Parser::parseTypeAnnotation() {
   SourceLocation start = cur().Loc;
+  Qualifier qual;
+  bool qualified = true;
+  auto cellTakesNoMut = [&] {
+    error(cur().Loc, "an 'atomic' cell takes no 'mut': it changes by its "
+                     "operations; an object crosses threads as 'atomic "
+                     "shared T' (frozen) or 'locked mut T'");
+    return nullptr;
+  };
+  if (accept(Tok::KwMut)) {
+    if (at(Tok::KwShared) || at(Tok::KwLocked)) {
+      const std::string form(cur().Text);
+      error(cur().Loc, "'mut " + form + "' is spelled '" + form +
+                           " mut': the form first, then the writes");
+      return nullptr;
+    }
+    if (at(Tok::KwAtomic))
+      return cellTakesNoMut();
+    qual.Mut = true;
+  } else if (accept(Tok::KwShared)) {
+    qual.Form = QualForm::Shared;
+    qual.Mut = accept(Tok::KwMut);
+  } else if (accept(Tok::KwLocked)) {
+    qual.Form = QualForm::Locked;
+    qual.Mut = accept(Tok::KwMut);
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwShared) {
+    consume();
+    consume();
+    if (at(Tok::KwMut)) {
+      error(cur().Loc, "'atomic shared mut T' would be written from several "
+                       "threads with no lock; write 'atomic shared T' to "
+                       "freeze it, or 'locked mut T' to change it under a "
+                       "lock");
+      return nullptr;
+    }
+    qual.Form = QualForm::AtomicShared;
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwMut) {
+    consume();
+    return cellTakesNoMut();
+  } else if (accept(Tok::KwAtomic)) {
+    // `atomic T`: a cell holding a number.
+    Type *inner = parseTypeAnnotation();
+    if (!inner)
+      return nullptr;
+    return Ctx.make<AtomicType>(span(start), inner);
+  } else {
+    qualified = false;
+  }
+  if (qualified) {
+    if (at(Tok::KwMut) || at(Tok::KwShared) || at(Tok::KwLocked) ||
+        at(Tok::KwAtomic)) {
+      error(cur().Loc, std::string("a type takes one qualifier: '") +
+                           qual.spelling() + " " + std::string(cur().Text) +
+                           "' is two");
+      return nullptr;
+    }
+    // The qualifier alone, in a declaration: the type is inferred.
+    if (at(Tok::Assign) || at(Tok::Semi) || at(Tok::Comma) || at(Tok::RParen))
+      return Ctx.make<QualifiedType>(span(start), qual, nullptr);
+    Type *inner = parseTypeAnnotation();
+    if (!inner)
+      return nullptr;
+    return Ctx.make<QualifiedType>(span(start), qual, inner);
+  }
   Type *ty = parsePrimaryType();
   if (!ty)
     return nullptr;
@@ -2509,32 +2652,27 @@ Expr *Parser::parseBinary(int minPrec) {
   }
 }
 
-// unary ::= ( "!" | "-" | "~" ) unary | postfix   ("mov" is reserved: an
-// error)
+// unary ::= ( "!" | "-" | "~" | "move" | "await" ) unary | postfix
 Expr *Parser::parseUnary() {
-  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMov)) {
+  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMove) ||
+      at(Tok::KwAwait)) {
     if (!enterNesting())
       return nullptr;
     const Tok op = kind();
     const SourceLocation opLoc = consume().Loc;
-    // `mov` is retired (#145), and reported at once, so that its error comes
-    // before any in the operand, in source order.  A run of them (`mov mov
-    // s`) is the one error.  The operand still parses, and becomes the
-    // expression.
-    if (op == Tok::KwMov) {
-      error(opLoc, std::string(kMovRemoved));
-      while (at(Tok::KwMov))
-        consume();
-    }
     Expr *operand = parseUnary();
     leaveNesting();
-    if (!operand || op == Tok::KwMov)
+    if (!operand)
       return operand;
     UnaryOpcode code = UnaryOpcode::Neg;
     if (op == Tok::Not)
       code = UnaryOpcode::Not;
     else if (op == Tok::Tilde)
       code = UnaryOpcode::BitNot;
+    else if (op == Tok::KwMove)
+      code = UnaryOpcode::Move;
+    else if (op == Tok::KwAwait)
+      code = UnaryOpcode::Await;
     return Ctx.make<UnaryExpr>(span(opLoc), code, operand);
   }
   return parsePostfix();

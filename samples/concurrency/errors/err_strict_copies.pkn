@@ -1,0 +1,30 @@
+import ::io;
+
+class Node {
+  id: int;
+}
+
+fn make() -> Node {
+  let n = Node(1);
+  return n;                     // strict: write `return move n`
+}
+
+fn take(n: Node) -> int {
+  return n.id;
+}
+
+fn main() -> int {
+  let a = Node(2);
+  let b = a;                    // strict: cannot copy a unique
+  let s: shared = Node(3);
+  let t = s;                    // fine: shared is Copyable
+  io::println(Str(take(a)));    // strict: cannot copy into a parameter
+  io::println(Str(take(move a)));
+  let m = make();
+  return t.id - 3;
+}
+
+fn repeat_copies() -> int {
+  let arr = [Node(1); 3];       // strict: '[v; n]' copies a move-only value
+  return arr[0].id;
+}

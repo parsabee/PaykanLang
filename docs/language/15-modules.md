@@ -480,14 +480,15 @@ impl TaskList {
 
 Finally `main.pkn` imports all three, the list module under the alias `tl`. It runs a few
 commands of the form `add <title>|<priority>` and `done <number>`; in [`::io`](../stdlib/io.md) they
-come from the command line and standard input instead:
+come from the command line and standard input instead. `run` adds to the list and completes
+its tasks, so it takes a `mut tl::TaskList`:
 
 ```pkn
 // file: main.pkn
 import ::io;
 import tasks::{task, text, list as tl};
 
-fn run(tasks: tl::TaskList, line: Str) {
+fn run(tasks: mut tl::TaskList, line: Str) {
   command, rest = text::splitOnce(text::trim(line), ' ');
   match command {
     "add" {
@@ -506,7 +507,7 @@ fn run(tasks: tl::TaskList, line: Str) {
 }
 
 fn main() -> int {
-  let tasks = tl::TaskList();
+  let tasks: mut = tl::TaskList();
   let script = ["add buy milk", "add fix the leak|high", "add call mum|low",
             "done 1", "done 9", "list"];
   i = 0;

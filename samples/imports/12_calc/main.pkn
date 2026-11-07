@@ -92,10 +92,10 @@ class Ring<T> {
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
     if self.count < self.items.len() {
-      self.items[self.count] = x;
+      self.items[self.count] = move x;
       self.count = self.count + 1;
     } else {
-      self.items[self.start] = x;
+      self.items[self.start] = move x;
       self.start = (self.start + 1) % self.items.len();
     }
   }
@@ -119,20 +119,20 @@ impl Ring<T> {
 
 // Format a result with trailing zeros trimmed.
 fn show(v: float) -> Str {
-  return utils::trimFloat(Str<float>(v));
+  return utils::trimFloat(Str(v));
 }
 
 // Seed the environment with the constants and the `ans` register.
-fn defineConstants(env: hashmap::HashMap) {
+fn defineConstants(env: mut hashmap::HashMap) {
   env.put("pi", 3.141592653589793);
   env.put("e", 2.718281828459045);
   env.put("ans", 0.0);
 }
 
 // Evaluate one statement line (an assignment or a bare expression) and print.
-fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
-                 quiet: bool) {
-  let p: parser::Parser = parser::Parser(src, env);
+fn evalStatement(src: Str, env: mut hashmap::HashMap,
+                 history: mut Ring<(Str, float)>, quiet: bool) {
+  let p: mut = parser::Parser(src, env);
   target, value = p.parseStatement();
 
   match p.error {
@@ -169,14 +169,14 @@ fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 }
 
 // List every stored variable, walking each bucket's chain of entries.
-fn listVars(env: hashmap::HashMap) {
+fn listVars(env: mut hashmap::HashMap) {
   if env.count() == 0 {
     io::println("(no variables)");
     return;
   }
-  b: int = 0;
+  b = 0;
   while b < env.bucketCount() {
-    cur: hashmap::Entry? = env.bucket(b);
+    cur = env.bucket(b);
     while cur != None {
       match cur {
         e: hashmap::Entry {
@@ -196,7 +196,7 @@ fn listHistory(history: Ring<(Str, float)>) {
     io::println("(no history)");
     return;
   }
-  i: int = 0;
+  i = 0;
   while i < history.len() {
     entry: view = history.at(i);   // (source, value)
     let value = entry.1;
@@ -208,16 +208,16 @@ fn listHistory(history: Ring<(Str, float)>) {
 // Split a `:command arg` line into its command word (between ':' and the
 // first space) and its argument (everything after the spaces that follow).
 fn splitCommand(s: Str) -> (Str, Str) {
-  word: Str = "";
-  i: int = 1;
+  word = "";
+  i = 1;
   while i < s.len() && s[i] != ' ' {
-    word = word + Str<char>(s[i]);
+    word = word + Str(s[i]);
     i = i + 1;
   }
   while i < s.len() && s[i] == ' ' {
     i = i + 1;
   }
-  arg: Str = "";
+  arg = "";
   while i < s.len() {
     arg = arg + Str(s[i]);
     i = i + 1;
@@ -226,7 +226,7 @@ fn splitCommand(s: Str) -> (Str, Str) {
 }
 
 // Run a `:command`. Returns False only for :quit (stop the REPL).
-fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
+fn runCommand(s: Str, env: mut hashmap::HashMap, history: Ring<(Str, float)>,
               quiet: bool) -> bool {
   word, arg = splitCommand(s);
 
@@ -272,9 +272,9 @@ fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 }
 
 // Handle one input line. Returns False only when the user asked to quit.
-fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
+fn handle(line: Str, env: mut hashmap::HashMap, history: mut Ring<(Str, float)>,
           quiet: bool) -> bool {
-  let s: Str = utils::stripLine(line);
+  let s = utils::stripLine(line);
   if s.len() == 0 { return True; }
   if s[0] == ':' {
     return runCommand(s, env, history, quiet);
@@ -284,7 +284,8 @@ fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 }
 
 // Read-evaluate-print loop over standard input.
-fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int {
+fn repl(env: mut hashmap::HashMap, history: mut Ring<(Str, float)>, quiet: bool)
+        -> int {
   if !quiet {
     io::println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
   }
@@ -317,12 +318,12 @@ fn printHelp() {
 // The scripted session: each line goes through handle(), as if typed at the
 // REPL. It covers expressions, assignment, `ans`, the constants, every
 // command and a few errors, and ends with `a` and `b` defined.
-fn demo(env: hashmap::HashMap, history: Ring<(Str, float)>) {
-  let script: Str[_] = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
+fn demo(env: mut hashmap::HashMap, history: mut Ring<(Str, float)>) {
+  let script = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
       "(x + y) / 4", "ans * 2", "-x + 10 % 4", "2.5 * 2", ":vars", ":history",
       ":del y", "y + 1", ":del y", "1 / 0", "3 +", "4 4", ":frobnicate",
       ":clear", ":vars", "a = 6", "b = a * 7" ];
-  i: int = 0;
+  i = 0;
   while i < script.len() {
     io::println("> " + script[i]);
     handle(script[i], env, history, False);
@@ -350,12 +351,12 @@ fn isOption(a: view Str) -> bool {
 }
 
 fn main(args: view Str[]) -> int {
-  quiet: bool = False;
-  runDemo: bool = True;
-  nexprs: int = 0;
+  quiet = False;
+  runDemo = True;
+  nexprs = 0;
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
-  i: int = 1;
+  i = 1;
   while i < args.len() {
     a: view = args[i];
     if a.equals("-h") || a.equals("--help") {
@@ -382,9 +383,9 @@ fn main(args: view Str[]) -> int {
     i = i + 1;
   }
 
-  let env: hashmap::HashMap = hashmap::HashMap();
+  let env: mut = hashmap::HashMap();
   defineConstants(env);
-  let history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
+  let history: mut = Ring(("", 0.0));
   if runDemo { demo(env, history); }
 
   // Batch mode: walk the arguments again and evaluate every expression, in
@@ -392,7 +393,7 @@ fn main(args: view Str[]) -> int {
   // each one here is known. `toString()` gives an argument's string as one
   // of our own, for the parser and the history to keep.
   if nexprs > 0 {
-    j: int = 1;
+    j = 1;
     while j < args.len() {
       if args[j].equals("-e") || args[j].equals("--eval") {
         j = j + 1;

@@ -23,7 +23,7 @@ TEST(Regression, MethodArrayParam) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Bag {
-      fn take(ys: view int[]) -> int { return ys.len(); }
+      view fn take(ys: view int[]) -> int { return ys.len(); }
     }
     fn main() -> int {
       b = Bag();
@@ -51,13 +51,13 @@ TEST(Regression, MethodObjectArrayParam) {
       fn __init__(x: int) { self.x = x; }
     }
     class Bag {
-      fn total(ps: view P[]) -> int {
+      view fn total(ps: view P[]) -> int {
         s = 0;
         i = 0;
         while i < ps.len() { s = s + ps[i].x; i = i + 1; }
         return s;
       }
-      fn count(ss: view Str[]) -> int { return ss.len(); }
+      view fn count(ss: view Str[]) -> int { return ss.len(); }
     }
     fn main() -> int {
       b = Bag();
@@ -79,8 +79,8 @@ TEST(Regression, MethodTupleParam) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Bag {
-      fn second(t: (int, Str)) -> Str { return t.1; }
-      fn first(t: (int, Str)) -> int { return t.0; }
+      view fn second(t: (int, Str)) -> Str { return t.1; }
+      view fn first(t: (int, Str)) -> int { return t.0; }
     }
     fn main() -> int {
       b = Bag();
@@ -131,15 +131,15 @@ TEST(Regression, InferredClassTernaryReceiver) {
     class Point {
       x: int;
       y: int;
-      fn sum() -> int { return self.x + self.y; }
+      view fn sum() -> int { return self.x + self.y; }
     }
 
     impl Point {
       fn __init__(x: int, y: int) { self.x = x; self.y = y; }
     }
-    class Animal { fn sound() -> Str { return "..."; } }
-    class Dog : Animal { fn sound() -> Str { return "woof"; } }
-    class Cat : Animal { fn sound() -> Str { return "meow"; } }
+    class Animal { view fn sound() -> Str { return "..."; } }
+    class Dog : Animal { view fn sound() -> Str { return "woof"; } }
+    class Cat : Animal { view fn sound() -> Str { return "meow"; } }
     fn pick(c: bool) -> int {
       p = Point(1, 2);
       q = Point(10, 20);
@@ -168,7 +168,7 @@ TEST(Regression, InferredTupleOptionalTernary) {
   auto r = compileAndRun(R"(import ::io;
     class Point {
       x: int;
-      fn get() -> int { return self.x; }
+      view fn get() -> int { return self.x; }
     }
 
     impl Point {
@@ -202,7 +202,7 @@ TEST(Regression, CharArrayElements) {
   auto r = compileAndRun(R"(import ::io;
     class Word {
       cs: char[2];
-      fn first() -> char { return self.cs[0]; }
+      view fn first() -> char { return self.cs[0]; }
     }
 
     impl Word {
@@ -245,7 +245,7 @@ TEST(Regression, CallRootedObjectSubscript) {
   auto r = compileAndRun(R"(import ::io;
     class Point {
       x: int;
-      fn get() -> int { return self.x; }
+      view fn get() -> int { return self.x; }
     }
 
     impl Point {
@@ -350,8 +350,8 @@ TEST(Regression, MethodConstructsOwnAndLaterClass) {
   auto r = compileAndRun(R"(import ::io;
     class Cell {
       v: int;
-      fn clone() -> Cell { return Cell(self.v + 1); }
-      fn wrap() -> Box { return Box(self.v * 2); }
+      view fn clone() -> Cell { return Cell(self.v + 1); }
+      view fn wrap() -> Box { return Box(self.v * 2); }
     }
 
     impl Cell {
@@ -368,7 +368,7 @@ TEST(Regression, MethodConstructsOwnAndLaterClass) {
     fn main() -> int {
       c = Cell(3);
       d = c.clone();
-      b = c.wrap();
+      b: mut = c.wrap();
       io::println(Str<int>(d.v) + " " + Str<int>(b.n) + " " + Str<int>(b.cell().v));
       return 0;
     }
@@ -384,7 +384,7 @@ TEST(Regression, ImportedClassConstructsItself) {
   writeProjectFile(dir, "lib/cell.pkn", R"(
 class Cell {
   v: int;
-  fn clone() -> Cell { return Cell(self.v + 1); }
+  view fn clone() -> Cell { return Cell(self.v + 1); }
 }
 
 impl Cell {
@@ -419,7 +419,7 @@ TEST(Regression, SubclassDeclaredBeforeBase) {
       w: int;
       h: int;
       tag: Str;
-      fn area() -> int { return self.w * self.h; }
+      view fn area() -> int { return self.w * self.h; }
     }
 
     impl Rect {
@@ -448,7 +448,7 @@ class Rect {
   w: int;
   h: int;
   tag: Str;
-  fn area() -> int { return self.w * self.h; }
+  view fn area() -> int { return self.w * self.h; }
 }
 
 impl Rect {
@@ -598,7 +598,7 @@ class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
   items: Foo[2];
-  fn second() -> int { return self.items[1].v; }   // subscript a member-access array
+  view fn second() -> int { return self.items[1].v; }   // subscript a member-access array
 }
 
 impl Box {
@@ -622,7 +622,7 @@ TEST(Regression, NestedArrayOfArraysFieldIsLeakFree) {
   auto r = compileAndRun(R"(import ::io;
 class Grid {
   rows: int[3][3];
-  fn at(r: int, c: int) -> int {
+  view fn at(r: int, c: int) -> int {
     row: int[3] = self.rows[r];   // subscript the outer 2-D field
     return row[c];
   }
@@ -720,7 +720,7 @@ TEST(Regression, MatchArmOfInt64Max) {
 TEST(Regression, MethodAndUserFunctionWithTheOldMangledName) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class K { fn w() -> int { return 1; } }
+    class K { view fn w() -> int { return 1; } }
     fn K_w() -> int { return 2; }
     fn main() -> int { k: K = K(); io::println(Str<int>(k.w() + K_w())); return 0; }
   )");
@@ -738,14 +738,14 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
   auto r = compileAndRun(R"(import ::io;
     class K {
       name: Str;
-      fn vtable() -> int { return 10; }
+      view fn vtable() -> int { return 10; }
     }
 
     impl K {
       fn __init__(name: Str) { self.name = name; }
     }
     class D : K {
-      fn vtable() -> int { return 20; }
+      view fn vtable() -> int { return 20; }
     }
 
     impl D {
@@ -773,7 +773,7 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
 TEST(Regression, MethodAndUserFunctionWithItsCSpelling) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class K { fn w() -> int { return 1; } fn destroy2() -> int { return 4; } }
+    class K { view fn w() -> int { return 1; } view fn destroy2() -> int { return 4; } }
     fn K_2Ew() -> int { return 2; }
     fn K_2Edestroy() -> int { return 8; }
     fn K_2Edestroy2() -> int { return 16; }
@@ -797,7 +797,7 @@ TEST(Regression, ImportedClassMethodAndImporterFunctionWithTheOldName) {
   writeProjectFile(dir, "lib/cell.pkn", R"(
 class Cell {
   v: int;
-  fn clone() -> Cell { return Cell(self.v + 1); }
+  view fn clone() -> Cell { return Cell(self.v + 1); }
 }
 
 impl Cell {

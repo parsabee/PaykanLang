@@ -107,18 +107,18 @@ impl List<T> {
 
   // Remove and return the last element.
   fn pop() -> T {
-    let n: unsigned = self.__items.len();
+    let n = self.__items.len();
     if n == 0 {
       _panic("pop from an empty List");
     }
-    let v: T = self.__items.get(n - 1);
+    let v = self.__items.get(n - 1);
     _check(self.__items.shrink(1));
     return v;
   }
 
   // The last element, as a `view`.
   view fn last() -> view T {
-    let n: unsigned = self.__items.len();
+    let n = self.__items.len();
     if n == 0 {
       _panic("last of an empty List");
     }
@@ -134,10 +134,10 @@ impl List<T> {
 
   // Insert `v` before element `i`, for i <= len().
   fn insert(i: unsigned, v: view T) {
-    let n: unsigned = self.__items.len();
+    let n = self.__items.len();
     self.__check(i, n + 1);
     _check(self.__items.push(v));
-    j: unsigned = n;
+    j = n;
     while j > i {
       _check(self.__items.swap(j, j - 1));
       j = j - 1;
@@ -146,10 +146,10 @@ impl List<T> {
 
   // Remove and return element `i`, for i < len().
   fn removeAt(i: unsigned) -> T {
-    let n: unsigned = self.__items.len();
+    let n = self.__items.len();
     self.__check(i, n);
-    let v: T = self.__items.get(i);
-    j: unsigned = i;
+    let v = self.__items.get(i);
+    j = i;
     while j < n - 1 {
       _check(self.__items.swap(j, j + 1));
       j = j + 1;
@@ -181,7 +181,7 @@ impl List<T> {
   fn remove(v: view T) -> bool {
     i: unsigned = 0;
     while i < self.__items.len() {
-      let n: unsigned = self.__items.len();
+      let n = self.__items.len();
       if self.__items.at(i) == v {
         if self.__items.len() != n {
           return False;
@@ -196,10 +196,10 @@ impl List<T> {
 
   // Reverse the order of the elements.
   fn reverse() {
-    let n: unsigned = self.__items.len();
+    let n = self.__items.len();
     if n < 2 { return; }
     i: unsigned = 0;
-    j: unsigned = n - 1;
+    j = n - 1;
     while i < j {
       _check(self.__items.swap(i, j));
       i = i + 1;
@@ -214,9 +214,9 @@ impl List<T> {
 
   // A new list of the same elements (which it shares, if they are objects).
   view fn copy() -> List<T> {
-    out: List<T> = List<T>();
+    out = List<T>();
     i: unsigned = 0;
-    let n: unsigned = self.__items.len();
+    let n = self.__items.len();
     while i < n {
       out.push(self.__items.at(i));
       i = i + 1;
@@ -234,8 +234,8 @@ impl List<T> {
 
 // A list of the elements of `xs`.
 fn listOf<T>(xs: view T[]) -> List<T> {
-  out: List<T> = List<T>();
-  i: int = 0;
+  out = List<T>();
+  i = 0;
   while i < xs.len() {
     out.push(xs[i]);
     i = i + 1;
@@ -248,7 +248,7 @@ fn listOf<T>(xs: view T[]) -> List<T> {
 // string so far for each element.  `out` is a string of its own (each use
 // of a literal is a new one), so the appends change no other.
 fn listToString<T: Show>(xs: view List<T>) -> Str {
-  let out: Str = "[";
+  let out: mut = "[";
   i: unsigned = 0;
   while i < xs.len() {
     if i > 0 { out.concat(", "); }
@@ -296,7 +296,7 @@ impl LinkedList<T> {
 
   // Add `v` before the first element.
   fn pushFront(v: T) {
-    let n = _Node<T>(v, self.__head, None);
+    let n = _Node(v, self.__head, None);
     match self.__head {
       h: _Node<T> { h.prev = n; }
       None { self.__tail = n; }
@@ -309,7 +309,7 @@ impl LinkedList<T> {
   fn pushBack(v: T) {
     match self.__tail {
       t: _Node<T> {
-        let n = _Node<T>(v, None, t);
+        let n = _Node(v, None, t);
         t.next = n;
         self.__tail = n;
         self.__len = self.__len + 1;
@@ -424,7 +424,7 @@ impl LinkedList<T> {
 
   // The elements from first to last, in a new list.
   view fn toList() -> List<T> {
-    out: List<T> = List<T>();
+    out = List<T>();
     weak cur = self.__head; // the cursor: no reference copied out of self
     while True {
       match cur {
@@ -439,7 +439,7 @@ impl LinkedList<T> {
   }
 
   // Take node `n` out of the chain.
-  fn __unlink(n: _Node<T>) {
+  fn __unlink(n: mut _Node<T>) {
     match n.prev {
       p: _Node<T> { p.next = n.next; }
       None { self.__head = n.next; }
@@ -580,7 +580,7 @@ impl _Table<K, V> {
   // Map `k` to `v`, replacing its value if `k` is already a key.  True if
   // `k` is a new key.
   fn put(k: K, v: V) -> bool {
-    let h: int = k.hash();
+    let h = k.hash();
     match self.__find(k, h) {
       e: _Entry<K, V> {
         e.value = v;
@@ -591,15 +591,15 @@ impl _Table<K, V> {
     if (self.__size + 1) * 4 > self.__buckets.len() * 3 {
       self.__rehash(self.__buckets.len() * 2);
     }
-    let b: unsigned = _bucket(h, self.__buckets.len());
-    _check(self.__buckets.set(b, _Entry<K, V>(k, v, h, self.__buckets.get(b))));
+    let b = _bucket(h, self.__buckets.len());
+    _check(self.__buckets.set(b, _Entry(k, v, h, self.__buckets.get(b))));
     self.__size = self.__size + 1;
     return True;
   }
 
   // The value of `k`, which must be a key, as a `view`.
   view fn at(k: view K) -> view V {
-    let h: int = k.hash();
+    let h = k.hash();
     match self.__buckets.at(_bucket(h, self.__buckets.len())) {
       e: _Entry<K, V> { return self.__valueIn(e, k, h); }
       None {
@@ -611,7 +611,7 @@ impl _Table<K, V> {
 
   // The value of `k`, or `otherwise` if it is not a key, as a `view`.
   view fn atOr(k: view K, otherwise: view V) -> view V {
-    let h: int = k.hash();
+    let h = k.hash();
     match self.__buckets.at(_bucket(h, self.__buckets.len())) {
       e: _Entry<K, V> { return self.__valueOr(e, k, h, otherwise); }
       None { return otherwise; }
@@ -636,7 +636,7 @@ impl _Table<K, V> {
 
   // True when `k` is a key.
   view fn containsKey(k: view K) -> bool {
-    let h: int = k.hash();
+    let h = k.hash();
     weak cur = self.__buckets.at(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
@@ -652,10 +652,10 @@ impl _Table<K, V> {
 
   // Remove `k` and its value; True if it was a key.
   fn remove(k: view K) -> bool {
-    let h: int = k.hash();
-    let b: unsigned = _bucket(h, self.__buckets.len());
-    prev: _Entry<K, V>? = None;
-    cur: _Entry<K, V>? = self.__buckets.get(b);
+    let h = k.hash();
+    let b = _bucket(h, self.__buckets.len());
+    prev: mut _Entry<K, V>? = None;
+    cur: mut = self.__buckets.get(b);
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -688,7 +688,7 @@ impl _Table<K, V> {
 
   // The keys, in a new list.
   view fn keys() -> List<K> {
-    out: List<K> = List<K>();
+    out = List<K>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
       weak cur = self.__buckets.at(i); // no reference copied out of self
@@ -708,7 +708,7 @@ impl _Table<K, V> {
 
   // The values, in a new list, in the order of keys().
   view fn values() -> List<V> {
-    out: List<V> = List<V>();
+    out = List<V>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
       weak cur = self.__buckets.at(i); // no reference copied out of self
@@ -756,8 +756,8 @@ impl _Table<K, V> {
 
   // The entry of key `k`, whose hash is `h`, or None: for put(), which
   // changes it, and for get().
-  fn __find(k: view K, h: int) -> _Entry<K, V>? {
-    cur: _Entry<K, V>? = self.__buckets.get(_bucket(h, self.__buckets.len()));
+  fn __find(k: view K, h: int) -> mut _Entry<K, V>? {
+    cur: mut = self.__buckets.get(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -774,16 +774,16 @@ impl _Table<K, V> {
 
   // Move every entry into `n` new buckets.
   fn __rehash(n: unsigned) {
-    old: mem::Buffer<_Entry<K, V>?> = self.__buckets;
+    old = self.__buckets;
     self.__buckets = _buffer<_Entry<K, V>?>(n);
     i: unsigned = 0;
     while i < old.len() {
-      cur: _Entry<K, V>? = old.get(i);
+      cur: mut = old.get(i);
       while cur != None {
         match cur {
           e: _Entry<K, V> {
             cur = e.next;
-            let b: unsigned = _bucket(e.hash, n);
+            let b = _bucket(e.hash, n);
             e.next = self.__buckets.get(b);
             _check(self.__buckets.set(b, e));
           }
@@ -924,8 +924,8 @@ impl _Heap<T> {
 
   fn pop(what: view Str) -> T {
     self.__nonEmpty(what);
-    let v: T = self.__values.get(0);
-    let last: unsigned = self.__values.len() - 1;
+    let v = self.__values.get(0);
+    let last = self.__values.len() - 1;
     self.__swap(0, last);
     _check(self.__values.shrink(1));
     _check(self.__priorities.shrink(1));
@@ -950,7 +950,7 @@ impl _Heap<T> {
   }
 
   fn clear() {
-    let n: unsigned = self.__values.len();
+    let n = self.__values.len();
     _check(self.__values.shrink(n));
     _check(self.__priorities.shrink(n));
     _check(self.__order.shrink(n));
@@ -958,8 +958,8 @@ impl _Heap<T> {
 
   // True when node `i` pops before node `j`.
   view fn __before(i: unsigned, j: unsigned) -> bool {
-    let pi: int = self.__priorities.at(i);
-    let pj: int = self.__priorities.at(j);
+    let pi = self.__priorities.at(i);
+    let pj = self.__priorities.at(j);
     if pi != pj {
       if self.__max { return pi > pj; }
       return pi < pj;
@@ -975,9 +975,9 @@ impl _Heap<T> {
   }
 
   fn __siftUp(i: unsigned) {
-    k: unsigned = i;
+    k = i;
     while k > 0 {
-      let parent: unsigned = (k - 1) / 2;
+      let parent = (k - 1) / 2;
       if !self.__before(k, parent) {
         return;
       }
@@ -987,12 +987,12 @@ impl _Heap<T> {
   }
 
   fn __siftDown(i: unsigned) {
-    let n: unsigned = self.__values.len();
-    k: unsigned = i;
+    let n = self.__values.len();
+    k = i;
     while True {
-      best: unsigned = k;
-      let l: unsigned = 2 * k + 1;
-      let r: unsigned = l + 1;
+      best = k;
+      let l = 2 * k + 1;
+      let r = l + 1;
       if l < n && self.__before(l, best) {
         best = l;
       }

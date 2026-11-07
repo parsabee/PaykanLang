@@ -19,6 +19,7 @@
 namespace paykan::lowering {
 
 using namespace names;
+using pir::CmpPred;
 using pir::Type;
 
 // -- Constructor
@@ -296,6 +297,7 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
     return it->second;
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
+  fn->IsAsync = node->isAsync();
   nameParams(*fn, 0, node->getParams());
   if (fn->Sig.Ret != Type::Ptr && ast::isMemType(node->getReturnType()))
     fn->Params.back().Name = "result"; // where the result is written
@@ -571,6 +573,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // no field of a class this module declares, as its type arguments are
   // that module's (readImportedCopies).
   readImportedCopies();
+  declareDroppedCopyMethods();
   // Each body points into its own module's file, or into its template's
   // module's (warnings say where).
   auto from = [&](const ast::Decl *d) {
@@ -590,6 +593,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
     visitFuncDecl(fn);
   }
   Source = &SemaCtx.Source;
+  lowerDroppedCopyMethods();
   return Val();
 }
 
@@ -628,6 +632,11 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
     return ast::isRefType(expr->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
+  // `move x` is x's own box, `await t` the task's result (the prototype).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(expr);
+      u && (u->getOpcode() == ast::UnaryOpcode::Move ||
+            u->getOpcode() == ast::UnaryOpcode::Await))
+    return expr->getResolvedType() && ast::isRefType(expr->getResolvedType());
   // A call through a function value returns a +1 box, as a function does.
   if (auto *e = ast::dyn_cast<ast::CallValueExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
@@ -660,6 +669,11 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     return true;
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
     return CurrentScope && CurrentScope->isWeak(id->getName());
+  // `move x` is x's own box, `await t` the task's result (the prototype).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(expr);
+      u && (u->getOpcode() == ast::UnaryOpcode::Move ||
+            u->getOpcode() == ast::UnaryOpcode::Await))
+    return expr->getResolvedType() && ast::isRefType(expr->getResolvedType());
   if (isWeakFieldAccess(expr))
     return true;
   // A struct's field is an element of a value held in memory, like a
@@ -1059,6 +1073,22 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
+  // An `atomic` variable (the prototype) changes by its operations.
+  if (node->getAtomicKind() != ast::AssignStmt::AtomicKind::None)
+    return emitAtomicAssign(node);
+  // A first assignment of an `atomic` handle (a place's, a call's result):
+  // the new variable holds the cell, as `let x = y` does (visitVarDecl).
+  if (ast::Type *vt = node->getValue()->getResolvedType();
+      vt && ast::isa<ast::AtomicType>(vt) &&
+      !CurrentScope->findOwner(node->getVarName())) {
+    Val cell = emitExpr(node->getValue());
+    if (!cell)
+      return cell;
+    pir::LocalId local = B.addLocal(node->getVarName(), Type::Box);
+    B.store(local, cell);
+    CurrentScope->declare(node->getVarName(), local, vt);
+    return Val();
+  }
   // A value held in memory: a new variable holding a copy, or its bytes
   // replaced.
   if (ast::Type *ty = node->getValue()->getResolvedType(); ast::isMemType(ty)) {
@@ -1144,8 +1174,9 @@ Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
     if (B.function() && B.function()->Sig.Ret == Type::Ptr) {
       val = emitPlaceAddress(retExpr); // an `inout` result
     } else if (CurrentFuncReturnASTType &&
-               ast::isRefType(CurrentFuncReturnASTType)) {
-      val = emitAsShared(retExpr);
+               (ast::isRefType(CurrentFuncReturnASTType) ||
+                ast::isa<ast::AtomicType>(CurrentFuncReturnASTType))) {
+      val = emitAsShared(retExpr); // a handle, or a new cell
     } else {
       val = emitExpr(retExpr);
       if (B.function())
@@ -1208,6 +1239,8 @@ Val ModuleLowering::visitWhileStmt(ast::WhileStmt *node) {
 Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
   using pir::CmpPred;
   using pir::Opcode;
+  if (node->isParallel())
+    return emitParallelFor(node);
   ScopeGuard guard(*this);
   ast::Type *ty = node->getVar()->getType();
   const bool isUnsigned = ast::BuiltinType::isUnsignedKind(builtinKind(ty));
@@ -1301,6 +1334,341 @@ Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
   return Val();
 }
 
+// A `parallel for` (docs/design/concurrency.md, the prototype) is the
+// counted loop
+//
+//   n = more ? lastIndex + 1 : 0; part = identity (per reduction); k = 0
+//   while k < n { idx = k; k = k + 1; i = first + idx * step; BODY }
+//   s = s op part                                   (per reduction)
+//
+// annotated as parallel (pir::Parallel): the counter, the count, the
+// locals of one iteration and the partials.  Read as a plain `while` it is
+// the loop run in order; a backend may run its iterations on several
+// threads, each chunk accumulating into a partial of its own, combined in
+// chunk order.  The body's reads and writes of a reduction variable go to
+// its partial, which shadows it.
+Val ModuleLowering::emitParallelFor(ast::ForStmt *node) {
+  using pir::CmpPred;
+  using pir::Opcode;
+  ScopeGuard guard(*this);
+  ast::Type *ty = node->getVar()->getType();
+  const bool isUnsigned = ast::BuiltinType::isUnsignedKind(builtinKind(ty));
+  auto compare = [&](CmpPred pred, const Val &a, const Val &b) {
+    return isUnsigned ? B.ucmp(pred, a, b, "for.has")
+                      : B.cmp(pred, a, b, "for.has");
+  };
+  Val first = emitExpr(node->getStart());
+  Val end = first ? emitExpr(node->getEnd()) : Val();
+  if (!end)
+    return Val();
+  const std::optional<int64_t> constant = node->constantStep();
+  Val step = constant ? Val::i64(*constant) : emitExpr(node->getStep());
+  if (!step)
+    return Val();
+  if (!constant) {
+    Val zero = B.cmp(CmpPred::Eq, step, Val::i64(0), "for.zero");
+    pir::If *z = B.openIf(zero, false);
+    B.enter(*z->Then);
+    callRuntime(kPaykanPanicForStep, {});
+    B.emitUnreachable();
+    B.leave();
+  }
+  const bool inclusive = node->isInclusive();
+  struct Direction {
+    Val More, Dist, Magnitude;
+  };
+  auto upward = [&] {
+    return Direction{compare(inclusive ? CmpPred::Le : CmpPred::Lt, first, end),
+                     B.binary(Opcode::Sub, end, first, "for.dist"), step};
+  };
+  auto downward = [&] {
+    return Direction{compare(inclusive ? CmpPred::Ge : CmpPred::Gt, first, end),
+                     B.binary(Opcode::Sub, first, end, "for.dist"),
+                     B.unary(Opcode::Neg, step, "for.mag")};
+  };
+  Direction d;
+  if (constant) {
+    d = *constant > 0 ? upward() : downward();
+  } else {
+    Direction up = upward();
+    Direction down = downward();
+    Val isUp = B.cmp(CmpPred::Gt, step, Val::i64(0), "for.up");
+    d = {B.select(isUp, up.More, down.More, "for.has"),
+         B.select(isUp, up.Dist, down.Dist, "for.dist"),
+         B.select(isUp, up.Magnitude, down.Magnitude, "for.mag")};
+  }
+  Val lastIndex =
+      inclusive ? d.Dist : B.binary(Opcode::Sub, d.Dist, Val::i64(1));
+  const bool unit = constant && (*constant == 1 || *constant == -1);
+  if (!unit)
+    lastIndex = B.binary(Opcode::UDiv, lastIndex, d.Magnitude, "for.lastidx");
+  // The trip count.
+  Val count = B.select(d.More, B.binary(Opcode::Add, lastIndex, Val::i64(1)),
+                       Val::i64(0), "par.count");
+
+  // A partial per reduction, at its operation's identity.
+  struct Reduction {
+    std::string Name;
+    ast::Type *ASTType;
+    pir::LocalId Target, Partial;
+    Opcode Op;
+  };
+  std::vector<Reduction> reductions;
+  for (const ast::ForStmt::Reduction &r : node->getReductions()) {
+    pir::LocalId target = CurrentScope->lookup(*r.Name);
+    Type rty = B.localType(target);
+    const Opcode op =
+        r.Op == ast::BinaryOpcode::Mul ? Opcode::Mul : Opcode::Add;
+    pir::LocalId part = B.addLocal(*r.Name + ".part", rty);
+    const bool one = op == Opcode::Mul;
+    B.store(part, rty == Type::F64 ? Val::f64(one ? 1.0 : 0.0)
+                                   : Val::i64(one ? 1 : 0));
+    reductions.push_back(
+        {*r.Name, CurrentScope->lookupASTType(*r.Name), target, part, op});
+  }
+
+  pir::LocalId counter = B.addLocal("par.k", Type::I64);
+  B.store(counter, Val::i64(0));
+  pir::While *w = B.openWhile();
+  LoopStack.push_back({CurrentScope});
+  B.enter(*w->CondBlock);
+  B.setWhileCond(
+      w, B.ucmp(CmpPred::Lt, B.load(counter, "par.kv"), count, "par.go"));
+  B.leave();
+  const size_t firstPrivate = B.function()->Locals.size();
+  B.enterLoopBody(*w->Body);
+  {
+    ScopeGuard body(*this);
+    for (const Reduction &r : reductions)
+      CurrentScope->declare(r.Name, r.Partial, r.ASTType);
+    Val idx = B.load(counter, "par.idx");
+    B.store(counter, B.binary(Opcode::Add, idx, Val::i64(1), "par.next"));
+    Val value = unit ? B.binary(*constant == 1 ? Opcode::Add : Opcode::Sub,
+                                first, idx, "par.value")
+                     : B.binary(Opcode::Add, first,
+                                B.binary(Opcode::Mul, idx, step), "par.value");
+    const std::string &name = node->getVar()->getName();
+    if (!name.empty()) {
+      pir::LocalId var = B.addLocal(name, Type::I64);
+      B.store(var, value);
+      CurrentScope->declare(name, var, ty);
+    }
+    visit(node->getBody());
+  }
+  B.leaveLoopBody();
+  LoopStack.pop_back();
+
+  pir::Parallel par;
+  par.Counter = counter;
+  par.Count = count.Op;
+  for (size_t l = firstPrivate; l < B.function()->Locals.size(); ++l)
+    par.Privates.push_back(static_cast<pir::LocalId>(l));
+  for (const Reduction &r : reductions)
+    par.Reductions.push_back({r.Partial, r.Op});
+  w->Par = std::move(par);
+  // Each partial folds into its variable.
+  for (const Reduction &r : reductions)
+    B.store(r.Target,
+            B.binary(r.Op, B.load(r.Target, r.Name),
+                     B.load(r.Partial, r.Name + ".part"), r.Name + ".fold"));
+  return Val();
+}
+
+// `lock c as v: inout|view { }` (the prototype): the cell's mutex is taken
+// for the block, and `v` is an `inout` local at the cell's payload slot,
+// which holds the contents' box.  Sema lets nothing leave the block early,
+// so the unlock after it always runs.
+Val ModuleLowering::visitLockStmt(ast::LockStmt *node) {
+  Val cell = emitExpr(node->getCell());
+  if (!cell)
+    return Val();
+  // A variable or parameter reads as the cell's object; a field
+  // (`lock self.cell as c`) as the box the object holds.  The cell is never
+  // freed, so the read needs no count of its own.
+  if (cell.Ty == Type::Box)
+    cell = B.unbox(cell, "cell.obj");
+  Val payload = callRuntime(names::kPaykanLockedLock, {cell}, "payload");
+  ScopeGuard guard(*this);
+  const std::string &name = node->getBinding()->getName();
+  pir::LocalId local = B.addLocal(name, Type::Ptr);
+  B.store(local, payload);
+  ast::Type *innerTy = canonicalizeDeclType(node->getBinding()->getType());
+  CurrentScope->declareInout(name, local, toPIRType(innerTy), innerTy);
+  CurrentScope->markStable(name);
+  visit(node->getBody());
+  callRuntime(names::kPaykanLockedUnlock, {cell});
+  return Val();
+}
+
+Val ModuleLowering::emitAtomicAssign(ast::AssignStmt *node) {
+  using K = ast::AssignStmt::AtomicKind;
+  const std::string &name = node->getVarName();
+  auto *at = ast::cast<ast::AtomicType>(CurrentScope->lookupASTType(name));
+  Val cell = B.load(CurrentScope->lookup(name), name + ".cell");
+  if (node->getAtomicKind() == K::Store) {
+    Val v = emitExpr(node->getValue());
+    if (!v)
+      return Val();
+    emitAtomicStore(at->getInnerType(), cell, v);
+    return Val();
+  }
+  // `x += e` / `x -= e`: one atomic add of e, or of -e.
+  auto *be = ast::cast<ast::BinaryExpr>(node->getValue());
+  Val v = emitExpr(be->getRHS());
+  if (!v)
+    return Val();
+  emitAtomicAdd(at->getInnerType(), cell, v, node->getAtomicKind() == K::Sub,
+                name + ".old");
+  return Val();
+}
+
+bool ModuleLowering::emitAtomicFieldAssign(ast::MemberAssignStmt *node,
+                                           ast::AtomicType *at,
+                                           ast::ClassType *ct,
+                                           const Val &objPtr) {
+  using K = ast::AssignStmt::AtomicKind;
+  const std::string &field = node->getFieldName();
+  ast::Type *inner = at->getInnerType();
+  // `self.f = p` in `__init__`: the field takes p's cell (never counted).
+  if (node->getAtomicKind() == K::Cell) {
+    Val box = emitExpr(node->getValue());
+    if (!box)
+      return false;
+    B.fieldStore(objPtr, ct->getName(), field, box);
+    return true;
+  }
+  if (node->getAtomicKind() == K::Store) {
+    Val v = emitExpr(node->getValue());
+    if (!v)
+      return false;
+    Val cell =
+        B.fieldLoad(objPtr, ct->getName(), field, Type::Box, field + ".cell");
+    if (!InInitBody) {
+      emitAtomicStore(inner, cell, v);
+      return true;
+    }
+    // In `__init__` the field's first value makes its cell (`new` zeroed
+    // the slot); a later one stores into it.
+    Val isNull = B.cmp(CmpPred::Eq, cell, Val::null(Type::Box), "no.cell");
+    pir::If *s = B.openIf(isNull, true);
+    B.enter(*s->Then);
+    Val fresh = emitAtomicNew(inner, v, field + ".cell");
+    B.fieldStore(objPtr, ct->getName(), field, fresh);
+    B.leave();
+    B.enter(*s->Else);
+    emitAtomicStore(inner, cell, v);
+    B.leave();
+    return true;
+  }
+  // `o.f += e` / `o.f -= e`: one atomic add of e, or of -e.
+  auto *be = ast::cast<ast::BinaryExpr>(node->getValue());
+  Val v = emitExpr(be->getRHS());
+  if (!v)
+    return false;
+  Val cell =
+      B.fieldLoad(objPtr, ct->getName(), field, Type::Box, field + ".cell");
+  emitAtomicAdd(inner, cell, v, node->getAtomicKind() == K::Sub,
+                field + ".old");
+  return true;
+}
+
+// static
+bool ModuleLowering::isAtomicHandleExpr(const ast::Expr *e) {
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return id->isAtomicHandle();
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return ma->isAtomicHandle();
+  return false;
+}
+
+/// The runtime's kind of the cell holding a value of the builtin kind @p k
+/// (PaykanAtomicKind in src/Runtime/Runtime.h).
+static int64_t atomicCellKind(ast::BuiltinType::Kind k) {
+  using BK = ast::BuiltinType;
+  switch (k) {
+  case BK::Float:
+    return 16;
+  case BK::F32:
+    return 17;
+  case BK::F16:
+    return 18;
+  case BK::U64:
+    return 1;
+  case BK::Bool:
+    return 2;
+  case BK::Char:
+    return 3;
+  default:
+    return 0;
+  }
+}
+
+Val ModuleLowering::atomicToRaw(ast::Type *inner, const Val &v) {
+  if (ast::BuiltinType::isFloatKind(builtinKind(inner)))
+    return coerceTo(v, Type::F64);
+  Val x = v;
+  if (x.Ty == Type::Char)
+    x = B.cast(x, Type::I64, "char.ext");
+  return coerceTo(x, Type::I64);
+}
+
+Val ModuleLowering::atomicFromRaw(ast::Type *inner, const Val &raw,
+                                  const std::string &name) {
+  const ast::BuiltinType::Kind k = builtinKind(inner);
+  if (ast::BuiltinType::isFloatKind(k))
+    return raw; // stored rounded to its kind
+  if (k == ast::BuiltinType::Bool)
+    return B.cast(raw, Type::Bool, name + ".bool");
+  if (k == ast::BuiltinType::Char)
+    return B.cast(raw, Type::Char, name + ".char");
+  // A narrow integer's adds drift past its range in the cell: its reads
+  // wrap it back (docs/design/sized-types.md).
+  return canonicalize(raw, inner);
+}
+
+Val ModuleLowering::emitAtomicNew(ast::Type *inner, const Val &v,
+                                  const std::string &name) {
+  const ast::BuiltinType::Kind k = builtinKind(inner);
+  const Val kind = Val::i64(atomicCellKind(k));
+  if (ast::BuiltinType::isFloatKind(k))
+    return callRuntime(names::kPaykanAtomicFNew, {atomicToRaw(inner, v), kind},
+                       name);
+  return callRuntime(names::kPaykanAtomicNew, {atomicToRaw(inner, v), kind},
+                     name);
+}
+
+Val ModuleLowering::emitAtomicLoad(ast::Type *inner, const Val &cell,
+                                   const std::string &name) {
+  Val obj = emitSharedGet(cell, name + ".obj");
+  const bool isFloat = ast::BuiltinType::isFloatKind(builtinKind(inner));
+  Val raw = callRuntime(isFloat ? names::kPaykanAtomicFLoad
+                                : names::kPaykanAtomicLoad,
+                        {obj}, name);
+  return atomicFromRaw(inner, raw, name);
+}
+
+void ModuleLowering::emitAtomicStore(ast::Type *inner, const Val &cell,
+                                     const Val &v) {
+  Val obj = emitSharedGet(cell, "cell.obj");
+  const bool isFloat = ast::BuiltinType::isFloatKind(builtinKind(inner));
+  callRuntime(isFloat ? names::kPaykanAtomicFStore : names::kPaykanAtomicStore,
+              {obj, atomicToRaw(inner, v)});
+}
+
+Val ModuleLowering::emitAtomicAdd(ast::Type *inner, const Val &cell,
+                                  const Val &v, bool negate,
+                                  const std::string &name) {
+  Val obj = emitSharedGet(cell, "cell.obj");
+  const bool isFloat = ast::BuiltinType::isFloatKind(builtinKind(inner));
+  Val delta = atomicToRaw(inner, v);
+  if (negate)
+    delta = B.unary(pir::Opcode::Neg, delta, "neg");
+  Val old =
+      callRuntime(isFloat ? names::kPaykanAtomicFAdd : names::kPaykanAtomicAdd,
+                  {obj, delta}, name);
+  return atomicFromRaw(inner, old, name);
+}
+
 Val ModuleLowering::visitBreakStmt(ast::BreakStmt *) {
   assert(!LoopStack.empty() && "break outside loop");
   emitLoopScopesCleanup();
@@ -1344,6 +1712,24 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
     pir::LocalId local = B.addLocal(node->getName(), Type::Weak);
     B.store(local, weak);
     CurrentScope->declareWeak(node->getName(), local, declTy);
+    return Val();
+  }
+
+  // An `atomic` variable (the prototype): a cell, held as a box; the
+  // initializer is its first value, or an `atomic` variable whose cell it
+  // shares.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(declTy)) {
+    // A handle (a place's, a call's result): the cell itself.
+    Val cell;
+    if (ast::isa<ast::AtomicType>(node->getInitExpr()->getResolvedType()))
+      cell = emitExpr(node->getInitExpr());
+    else if (Val v = emitExpr(node->getInitExpr()))
+      cell = emitAtomicNew(at->getInnerType(), v, node->getName() + ".cell");
+    if (!cell)
+      return Val();
+    pir::LocalId local = B.addLocal(node->getName(), Type::Box);
+    B.store(local, cell);
+    CurrentScope->declare(node->getName(), local, declTy);
     return Val();
   }
 
@@ -1448,21 +1834,51 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
 
 Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   pir::Function *fn = declareFunctionPrototype(node);
+  // `async fn main` (the prototype): the task runs under another name, and
+  // the program's entry point starts it and awaits its result.
+  const bool asyncMain = node->isAsync() && node->getName() == names::kMain;
+  if (asyncMain)
+    fn->Name = std::string(names::kMain) + ".async";
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
-  FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
   {
-    ScopeGuard guard(*this);
-    size_t at = 0;
-    for (const ast::Param &p : node->getParams())
-      at += declareParam(p.getName(), fn->Params, at,
-                         canonicalizeDeclType(p.ParamType), p.Mode);
-    if (node->isNative())
-      emitNativeBody(node, *fn);
-    else
-      emitBody(node->getBody());
+    FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
+    {
+      ScopeGuard guard(*this);
+      size_t at = 0;
+      for (const ast::Param &p : node->getParams())
+        at += declareParam(p.getName(), fn->Params, at,
+                           canonicalizeDeclType(p.ParamType), p.Mode);
+      if (node->isNative())
+        emitNativeBody(node, *fn);
+      else
+        emitBody(node->getBody());
+    }
+    emitImplicitReturn(fn->Sig);
   }
-  emitImplicitReturn(fn->Sig);
+  if (asyncMain)
+    emitAsyncMainEntry(*fn);
   return Val();
+}
+
+void ModuleLowering::emitAsyncMainEntry(const pir::Function &task) {
+  Funcs.emplace_back();
+  pir::Function &entry = Funcs.back();
+  entry.Name = names::kMain;
+  entry.Sig = task.Sig;
+  for (Type t : entry.Sig.Params)
+    entry.Params.push_back(pir::Value{entry.NextValueId++, t, ""});
+  FunctionStateGuard state(*this, &entry, nullptr, /*methodClassTy=*/nullptr);
+  std::vector<Val> args;
+  args.reserve(entry.Params.size());
+  for (const pir::Value &p : entry.Params)
+    args.emplace_back(pir::Operand::value(p), p.Ty);
+  Val t = B.asyncCall(task.Name, task.Sig, args, "task");
+  if (task.Sig.Ret == Type::Void) {
+    B.await(t, Type::I64, "done");
+    B.emitRetVoid();
+  } else {
+    B.emitRet(B.await(t, task.Sig.Ret, "result"));
+  }
 }
 
 // A `native fn` (#198) calls its C symbol with the runtime builtins'
@@ -1603,25 +2019,34 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
                                 nativeTypeKind(ty), 0, 0};
-  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
-    MemLayout l = memLayout(tt);
-    words = {l.Size, l.Align, kNativeKindTuple, 0, 0};
-    std::function<void(ast::TupleType *, int64_t, bool)> refs =
-        [&](ast::TupleType *t, int64_t base, bool nullable) {
-          for (size_t i = 0; i < t->getArity(); ++i) {
-            ast::Type *e = t->getElementType(i);
-            int64_t off = base + tupleElementOffset(t, i);
-            const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e) ||
-                                   ast::isPayloadEnum(e);
-            if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
-              refs(nested, off, maybeNull);
-            } else if (ast::isRefType(e)) {
-              ++words[3];
-              words.push_back(off << 1 | (maybeNull ? 1 : 0));
-            }
+  if (ast::isa<ast::TupleType>(ty) || ast::isa<ast::FixedArrayType>(ty)) {
+    // A tuple (a struct's shape) or a fixed-size array: the references it
+    // holds, through nested tuples and arrays, by offset.
+    MemLayout l = memLayout(ty);
+    words = {l.Size, l.Align,
+             ast::isa<ast::TupleType>(ty)
+                 ? static_cast<int64_t>(kNativeKindTuple)
+                 : static_cast<int64_t>(nativeTypeKind(ty)),
+             0, 0};
+    std::function<void(ast::Type *, int64_t, bool)> refs =
+        [&](ast::Type *e, int64_t off, bool nullable) {
+          const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e) ||
+                                 ast::isPayloadEnum(e);
+          ast::Type *shape = memShapeOf(e);
+          if (auto *tt = ast::dyn_cast<ast::TupleType>(shape)) {
+            for (size_t i = 0; i < tt->getArity(); ++i)
+              refs(tt->getElementType(i), off + tupleElementOffset(tt, i),
+                   maybeNull);
+          } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(shape)) {
+            const int64_t stride = memLayout(ft->getElementType()).Size;
+            for (int64_t i = 0; i < ft->getLength(); ++i)
+              refs(ft->getElementType(), off + i * stride, maybeNull);
+          } else if (ast::isRefType(e)) {
+            ++words[3];
+            words.push_back(off << 1 | (maybeNull ? 1 : 0));
           }
         };
-    refs(tt, 0, optional);
+    refs(ty, 0, optional);
   } else if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
@@ -1665,6 +2090,9 @@ std::vector<int64_t> ModuleLowering::unsetWords(ast::Type *ty, int64_t base) {
                    base + tupleElementOffset(enumCarrier(et), 0)); // the tag
     return words;
   }
+  // An array holds one in any element: the first's words tell.
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return unsetWords(ft->getElementType(), base);
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     std::vector<int64_t> fewest;
     for (size_t i = 0; i < tt->getArity(); ++i) {
@@ -1890,6 +2318,27 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
+  // A value flowing into a slot of an `atomic` type (the prototype): a new
+  // cell holding it.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(expr->getNewAtomicCell())) {
+    Val v = emitExpr(expr);
+    return v ? emitAtomicNew(at->getInnerType(), v, "cell") : v;
+  }
+  // A unique value flowing into a `locked` slot (the prototype): a new
+  // cell holding it (the cell takes the +1 box).
+  if (expr->getMaterialize() == ast::QualForm::Locked) {
+    Val box = emitAsSharedRaw(expr, /*lend=*/false);
+    return box ? callRuntime(names::kPaykanLockedNew, {box}, "cell") : box;
+  }
+  // A unique value flowing into an `atomic shared` slot: the object and
+  // everything it holds are frozen at this use (immortal, counted nowhere;
+  // the design counts the root atomically and thaws it).
+  if (expr->getMaterialize() == ast::QualForm::AtomicShared) {
+    Val box = emitAsSharedRaw(expr, /*lend=*/false);
+    if (box)
+      callRuntime(names::kPaykanFreeze, {emitSharedGet(box, "frozen")});
+    return box;
+  }
   // An optional value is never boxed (Sema lets none reach a box slot).
   if (valueOptionalType(expr)) {
     reportInternalError("an optional value where a box is due");
@@ -1932,6 +2381,9 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
 }
 
 Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
+  // An `atomic` place's handle (the prototype): its cell, never counted.
+  if (isAtomicHandleExpr(expr))
+    return emitExpr(expr);
   // Owned identifier: retain + return the existing box.  The copy of an
   // argument may be lent (docs/pir.md §6) unless a later part of the
   // statement may replace the variable (noteHeldReads); what an `inout`

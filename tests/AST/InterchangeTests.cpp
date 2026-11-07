@@ -1568,18 +1568,6 @@ TEST(ASTInterchange, MatchArmModes) {
   }
 }
 
-TEST(Interchange, MovIsRemoved) {
-  // `mov` is retired (#145): an out-of-tree frontend still emitting it gets
-  // the same diagnostic as the built-in parser.
-  const std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
-                           "(params) _ (block (expr (mov (ident \"x\")))))))";
-  ast::ASTContext ctx;
-  std::string error;
-  EXPECT_EQ(read(text, ctx, error), nullptr);
-  EXPECT_NE(error.find("'mov' was removed in v0.2.0"), std::string::npos)
-      << error;
-}
-
 // A `native fn` (#198) carries (native "symbol") where the body goes.
 TEST(Interchange, NativeFunctionRoundTrips) {
   const std::string text = "(paykan-ast 1\n"

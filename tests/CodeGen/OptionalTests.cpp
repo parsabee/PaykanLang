@@ -94,7 +94,7 @@ TEST(Optional, LinkedListInsertAndTraverse) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
     fn push_front(head: Node?, v: int) -> Node {
-      n: Node = Node(v);
+      n: mut Node = Node(v);
       n.next = head;
       return n;
     }
@@ -154,7 +154,7 @@ TEST(Optional, OptionalFieldReleasedByDestructor) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(
     fn main() -> int {
-      a: Node = Node(1);
+      a: mut Node = Node(1);
       b: Node = Node(2);
       a.next = b;
       a.next = None;      // releases b's reference held by the field
@@ -181,7 +181,7 @@ TEST(Optional, CompareAgainstNone) {
       io::println(Str<bool>(None != b));
       io::println(Str<bool>(make(True) == None));    // call temporary released
       io::println(Str<bool>(make(False) == None));
-      n: Node = Node(5);
+      n: mut Node = Node(5);
       io::println(Str<bool>(n.next == None));        // field read
       n.next = Node(6);
       io::println(Str<bool>(n.next != None));
@@ -319,7 +319,7 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
       fn __init__() {}
     }
     fn main() -> int {
-      l: List = List();
+      l: mut List = List();
       io::println(Str<int>(l.firstOr(-1)));
       l.link(Node(3));
       io::println(Str<int>(l.firstOr(-1)));
@@ -353,7 +353,7 @@ TEST(Optional, PrintingAReferenceOptional) {
       io::println(a);
       io::println(make(False));
       io::println(make(True));
-      h = H();
+      h: mut = H();
       io::print(h.s); io::print(" ");
       h.s = "two";
       io::println(h.s);
@@ -480,8 +480,8 @@ TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
       return -1;
     }
     fn main() -> int {
-      a: Node = Node(1);
-      b: Node = Node(5);
+      a: mut Node = Node(1);
+      b: mut Node = Node(5);
       c: Node = Node(9);
       a.next = b;
       b.next = c;
@@ -566,8 +566,8 @@ TEST(Optional, ImportedOptionalSignatures) {
   auto main = writeFile(tmp, "main.pkn", R"pkn(import ::io;
 import list;
 fn main() -> int {
-  a: list::Node = list::Node(1);
-  b: list::Node = list::Node(2);
+  a: mut list::Node = list::Node(1);
+  b: mut list::Node = list::Node(2);
   a.next = b;
   io::println(Str<int>(list::count(a)));
   io::println(Str<int>(list::count(None)));
@@ -699,7 +699,7 @@ fn main() -> int {
   s = pick(True);
   match s { x: Suit { io::println(x == Suit::Spades); } None { io::println("none"); } }
   io::println(pick(False) == None);
-  h = Holder(None, None, None);
+  h: mut = Holder(None, None, None);
   io::println(h.p);
   h.p = Point(9, "z");
   h.t = (1, "q");
@@ -825,7 +825,7 @@ TEST(Optional, InoutArmOnAnOptionalStruct) {
       t: (int, Str)? = (1, "b");
       match t { u: inout (int, Str) { u = (3, "c"); } None { } }
       io::println(t);
-      b = Box();
+      b: mut = Box();
       match b.p { p: inout P { p = P(7, "q"); } None { } }
       io::println(b.p);
       return 0;
@@ -883,7 +883,7 @@ import ::memory;
 struct Eight { a: int; b: int; c: int; d: int; e: int; f: int; g: int; h: int; }
 struct Nine { a: int; b: int; c: int; d: int; e: int; f: int; g: int; h: int; i: int; }
 fn pick(x: Eight?) -> int { match x { e: Eight { return e.a + e.h; } None { return -1; } } }
-fn boxed(n: memory::Box<Nine>?) -> int { match n { b: memory::Box<Nine> { return b.get().i; } None { return -2; } } }
+fn boxed(n: memory::Box<Nine>?) -> int { match n { b: memory::Box<Nine> { return b.value().i; } None { return -2; } } }
 fn main() -> int {
   t: (Str, int, int, int, int, int, int, int)? = ("t", 2, 3, 4, 5, 6, 7, 8);
   io::println(Str(pick(Eight(1, 2, 3, 4, 5, 6, 7, 8))) + " " + Str(pick(None)));

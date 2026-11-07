@@ -26,34 +26,44 @@
 //
 // A weak load therefore gives an object only while `strong` is above zero:
 // never one that is dying, pending or destroyed.  Both counts are 32 bits
-// (Runtime.h, PaykanObject); one more reference than PAYKAN_REF_MAX panics
-// instead of wrapping to a count that would free a live object.
+// (Runtime.h, PaykanObject); one more reference than the limit panics
+// instead of wrapping to a count that would free a live object.  The limit
+// is PAYKAN_REF_MAX - 1 for a strong count: PAYKAN_REF_MAX itself marks an
+// immortal object (below), and PAYKAN_REF_MAX for a weak count.
 
 enum { kDying = -1, kPending = -2 };
 
-PAYKAN_NORETURN static void count_overflow(const char *kind) {
+PAYKAN_NORETURN static void count_overflow(const char *kind, int limit) {
   Paykan_runtime_panic("too many %s references to one object (the limit is "
                        "%d)",
-                       kind, (int)PAYKAN_REF_MAX);
+                       kind, limit);
 }
 
 // -- Strong references
 
-PaykanShared *PaykanShared_new(PaykanObject *obj) {
-  if (obj) {
-    if (PAYKAN_UNLIKELY(obj->strong == PAYKAN_REF_MAX))
-      count_overflow("strong");
+// An object whose strong count is PAYKAN_REF_MAX is immortal (the
+// concurrency prototype's cells and frozen objects, Atomic.c, Locked.c,
+// Object.c): nothing counts it, so a handle to it crosses threads with no
+// atomic count.  A counted object's limit is one below: the reference that
+// would reach the sentinel is the overflow.
+
+static inline void strong_retain(PaykanObject *obj) {
+  if (obj->strong != PAYKAN_REF_MAX) {
+    if (PAYKAN_UNLIKELY(obj->strong == PAYKAN_REF_MAX - 1))
+      count_overflow("strong", PAYKAN_REF_MAX - 1);
     ++obj->strong;
   }
+}
+
+PaykanShared *PaykanShared_new(PaykanObject *obj) {
+  if (obj)
+    strong_retain(obj);
   return obj;
 }
 
 void Paykan_retain(PaykanShared *shared) {
-  if (shared) {
-    if (PAYKAN_UNLIKELY(shared->strong == PAYKAN_REF_MAX))
-      count_overflow("strong");
-    ++shared->strong;
-  }
+  if (shared)
+    strong_retain(shared);
 }
 
 PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
@@ -94,18 +104,21 @@ PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
 // header has no room for the link (its counts are 32 bits, a pointer 64),
 // which is why the stack is not threaded through the objects.
 //
-// Like the reference counts themselves this state is not thread-safe: the
-// runtime assumes a single thread of execution (08-memory-model.md).
+// The state is each thread's own (the concurrency prototype runs tasks on
+// several threads): a NULL `pending` means the inline array, since a
+// thread-local's address is no constant initializer.
 
 enum { kInlinePending = 256 };
 
-static int g_destroying; // nonzero while a release is draining
-static PaykanObject *g_inline_pending[kInlinePending];
-static PaykanObject **g_pending = g_inline_pending; // the pending stack ...
-static size_t g_pending_len;                        // ... its height ...
-static size_t g_pending_cap = kInlinePending;       // ... and its room
+static _Thread_local int g_destroying; // nonzero while a release is draining
+static _Thread_local PaykanObject *g_inline_pending[kInlinePending];
+static _Thread_local PaykanObject **g_pending; // the pending stack ...
+static _Thread_local size_t g_pending_len;     // ... its height ...
+static _Thread_local size_t g_pending_cap = kInlinePending; // ... its room
 
 static void push_pending(PaykanObject *obj) {
+  if (!g_pending)
+    g_pending = g_inline_pending;
   if (PAYKAN_UNLIKELY(g_pending_len == g_pending_cap)) {
     size_t cap = g_pending_cap * 2;
     PaykanObject **grown =
@@ -142,11 +155,15 @@ static void destroy_dead_object(PaykanObject *obj) {
 }
 
 void Paykan_release(PaykanShared *shared) {
-  // Keep the common case (the count stays above zero) as the fall-through.
-  // With an early `if (!shared || --strong > 0) return;` GCC lays that path
-  // out as a taken jump to a distant `ret`, which measurably slows
-  // retain/release-heavy programs; this shape gives `test; jle slow; pop; ret`.
-  if (shared && --shared->strong <= 0) {
+  // Keep the common case (the count stays above zero) short: an early
+  // `if (!shared || --strong > 0) return;` made GCC lay that path out as a
+  // taken jump to a distant `ret`, which measurably slowed retain/release-
+  // heavy programs; the decrement and its test stand on their own lines for
+  // clang-tidy (bugprone-inc-dec-in-conditions), the shape is the same.
+  if (shared && shared->strong != PAYKAN_REF_MAX) {
+    shared->strong -= 1;
+    if (shared->strong > 0)
+      return;
     if (g_destroying) {
       // A destroy is running: defer to the outermost release.
       push_pending(shared);
@@ -154,7 +171,7 @@ void Paykan_release(PaykanShared *shared) {
     }
     g_destroying = 1;
     destroy_dead_object(shared);
-    while (g_pending_len)
+    while (g_pending_len && g_pending)
       destroy_dead_object(g_pending[--g_pending_len]);
     g_destroying = 0;
   }
@@ -169,7 +186,7 @@ void Paykan_dispose(PaykanObject *obj) {
 PaykanWeak *Paykan_weak_new(PaykanShared *shared) {
   if (shared) {
     if (PAYKAN_UNLIKELY(shared->weak == PAYKAN_REF_MAX))
-      count_overflow("weak");
+      count_overflow("weak", PAYKAN_REF_MAX);
     ++shared->weak;
   }
   return shared;
@@ -177,9 +194,7 @@ PaykanWeak *Paykan_weak_new(PaykanShared *shared) {
 
 PaykanShared *Paykan_weak_load(PaykanWeak *weak) {
   if (weak && weak->strong > 0) {
-    if (PAYKAN_UNLIKELY(weak->strong == PAYKAN_REF_MAX))
-      count_overflow("strong");
-    ++weak->strong;
+    strong_retain(weak);
     return weak;
   }
   return (PaykanShared *)0;

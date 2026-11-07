@@ -244,6 +244,17 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
       ok = false;
       continue;
     }
+    const ast::Qualifier fieldQual = takeQualifier(); // the prototype
+    // A struct is a value, copied whole: a cell inside it would be shared
+    // by every copy (the prototype keeps cells in classes).
+    if (ast::isa<ast::AtomicType>(fty)) {
+      error(field->getLocation(),
+            context.str() + " has type '" + typeName(fty) +
+                "': a struct cannot hold an 'atomic' field in the prototype "
+                "(hold the cell in a class)");
+      ok = false;
+      continue;
+    }
     if (holdsFixedArray(fty)) {
       error(field->getLocation(),
             context.str() + " has type '" + typeName(fty) +
@@ -297,7 +308,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
       continue;
     }
     field->setType(fty); // canonical write-back for the lowering
-    st->addField(field->getName(), fty);
+    st->addField(field->getName(), fty, fieldQual);
     if (!names::isPrivateName(field->getName()) &&
         !isModuleOwnName(sd->getName()) &&
         sd->getName().find('<') == std::string::npos &&
@@ -359,11 +370,16 @@ ast::FuncDecl *Sema::defaultInit(ast::StructType *st, ast::SourceLocation loc) {
   std::vector<ast::Stmt *> body;
   for (size_t i = 0; i < st->getNumFields(); ++i) {
     const std::string &interned = Ctx.intern(st->getFieldName(i));
-    params.push_back(
-        {&interned, st->getElementType(i), ast::ParamMode::Value, loc});
+    params.push_back({&interned, st->getElementType(i), ast::ParamMode::Value,
+                      st->findFieldQualifier(st->getFieldName(i)), loc});
+    // The field takes the parameter: a move-only one by `move` (the
+    // prototype's copy rule, --strict-ownership), a Copyable one as it is.
+    ast::Expr *value = Ctx.make<ast::Identifier>(loc, interned);
+    if (!isCopyable(st->getElementType(i)))
+      value = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, value);
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
-        Ctx.make<ast::Identifier>(loc, interned)));
+        value));
   }
   return Ctx.make<ast::FuncDecl>(
       loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
@@ -393,8 +409,10 @@ void Sema::declareConstructor(ast::StructDecl *sd, ast::StructType *st) {
   assert(!lookupFunction(sd->getName()) &&
          "constructor would overwrite a registered function");
   declareFunction(sd->getName(), st, ctorParams);
-  if (initDecl)
+  if (initDecl) {
     FunctionTable[sd->getName()].Modes = initDecl->getParamModes();
+    FunctionTable[sd->getName()].ParamQuals = initDecl->getParamQuals();
+  }
 }
 
 // -- Generic structs
@@ -796,8 +814,14 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
       // (frozenPlace), the caller's variable, field or element to change
       // in any other method, as an `inout` parameter is.
       CurrentScope->declare(names::kSelf, st);
-      for (size_t i = 0; i < method->getParams().size(); ++i)
-        CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+      for (size_t i = 0; i < method->getParams().size(); ++i) {
+        const ast::Param &p = method->getParams()[i];
+        CurrentScope->declare(p.getName(), paramTys[i]);
+        ast::Qualifier q = p.Qual;
+        if (p.Mode == ast::ParamMode::Inout)
+          q.Mut = true; // the borrow's writes
+        CurrentScope->Quals[p.getName()] = q;
+      }
       declareParamKinds(method);
 
       if (method->getName() != names::kMethodInit) {
@@ -805,7 +829,28 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
         CurrentMethodUse->Struct = st;
         CurrentMethodUse->Decl = method;
       }
+      // The method's moves, task handles and loop depths are its own (the
+      // prototype); a generic instance's methods are checked in the middle
+      // of another body, whose state comes back after.
+      Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+      std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+          std::exchange(TaskLocals, {});
+      MovedMap savedMoves = std::exchange(MovedVars, {});
+      std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+      const bool savedFlowEnded = std::exchange(FlowEnded, false);
+      std::unordered_map<std::string, unsigned> savedDeclDepths =
+          std::exchange(DeclLoopDepth, {});
+      const unsigned savedLoopDepth = std::exchange(LoopDepth, 0u);
       bool bodyOk = visitBody(method->getBody()->getStatements());
+      if (bodyOk && !FlowEnded)
+        checkTasksAwaited(CurrentScope, nullptr, method->getLocation());
+      LoopDepth = savedLoopDepth;
+      DeclLoopDepth = std::move(savedDeclDepths);
+      FlowEnded = savedFlowEnded;
+      LoopMoveStack = std::move(savedLoopMoves);
+      MovedVars = std::move(savedMoves);
+      FunctionScope = savedFunctionScope;
+      TaskLocals = std::move(savedTasks);
       CurrentMethodUse = nullptr;
 
       if (!bodyOk) {

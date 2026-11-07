@@ -1,0 +1,15 @@
+// A `mem::Buffer<T>` of the enclosing function in a `parallel for` body:
+// read anywhere, written at the loop's variable, never reshaped.
+import ::io;
+import ::memory as mem;
+
+fn main() -> int {
+  ys = mem::Buffer<float>();
+  let g = ys.grow(16);
+  parallel for i in 0..16 {
+    let a = ys.set(unsigned(i + 1), 1.0);        // error: written at an index other than the loop's variable
+    let b = ys.reserve(32);                      // error: reserve could move its storage
+    let c = ys.set(unsigned(i), 2.0);            // fine
+  }
+  return 0;
+}

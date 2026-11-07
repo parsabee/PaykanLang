@@ -27,17 +27,17 @@ impl Node {
     self.first = None;
     self.next = None;
   }
-  fn add(child: Node) {
+  fn add(child: mut Node) {
     child.parent = self;
     child.next = self.first;
     self.first = child;
   }
-  fn path() -> Str {
+  view fn path() -> Str {
     match self.parent {
       p: Node {
         return p.path() + "/" + self.name;
       }
-      None { return self.name; }
+      None { return self.name.toString(); }
     }
   }
 }
@@ -77,9 +77,9 @@ fn show(w: Node?) -> Str {
 
 fn main() -> int {
   // A tree whose children point back at their parent weakly.
-  root = Node("root");
-  a = Node("a");
-  let b = Node("b");
+  root: mut = Node("root");
+  a: mut = Node("a");
+  let b: mut = Node("b");
   root.add(a);
   a.add(b);
   io::println(b.path());
@@ -103,7 +103,7 @@ fn main() -> int {
   io::println(show(u));
 
   // A closure stored in the object it refers to, through a weak capture.
-  btn = Button("ok");
+  btn: mut = Button("ok");
   io::println(btn.click());
   btn.wire();
   io::println(btn.click());

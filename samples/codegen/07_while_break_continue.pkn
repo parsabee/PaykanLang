@@ -7,15 +7,15 @@ import ::io;
 
 fn main() -> int {
   io::println("=== basic while ===");
-  i: int = 0;
+  i = 0;
   while i < 5 {
-    io::println(Str<int>(i));
+    io::println(Str(i));
     i = i + 1;
   }
 
   io::println("=== while sum ===");
-  sum: int = 0;
-  n: int = 1;
+  sum = 0;
+  n = 1;
   while n <= 100 {
     sum = sum + n;
     n = n + 1;
@@ -29,16 +29,16 @@ fn main() -> int {
   io::println("after never");
 
   io::println("=== while True + break ===");
-  count: int = 0;
+  count = 0;
   while True {
     if count == 5 { break; }
     count = count + 1;
   }
-  io::println("count=" + Str<int>(count));  // 5
+  io::println("count=" + Str(count));  // 5
 
   io::println("=== continue skips odd ===");
-  evens: int = 0;
-  j: int = 0;
+  evens = 0;
+  j = 0;
   while j < 10 {
     j = j + 1;
     if j % 2 != 0 { continue; }
@@ -47,23 +47,23 @@ fn main() -> int {
   io::println("sum evens 2..10=" + Str(evens));  // 30
 
   io::println("=== nested loops ===");
-  total: int = 0;
-  r: int = 0;
+  total = 0;
+  r = 0;
   while r < 4 {
-    c: int = 0;
+    c = 0;
     while c < 4 {
       total = total + 1;
       c = c + 1;
     }
     r = r + 1;
   }
-  io::println("4x4 iterations=" + Str<int>(total));  // 16
+  io::println("4x4 iterations=" + Str(total));  // 16
 
   io::println("=== break inner loop only ===");
-  outer: int = 0;
-  inner_total: int = 0;
+  outer = 0;
+  inner_total = 0;
   while outer < 3 {
-    inner: int = 0;
+    inner = 0;
     while True {
       if inner == 3 { break; }
       inner_total = inner_total + 1;
@@ -74,25 +74,25 @@ fn main() -> int {
   io::println("3 * 3 inner=" + Str(inner_total));  // 9
 
   io::println("=== Str var per iteration (scope cleanup) ===");
-  k: int = 0;
+  k = 0;
   while k < 3 {
-    let label: Str = "iter-" + Str<int>(k);
+    let label = "iter-" + Str(k);
     io::println(label);
     k = k + 1;
   }
 
   io::println("=== loop with complex condition ===");
-  a: int = 0;
-  b: int = 100;
+  a = 0;
+  b = 100;
   while a < 10 && b > 90 {
     a = a + 1;
     b = b - 1;
   }
-  io::println("a=" + Str(a) + " b=" + Str<int>(b));  // a=10 b=90
+  io::println("a=" + Str(a) + " b=" + Str(b));  // a=10 b=90
 
   io::println("=== countdown with multiple continues ===");
-  x: int = 10;
-  out_count: int = 0;
+  x = 10;
+  out_count = 0;
   while x > 0 {
     x = x - 1;
     if x % 3 == 0 { continue; }

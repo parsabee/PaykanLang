@@ -489,7 +489,7 @@ TEST(Leak, MemberReadRebindAndFieldToField) {
     }
     fn main() -> int {
       h: H = H("one");
-      h2: H = H("two");
+      h2: mut H = H("two");
       x: Str = "seed";
       x = h.a;      // rebind an owned var to a borrowed field box
       h2.a = h.a;   // field-to-field assignment (borrowed RHS)
@@ -559,9 +559,9 @@ TEST(Leak, RefTypedArgsToUserMethods) {
     class Bag {
       xs: int[2];
       view fn sum(ys: view int[]) -> int { return ys[0] + ys[1]; }
-      fn names(ns: Str[2]) -> int { ns[1] = "m"; return ns.len(); }
-      fn first(t: (int, Str)) -> Str { return t.1; }
-      fn own() -> int { return self.sum(self.xs); }     // field argument
+      view fn names(ns: Str[2]) -> int { ns[1] = "m"; return ns.len(); }
+      view fn first(t: (int, Str)) -> Str { return t.1; }
+      view fn own() -> int { return self.sum(self.xs); }     // field argument
     }
 
     impl Bag {

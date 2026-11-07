@@ -223,7 +223,7 @@ fn main() -> int {
   p.f >>= 1;
   p.f ^= 0x0F;
   p.f &= 0xF0;
-  let c = C(0x00FF);
+  let c: mut C = C(0x00FF);
   c.g <<= 12;
   c.g ^= 0x0F00;
   c.g >>= 8;

@@ -426,6 +426,45 @@ private:
   pir::Signature functionSignature(ast::FuncDecl *node);
   pir::Function *declareFunctionPrototype(ast::FuncDecl *node);
 
+  // -- The concurrency prototype (docs/design/concurrency.md)
+
+  /// A `parallel for`: a counted `while` with the parallel annotation
+  /// (pir::Parallel), its reductions accumulated in partials.
+  Val emitParallelFor(ast::ForStmt *node);
+  /// An assignment to an `atomic` variable: a store or an atomic add.
+  Val emitAtomicAssign(ast::AssignStmt *node);
+  /// An assignment to the `atomic` field of the object @p objPtr (of class
+  /// @p ct): a store, an atomic add, or the cell of a handle; false after
+  /// an error.
+  bool emitAtomicFieldAssign(ast::MemberAssignStmt *node, ast::AtomicType *at,
+                             ast::ClassType *ct, const Val &objPtr);
+  /// Whether @p e is an `atomic` place read as its handle (Sema's
+  /// AtomicHandle on an identifier or a member access).
+  static bool isAtomicHandleExpr(const ast::Expr *e);
+  /// A new cell of the `atomic` type holding @p inner, with the value @p v.
+  Val emitAtomicNew(ast::Type *inner, const Val &v, const std::string &name);
+  /// The value of the cell @p cell (a box) holding @p inner, read atomically
+  /// and in the type's canonical form.
+  Val emitAtomicLoad(ast::Type *inner, const Val &cell,
+                     const std::string &name);
+  /// Stores @p v in the cell atomically.
+  void emitAtomicStore(ast::Type *inner, const Val &cell, const Val &v);
+  /// Adds @p v (or its negation) to the cell atomically; the value found,
+  /// as emitAtomicLoad gives it.
+  Val emitAtomicAdd(ast::Type *inner, const Val &cell, const Val &v,
+                    bool negate, const std::string &name);
+  /// @p v, of the value type held in a cell, as the cell's 64 bits: an
+  /// integer, a bool or a char as an i64, a float as an f64.
+  Val atomicToRaw(ast::Type *inner, const Val &v);
+  /// The cell's 64 bits @p raw as a value of @p inner.
+  Val atomicFromRaw(ast::Type *inner, const Val &raw, const std::string &name);
+  /// Set while an `__init__` body is emitted (emitInitBody): an assignment
+  /// to an `atomic` field finds no cell on the field's first value.
+  bool InInitBody = false;
+  /// The program's `main` for an `async fn main` (@p task): starts the task
+  /// and awaits its result.
+  void emitAsyncMainEntry(const pir::Function &task);
+
   // -- Ownership predicates
 
   bool exprAlreadyShared(ast::Expr *expr) const;
@@ -529,6 +568,19 @@ private:
   /// Put the methods of those copies in Bodies, as declareStruct and
   /// declareClass put this module's.
   void readImportedCopies();
+  /// The methods of the struct copies that the exporting module's code does
+  /// not define (its file keeps of a copy it does not expose only what its
+  /// own code reaches, docs/design/pkm.md §5.13), each with the struct it
+  /// is a method of: this module emits them, as shared copies
+  /// (declareDroppedCopyMethods, lowerDroppedCopyMethods).
+  std::vector<std::pair<ast::StructDecl *, ast::FuncDecl *>> DroppedCopyMethods;
+  /// The functions of DroppedCopyMethods, shared like this module's copies
+  /// (markShared).
+  std::unordered_set<std::string> DroppedCopyFunctions;
+  /// Declare DroppedCopyMethods, before any body is emitted.
+  void declareDroppedCopyMethods();
+  /// Emit their bodies.
+  void lowerDroppedCopyMethods();
   /// The class or struct whose method each body of Bodies is.
   std::unordered_map<const ast::FuncDecl *, ast::Type *> BodyOwners;
   /// The function or method named @p name in Bodies, or null.
@@ -914,12 +966,28 @@ private:
     /// call's `inout` result.
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
+    /// `b.at(i)`, `b.get(i)` and `b.len()` of a `mem::Buffer<T>` @p st
+    /// holding a number type @p elem, read in place (the prototype): a
+    /// bounds check and a load, as a fixed array's element, with no call
+    /// into the memory module and no count on the buffer.  nullopt when the
+    /// call is another method or another element type.
+    /// The box of `bx.value().at(i)`, `bx.get().len()` & co.: the receiver
+    /// of a `value()` or `get()` on a `mem::Box<mem::Buffer<T>>`, when the
+    /// buffer read is one emitBufferRead emits in place (a number's element,
+    /// or the length); nullptr otherwise.  The read takes the box's field
+    /// itself, so the box is the link visited first (visitedFirst).
+    ast::Expr *bufferReadBox(ast::MethodCallExpr *node);
+    std::optional<Val> emitBufferRead(ast::MethodCallExpr *node,
+                                      ast::Type *elem);
     /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
     /// field's function value, `hash()`, a Str's parse into @p target
     /// (`s.toInt()` & co.), an `unsigned`'s `toInt()`, an optional's
     /// `toString()`, a tuple's, a struct's, an enum's or a builtin type's,
     /// and a class's method.
     Val emitFieldCall(ast::MethodCallExpr *node);
+    /// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an
+    /// `atomic` place (the prototype).
+    Val emitAtomicMethodCall(ast::MethodCallExpr *node, ast::AtomicType *at);
     Val emitHashCall(ast::MethodCallExpr *node);
     Val emitStrParseCall(ast::MethodCallExpr *node,
                          ast::BuiltinType::Kind target);
@@ -967,6 +1035,8 @@ private:
   void declareClass(ast::ClassDecl *node);
   Val lowerClassDecl(ast::ClassDecl *node);
   void emitDestructor(ast::ClassDecl *node, ast::ClassType *ct);
+  /// The class's walk (the concurrency prototype's freeze).
+  void emitWalk(ast::ClassDecl *node, ast::ClassType *ct);
   /// The body of @p fn, the function of @p ct's pure virtual @p method:
   /// Paykan_panic_pure_virtual, then unreachable.
   void emitPureVirtualTrap(pir::Function *fn, ast::ClassType *ct,
@@ -1087,8 +1157,21 @@ private:
   /// Emit the bodies: each method, and the constructor (zero the value,
   /// then `__init__`).
   Val lowerStructDecl(ast::StructDecl *sd);
+  /// Emit the body of @p funcDecl, a method of @p sd's struct @p st, into
+  /// the function declareStruct declared for it.
+  void lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
+                         ast::FuncDecl *funcDecl);
   /// The struct type of @p e's value, canonical in this module, or nullptr.
   ast::StructType *getExprStructType(ast::Expr *e);
+  /// `T` when @p st is the standard library's `mem::Buffer<T>` (one field,
+  /// `__data`, the runtime's buffer object as an `Obj`); nullptr otherwise.
+  ast::Type *bufferElementType(ast::StructType *st);
+  /// Whether @p mc, a call on a `mem::Buffer<T>`, is an element or length
+  /// read the lowering emits in place (ExprEmitter::emitBufferRead): `at`
+  /// or `get` of a number, or `len`.  Such a read loads its number at once,
+  /// as a variable's read does, so the holds analysis (LoweringHolds.cpp)
+  /// takes it as one, not as a struct's `view fn` on its receiver.
+  bool isBufferReadInPlace(ast::MethodCallExpr *mc);
   /// `p.x` read, the receiver a struct: in place, as a tuple element.
   Val lowerStructFieldRead(ast::MemberAccessExpr *node, ast::StructType *st);
   /// `p.x = v`, the receiver a struct: written in place.

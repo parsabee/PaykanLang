@@ -58,14 +58,14 @@ fn firstTwo(n: Node) -> int {
 }
 
 /// Lets the whole list go: what the caller's match read loses its holder.
-fn clear(l: List) -> int {
+fn clear(l: mut List) -> int {
   l.head = None;
   return 0;
 }
 
 /// A match on l.head whose arm clears l: the node lives on in the match,
 /// which alone holds it until the match ends.
-fn cleared(l: List) -> Str {
+fn cleared(l: mut List) -> Str {
   match l.head {
     n: Node {
       let k = clear(l);
@@ -77,7 +77,7 @@ fn cleared(l: List) -> Str {
 
 /// x.next = x.next.next while a match holds x.next: the node unlinked
 /// lives on in the match.
-fn unlink(x: Node) -> Str {
+fn unlink(x: mut Node) -> Str {
   match x.next {
     n: Node {
       x.next = n.next;
@@ -100,14 +100,14 @@ class Bag {
 }
 
 /// Replaces the bag's first element.
-fn swapIn(b: Bag) -> int {
+fn swapIn(b: mut Bag) -> int {
   b.items[0] = Node("new", 7, None);
   return 0;
 }
 
 /// A match on an element whose arm replaces it: the old one lives on in
 /// the match.
-fn element(b: Bag) -> Str {
+fn element(b: mut Bag) -> Str {
   match b.items[0] {
     n: Node {
       let k = swapIn(b);
@@ -126,7 +126,7 @@ fn firstName(b: Bag) -> Str {
 }
 
 /// Empties the bag: each element loses its holder.
-fn empty(b: Bag) -> int {
+fn empty(b: mut Bag) -> int {
   b.items[0] = None;
   b.items[1] = None;
   return 10;
@@ -135,7 +135,7 @@ fn empty(b: Bag) -> int {
 /// Iterates over the bag while `empty` empties it: the node the match read
 /// lives on in the match (no weak reference keeps its memory: it is freed
 /// when it dies).
-fn iterate(b: Bag) -> int {
+fn iterate(b: mut Bag) -> int {
   total = 0;
   for i in 0..2 {
     match b.items[i] {
@@ -204,13 +204,13 @@ fn main() -> int {
 
   let y = Node("y", 2, Node("z", 3, None));
   let wy = Watch(y);
-  let x = Node("x", 1, y);
+  let x: mut = Node("x", 1, y);
   io::println("unlinked: " + unlink(x) + " | list: " + names(x) + " | y "
       + state(wy));
 
   let old = Node("old", 0, None);
   let wo = Watch(old);
-  let bag = Bag([old, None]);
+  let bag: mut = Bag([old, None]);
   io::println("element: " + element(bag) + " | old " + state(wo) + ", "
       + firstName(bag));
 

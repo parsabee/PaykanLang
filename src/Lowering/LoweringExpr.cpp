@@ -5,6 +5,7 @@
 
 #include "LoweringInternal.h"
 #include "Names.h"
+#include "Runtime.h"
 
 #include <cassert>
 #include <cmath>
@@ -61,6 +62,10 @@ ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
     if (ast::isa<ast::FixedArrayType>(ty))
       return ast::isa<ast::Identifier>(recv) ? nullptr
                                              : L.memValueVisitsFirst(recv);
+    // A buffer's element or length read through a box's `value()`
+    // (emitBufferRead): the box, as emitReceiver takes it.
+    if (ast::Expr *box = bufferReadBox(m))
+      return box;
     if (L.getExprStructType(recv) && m->getMethodName() != kMethodToString)
       return L.memValueVisitsFirst(recv);
     if ((ast::isa<ast::OptionalType>(ty) &&
@@ -219,6 +224,13 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
+  // An `atomic` variable (the prototype): its handle, or its value read
+  // atomically.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(astTy)) {
+    if (node->isAtomicHandle())
+      return val;
+    return L.emitAtomicLoad(at->getInnerType(), val, node->getName());
+  }
   // A read its statement may replace the variable's value under
   // (noteHeldReads): the box, with a reference of its own, a fresh +1 one
   // (exprProducesFreshBox).
@@ -339,6 +351,39 @@ Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
+  // The concurrency prototype: `await t` is the task's result; `move x` is
+  // x's box, which x no longer holds (a value is read as it is).
+  if (node->getOpcode() == ast::UnaryOpcode::Await) {
+    Val task = visit(node->getOperand());
+    if (!task)
+      return Val();
+    ast::Type *ty = node->getResolvedType();
+    Type t = ty && ty != L.ASTCtx.getVoidTy() ? L.toPIRType(ty) : Type::I64;
+    return L.B.await(task, t, "awaited");
+  }
+  if (node->getOpcode() == ast::UnaryOpcode::Move) {
+    // `move x.f` (the prototype): the field's reference leaves its slot,
+    // which becomes null; `x` has ended (Sema), so its teardown finds the
+    // slot empty.
+    if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand())) {
+      Val addr = L.emitPlaceAddress(ma);
+      if (!addr)
+        return Val();
+      Val box = L.B.ptrLoad(addr, Type::Box, "moved");
+      L.B.ptrStore(addr, Val::null(Type::Box));
+      return box;
+    }
+    // `move` before a temporary: the temporary, owned already.
+    if (!ast::isa<ast::Identifier>(node->getOperand()))
+      return visit(node->getOperand());
+    auto *id = ast::cast<ast::Identifier>(node->getOperand());
+    if (L.holdsBox(id->getName())) {
+      Val box = L.loadVarBox(id->getName());
+      L.B.store(L.CurrentScope->lookup(id->getName()), Val::null(Type::Box));
+      return box;
+    }
+    return visit(node->getOperand());
+  }
   Val operand = visit(node->getOperand());
   if (!operand)
     return Val();
@@ -377,6 +422,8 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     return L.canonicalize(
         L.B.binary(Opcode::Xor, operand, Val::i64(-1), "compl"), ty);
   }
+  case ast::UnaryOpcode::Move:  // handled above
+  case ast::UnaryOpcode::Await: // handled above
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -1137,8 +1184,11 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     L.releaseMemTemps(fixedMark);
     return slot;
   }
-  Val result = L.B.call(callee->Name, callee->Sig, args, "call");
-  if (result && result.Ty == Type::Ptr) // an `inout` result
+  // An `async fn` (the prototype): the call starts a task of its result.
+  Val result = callee->IsAsync
+                   ? L.B.asyncCall(callee->Name, callee->Sig, args, "task")
+                   : L.B.call(callee->Name, callee->Sig, args, "call");
+  if (!callee->IsAsync && result && result.Ty == Type::Ptr) // an `inout` result
     return L.takeInoutResult(result, node, wantAddress, keep, fixedMark,
                              places);
   L.releaseAfterCall(keep);
@@ -1155,6 +1205,9 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // `obj.cb(args)` with `cb` a field of function type.
   if (node->isFieldCall())
     return emitFieldCall(node);
+  // `x.exchange(v)` / `x.compareExchange(e, d)` on an `atomic` place.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(recvResolved))
+    return emitAtomicMethodCall(node, at);
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
   if (ast::dyn_cast<ast::SliceType>(recvResolved))
@@ -1182,10 +1235,15 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       node->getMethodName() == kMethodToInt)
     return emitUnsignedToInt(node);
   // A struct's method, called directly on the receiver's storage
-  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
+  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.  A
+  // buffer's element and length are read in place.
   if (auto *st = L.getExprStructType(node->getReceiver());
-      st && node->getMethodName() != kMethodToString)
+      st && node->getMethodName() != kMethodToString) {
+    if (ast::Type *elem = !wantAddress ? L.bufferElementType(st) : nullptr)
+      if (std::optional<Val> read = emitBufferRead(node, elem))
+        return *read;
     return emitStructMethodCall(node, st, wantAddress);
+  }
   // `o.toString()` on an optional (the builtin `Show`).
   if (ast::dyn_cast<ast::OptionalType>(recvResolved) &&
       node->getMethodName() == kMethodToString)
@@ -1197,6 +1255,117 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       ast::dyn_cast<ast::BuiltinType>(recvResolved))
     return emitShowCall(node);
   return emitClassMethodCall(node, wantAddress);
+}
+
+// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an `atomic`
+// place (the prototype): the receiver is the place's handle, its cell.
+Val ModuleLowering::ExprEmitter::emitAtomicMethodCall(ast::MethodCallExpr *node,
+                                                      ast::AtomicType *at) {
+  Val cell = visit(node->getReceiver());
+  if (!cell)
+    return Val();
+  Val obj = L.emitSharedGet(cell, "cell.obj");
+  ast::Type *inner = at->getInnerType();
+  const bool isFloat =
+      ast::BuiltinType::isFloatKind(ModuleLowering::builtinKind(inner));
+  std::vector<Val> args{obj};
+  for (ast::Expr *arg : node->getArguments()) {
+    Val v = visit(arg);
+    if (!v)
+      return Val();
+    args.push_back(L.atomicToRaw(inner, v));
+  }
+  if (node->getMethodName() == kMethodExchange) {
+    Val old = L.callRuntime(
+        isFloat ? kPaykanAtomicFExchange : kPaykanAtomicExchange, args, "old");
+    return L.atomicFromRaw(inner, old, "old");
+  }
+  Val swapped = L.callRuntime(isFloat ? kPaykanAtomicFCompareExchange
+                                      : kPaykanAtomicCompareExchange,
+                              args, "swapped");
+  return L.B.cast(swapped, Type::Bool, "swapped.bool");
+}
+
+ast::Expr *
+ModuleLowering::ExprEmitter::bufferReadBox(ast::MethodCallExpr *node) {
+  if (!L.isBufferReadInPlace(node))
+    return nullptr;
+  ast::StructType *st = L.getExprStructType(node->getReceiver());
+  auto *mc = ast::dyn_cast<ast::MethodCallExpr>(node->getReceiver());
+  if (!mc || mc->getNumArguments() != 0 ||
+      (mc->getMethodName() != "value" && mc->getMethodName() != "get"))
+    return nullptr;
+  ast::ClassType *ct = L.getExprClassType(mc->getReceiver());
+  const auto *fst =
+      ct ? ast::dyn_cast<ast::StructType>(ct->findField("__data")) : nullptr;
+  return fst && fst->getName() == st->getName() ? mc->getReceiver() : nullptr;
+}
+
+std::optional<Val>
+ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
+                                            ast::Type *elem) {
+  if (!L.isBufferReadInPlace(node))
+    return std::nullopt;
+  const bool length = node->getMethodName() == kMethodLength;
+  // A number: an 8-byte slot in the buffer, as in the type descriptor
+  // (memLayout), loaded as the i64 or f64 it is held as.
+  const Type et = L.toPIRType(elem);
+  // The receiver's storage: a variable's, a field's, or the `__data` of a
+  // `mem::Box<mem::Buffer<T>>` read through `value()` or `get()` (a frozen
+  // buffer's way into a `parallel for` body) -- that field itself, where a
+  // `view` result of a struct is a copy, which counts the buffer's object
+  // (two runtime calls on a frozen one).  Its one field, `__data`, is the
+  // buffer's box.
+  const size_t mark = L.MemTemps.size();
+  Val self;
+  if (ast::Expr *boxExpr = bufferReadBox(node)) {
+    ast::ClassType *ct = L.getExprClassType(boxExpr);
+    L.getOrCreateClass(ct);
+    Receiver recv = L.emitReceiver(boxExpr, "box.obj");
+    if (!recv)
+      return Val();
+    if (recv.Owned.isOwned())
+      L.MemTemps.emplace_back(recv.Owned.V, nullptr);
+    self = L.B.fieldAddr(recv.Raw, ct->getName(), "__data", "__data.addr");
+  } else {
+    self = L.emitMemAddress(node->getReceiver());
+  }
+  if (!self)
+    return Val();
+  Val box = L.B.ptrLoad(self, Type::Box, "buf.box");
+  Val obj = L.B.cast(L.emitSharedGet(box, "buf.obj"), Type::Ptr, "buf.ptr");
+  Val len = L.B.ptrLoad(
+      L.B.ptrAdd(obj, Val::i64(offsetof(PaykanBuffer, len)), "buf.len.addr"),
+      Type::I64, "buf.len");
+  if (length) {
+    L.releaseMemTemps(mark);
+    return len;
+  }
+  Val idx = visit(node->getArguments()[0]);
+  if (!idx)
+    return Val();
+  idx = L.coerceTo(idx, Type::I64);
+  // The bounds check the runtime's PaykanBuffer_get makes (a number has no
+  // "never set" state to check).
+  Val neg = L.B.cmp(CmpPred::Lt, idx, Val::i64(0), "idx.neg");
+  Val over = L.B.cmp(CmpPred::Ge, idx, len, "idx.over");
+  pir::If *s = L.B.openIf(L.B.select(neg, Val::boolean(true), over, "idx.bad"),
+                          /*withElse=*/false);
+  L.B.enter(*s->Then);
+  L.callRuntime(kPaykanPanicBufferIndex, {idx, len});
+  L.B.emitUnreachable();
+  L.B.leave();
+  // The storage's address, read as the bits a `ptr.load` has (an `i64`),
+  // then the pointer/int cast (docs/pir.md, `cast`).
+  Val data = L.B.cast(
+      L.B.ptrLoad(L.B.ptrAdd(obj, Val::i64(offsetof(PaykanBuffer, data)),
+                             "buf.data.addr"),
+                  Type::I64, "buf.data.bits"),
+      Type::Ptr, "buf.data");
+  Val off = L.B.binary(Opcode::Mul, idx, Val::i64(8), "elem.off");
+  Val v = L.B.ptrLoad(L.B.ptrAdd(data, off, "elem.addr"), et, "elem");
+  L.releaseMemTemps(mark);
+  return v;
 }
 
 // `obj.cb(args)` with `cb` a field of function type: the field's closure,

@@ -598,7 +598,10 @@ private:
         const bool shared = isWord("shared");
         if (shared)
           advance();
-        if (!shared && (isWord("obj") || isWord("vtable"))) {
+        const bool async = isWord("async");
+        if (async)
+          advance();
+        if (!shared && !async && (isWord("obj") || isWord("vtable"))) {
           ExternGlobal g;
           g.K = isWord("obj") ? ExternGlobal::Object : ExternGlobal::VTable;
           advance();
@@ -610,6 +613,7 @@ private:
           Function f;
           f.IsExtern = true;
           f.Shared = shared;
+          f.IsAsync = async;
           if (!parseSymbol(f.Name) || !parseSignature(f.Sig))
             return false;
           // The optional `module "<name>"` clause is on the declaration's
@@ -643,9 +647,13 @@ private:
                               : "expected 'obj', 'vtable', 'fn' or 'class' "
                                 "after 'extern'");
         }
-      } else if (isWord("class") || isWord("fn") || isWord("shared")) {
+      } else if (isWord("class") || isWord("fn") || isWord("shared") ||
+                 isWord("async")) {
         const bool shared = isWord("shared");
         if (shared)
+          advance();
+        const bool async = isWord("async");
+        if (async)
           advance();
         if (isWord("class")) {
           advance();
@@ -658,6 +666,7 @@ private:
           advance();
           Function f;
           f.Shared = shared;
+          f.IsAsync = async;
           if (!parseFunction(f))
             return false;
           m.Functions.push_back(std::move(f));
@@ -1057,6 +1066,49 @@ private:
       if (!parseOperand(w.Cond) || !expect(Tok::RBrace, "'}'") ||
           !parseBracedBlock(w.Body))
         return false;
+      if (isWord("parallel")) {
+        advance();
+        Parallel p;
+        if (!parseLocalRef(p.Counter) || !expect(Tok::Comma, "','") ||
+            !parseOperand(p.Count))
+          return false;
+        if (isWord("privates")) {
+          advance();
+          if (!expect(Tok::LParen, "'('"))
+            return false;
+          while (Cur.Kind != Tok::RParen) {
+            LocalId l;
+            if (!parseLocalRef(l))
+              return false;
+            p.Privates.push_back(l);
+            if (Cur.Kind == Tok::Comma)
+              advance();
+            else if (Cur.Kind != Tok::RParen)
+              return error("expected ',' or ')'");
+          }
+          advance();
+        }
+        if (isWord("reduce")) {
+          advance();
+          if (!expect(Tok::LParen, "'('"))
+            return false;
+          while (Cur.Kind != Tok::RParen) {
+            Parallel::Reduction r;
+            if (!parseLocalRef(r.Partial))
+              return false;
+            if (Cur.Kind != Tok::Word || !parseOpcodeName(Cur.Text, r.Op))
+              return error("expected 'add' or 'mul'");
+            advance();
+            p.Reductions.push_back(r);
+            if (Cur.Kind == Tok::Comma)
+              advance();
+            else if (Cur.Kind != Tok::RParen)
+              return error("expected ',' or ')'");
+          }
+          advance();
+        }
+        w.Par = std::move(p);
+      }
       out = std::move(w);
       return true;
     }
@@ -1241,9 +1293,15 @@ private:
       resultTy = in.CastTo;
       break;
     case Opcode::Call:
+    case Opcode::AsyncCall:
       if (!parseSymbol(in.Callee) || !parseArgs(in))
         return false;
       needsFixup = true;
+      break;
+    case Opcode::Await:
+      if (!parseType(resultTy) || !expect(Tok::Comma, "','") ||
+          !parseCommaOperands(in.Args, 1))
+        return false;
       break;
     case Opcode::FnAddr:
       if (!parseSymbol(in.Callee))
@@ -1572,6 +1630,9 @@ private:
     case Opcode::Call:
       if (const Function *callee = m.findFunction(in.Callee))
         in.Result.Ty = callee->Sig.Ret;
+      break;
+    case Opcode::AsyncCall:
+      in.Result.Ty = Type::Ptr;
       break;
     case Opcode::VCall:
       if (in.ClassName.empty()) {

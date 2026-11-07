@@ -46,6 +46,7 @@ namespace ast {
   NODE(NK_MemberAssignStmt, MemberAssignStmt, MemberAssignStmt)                \
   NODE(NK_MatchStmt, MatchStmt, MatchStmt)                                     \
   NODE(NK_SubscriptAssignStmt, SubscriptAssignStmt, SubscriptAssignStmt)       \
+  NODE(NK_LockStmt, LockStmt, LockStmt)                                        \
   NODE(NK_DestructureStmt, DestructureStmt, DestructureStmt)
 
 #define PAYKAN_EXPR_NODES(NODE)                                                \
@@ -80,6 +81,9 @@ namespace ast {
   NODE(NK_TupleType, TupleType, TupleType)                                     \
   NODE(NK_StructType, StructType, StructType)                                  \
   NODE(NK_SliceType, SliceType, SliceType)                                     \
+  NODE(NK_AtomicType, AtomicType, AtomicType)                                  \
+  NODE(NK_TaskType, TaskType, TaskType)                                        \
+  NODE(NK_QualifiedType, QualifiedType, QualifiedType)                         \
   NODE(NK_PoisonType, PoisonType, PoisonType)                                  \
   NODE(NK_FunctionType, FunctionType, FunctionType)                            \
   NODE(NK_GenericType, GenericType, GenericType)

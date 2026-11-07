@@ -173,6 +173,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The subject a ViewBinding names a `view` of: a `view` result may be
     /// part of it.
     StringMap<const ast::Expr *> ViewSubjects;
+    /// The qualifier of each reference bound here (the prototype); absent
+    /// for unique.
+    StringMap<ast::Qualifier> Quals;
+    /// The scope's number, unique in the program (ScopeGuard): with a name,
+    /// the key of a variable's state (varKey).
+    unsigned Id = 0;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -194,6 +200,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   Scope *CurrentScope = nullptr;
+  /// The number the next scope takes (Scope::Id).
+  unsigned NextScopeId = 1;
 
   // -- Lambdas (SemaLambda.cpp, docs/language/14-function-types.md)
 
@@ -269,6 +277,264 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Loop nesting depth (0 = not inside a loop).
   unsigned LoopDepth = 0;
 
+  // -- The concurrency prototype (docs/design/concurrency.md,
+  // SemaConcurrency.cpp)
+
+  /// Whether the function being checked is an `async fn`.
+  bool InAsyncFn = false;
+  /// The qualifier of the annotation resolveType last resolved (a
+  /// QualifiedType's; unique for any other), taken by the declaration that
+  /// records it on its place.
+  ast::Qualifier LastQualifier;
+  ast::Qualifier takeQualifier() {
+    return std::exchange(LastQualifier, ast::Qualifier{});
+  }
+  /// The result qualifier of the function being checked.
+  ast::Qualifier CurrentResultQual;
+  /// --strict-ownership: a unique reference read from a place is moved into
+  /// an owning slot, never copied.
+  bool StrictOwnership = false;
+  /// Set while a `lock` statement's operand is checked, where a `locked`
+  /// place may be named.
+  bool LockOperand = false;
+  /// The `lock` blocks being checked, innermost last (no `await`, `return`,
+  /// nested `lock` or `parallel for` inside one).
+  unsigned LockDepth = 0;
+  /// The qualifier of variable @p name (unique when it has none).
+  ast::Qualifier qualifierOfVar(std::string_view name) const;
+  /// The qualifier of the reference @p e reads: its place's (a variable's,
+  /// a field's, through an immutable receiver), a call's result's; unique for
+  /// a temporary.
+  ast::Qualifier qualifierOf(const ast::Expr *e);
+  /// Whether @p q may qualify a value of type @p inner (an error names why
+  /// not).
+  bool checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
+                             ast::SourceLocation loc);
+  /// A reference @p src stored into an owning slot of qualifier @p dst (a
+  /// variable, field, element, by-value parameter or result): the
+  /// conversion rules, what a unique value becomes there (Materialize),
+  /// and the copy rule under --strict-ownership.
+  bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
+                          const std::string &what, ast::SourceLocation loc);
+  /// Why the place @p e cannot change through an immutable reference or field
+  /// on its way; "" when it can.
+  std::string constPlace(const ast::Expr *e);
+  /// Whether the objects a value at @p e holds may be written: the value's
+  /// variable is not `let` (nor a borrow, a loop's copy or a capture), or
+  /// the object it is part of is `mut`.
+  bool valueRootWritable(const ast::Expr *e);
+  /// Whether a value of @p ty read from a place is copied (the design's
+  /// Copyable): a number, bool, char, an enum of Copyable payloads, a
+  /// tuple, struct, fixed array or optional of Copyable parts, an `atomic`
+  /// handle.  A reference, `Str`, a function value and a task are not.
+  /// When not, @p why (if given) names the move-only part.
+  bool isCopyable(ast::Type *ty, std::string *why = nullptr);
+  /// isCopyable of a part held with qualifier @p q: a `shared` reference
+  /// or a handle copies, a unique one (`mut` or not) does not.
+  bool isCopyablePart(ast::Type *ty, ast::Qualifier q,
+                      std::string *why = nullptr);
+  /// Why a value of @p ty, held with qualifier @p q, cannot cross to
+  /// another thread (the design's send check): a `shared` or `weak` part, a
+  /// function value, an `Obj`; "" when it can.  @p path names the part
+  /// looked at ("" for the value itself).
+  std::string uncrossable(ast::Type *ty, ast::Qualifier q,
+                          const std::string &path);
+  /// The borrowing parameters' arguments: a `view` takes every form of the
+  /// object and an `inout` a unique or `shared` one, neither counting it,
+  /// and no borrow reaches a `locked` cell.
+  bool checkBorrowQualifiers(const ast::ParamModes &modes,
+                             const std::vector<ast::Qualifier> &quals,
+                             const std::vector<ast::Expr *> &args,
+                             const std::string &callee);
+  /// A qualifier written on a borrow (a `view` or `inout` parameter,
+  /// result or local) is an error: a borrow takes the object whatever its
+  /// qualifier, a `view` is read-only already, and an `inout` of an immutable
+  /// object could not change it (owner, 2026-11-02).
+  bool checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
+                            const std::string &what, ast::SourceLocation loc);
+  /// Error (and false) when @p place is `locked`: its contents are reached
+  /// only in a `lock` block.
+  bool checkNotLocked(const ast::Expr *place, ast::SourceLocation loc);
+  /// The spelling of a slot: "shared Node", "Node".
+  static std::string qualifiedName(ast::Qualifier q, ast::Type *ty);
+  /// The source text of a place, for diagnostics: `x`, `x.f`, `xs[i]`.
+  static std::string placeText(const ast::Expr *e);
+  /// How a `move` ended a variable: where, and whether on some paths only
+  /// (then By names the branch or loop whose paths joined).
+  struct MovedState {
+    ast::SourceLocation At;
+    bool Maybe = false;
+    std::string By;
+  };
+  using MovedMap = std::unordered_map<std::string, MovedState>;
+  /// The variables a `move` has ended, by varKey: a forward "maybe moved"
+  /// set over the body (the design's SemaMoves).
+  MovedMap MovedVars;
+  /// The key of the variable @p name that @p owner declares: the name and
+  /// the scope's number, so that a variable that shadows another (a block's
+  /// local, a `match` arm's or a `lock` block's binding) has a state of its
+  /// own in MovedVars, DeclLoopDepth and TaskLocals, and the one it shadows
+  /// keeps its own.
+  static std::string varKey(const Scope *owner, std::string_view name);
+  /// The key of the variable @p name names in the current scope.
+  std::string varKey(std::string_view name) const;
+  /// The name, and the number of the scope, that @p key was made from.
+  static std::string_view keyName(std::string_view key);
+  static unsigned keyScope(std::string_view key);
+  /// The task handles of the function being checked (the prototype): its
+  /// locals and parameters of a `Task<T>` type, by varKey, with where each
+  /// is declared.  A handle is spent by `await`, by `move`, or by its use
+  /// as a value (checkQualifiedFlow), and every path spends it before its
+  /// scope ends (checkTasksAwaited): the design's typestate, reduced to the
+  /// one operation the prototype has.
+  std::unordered_map<std::string, ast::SourceLocation> TaskLocals;
+  /// The scope of the body being checked (a function's, a method's, a
+  /// lambda's): a `return` checks the task handles of every scope up to it.
+  Scope *FunctionScope = nullptr;
+  /// The task handles of @p s not spent on every path: an error for each, at
+  /// its declaration, or at @p loc when @p exit names the statement leaving
+  /// (`return`, `break`, `continue`).
+  void checkTasksAwaited(const Scope *s, const char *exit,
+                         ast::SourceLocation loc);
+  /// checkTasksAwaited of every scope from the current one up to, not
+  /// including, @p stop.
+  void checkTasksAwaitedUpTo(const Scope *stop, const char *exit,
+                             ast::SourceLocation loc);
+  /// Whether @p name may be spent (moved, awaited: @p what) at @p loc: a
+  /// variable of the function's own, not a borrow, not a `weak` or a
+  /// capture; an error otherwise.
+  bool checkMovable(const std::string &name, ast::SourceLocation loc,
+                    const char *what);
+  /// Set by a statement no statement after it reaches (`return`, `break`,
+  /// `continue`): its path's moves do not join what follows the branch.
+  bool FlowEnded = false;
+  /// The loops being checked, innermost last: the moves on entry (an
+  /// iteration assigns again what it moves of the enclosing function's
+  /// variables), the body's depth, and the moves at each `break`.
+  struct LoopMoves {
+    ast::SourceLocation Loc;
+    unsigned Depth = 0;
+    MovedMap Entry;
+    std::vector<MovedMap> Breaks;
+    /// The scope the loop stands in: a `break` or `continue` spends the
+    /// task handles of the scopes inside it (checkTasksAwaitedUpTo).
+    Scope *Outer = nullptr;
+  };
+  std::vector<LoopMoves> LoopMoveStack;
+  /// The (variable, loop) pairs reported as moved and not assigned again.
+  std::set<std::string> LoopMovesReported;
+  /// A `match` being checked: the moves on entry, and at the end of each
+  /// arm that falls through, joined after the match (MatchMovesGuard).
+  struct MatchMoves {
+    ast::MatchStmt *Node;
+    MovedMap Entry;
+    std::vector<MovedMap> Arms;
+    bool AllEnded = true;
+  };
+  std::vector<MatchMoves> MatchMoveStack;
+  /// Around a `match`: joins its arms' moves on the way out.
+  struct MatchMovesGuard {
+    Sema &S;
+    MatchMovesGuard(Sema &s, ast::MatchStmt *node);
+    ~MatchMovesGuard();
+  };
+  /// Around one arm's check: starts it from the match's entry state and
+  /// records where it leaves off.
+  struct ArmMovesGuard {
+    Sema &S;
+    ArmMovesGuard(Sema &s);
+    ~ArmMovesGuard();
+  };
+  /// MovedVars joined from the states @p paths of the branches of the
+  /// @p what (an "if", a "loop", a "match") at @p loc: a variable moved on
+  /// every path stays so; one moved on some paths only is "maybe moved".
+  /// No path: MovedVars is left as it is (nothing after is reached).
+  void joinMoves(const std::vector<MovedMap> &paths, const char *what,
+                 ast::SourceLocation loc);
+  /// The end of an iteration of @p loop (its body's end, a `continue` at
+  /// @p loc): every variable of the enclosing function it moved was
+  /// assigned again, or an error.
+  void checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc);
+  /// Opens the loop at @p loc for the moves of its body.
+  void beginLoopMoves(ast::SourceLocation loc);
+  /// Closes it: checks the body's end as an iteration's, and joins the
+  /// paths out of the loop.
+  void finishLoopMoves();
+  /// `move x.f`: a unique reference field reached through unique fields of
+  /// an owned variable leaves its slot, and the variable ends.  The field's
+  /// type, or nullptr after an error.
+  ast::Type *checkPartialMove(ast::UnaryExpr *node, ast::MemberAccessExpr *ma);
+  /// The loop depth each variable was declared at, by varKey.
+  std::unordered_map<std::string, unsigned> DeclLoopDepth;
+  /// Set while an expression that is an `atomic` variable's handle (not
+  /// its value) is checked: an argument to an `atomic` parameter, the
+  /// initializer of an `atomic` variable.
+  bool WantAtomicHandle = false;
+  /// The `parallel for` loops being checked, innermost last: the loop and
+  /// the scope its variable is bound in (names bound there or inside its
+  /// body are an iteration's own).
+  struct ParallelContext {
+    ast::ForStmt *Loop;
+    Scope *Boundary;
+  };
+  std::vector<ParallelContext> ParallelStack;
+  /// Whether @p owner, the scope a name is bound in, is outside the
+  /// innermost `parallel for`.
+  bool isOuterScope(Scope *owner) const;
+  /// Whether a `parallel for` body may read @p name, of type @p ty.
+  bool checkParallelRead(const std::string &name, ast::Type *ty,
+                         ast::SourceLocation loc);
+  /// An assignment to a variable of the enclosing function in a `parallel
+  /// for` body: a reduction, recorded on the loop.
+  bool checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy);
+  /// An assignment to an `atomic` variable: a store, or `x += e` / `x -= e`
+  /// as one atomic add.
+  bool checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at);
+  /// An assignment to an `atomic` field: a store, an atomic add, or, in
+  /// `__init__`, the cell of an `atomic` handle.
+  bool checkAtomicMemberAssign(ast::MemberAssignStmt *node,
+                               ast::AtomicType *at);
+  /// The value assigned to the `atomic` place @p place: the operation it
+  /// is, or nullopt after an error.  @p valTy is the value's type when it
+  /// was resolved already.
+  std::optional<ast::AssignStmt::AtomicKind>
+  checkAtomicValue(const ast::Expr *place, ast::Expr *value,
+                   ast::AtomicType *at, ast::SourceLocation loc,
+                   ast::Type *valTy = nullptr);
+  /// A warning when the atomic @p place of the enclosing function changes
+  /// on every iteration of a `parallel for` (the statement at @p loc is
+  /// the body's own, under no condition): each operation moves the cell's
+  /// cache line between cores (benchmarks/README.md).
+  void warnAtomicEveryIteration(const ast::Expr *place,
+                                ast::SourceLocation loc);
+  /// `x.exchange(v)` and `x.compareExchange(expected, desired)` on an
+  /// `atomic` place: the result's type, or nullptr after an error.
+  ast::Type *checkAtomicMethodCall(ast::MethodCallExpr *node,
+                                   ast::AtomicType *at);
+  /// A variable, or a field reached through variables and fields only.
+  static bool isPlaceChain(const ast::Expr *e);
+  /// `T` when @p ty is the standard library's `mem::Buffer<T>` (a struct of
+  /// one field, `__data`, the runtime's buffer object as an `Obj`); nullptr
+  /// otherwise.
+  ast::Type *bufferElementType(ast::Type *ty) const;
+  /// A method call on a `mem::Buffer<T>` of the enclosing function in a
+  /// `parallel for` body: a read (`at`, `get`, `len`), or `set` at the
+  /// loop's variable; anything else is an error.
+  bool checkParallelBufferCall(const ast::MethodCallExpr *node,
+                               const std::string &name);
+  /// Whether @p a and @p b name the same place (isPlaceChain).
+  static bool samePlace(const ast::Expr *a, const ast::Expr *b);
+  /// Whether @p e reads @p place: a walk of the operators, accesses and
+  /// calls of an expression.
+  static bool readsPlace(const ast::Expr *e, const ast::Expr *place);
+  /// The send check of an async call: every reference argument is moved
+  /// or a temporary, and never `shared`.
+  bool checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig);
+  /// `move x`: the variable's type, and x ends; nullptr after an error.
+  ast::Type *checkMove(ast::UnaryExpr *node);
+  /// Error at @p loc (and false) when @p name was moved.
+  bool checkNotMoved(const std::string &name, ast::SourceLocation loc);
+
   // -- Class analysis context
   //
   // Populated while visitClassDecl is running; nullptr outside of a class.
@@ -327,6 +593,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// what its `inout` arguments name (docs/language/03-functions.md,
     /// "Native Functions").
     bool Native = false;
+    /// An `async fn` (the concurrency prototype): ReturnType is the task
+    /// of its result.
+    bool Async = false;
+    /// The parameters' and the result's qualifiers (the prototype).
+    std::vector<ast::Qualifier> ParamQuals;
+    ast::Qualifier ResultQual;
   };
 
   /// Maps function names to their signatures.
@@ -2483,6 +2755,8 @@ public:
     Required,   ///< ... and the program must declare one
   };
   void setEntryPointCheck(EntryPoint check) { EntryPointCheck = check; }
+  /// --strict-ownership (the concurrency prototype's copy rule).
+  void setStrictOwnership(bool strict) { StrictOwnership = strict; }
 
 private:
   EntryPoint EntryPointCheck = EntryPoint::None;

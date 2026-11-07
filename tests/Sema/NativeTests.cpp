@@ -64,7 +64,7 @@ TEST(Native, OnlyScalarsCrossByValue) {
     native fn h(d: Dir) -> Dir = "pk_h"; // an enum, as its ordinal
     fn main() -> int {
       m = 1;
-      o: Obj = "o";
+      o: mut Obj = "o";
       a = 1;
       g<int>(1, 2, a);
       return f(1, 2.0, True, 'c', 3, m, "s", o);
@@ -152,13 +152,13 @@ TEST(Native, GenericInstancesTakeAnyType) {
     native fn get<T>(b: view Obj, i: int) -> view T = "pk_get";
     native fn swap<T>(a: inout T, b: inout T) = "pk_swap";
     fn main() -> int {
-      p: P = pick<P>(True, P(1), P(2));
+      p: mut P = pick<P>(True, P(1), P(2));
       t = pick<(int, Str)>(False, (1, "a"), (2, "b"));
       o: int? = pick<int?>(True, None, 3);
       b: Obj = P(3);
       y: int = get<int>(b, 0);
       n: int = pick(True, 1, 2);
-      q = P(4);
+      q: mut = P(4);
       swap<P>(p, q);
       return n + t.0 + y;
     }

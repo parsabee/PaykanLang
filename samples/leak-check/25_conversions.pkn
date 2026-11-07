@@ -51,7 +51,7 @@ fn main() -> int {
   }
   io::println(Str<int>(total));
 
-  let c = Cell();
+  let c: mut = Cell();
   c.label = Str(2.5);
   c.value = "7".toInt();
   c.value = "nope".toInt();

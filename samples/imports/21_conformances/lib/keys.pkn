@@ -87,9 +87,9 @@ enum Maybe<T: Hashable> {
 
 // Instantiations this module makes: their conformances are in its interface.
 fn mkKeyed() -> Keyed<int> {
-  return Keyed<int>(7);
+  return Keyed(7);
 }
 
 fn mkBox() -> GBox<int> {
-  return GBox<int>(1);
+  return GBox(1);
 }

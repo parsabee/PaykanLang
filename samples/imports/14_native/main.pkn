@@ -23,10 +23,10 @@ fn show(r: Str?) {
 fn main() -> int {
   io::println(text::upper("hello, native"));
   io::println(text::shout("loud"));
-  io::println(Str<int>(text::count("banana", 'a')));
+  io::println(Str(text::count("banana", 'a')));
   show(text::find("needle in a haystack", "in a"));
   show(text::find("haystack", "needle"));
-  padded = "   spaced out  ";
+  padded: mut = "   spaced out  ";
   text::trim(padded);
   io::println("[" + padded + "]");
   return 0;

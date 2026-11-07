@@ -105,8 +105,10 @@ defaults:
     values: { title: 17. The paykan command, parent: Language reference, nav_order: 17 }
   - scope: { path: language/18-appendix-calculator.md }
     values: { title: "Appendix: a calculator", parent: Language reference, nav_order: 18 }
+  - scope: { path: language/19-concurrency.md }
+    values: { title: 19. Concurrency and ownership, parent: Language reference, nav_order: 19 }
   - scope: { path: grammar.md }
-    values: { title: Grammar, parent: Language reference, nav_order: 19 }
+    values: { title: Grammar, parent: Language reference, nav_order: 20 }
 
   # The standard library
   - scope: { path: stdlib/index.md }

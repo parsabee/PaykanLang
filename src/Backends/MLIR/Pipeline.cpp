@@ -66,13 +66,30 @@ Status lowerTo(mlir::ModuleOp module, Stage stage) {
         return mlir::success();
       });
   mlir::PassManager pm(module.getContext());
-  pm.addPass(createPIRToStandardPass());
-  if (stage == Stage::LLVM)
-    addLLVMDialectPasses(pm);
-  else if (stage == Stage::EmitC)
+  // The C path runs the concurrency prototype's parallel loops in order
+  // and its async functions as plain functions.
+  pm.addPass(createPIRToStandardPass(/*sequential=*/stage == Stage::EmitC));
+  if (stage == Stage::EmitC)
     addEmitCPasses(pm);
   if (mlir::failed(pm.run(module)))
     return Status::error("the MLIR pipeline failed:\n" + diagnostics);
+  if (stage != Stage::LLVM)
+    return Status::ok();
+  // The LLVM path's passes run on each PIR module (a nested module of a
+  // program, with a symbol table of its own) on its own: the concurrency
+  // prototype's upstream passes declare the runtime functions they call in
+  // the module they run on.
+  std::vector<mlir::ModuleOp> modules;
+  for (auto nested : module.getOps<mlir::ModuleOp>())
+    modules.push_back(nested);
+  if (modules.empty())
+    modules.push_back(module);
+  for (mlir::ModuleOp m : modules) {
+    mlir::PassManager llvmPm(module.getContext());
+    addLLVMDialectPasses(llvmPm);
+    if (mlir::failed(llvmPm.run(m)))
+      return Status::error("the MLIR pipeline failed:\n" + diagnostics);
+  }
   return Status::ok();
 }
 

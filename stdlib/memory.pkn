@@ -89,7 +89,7 @@ impl Buffer<T> {
     if i >= _len<T>(self.__data) {
       return _errorOf(err::ErrorCode::OutOfRange);
     }
-    _set<T>(self.__data, i, v);
+    _set(self.__data, i, v);
     return err::none();
   }
 
@@ -120,7 +120,7 @@ impl Buffer<T> {
     if errno != 0 {
       return err::fromErrno(errno);
     }
-    _set<T>(self.__data, _len<T>(self.__data) - 1, v);
+    _set(self.__data, _len<T>(self.__data) - 1, v);
     return err::none();
   }
 
@@ -134,10 +134,10 @@ impl Buffer<T> {
     if _isSet<T>(self.__data, i) == 0 || _isSet<T>(self.__data, j) == 0 {
       return _errorOf(err::ErrorCode::NotFound);
     }
-    let a: T = _copy<T>(self.__data, i);
-    let b: T = _copy<T>(self.__data, j);
-    _set<T>(self.__data, i, b);
-    _set<T>(self.__data, j, a);
+    let a = _copy<T>(self.__data, i);
+    let b = _copy<T>(self.__data, j);
+    _set(self.__data, i, b);
+    _set(self.__data, j, a);
     return err::none();
   }
 }
@@ -152,6 +152,9 @@ class Box<T: ValueType> {
 }
 
 impl Box<T> {
-  fn __init__(v: T)   { self.__data = v; }
-  fn get() -> inout T { return self.__data; }
+  fn __init__(v: T)         { self.__data = move v; }
+  fn get() -> inout T       { return self.__data; }
+  /// The value, read only: what a `const` or `atomic shared` box gives
+  /// (`get()` is not a `view fn`, since its result may be assigned).
+  view fn value() -> view T { return self.__data; }
 }

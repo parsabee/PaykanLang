@@ -1,0 +1,27 @@
+// OK: the qualifiers of another module's signatures and fields
+// (docs/language/19-concurrency.md: the qualifier is part of the type of a
+// parameter, a field or a result).  A result `-> mut Cell` is written
+// through by the importer as by the module itself, a `mut` parameter takes
+// a `mut` reference, and a `shared mut` field keeps its writes.  The
+// module's interface spelled every type without its qualifier, so `b` and
+// the arm's `m` were immutable here: `'b' is immutable (a 'Cell'; write
+// 'mut Cell' to change it); 'bump' is not a 'view fn'`.
+// expect-stdout: 2 6 8
+import ::io;
+import cells;
+
+fn main() -> int {
+  let a: mut = cells::Cell(1, None);
+  match a.me() {
+    m: cells::Cell { m.bump(); }
+  }
+  let b = cells::make(5);
+  b.bump();
+  let s: shared mut cells::Cell = cells::make(7);
+  cells::link(a, s);
+  match a.next {
+    n: cells::Cell { n.bump(); }
+  }
+  io::println(Str(a.n) + " " + Str(b.n) + " " + Str(s.n));
+  return 0;
+}

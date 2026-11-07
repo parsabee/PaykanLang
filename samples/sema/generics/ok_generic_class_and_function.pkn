@@ -51,7 +51,7 @@ fn describe(o: Obj) -> Str {
 }
 
 fn main() -> int {
-  let h: Holder = Holder();
+  let h = Holder();
   let n: int = unbox(h.get());
   let m: int = unbox<int>(Box<Box<int>>(Box<int>(1)).get());
   let arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];

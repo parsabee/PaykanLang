@@ -260,6 +260,10 @@ private:
       sym(d.isView() ? "view" : "static");
       close();
     }
+    if (d.isAsync()) { // the concurrency prototype
+      open("async");
+      close();
+    }
     if (d.hasInferredResult()) {
       open("inferred");
       close();
@@ -328,6 +332,20 @@ private:
     } else if (const auto *ot = dyn_cast<OptionalType>(t)) {
       open("optional-type", ot);
       type(ot->getInnerType());
+      close();
+    } else if (const auto *at = dyn_cast<AtomicType>(t)) {
+      open("atomic-type", at);
+      type(at->getInnerType());
+      close();
+    } else if (const auto *tt = dyn_cast<TaskType>(t)) {
+      open("task-type", tt);
+      type(tt->getInnerType());
+      close();
+    } else if (const auto *qt = dyn_cast<QualifiedType>(t)) {
+      open("qualified-type", qt);
+      OS << " \"" << qt->getQualifier().spelling() << "\"";
+      if (qt->getInnerType())
+        type(qt->getInnerType());
       close();
     } else if (const auto *tt = dyn_cast<TupleType>(t)) {
       open("tuple-type", tt);
@@ -434,6 +452,15 @@ private:
       close();
       return;
     }
+    case ASTNode::NK_LockStmt: {
+      const auto *l = cast<LockStmt>(s);
+      open("lock", l);
+      expr(l->getCell());
+      varDecl(*l->getBinding());
+      stmt(l->getBody());
+      close();
+      return;
+    }
     case ASTNode::NK_ForStmt: {
       const auto *f = cast<ForStmt>(s);
       open("for", f);
@@ -444,6 +471,10 @@ private:
       stmt(f->getBody());
       if (f->isInclusive()) {
         open("inclusive");
+        close();
+      }
+      if (f->isParallel()) { // the concurrency prototype
+        open("parallel");
         close();
       }
       close();
@@ -590,6 +621,10 @@ private:
       return "not";
     case UnaryOpcode::BitNot:
       return "bitnot";
+    case UnaryOpcode::Move:
+      return "move";
+    case UnaryOpcode::Await:
+      return "await";
     case UnaryOpcode::Count:
       break;
     }

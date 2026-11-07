@@ -110,14 +110,14 @@ class Holder {
 }
 
 // Keeps its parameter in a field, then lets the field go.
-fn stash(h: Holder, n: Node, w: view Watcher) {
+fn stash(h: mut Holder, n: Node, w: view Watcher) {
   h.n = n;
   h.n = None;
   report(w, "in stash, after the field let go");
 }
 
 // Keeps its parameter in a field the caller reads afterwards.
-fn keep(h: Holder, n: Node) {
+fn keep(h: mut Holder, n: Node) {
   h.n = n;
 }
 
@@ -134,7 +134,7 @@ fn handOffs() {
 
   let c = Node("c");
   let wc = Watcher(c);
-  let h = Holder(None);
+  let h: mut = Holder(None);
   stash(h, c, wc);
   report(wc, "in main, after stash");
 
@@ -145,7 +145,7 @@ fn handOffs() {
   // Lent to keep, which retains what it keeps.
   let k = Node("k");
   let wk = Watcher(k);
-  let g = Holder(None);
+  let g: mut = Holder(None);
   keep(g, k);
   label = "";
   match g.n {
@@ -164,7 +164,7 @@ class Pair {
 
 // The callee replaces the field its argument was read from, then reads
 // the argument: the caller keeps the argument alive (a hold).
-fn clearThenRead(s: Str, p: Pair) {
+fn clearThenRead(s: Str, p: mut Pair) {
   p.s = "replaced";
   io::println("still have " + s);
 }
@@ -178,7 +178,7 @@ fn nameAndNode(s: Str, n: Node, w: view Watcher) {
 }
 
 fn hazards() {
-  let p = Pair(None, "original " + "string");
+  let p: mut = Pair(None, "original " + "string");
   clearThenRead(p.s, p);
 
   let x = Node("x" + "name");
@@ -203,7 +203,7 @@ fn bump(n: inout Node) {
   n = Node("c");
 }
 
-fn viaInout(n: Node, w: view Watcher) {
+fn viaInout(n: mut Node, w: view Watcher) {
   bump(n);
   io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
 }
@@ -217,14 +217,14 @@ fn destructure(n: Node, w: view Watcher) {
   io::println("  destructure: old is " + state(w) + ", n = " + n.name);
 }
 
-fn armInout(n: Node, w: view Watcher) {
+fn armInout(n: mut Node, w: view Watcher) {
   match n {
     s: inout Node { s = Node("arm"); }
   }
   io::println("  armInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn inoutLocal(n: Node, w: view Watcher) {
+fn inoutLocal(n: mut Node, w: view Watcher) {
   r: inout = n;
   r = Node("loc");
   io::println("  inoutLocal: old is " + state(w) + ", n = " + n.name);
@@ -236,7 +236,7 @@ fn toNone(n: Node?, w: view Watcher) {
 }
 
 fn writes() {
-  let a = Node("a");
+  let a: mut = Node("a");
   let wa = Watcher(a);
   io::println("copies:");
   assign(a, wa);
@@ -251,7 +251,7 @@ fn writes() {
   let b = Node("b0");
   let wb = Watcher(b);
   assign(b, wb);
-  let c = Node("c0");
+  let c: mut = Node("c0");
   let wc = Watcher(c);
   viaInout(c, wc);
   let d = Node("d0");
@@ -260,10 +260,10 @@ fn writes() {
   let e = Node("e0");
   let we = Watcher(e);
   destructure(e, we);
-  let f = Node("f0");
+  let f: mut = Node("f0");
   let wf = Watcher(f);
   armInout(f, wf);
-  let g = Node("g0");
+  let g: mut = Node("g0");
   let wg = Watcher(g);
   inoutLocal(g, wg);
   io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd)
@@ -276,17 +276,17 @@ class Cell {
   n: Node;
 }
 
-fn direct(m: Node, h: Cell) {
+fn direct(m: Node, h: mut Cell) {
   h.n = Node("z");
   io::println("direct: " + m.name);
 }
 
 class Base {
-  view fn take(m: Node, h: Cell) { io::println("base"); }
+  view fn take(m: Node, h: mut Cell) { io::println("base"); }
 }
 
 class Derived: Base {
-  view fn take(m: Node, h: Cell) {
+  view fn take(m: Node, h: mut Cell) {
     h.n = Node("z");
     io::println("vcall: " + m.name);
   }
@@ -297,7 +297,7 @@ class Keeper {
 }
 
 impl Keeper {
-  fn __init__(m: Node, h: Cell) {
+  fn __init__(m: Node, h: mut Cell) {
     h.n = Node("z");
     self.m = m;
     io::println("ctor: " + m.name);
@@ -309,7 +309,7 @@ class Parent {
 }
 
 impl Parent {
-  fn __init__(m: Node, h: Cell) {
+  fn __init__(m: Node, h: mut Cell) {
     h.n = Node("z");
     self.m = m;
     io::println("super: " + m.name);
@@ -319,7 +319,7 @@ impl Parent {
 class Child: Parent { }
 
 impl Child {
-  fn __init__(h: Cell) { __super__(h.n, h); }
+  fn __init__(h: mut Cell) { __super__(h.n, h); }
 }
 
 struct S {
@@ -327,19 +327,19 @@ struct S {
 }
 
 impl S {
-  view fn meth(m: Node, h: Cell) {
+  view fn meth(m: Node, h: mut Cell) {
     h.n = Node("z");
     io::println("struct method: " + m.name);
   }
 }
 
-fn gen<T>(m: T, h: Cell) -> T {
+fn gen<T>(m: T, h: mut Cell) -> T {
   h.n = Node("z");
   return m;
 }
 
 fn kinds() {
-  let h = Cell(Node("a" + "1"));
+  let h: mut = Cell(Node("a" + "1"));
   direct(h.n, h);
   h.n = Node("a" + "2");
   let b: Base = Derived();
@@ -394,7 +394,7 @@ class Slot {
 
 // Lets go of the field its argument was matched from, then reads the
 // argument: the matched value keeps it alive until the match ends.
-fn dropAndRead(n: Node, s: Slot, w: view Watcher) {
+fn dropAndRead(n: Node, s: mut Slot, w: view Watcher) {
   s.n = None;
   report(w, "in dropAndRead, after the field let go");
   io::println("dropAndRead reads " + n.name);
@@ -405,7 +405,7 @@ fn movesLent() {
 
   let m = Node("m");
   let wm = Watcher(m);
-  let s = Slot(m);
+  let s: mut = Slot(m);
   match s.n {
     x: Node { dropAndRead(x, s, wm); }   // x's last use
     None { }

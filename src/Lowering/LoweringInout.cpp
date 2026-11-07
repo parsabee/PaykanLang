@@ -151,6 +151,8 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
     exprs = {x->getCondition()};
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     exprs = {x->getCondition()};
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    exprs = {x->getCell()};
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     exprs = {x->getStart(), x->getEnd(), x->getStep()};
   } else if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
@@ -186,10 +188,23 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
   for (ast::Expr *t : targets)
     if (ast::Identifier *root = storageRoot(t))
       places.insert(root);
+  // The receiver of a buffer read emitted in place (`b.at(i)`, `b.len()`:
+  // a number loaded at once, ExprEmitter::emitBufferRead) is used before
+  // any call of the statement runs, so no call can replace what it read:
+  // it is not held (a hold would count the buffer's object, which a
+  // `parallel for` body may never do).
+  std::unordered_set<const ast::Expr *> inPlace;
+  auto findInPlaceReads = [&](ast::Expr *e) {
+    if (auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e);
+        mc && isBufferReadInPlace(mc))
+      inPlace.insert(mc->getReceiver());
+  };
+  for (ast::Expr *e : exprs)
+    forEachEvaluated(e, findInPlaceReads);
   auto findReads = [&](ast::Expr *e) {
     if (auto *id = ast::dyn_cast<ast::Identifier>(e);
         id && !id->isFunctionRef() && changed.count(id->getName()) &&
-        !places.count(id)) {
+        !places.count(id) && !inPlace.count(id)) {
       ast::Type *ty = CurrentScope->lookupASTType(id->getName());
       if (ast::isRefType(ty) || (ast::isMemType(ty) && memHoldsRefs(ty)))
         HeldReads.insert(id);
@@ -301,7 +316,7 @@ size_t ModuleLowering::declareParam(const std::string &name,
     CurrentScope->declareInout(name, local,
                                toPIRType(canonicalizeDeclType(astTy)),
                                canonicalizeDeclType(astTy));
-  else if (astTy && ast::isRefType(astTy))
+  else if (astTy && (ast::isRefType(astTy) || ast::isa<ast::AtomicType>(astTy)))
     CurrentScope->declare(name, local, astTy);
   else
     CurrentScope->declare(name, local, nullptr);

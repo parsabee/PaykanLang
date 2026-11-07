@@ -3,7 +3,7 @@ import ::io;
 import ::collections;
 
 fn main() -> int {
-  l = collections::LinkedList<Str>();
+  l: mut = collections::LinkedList<Str>();
   io::println(l.getBack());
   return 0;
 }

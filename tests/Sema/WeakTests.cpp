@@ -143,7 +143,7 @@ TEST(Weak, NestedCaptureIsReadOnly) {
           let n = look(me);
           let keep: B? = me;
           v: view B? = me;
-          match me { x: B { x.n = x.n + n; } None { } }
+          match me { x: B { let sum = x.n + n; } None { } }
           return if me == None then keep else me;
         };
       };
@@ -225,7 +225,7 @@ TEST(Weak, LocalOfAViewReadsAsAView) {
         weak cur = self.head;
         match cur { n: Node { n.v = 9; n.bump(); take(n); } None { } }
       }
-      view fn keep(k: Keep) {
+      view fn keep(k: mut Keep) {
         weak cur = self.head;
         match cur { n: Node { k.n = n; } None { } }
       }
@@ -300,7 +300,7 @@ TEST(Weak, IsOtherwiseAnOptional) {
       w = o;
       w = None;
       w = u;
-      h = Holder(None, None);
+      h: mut = Holder(None, None);
       h.item = w;
       h.peek = x;
       h.peek = h.peek;

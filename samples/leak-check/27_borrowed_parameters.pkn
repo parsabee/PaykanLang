@@ -31,11 +31,11 @@ class Holder {
   n: Node?;
 }
 
-fn keep(h: Holder, n: Node) {
+fn keep(h: mut Holder, n: Node) {
   h.n = n;
 }
 
-fn handOn(h: Holder, n: Node) {
+fn handOn(h: mut Holder, n: Node) {
   keep(h, n);
 }
 
@@ -55,7 +55,7 @@ fn name(h: Holder) -> Str {
 }
 
 fn main() -> int {
-  let h = Holder(None);
+  let h: mut = Holder(None);
   let a = Node("a");
   keep(h, a);
   io::println("kept: " + a.name + " " + name(h));

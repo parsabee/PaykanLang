@@ -300,6 +300,34 @@ private:
     }
   }
 
+  /// ` parallel %counter, count privates(%a, %b) reduce(%p add)`, after a
+  /// parallel loop's body.
+  void printParallel(const Parallel &p) {
+    OS << " parallel ";
+    printLocalRef(p.Counter);
+    OS << ", ";
+    printOperand(p.Count);
+    if (!p.Privates.empty()) {
+      OS << " privates(";
+      for (size_t i = 0; i < p.Privates.size(); ++i) {
+        if (i)
+          OS << ", ";
+        printLocalRef(p.Privates[i]);
+      }
+      OS << ')';
+    }
+    if (!p.Reductions.empty()) {
+      OS << " reduce(";
+      for (size_t i = 0; i < p.Reductions.size(); ++i) {
+        if (i)
+          OS << ", ";
+        printLocalRef(p.Reductions[i].Partial);
+        OS << ' ' << opcodeName(p.Reductions[i].Op);
+      }
+      OS << ')';
+    }
+  }
+
   void printInstr(const Instr &in) {
     if (in.Result.Id != kNoValue) {
       printValueRef(in.Result, OS);
@@ -323,9 +351,14 @@ private:
       OS << " to " << typeName(in.CastTo);
       break;
     case Opcode::Call:
+    case Opcode::AsyncCall:
       OS << ' ';
       printSymbol(in.Callee, OS);
       printArgs(in, 0);
+      break;
+    case Opcode::Await:
+      OS << ' ' << typeName(in.Result.Ty) << ", ";
+      printOperandList(in.Args);
       break;
     case Opcode::VCall:
       OS << ' ';
@@ -456,7 +489,10 @@ private:
         if (w->Body)
           printBlock(*w->Body, depth + 1);
         indent(depth);
-        OS << "}\n";
+        OS << "}";
+        if (w->Par)
+          printParallel(*w->Par);
+        OS << "\n";
       } else if (const auto *sw = std::get_if<Switch>(&s)) {
         OS << "switch ";
         printOperand(sw->Value);
@@ -509,7 +545,8 @@ void printUses(const std::vector<std::string> &uses, std::ostream &os) {
 
 void printFunction(const Function &f, std::ostream &os) {
   if (f.IsExtern) {
-    os << (f.Shared ? "extern shared fn " : "extern fn ");
+    os << "extern " << (f.Shared ? "shared " : "")
+       << (f.IsAsync ? "async " : "") << "fn ";
     printSymbol(f.Name, os);
     print(f.Sig, os);
     if (!f.Module.empty()) {
@@ -524,7 +561,7 @@ void printFunction(const Function &f, std::ostream &os) {
     os << "\n";
     return;
   }
-  os << (f.Shared ? "shared fn " : "fn ");
+  os << (f.Shared ? "shared " : "") << (f.IsAsync ? "async " : "") << "fn ";
   printSymbol(f.Name, os);
   os << '(';
   for (size_t i = 0; i < f.Params.size(); ++i) {

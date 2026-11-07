@@ -180,7 +180,7 @@ fn main() -> int {
   t: (P, P) = (P(1), P(2));
   b = Box<P>(P(1));
   c = Box(P(2));
-  hld = Holder(P(3), [P(4), P(5)]);
+  hld: mut = Holder(P(3), [P(4), P(5)]);
   hld.p.x = 1;
   hld.ps[1].x = 2;
   r = P(9);
@@ -579,7 +579,7 @@ fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   a = mk();
   bump(a.x);
-  h = H(a);
+  h: mut = H(a);
   bump(h.a.x);
   m: inout = h.a.s;
   m = "b";
@@ -611,7 +611,7 @@ struct A { x: int; }
 class C { x: int; }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
-  a = A(1); b = A(2); c = C(1); d = C(2);
+  a = A(1); b = A(2); c: mut = C(1); d: mut = C(2);
   bump((if a.x == 1 then a else b).x);
   k: inout = (if a.x == 1 then a else b).x;
   bump((if c.x == 1 then c else d).x);

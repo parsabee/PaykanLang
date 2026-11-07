@@ -19,7 +19,7 @@ TEST(Let, LocalsHoldValuesAndReferences) {
       let n = 3;
       let f: float = 2;
       let s = "n=" + Str(n);
-      let p = Point(1);
+      let p: mut Point = Point(1);
       let base: Obj = Point(5);
       let xs: int[3] = [n, 4, p.x];
       let o: int? = None;

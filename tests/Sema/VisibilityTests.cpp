@@ -30,7 +30,7 @@ class Counter {
   fn __bump(by: int) { self.__count = self.__count + by; }
 }
 impl Counter {
-  static fn make(n: int) -> Counter { c = Counter(0, n); c.__count = 1; c.__bump(1); return c; }
+  static fn make(n: int) -> Counter { c: mut = Counter(0, n); c.__count = 1; c.__bump(1); return c; }
   fn reset() { self.__count = 0; }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
   fn later() -> (int) -> int { return fn(d: int) -> int { return self.__count + d; }; }
@@ -49,14 +49,14 @@ fn _helper(n: view _Node) -> int { return n.v; }
 class Box<T> { __v: T; view fn get() -> T { return self.__v; } fn set(v: T) { self.__v = v; } }
 impl Box<T> { fn __init__(v: T) { self.__v = v; } fn take(o: Box<T>) { self.__v = o.__v; } }
 fn main() -> int {
-  c = Counter::make(3);
+  c: mut = Counter::make(3);
   c.tick();
-  d = Counter(0, 1);
+  d: mut = Counter(0, 1);
   d.copyFrom(c);
   p = P::origin();
   p.bump();
   n = _Node(5, None);
-  b = Box(7);
+  b: mut = Box(7);
   b.set(8);
   return c.value() + d.value() + c.name().len() + p.x() + _helper(n) + b.get() + c.later()(1);
 }
@@ -157,7 +157,7 @@ impl C {
   fn __init__(x: int) { self._x = x; self.__y = x; }
   fn __repr() -> int { return self.__y; }
 }
-class D : C { fn x() -> int { return self._x + self._half(); } }
+class D : C { view fn x() -> int { return self._x + self._half(); } }
 impl C { view fn _half() -> int { return self._x / 2; } static fn _one() -> C { return C(1); } }
 impl D { fn __init__() { __super__(7); } }
 struct S { _n: int; }
@@ -186,7 +186,7 @@ impl Box<T> {
   view fn sameAs(o: view Box<int>) -> bool { return o.__v == 1; }
 }
 fn main() -> int {
-  a = Box("s");
+  a: mut = Box("s");
   b = Box(1);
   if a.sameAs(b) { return a.get().len(); }
   return b.__v;

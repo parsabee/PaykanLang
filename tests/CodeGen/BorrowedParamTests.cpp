@@ -64,7 +64,7 @@ class Holder {
 }
 
 // Keeps its parameter in a field, then lets the field go.
-fn stash(h: Holder, n: Node, w: view Watcher) {
+fn stash(h: mut Holder, n: Node, w: view Watcher) {
   h.n = n;
   h.n = None;
   report(w, "in stash, after the field let go");
@@ -83,7 +83,7 @@ fn main() -> int {
 
   c = Node("c");
   wc = Watcher(c);
-  h = Holder(None);
+  h: mut = Holder(None);
   stash(h, c, wc);
   report(wc, "in main, after stash");
 
@@ -147,7 +147,7 @@ fn report(w: view Watcher, tag: view Str) {
 
 // The callee replaces the field its argument was read from, then reads
 // the argument: the caller must keep the argument alive (a hold).
-fn clearThenRead(s: Str, h: Holder) {
+fn clearThenRead(s: Str, h: mut Holder) {
   h.s = "replaced";
   io::println("still have " + s);
 }
@@ -161,7 +161,7 @@ fn nameAndNode(s: Str, n: Node, w: view Watcher) {
 }
 
 fn main() -> int {
-  h = Holder(None, "original " + "string");
+  h: mut = Holder(None, "original " + "string");
   clearThenRead(h.s, h);
 
   x = Node("x" + "name");
@@ -352,7 +352,7 @@ fn f(s: Str, n: inout Node, w: view Watch) {
 }
 
 fn main() -> int {
-  x = Node("x" + "name");
+  x: mut = Node("x" + "name");
   wx = Watch(x);
   f(x.name, x, wx);
   io::println("after f: " + x.name);
@@ -448,17 +448,17 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn sink(s: Str, h: Holder, w: view Watch) {
+fn sink(s: Str, h: mut Holder, w: view Watch) {
   h.n = Node("replaced");
   io::println("in sink, old node is " + state(w) + "; s = " + s);
 }
 
-fn cur(h: Holder, w: view Watch) {
+fn cur(h: mut Holder, w: view Watch) {
   sink(h.n.name, h, w);
 }
 
 fn main() -> int {
-  h = Holder(Node("n" + "ame"));
+  h: mut = Holder(Node("n" + "ame"));
   w = Watch(h.n);
   cur(h, w);
   io::println("after cur: old node is " + state(w));
@@ -492,19 +492,19 @@ class Holder {
   n: Node;
 }
 
-fn direct(m: Node, h: Holder) {
+fn direct(m: Node, h: mut Holder) {
   h.n = Node("z");
   io::println("direct: " + m.name);
 }
 
 class Base {
-  view fn take(m: Node, h: Holder) {
+  view fn take(m: Node, h: mut Holder) {
     io::println("base");
   }
 }
 
 class Derived: Base {
-  view fn take(m: Node, h: Holder) {
+  view fn take(m: Node, h: mut Holder) {
     h.n = Node("z");
     io::println("vcall: " + m.name);
   }
@@ -515,7 +515,7 @@ class Keeper {
 }
 
 impl Keeper {
-  fn __init__(m: Node, h: Holder) {
+  fn __init__(m: Node, h: mut Holder) {
     h.n = Node("z");
     self.m = m;
     io::println("ctor: " + m.name);
@@ -527,7 +527,7 @@ class Parent {
 }
 
 impl Parent {
-  fn __init__(m: Node, h: Holder) {
+  fn __init__(m: Node, h: mut Holder) {
     h.n = Node("z");
     self.m = m;
     io::println("super: " + m.name);
@@ -538,7 +538,7 @@ class Child: Parent {
 }
 
 impl Child {
-  fn __init__(h: Holder) {
+  fn __init__(h: mut Holder) {
     __super__(h.n, h);
   }
 }
@@ -548,19 +548,19 @@ struct S {
 }
 
 impl S {
-  view fn meth(m: Node, h: Holder) {
+  view fn meth(m: Node, h: mut Holder) {
     h.n = Node("z");
     io::println("struct method: " + m.name);
   }
 }
 
-fn gen<T>(m: T, h: Holder) -> T {
+fn gen<T>(m: T, h: mut Holder) -> T {
   h.n = Node("z");
   return m;
 }
 
 fn main() -> int {
-  h = Holder(Node("a" + "1"));
+  h: mut = Holder(Node("a" + "1"));
   direct(h.n, h);
   h.n = Node("a" + "2");
   b: Base = Derived();
@@ -634,7 +634,7 @@ fn bump(n: inout Node) {
   n = Node("c");
 }
 
-fn viaInout(n: Node, w: view Watch) {
+fn viaInout(n: mut Node, w: view Watch) {
   bump(n);
   io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
 }
@@ -650,14 +650,14 @@ class Sub: Node {
   extra: int;
 }
 
-fn armInout(n: Node, w: view Watch) {
+fn armInout(n: mut Node, w: view Watch) {
   match n {
     s: inout Node { s = Node("arm"); }
   }
   io::println("  armInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn inoutLocal(n: Node, w: view Watch) {
+fn inoutLocal(n: mut Node, w: view Watch) {
   r: inout = n;
   r = Node("loc");
   io::println("  inoutLocal: old is " + state(w) + ", n = " + n.name);
@@ -669,7 +669,7 @@ fn toNone(n: Node?, w: view Watch) {
 }
 
 fn main() -> int {
-  a = Node("a");
+  a: mut = Node("a");
   wa = Watch(a);
   io::println("copies:");
   assign(a, wa);
@@ -684,7 +684,7 @@ fn main() -> int {
   b = Node("b0");
   wb = Watch(b);
   assign(b, wb);
-  c = Node("c0");
+  c: mut = Node("c0");
   wc = Watch(c);
   viaInout(c, wc);
   d = Node("d0");
@@ -693,10 +693,10 @@ fn main() -> int {
   e = Node("e0");
   we = Watch(e);
   destructure(e, we);
-  f = Node("f0");
+  f: mut = Node("f0");
   wf = Watch(f);
   armInout(f, wf);
-  g = Node("g0");
+  g: mut = Node("g0");
   wg = Watch(g);
   inoutLocal(g, wg);
   io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd) + " " + state(we) + " " + state(wf) + " " + state(wg));

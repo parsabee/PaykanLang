@@ -168,6 +168,11 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
     lc.Node->addCapture(Ctx.intern(name), ty, weak);
     lc.Boundary->declare(name, ty);
     lc.Boundary->Kinds[name] = weak ? VarKind::CapturedWeak : VarKind::Captured;
+    // The capture keeps the variable's form (the prototype): a `mut`
+    // object stays writable through it, though the capture itself is a
+    // read-only copy.
+    if (auto q = owner->Quals.find(name); q != owner->Quals.end())
+      lc.Boundary->Quals[name] = q->second;
     owner = lc.Boundary;
   }
   return true;
@@ -183,6 +188,13 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     SliceAllowed = p.Mode != ast::ParamMode::Value;
     auto *pty =
         resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
+    // The prototype's qualifiers: taken here too, as a function's are.
+    if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
+      if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
+                                p.Loc))
+        ok = false;
+      p.Qual = q;
+    }
     if (pty)
       p.ParamType = pty;
     else
@@ -198,6 +210,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "the lambda's result");
+    (void)takeQualifier(); // a lambda's result carries none (the prototype)
     if (!retTy)
       return nullptr;
     node->setReturnType(retTy);
@@ -236,9 +249,17 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   CurrentReturnType = retTy;
   LoopDepth = 0;
   CurrentMethodUse = nullptr;
+  // Its moves are its own: a capture is a read-only copy (the prototype).
+  MovedMap savedMoves = std::exchange(MovedVars, {});
+  std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
+  const bool savedFlowEnded = std::exchange(FlowEnded, false);
   bool bodyOk;
   {
     ScopeGuard guard(*this);
+    // The lambda's task handles are its own (the prototype).
+    Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
+    std::unordered_map<std::string, ast::SourceLocation> savedTasks =
+        std::exchange(TaskLocals, {});
     LambdaStack.push_back(
         {node, CurrentScope, savedClassCtx, savedMethodUse, Borrows});
     for (size_t i = 0; i < node->getParams().size(); ++i) {
@@ -247,9 +268,17 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
       if (p.Mode != ast::ParamMode::Value)
         CurrentScope->Kinds[p.getName()] =
             p.Mode == ast::ParamMode::View ? VarKind::View : VarKind::Inout;
+      ast::Qualifier q = p.Qual;
+      if (p.Mode == ast::ParamMode::Inout)
+        q.Mut = true; // the borrow's writes
+      CurrentScope->Quals[p.getName()] = q;
     }
     CurrentResult = {ast::ParamMode::Value, nullptr, CurrentScope};
     bodyOk = visitBody(node->getBody()->getStatements());
+    if (bodyOk && !FlowEnded)
+      checkTasksAwaited(CurrentScope, nullptr, node->getLocation());
+    FunctionScope = savedFunctionScope;
+    TaskLocals = std::move(savedTasks);
     if (bodyOk && inferred)
       retTy = inferredResult(node);
     if (!retTy)
@@ -266,6 +295,9 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   CurrentReturnType = savedRetTy;
   CurrentResult = savedResult;
   LoopDepth = savedLoopDepth;
+  MovedVars = std::move(savedMoves);
+  LoopMoveStack = std::move(savedLoopMoves);
+  FlowEnded = savedFlowEnded;
   CurrentMethodUse = savedMethodUse;
   CurrentClassCtx = savedClassCtx;
   if (!bodyOk)

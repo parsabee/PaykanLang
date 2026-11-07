@@ -104,12 +104,12 @@ is otherwise a name too.
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`, never one with type arguments (`"Half<int>"` is the parser's `a superclass cannot be generic: ...`); a generic class has type parameters. Each field is a `var` with a type and no initialiser. A method may have `_` in place of its body: a pure virtual method, `fn area() -> float;` ([`../language/05-classes.md`](../language/05-classes.md#pure-virtual-methods)) |
 | `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/11-structs.md`](../language/11-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL? INFERRED?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn`, an `impl` block's only, with `(qual static)`. `INFERRED` is `(inferred)` for `fn double(x: int) => x * 2;`, whose result type Sema infers: `_` for its `TYPE` and a body of one `return` of a value, as a lambda's |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL? ASYNC? INFERRED?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn`, an `impl` block's only, with `(qual static)`. `ASYNC` is `(async)` for an `async fn` ([`../design/concurrency.md`](../design/concurrency.md), the concurrency prototype), a top-level function whose call is a task: it follows the body and its `QUAL`. `INFERRED` is `(inferred)` for `fn double(x: int) => x * 2;`, whose result type Sema infers: `_` for its `TYPE` and a body of one `return` of a value, as a lambda's |
 | `(impl LOC TYPE (type-params NAME...)? (for TRAIT)? (methods FN...))` | an `impl` block: `TYPE` is the type's name as written (`"A"`, `"geo::Point"`). The block of a generic type has its type parameters (`impl Box<T>` is `(impl "Box" (type-params "T") ...)`). `impl Show for A` has `(for TRAIT)`, the trait as a type |
 | `(trait LOC NAME (type-params NAME...) (methods FN...))` | a trait. Its methods are signatures: each `fn` has `_` in place of its body, and none is generic |
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198), a top-level function only: the C symbol in place of the body; a generic one has type parameters |
 | `(param LOC NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `n: inout int` is `(param "n" (named-type "int") (qual inout))`. Its `LOC` is where `n: inout int` is written, which an error about the parameter shows and `--emit-ast` writes (new in 0.3.0); without one, the parameter is at its `fn`'s or `lambda`'s |
-| `(var LOC NAME TYPE? EXPR? MODE? LET? WEAK?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))`. `WEAK` is `(weak)` for a `weak` local or class field ([`../language/16-memory.md`](../language/16-memory.md)), which has a type or an initialiser and is never a borrow or `let`: `weak w: Node? = n;` is `(var "w" (optional-type (named-type "Node")) (ident "n") (weak))` |
+| `(var LOC NAME TYPE? EXPR? MODE? LET? WEAK?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser (but a `lock` block's binding, below) and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))`. `WEAK` is `(weak)` for a `weak` local or class field ([`../language/16-memory.md`](../language/16-memory.md)), which has a type or an initialiser and is never a borrow or `let`: `weak w: Node? = n;` is `(var "w" (optional-type (named-type "Node")) (ident "n") (weak))` |
 
 ### Types
 
@@ -122,6 +122,9 @@ is otherwise a name too.
 | `(tuple-type LOC TYPE TYPE TYPE...)` | `(T1, T2, ...)`, at least two |
 | `(fn-type LOC (params (param TYPE QUAL?)...) TYPE)` | a function type ([`../language/14-function-types.md`](../language/14-function-types.md)): `(int, view Str) -> bool` is `(fn-type (params (param (named-type "int")) (param (named-type "Str") (qual view))) (named-type "bool"))`; the result type is never `_` (`void` is `(named-type "void")`) |
 | `(generic-type LOC NAME TYPE TYPE...)` | `Box<int>`, `Pair<Str, int>`, `m::Box<int>` |
+| `(atomic-type LOC TYPE)` | `atomic T` (the concurrency prototype, [`../design/concurrency.md`](../design/concurrency.md)), the type of a place that is an atomic cell: `let hits: atomic int = 0;` has `(atomic-type (named-type "int"))`, and a class's field `n: atomic float;` the same with no initialiser. Sema checks that `T` is a number type, `bool` or `char` |
+| `(qualified-type LOC STR TYPE?)` | a qualifier on a place's type (the concurrency prototype): `STR` is the qualifier as spelled, `"mut"`, `"shared"`, `"shared mut"`, `"atomic shared"`, `"locked"` or `"locked mut"` (the bare type, immutable and unique, is unwritten, and `atomic T` is an `atomic-type`; any other spelling is refused: `unknown qualifier "mutable" (mut, shared, shared mut, atomic shared, locked, locked mut)`), then the type it qualifies, which is absent when the declaration infers it: `p: shared mut Node` is `(param "p" (qualified-type "shared mut" (named-type "Node")))`, and `x: mut = e;` has `(qualified-type "mut")` |
+| `(task-type LOC TYPE)` | the type of a task, an `async fn`'s result before `await`. No source spells it (a task is what a call of an `async fn` is), so the writer never meets one; the reader accepts it so that a tree holding one reads back |
 
 A `named-type` is resolved the way the recursive-descent frontend resolves a
 name: a builtin type or a class the compiler predefines (`Str`, `Obj`, ...)
@@ -143,7 +146,8 @@ to resolve, which reports unknown names.
 | `(return LOC EXPR?)` | `return;` / `return e;` |
 | `(if LOC EXPR BLOCK ELSE)` | `ELSE` is a `block`, another `if` (`elif`), or `_` |
 | `(while LOC EXPR BLOCK)` | |
-| `(for LOC VAR EXPR EXPR EXPR BLOCK (inclusive)?)` | `for i in a..b step s { ... }`: the loop's variable as a `var` with no initialiser (`(var "i" TYPE _)`, `TYPE` its annotation or `_`; the name is `""` for `for _ in ...`), the range's start and end, the step or `_` (none written), the body, and a trailing `(inclusive)` for `..=` |
+| `(lock LOC EXPR VAR BLOCK)` | `lock cell as v: inout { ... }` (the concurrency prototype): the cell, an expression naming a `locked` place; the binding, a `var` with no type, no initialiser and `(qual inout)` or `(qual view)`, the one borrow written without an initialiser (`v: view` is `(var "v" _ _ (qual view))`); then the body |
+| `(for LOC VAR EXPR EXPR EXPR BLOCK (inclusive)? (parallel)?)` | `for i in a..b step s { ... }`: the loop's variable as a `var` with no initialiser (`(var "i" TYPE _)`, `TYPE` its annotation or `_`; the name is `""` for `for _ in ...`), the range's start and end, the step or `_` (none written), the body, a trailing `(inclusive)` for `..=`, and `(parallel)` after it for `parallel for` (the concurrency prototype) |
 | `(break LOC)`, `(continue LOC)` | |
 | `(match LOC EXPR ARM...)` | `match e { ... }`, at least one `ARM` |
 | `(type-arm LOC STR TYPE QUAL? BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }`. `QUAL` is a binding's mode, `(qual view)` for `b: view T { ... }` or `(qual inout)`, and needs a binding |
@@ -161,7 +165,7 @@ to resolve, which reports unknown names.
 | `(string LOC STR)` | a string literal: its value after the source's escapes are applied |
 | `(none LOC)` | `None` |
 | `(ident LOC NAME)` | a name |
-| `(unary LOC OP EXPR)` | `OP` is `neg` (`-`), `not` (`!`) or `bitnot` (`~`) |
+| `(unary LOC OP EXPR)` | `OP` is `neg` (`-`), `not` (`!`), `bitnot` (`~`), `move` (`move x`, `move x.f`: the concurrency prototype) or `await` (`await e`) |
 | `(binary LOC OP EXPR EXPR)` | `OP` is one of `add sub mul div mod lt gt le ge eq ne and or bitand bitor bitxor shl shr`: `and` and `or` are `&&` and `\|\|`, and `bitand bitor bitxor shl shr` are `& \| ^ << >>` ([`../design/bitwise.md`](../design/bitwise.md)) |
 | `(ternary LOC EXPR EXPR EXPR)` | `c ? a : b` |
 | `(call LOC NAME (type-args TYPE...) EXPR...)` | `f(a, b)`, `first<int>(xs)`, `Point(1, 2)`, `m::f(x)` (the qualified name as one string) |
@@ -217,7 +221,9 @@ function that is neither a class's method nor a trait's, `(native ...)` on
 a method, `(qual static)` outside an `impl` block, a `decl` without an
 initialiser that is not `weak`, a `value-arm` whose pattern is not a
 literal, an `enum` without a variant, a `match` without an arm, a binding on
-a `value-arm` or a `wildcard-arm`, and a `NAME` the grammar does not write
+a `value-arm` or a `wildcard-arm`, a `lock` whose binding is not a `view`
+or `inout` without an initialiser, a `qualified-type` whose qualifier is
+not one of its six spellings, and a `NAME` the grammar does not write
 where it stands: `"a b"`, a keyword, or a qualified `"io::x"` as a
 variable's name). A module's templates in a `.pkm` (its TMPL section,
 [`../design/pkm.md`](../design/pkm.md)) are read with the compiler's own

@@ -214,9 +214,11 @@ void ModuleLowering::markShared() {
     if (f.IsExtern)
       continue; // an extern is as shared as its definition (declareExternFrom)
     const std::string owner(ownerTypeName(f.Name));
-    f.Shared = (f.Name.starts_with(kHiddenQualPrefix) &&
-                f.Name.find('<') != std::string::npos) ||
-               (owner.find('<') != std::string::npos && OwnTypes.count(owner));
+    f.Shared =
+        (f.Name.starts_with(kHiddenQualPrefix) &&
+         f.Name.find('<') != std::string::npos) ||
+        (owner.find('<') != std::string::npos && OwnTypes.count(owner)) ||
+        DroppedCopyFunctions.count(f.Name);
   }
 }
 

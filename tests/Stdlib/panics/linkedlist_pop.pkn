@@ -2,7 +2,7 @@
 import ::collections;
 
 fn main() -> int {
-  l = collections::LinkedList<int>();
+  l: mut = collections::LinkedList<int>();
   l.pushBack(1);
   l.popBack();
   l.popFront();

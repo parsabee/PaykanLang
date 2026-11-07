@@ -209,6 +209,20 @@ void ASTPrinter::visitIfStmt(IfStmt *node) {
   }
 }
 
+void ASTPrinter::visitLockStmt(LockStmt *node) {
+  header("LockStmt", node);
+  OS << " '" << node->getBinding()->getName() << "' "
+     << paramModeName(node->getBinding()->getMode()) << "\n";
+  {
+    ChildScope cs(*this, false);
+    visit(node->getCell());
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getBody());
+  }
+}
+
 void ASTPrinter::visitWhileStmt(WhileStmt *node) {
   header("WhileStmt", node);
   OS << "\n";
@@ -492,6 +506,29 @@ void ASTPrinter::visitSliceType(SliceType *node) {
   OS << "\n";
   ChildScope cs(*this, true);
   visit(node->getElementType());
+}
+
+void ASTPrinter::visitAtomicType(AtomicType *node) {
+  header("AtomicType", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getInnerType());
+}
+
+void ASTPrinter::visitTaskType(TaskType *node) {
+  header("TaskType", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getInnerType());
+}
+
+void ASTPrinter::visitQualifiedType(QualifiedType *node) {
+  header("QualifiedType", node);
+  OS << " '" << node->getQualifier().spelling() << "'\n";
+  if (node->getInnerType()) {
+    ChildScope cs(*this, true);
+    visit(node->getInnerType());
+  }
 }
 
 void ASTPrinter::visitPoisonType(PoisonType *node) {

@@ -27,16 +27,16 @@ impl Holder {
 }
 
 fn probe(a: A) {
-  io::println(Str<int>(a.x));
+  io::println(Str(a.x));
 }
 
 fn main() -> int {
   let o: Obj = A();
-  let h: Holder = Holder(A());
+  let h: mut = Holder(A());
   match o {
     b: A {
       probe(b);      // consumed argument: retains the subject's box
-      let c: A = b;  // new owner: shares the same box
+      let c = b;     // new owner: shares the same box
       h.a = b;       // field slot: releases old box, retains subject's
       io::println(Str(c.x + h.a.x));  // 10
     }

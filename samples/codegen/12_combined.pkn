@@ -23,7 +23,7 @@ fn clamp(v: int, lo: int, hi: int) -> int {
 
 fn gcd(a: int, b: int) -> int {
   while b != 0 {
-    let t: int = b;
+    let t = b;
     b = a % b;
     a = t;
   }
@@ -37,7 +37,7 @@ fn isPrime(n: int) -> bool {
   if n < 2 { return False; }
   if n == 2 { return True; }
   if n % 2 == 0 { return False; }
-  d: int = 3;
+  d = 3;
   while d * d <= n {
     if n % d == 0 { return False; }
     d = d + 2;
@@ -46,8 +46,8 @@ fn isPrime(n: int) -> bool {
 }
 
 fn sumRange(lo: int, hi: int) -> int {
-  s: int = 0;
-  i: int = lo;
+  s = 0;
+  i = lo;
   while i <= hi {
     s = s + i;
     i = i + 1;
@@ -56,8 +56,8 @@ fn sumRange(lo: int, hi: int) -> int {
 }
 
 fn power(base: int, exp: int) -> int {
-  r: int = 1;
-  i: int = 0;
+  r = 1;
+  i = 0;
   while i < exp {
     r = r * base;
     i = i + 1;
@@ -77,7 +77,7 @@ fn favg(a: float, b: float) -> float {
 // ---- Str helpers ----------------------------------------------------------
 
 fn padLeft(s: Str, width: int) -> Str {
-  result: Str = s;
+  result = s;
   while result.len() < width {
     result = " " + result;
   }
@@ -88,7 +88,7 @@ fn fizzbuzz(n: int) -> Str {
   if n % 15 == 0 { return "FizzBuzz"; }
   if n % 3 == 0 { return "Fizz"; }
   if n % 5 == 0 { return "Buzz"; }
-  return Str<int>(n);
+  return Str(n);
 }
 
 fn tableRow(label: Str, val: int) -> Str {
@@ -112,36 +112,36 @@ fn main() -> int {
 
   // ---------- Relational & logical -----------------------------------------
   io::println("\n--- Relational/Logical ---");
-  let x: int = 7;
-  io::println("7 in [1,10]: " + Str<bool>(x >= 1 && x <= 10));  // True
+  let x = 7;
+  io::println("7 in [1,10]: " + Str(x >= 1 && x <= 10));  // True
   io::println("7 prime:     " + Str(isPrime(x)));  // True
-  io::println("7 even:      " + Str<bool>(x % 2 == 0));  // False
+  io::println("7 even:      " + Str(x % 2 == 0));   // False
   io::println("!prime(4):   " + Str(!isPrime(4)));  // True
 
   // ---------- Float ---------------------------------------------------------
   io::println("\n--- Float ---");
-  let pi: float = 3.14159;
-  io::println("pi^2=" + Str<float>(fsquare(pi)));  // ~9.8696
+  let pi = 3.14159;
+  io::println("pi^2=" + Str(fsquare(pi)));    // ~9.8696
   io::println("avg=" + Str(favg(1.0, 3.0)));  // 2
-  io::println("0.1+0.2=" + Str<float>(0.1 + 0.2));
+  io::println("0.1+0.2=" + Str(0.1 + 0.2));
 
   // ---------- Ternary -------------------------------------------------------
   io::println("\n--- Ternary ---");
-  let grade: int = 83;
+  let grade = 83;
   let band: Str = if grade >= 90 then "A" else if grade >= 80 then "B"
       else if grade >= 70 then "C" else "F";
   io::println("grade 83 -> " + band);   // B
 
   // ---------- Control flow --------------------------------------------------
   io::println("\n--- FizzBuzz 1-20 ---");
-  k: int = 1;
+  k = 1;
   while k <= 20 {
     io::println(fizzbuzz(k));
     k = k + 1;
   }
 
   io::println("\n--- Primes up to 30 ---");
-  p: int = 2;
+  p = 2;
   while p <= 30 {
     if isPrime(p) {
       io::println(Str(p));
@@ -158,16 +158,16 @@ fn main() -> int {
 
   // ---------- Str methods & ops --------------------------------------------
   io::println("\n--- Str methods ---");
-  let hello: Str = "Hello";
-  let world: Str = " World";
-  let hw: Str = hello + world;
+  let hello = "Hello";
+  let world = " World";
+  let hw = hello + world;
   io::println(hw);                          // Hello World
-  io::println(Str<int>(hw.len()));      // 11
+  io::println(Str(hw.len()));               // 11
   io::println(hw.toString());               // Hello World
 
   // Padded table rows via Str helper
   io::println("\n--- Padded table ---");
-  i: int = 1;
+  i = 1;
   while i <= 5 {
     io::println(tableRow("item-" + Str(i), i * i));
     i = i + 1;
@@ -175,12 +175,12 @@ fn main() -> int {
 
   // ---------- Nested scopes + cleanup --------------------------------------
   io::println("\n--- Scope stress ---");
-  j: int = 0;
+  j = 0;
   while j < 4 {
-    let row: Str = "row-" + Str<int>(j);
-    col: int = 0;
+    let row = "row-" + Str(j);
+    col = 0;
     while col < 3 {
-      let cell: Str = row + "-" + Str(col);
+      let cell = row + "-" + Str(col);
       io::println(cell);
       col = col + 1;
     }

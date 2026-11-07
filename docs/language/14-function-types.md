@@ -211,7 +211,7 @@ struct P { x: int; }
 
 fn main() -> int {
   n = 1;
-  let c = Counter(1);
+  let c: mut = Counter(1);
   p = P(1);
   let f = fn() -> int { c.n = c.n + 1; return n + p.x + c.n; };   // n, p copied; c shared
   n = 100;
@@ -232,12 +232,12 @@ Inside the lambda a captured name is read-only: it cannot be assigned (`cannot a
 function is made, or keep it in an object)`), passed to an `inout` parameter, or, when
 it holds a value in place, have a field or an element assigned (`'p' is captured by copy
 by the function; cannot assign to its field 'x'`).  An object reached through a captured
-reference is changed through it as through any other reference (`c.n = c.n + 1` above):
-to share a counter with a closure, keep it in an object. Read, a captured name is a value
-like any other: the lambda may return it, store it in a local or pass it to any parameter,
-a struct, a tuple or a tagged union as well as a string or an object (`fn constant<T>(x:
-T) -> () -> T { return fn() -> T { return x; }; }` works for every `T`), and the copy holds
-the references the capture does.
+`mut` reference is changed through it as through any other (`c.n = c.n + 1` above, with
+`c` a `mut Counter`): to share a counter with a closure, keep it in an object. Read, a
+captured name is a value like any other: the lambda may return it, store it in a local or
+pass it to any parameter, a struct, a tuple or a tagged union as well as a string or an
+object (`fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }` works for
+every `T`), and the copy holds the references the capture does.
 
 What cannot be captured: a `view` or `inout` parameter or local, or a `match` binding of
 one (`'v' is a 'view' parameter; a function cannot capture a borrow (it may outlive the
@@ -261,7 +261,7 @@ class Counter {
 }
 
 fn main() -> int {
-  let c = Counter(5);
+  let c: mut = Counter(5);
   let add = c.adder();
   let get = c.reader();
   add(10);
@@ -302,7 +302,7 @@ fn plus(a: int, b: int) -> int { return a + b; }
 
 fn main() -> int {
   let ops: Op[2] = [Op("plus", plus), Op("times", fn(a: int, b: int) -> int { return a * b; })];
-  let h = Handler(None);
+  let h: mut = Handler(None);
   h.cb = fn(s: Str) -> Str { return s + "!"; };
   match h.cb {
     f: (Str) -> Str { io::println(f(ops[0].name) + " " + f(ops[1].name)); }
@@ -398,7 +398,8 @@ Output:
 
 A function type crosses a module boundary in a signature or a field like any type, an
 imported function is a value under its qualifier (`ops::square`), and a closure made in
-one module is called in another:
+one module is called in another. `click` hands a field of `self` to the function value, so
+it is not a `view fn`, and `b` is a `mut Button`:
 
 ```pkn
 // file: ops.pkn
@@ -418,7 +419,7 @@ import ops;
 
 fn main() -> int {
   let t = ops::twice(ops::square);
-  let b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  let b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   io::println(Str(t(3)) + " " + b.click());
   return 0;
 }

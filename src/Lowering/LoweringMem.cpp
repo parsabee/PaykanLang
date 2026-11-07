@@ -197,6 +197,13 @@ void ModuleLowering::releaseSliceCopy(const Val &copy, const Val &len,
 }
 
 ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
+  // `move v` of a value held in memory (the prototype): the value where it
+  // is, as emitMemAddress reads it; Sema has ended `v`, whose teardown
+  // still drops its own references (a copy of the bytes retains the
+  // references among them).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    return emitMemRead(u->getOperand());
   // A tuple or a struct made the present value of its optional: the
   // optional, in a temporary.
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
@@ -341,6 +348,12 @@ ast::Expr *ModuleLowering::memValueVisitsFirst(ast::Expr *e) {
 }
 
 Val ModuleLowering::emitMemAddress(ast::Expr *e) {
+  // `move v` of a value held in memory (the prototype): the value where it
+  // is; Sema has ended `v`, whose teardown still drops its own references
+  // (a copy of the bytes retains the references among them).
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    return emitMemAddress(u->getOperand());
   MemValue v = emitMemValue(e);
   // The temporary is what emitMemValue built: a tuple or a struct made the
   // present value of its optional is the optional (memTypeOf), whose
@@ -622,6 +635,11 @@ Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
 }
 
 void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
+  // `move v` of a value held in memory (the prototype): the value as it
+  // is; Sema has ended `v`.
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    e = u->getOperand();
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
     emitMemOptionalWrap(e, dst);
     return;

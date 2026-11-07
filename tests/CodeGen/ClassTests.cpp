@@ -111,7 +111,7 @@ TEST(Class, FieldReadWrite) {
     }
   )",
                                  R"(
-    p: Point = Point(0, 0);
+    p: mut Point = Point(0, 0);
     p.x = 3;
     p.y = 7;
     io::println(Str<int>(p.x));
@@ -182,7 +182,7 @@ TEST(Class, FieldReassign) {
     }
   )",
                                  R"(
-    m: Mutable = Mutable(10);
+    m: mut Mutable = Mutable(10);
     m.set(99);
     io::println(Str<int>(m.val));
   )"));
@@ -197,7 +197,7 @@ TEST(Class, MethodReturnsField) {
   auto r = compileAndRun(withFns(R"(
     class Foo {
       x: int;
-      fn get() -> int { return self.x; }
+      view fn get() -> int { return self.x; }
     }
 
     impl Foo {
@@ -221,7 +221,7 @@ TEST(Class, MethodWithParam) {
     }
   )",
                                  R"(
-    a: Acc = Acc(0);
+    a: mut Acc = Acc(0);
     a.add(5);
     a.add(3);
     io::println(Str<int>(a.total));
@@ -236,7 +236,7 @@ TEST(Class, MethodComputed) {
     class Rect {
       w: int;
       h: int;
-      fn area() -> int { return self.w * self.h; }
+      view fn area() -> int { return self.w * self.h; }
     }
 
     impl Rect {
@@ -332,10 +332,10 @@ TEST(Class, SubclassOwnField) {
 TEST(Class, MethodOverride) {
   auto r = compileAndRun(withFns(R"(
     class Shape {
-      fn describe() -> Str { return "shape"; }
+      view fn describe() -> Str { return "shape"; }
     }
     class Circle : Shape {
-      fn describe() -> Str { return "circle"; }
+      view fn describe() -> Str { return "circle"; }
     }
   )",
                                  R"(
@@ -410,7 +410,7 @@ TEST(Class, InheritedMethod) {
   auto r = compileAndRun(withFns(R"(
     class Base {
       n: int;
-      fn doubled() -> int { return self.n * 2; }
+      view fn doubled() -> int { return self.n * 2; }
     }
 
     impl Base {
@@ -484,7 +484,7 @@ TEST(Class, ReturnClassFromFunction) {
 TEST(Class, MethodWithIfElse) {
   auto r = compileAndRun(withFns(R"(
     class Sign {
-      fn of(n: int) -> Str {
+      view fn of(n: int) -> Str {
         if n > 0 {
           return "pos";
         } else {
@@ -517,7 +517,7 @@ TEST(Class, MethodWithLoop) {
     }
   )",
                                  R"(
-    s: Summer = Summer(0);
+    s: mut Summer = Summer(0);
     s.sumTo(5);
     io::println(Str<int>(s.total));
   )"));
@@ -530,28 +530,28 @@ TEST(Class, MethodWithLoop) {
 // Shared class hierarchy used across match tests.
 static const std::string kMatchHierarchy = R"(
   class Animal {
-    fn speak() -> Str { return "..."; }
+    view fn speak() -> Str { return "..."; }
   }
 
   impl Animal {
     fn __init__() {}
   }
   class Dog : Animal {
-    fn speak() -> Str { return "Woof"; }
+    view fn speak() -> Str { return "Woof"; }
   }
 
   impl Dog {
     fn __init__() { __super__(); }
   }
   class Cat : Animal {
-    fn speak() -> Str { return "Meow"; }
+    view fn speak() -> Str { return "Meow"; }
   }
 
   impl Cat {
     fn __init__() { __super__(); }
   }
   class Bird : Animal {
-    fn speak() -> Str { return "Tweet"; }
+    view fn speak() -> Str { return "Tweet"; }
   }
 
   impl Bird {
@@ -976,7 +976,7 @@ TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
   auto r =
       compileAndRun("fn helper() -> int { return 7; }\n"
                     "class C {\n"
-                    "  fn get() -> int { return helper(); }\n"
+                    "  view fn get() -> int { return helper(); }\n"
                     "}\n"
                     "impl C {\n"
                     "  fn __init__() {}\n"
@@ -989,7 +989,7 @@ TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
 TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
   auto r =
       compileAndRun("class C {\n"
-                    "  fn get() -> int { return helper(); }\n"
+                    "  view fn get() -> int { return helper(); }\n"
                     "}\n"
                     "impl C {\n"
                     "  fn __init__() {}\n"
@@ -1121,7 +1121,7 @@ TEST(Class, MethodMatchesOwnType) {
   auto r = compileAndRun(R"(import ::io;
     class Node {
       v: int;
-      fn isNode(o: Obj) -> bool {
+      view fn isNode(o: Obj) -> bool {
         match o { n: Node { return True; } _ { return False; } }
       }
     }
@@ -1205,8 +1205,8 @@ TEST(Class, FieldsOfAConditionalReceiver) {
     fn shout(s: inout Str) { s = s + "!"; }
   )",
                                  R"(
-    a = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
-    b = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
+    a: mut = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
+    b: mut = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
     b.back = a;
     for k in 1..=2 {
       x = (if k == 1 then a else b).name;

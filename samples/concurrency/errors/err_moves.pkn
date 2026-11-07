@@ -1,0 +1,44 @@
+import ::io;
+
+class Job {
+  name: Str;
+}
+class Holder {
+  job: Job;
+  other: shared Job;
+}
+
+fn keep(j: Job) -> int {
+  return j.name.len();
+}
+fn look(j: view Job, k: Job) -> int {
+  return j.name.len() + k.name.len();
+}
+
+fn main() -> int {
+  let a = Job("a");
+  if a.name.len() > 3 { keep(move a); }
+  io::println(a.name);                 // error: may have been moved (by the 'if')
+  let b = Job("b");
+  match 3 { 3 { keep(move b); } _ { } }
+  io::println(b.name);                 // error: may have been moved (by the 'match')
+  let c = Job("c");
+  for i in 0..2 { keep(move c); }      // error: moved in the loop and not assigned again
+  d = Job("d");
+  while True {
+    if d.name.len() > 0 { keep(move d); continue; }   // error: continue without an assignment
+    d = Job("dd");
+    break;
+  }
+  let e = Job("e");
+  v: view = e;
+  keep(move e);                        // error: viewed by 'v'
+  io::println(v.name);
+  let f = Job("f");
+  look(f, move f);                     // error: viewed by parameter and moved
+  let h = Holder(Job("in"), Job("o"));
+  let o = move h.other;                // error: not a unique part
+  let i = move h.job;
+  io::println(h.job.name);             // error: h was moved
+  return 0;
+}

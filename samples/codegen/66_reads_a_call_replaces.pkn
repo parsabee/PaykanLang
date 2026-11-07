@@ -60,17 +60,17 @@ fn take(s: Str) -> Str {
 }
 
 /// Its parameter's only reference may be its own (a variable's last use).
-fn use(p: Node) -> Str {
+fn use(p: mut Node) -> Str {
   return p.name + replNode(p) + " " + p.name;
 }
 
 fn main() -> int {
-  s = "first" + Str(1);
+  s: mut = "first" + Str(1);
   io::println("string: " + (s + repl(s)) + " " + s);
   s += repl(s);
   io::println("assigned: " + s);
 
-  l = Node("node" + Str(1));
+  l: mut = Node("node" + Str(1));
   io::println("receiver: " + l.greet(replNode(l)) + " " + l.name);
 
   h = Holder(Node("sn" + Str(1)));
@@ -82,15 +82,15 @@ fn main() -> int {
   arr = [Node("x" + Str(1)), Node("y" + Str(1))];
   io::println("array: " + arr[0].greet(replArray(arr)) + " " + arr[0].name);
 
-  let x = Node("old" + Str(1));
+  let x: mut = Node("old" + Str(1));
   io::println("handed on: " + use(x));
 
-  let x2 = Node("x" + Str(2));
-  y = x2;
+  let x2: mut = Node("x" + Str(2));
+  y: mut = x2;
   io::println("moved into: " + y.greet(replNode(y)) + " " + y.name);
 
-  let a = "first" + Str(1);
-  s2 = a;
+  let a: mut = "first" + Str(1);
+  s2: mut = a;
   let t = take(a);
   io::println("shared: " + t + " " + (s2 + repl(s2)) + " " + s2);
   return 0;

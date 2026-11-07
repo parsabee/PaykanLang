@@ -1,0 +1,37 @@
+// Compute bound: `work` dependent multiply-adds per element, little memory
+// traffic.  Scales with cores and shows the performance/efficiency core mix.
+//   compute <n> <reps> <work>    n <= 16384
+import ::io;
+import bench;
+
+fn main(args: view Str[]) -> int {
+  n = bench::arg(args, 1, 16384);
+  if n > 16384 { n = 16384; }
+  let reps = bench::arg(args, 2, 5);
+  let work = bench::arg(args, 3, 2000);
+  xs = [0.0; 16384];
+  for i in 0..n { xs[i] = float(i % 97) * 0.01; }
+  best = 0;
+  total = 0;
+  s = 0.0;
+  let c0 = bench::cpu();
+  let w0 = bench::now();
+  for r in 0..reps {
+    let t0 = bench::now();
+    s = 0.0;
+    parallel for i in 0..n {
+      x = xs[i];
+      for k in 0..work { x = x * x * 0.5 + 0.25; }
+      s += x;
+    }
+    let dt = bench::now() - t0;
+    total += dt;
+    if best == 0 || dt < best { best = dt; }
+  }
+  let cpu = bench::cpu() - c0;
+  let wall = bench::now() - w0;
+  io::println("compute n=" + Str(n) + " reps=" + Str(reps) + " work="
+      + Str(work) + " ns_min=" + Str(best) + " ns_mean=" + Str(total / reps)
+      + " wall_ns=" + Str(wall) + " cpu_ns=" + Str(cpu) + " check=" + Str(s));
+  return 0;
+}

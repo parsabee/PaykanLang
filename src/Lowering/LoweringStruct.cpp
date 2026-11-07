@@ -94,34 +94,75 @@ void ModuleLowering::declareStruct(ast::StructDecl *sd) {
   ctor->Params.back().Name = "out";
 }
 
+void ModuleLowering::lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
+                                       ast::FuncDecl *funcDecl) {
+  auto *md = st->findMethod(funcDecl->getName());
+  if (!md)
+    return;
+  pir::Function *fn =
+      FuncByName.at(sd->getName() + kNameSep + funcDecl->getName());
+  FunctionStateGuard fnState(*this, fn, md->getReturnType(),
+                             /*methodClassTy=*/nullptr);
+  {
+    ScopeGuard guard(*this);
+    // `self` names the receiver's storage, as an `inout` parameter of the
+    // struct's type names its caller's.
+    declareMemParam(kSelf, fn->Params[0], st, ast::ParamMode::Inout);
+    size_t at = 1;
+    for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
+      at += declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
+                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
+    emitBody(funcDecl->getBody());
+  }
+  emitImplicitReturn(fn->Sig);
+}
+
+// A copy of an import's instantiation (readImportedCopies) is that module's,
+// which the program links, but its file keeps of a copy it does not expose
+// only what its own code reaches (docs/design/pkm.md §5.13): the
+// `mem::Buffer<Str>` behind `collections::List<Str>`'s private field has no
+// `grow`, which this module may call.  A method the exporting module does
+// not define is this module's to emit, from the copy Sema checked, as a
+// shared copy of its own: the program keeps one of each.
+void ModuleLowering::declareDroppedCopyMethods() {
+  for (ast::StructDecl *sd : SemaCtx.ImportedInstanceStructs) {
+    ast::StructType *st = ASTCtx.lookupStructType(sd->getName());
+    const std::string *origin = st ? typeOrigin(sd->getName()) : nullptr;
+    if (!origin || *origin == Mod.Name)
+      continue;
+    auto modIt = PL.ByName.find(*origin);
+    const pir::Module *def = modIt == PL.ByName.end() ? nullptr : modIt->second;
+    for (ast::FuncDecl *funcDecl : sd->getMethods()) {
+      ast::MethodDecl *md = st->findMethod(funcDecl->getName());
+      if (!md || !funcDecl->getBody())
+        continue;
+      const std::string symbol = sd->getName() + kNameSep + funcDecl->getName();
+      const pir::Function *f = def ? def->findFunction(symbol) : nullptr;
+      if ((f && def->defines(*f)) || FuncByName.count(symbol))
+        continue;
+      pir::Function *fn =
+          getOrCreateFunction(symbol, structMethodSignature(md));
+      fn->Params[0].Name = kSelf;
+      nameParams(*fn, 1, funcDecl->getParams());
+      DroppedCopyMethods.emplace_back(sd, funcDecl);
+      DroppedCopyFunctions.insert(symbol);
+    }
+  }
+}
+
+void ModuleLowering::lowerDroppedCopyMethods() {
+  for (auto &[sd, funcDecl] : DroppedCopyMethods)
+    lowerStructMethod(sd, ASTCtx.lookupStructType(sd->getName()), funcDecl);
+}
+
 Val ModuleLowering::lowerStructDecl(ast::StructDecl *sd) {
   auto *st = ASTCtx.lookupStructType(sd->getName());
   assert(st && "StructType must have been registered by Sema");
   declareStruct(sd);
 
   // 1. Method bodies.
-  for (auto *funcDecl : sd->getMethods()) {
-    auto *md = st->findMethod(funcDecl->getName());
-    if (!md)
-      continue;
-    pir::Function *fn =
-        FuncByName.at(sd->getName() + kNameSep + funcDecl->getName());
-    FunctionStateGuard fnState(*this, fn, md->getReturnType(),
-                               /*methodClassTy=*/nullptr);
-    {
-      ScopeGuard guard(*this);
-      // `self` names the receiver's storage, as an `inout` parameter of the
-      // struct's type names its caller's.
-      declareMemParam(kSelf, fn->Params[0], st, ast::ParamMode::Inout);
-      size_t at = 1;
-      for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
-        at +=
-            declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
-                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
-      emitBody(funcDecl->getBody());
-    }
-    emitImplicitReturn(fn->Sig);
-  }
+  for (auto *funcDecl : sd->getMethods())
+    lowerStructMethod(sd, st, funcDecl);
 
   // 2. The constructor: the value starts out all zero (so an optional field
   //    `__init__` leaves alone is None, and a reference field it assigns
@@ -202,6 +243,38 @@ Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,
 }
 
 // -- Method calls
+
+ast::Type *ModuleLowering::bufferElementType(ast::StructType *st) {
+  const std::string &n = st->getName();
+  const size_t lt = n.find('<');
+  if (lt == std::string::npos)
+    return nullptr;
+  const std::string base = n.substr(0, lt);
+  const bool named =
+      base == "Buffer" ||
+      (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
+  if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
+      st->getElementTypes()[0] != ASTCtx.getObjTy())
+    return nullptr;
+  const ast::MethodDecl *at = st->findMethod("at");
+  return at ? at->getReturnType() : nullptr;
+}
+
+bool ModuleLowering::isBufferReadInPlace(ast::MethodCallExpr *mc) {
+  ast::StructType *st = getExprStructType(mc->getReceiver());
+  ast::Type *elem = st ? bufferElementType(st) : nullptr;
+  if (!elem)
+    return false;
+  const std::string &m = mc->getMethodName();
+  if (m == names::kMethodLength)
+    return mc->getNumArguments() == 0;
+  if ((m != "at" && m != "get") || mc->getNumArguments() != 1)
+    return false;
+  // A number: an 8-byte slot in the buffer, loaded as the i64 or f64 it is
+  // held as (ExprEmitter::emitBufferRead).
+  const pir::Type et = toPIRType(elem);
+  return et == pir::Type::I64 || et == pir::Type::F64;
+}
 
 Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
                                                       ast::StructType *st,

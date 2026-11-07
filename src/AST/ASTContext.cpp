@@ -45,7 +45,9 @@ ASTContext::ClassTypeBuilder &ASTContext::ClassTypeBuilder::objectSlots() {
       .method(names::kMethodToString, Ctx.StrTy, {},
               MethodDecl::View) // slot 1
       .method(names::kMethodEquals, Ctx.BoolTy, {Ctx.ObjTy},
-              MethodDecl::View); // slot 2
+              MethodDecl::View) // slot 2
+      .method(names::kMethodWalk, Ctx.VoidTy, {},
+              MethodDecl::View); // slot 3 (the concurrency prototype)
 }
 
 void ASTContext::buildObjectType() {
@@ -103,6 +105,24 @@ OptionalType *ASTContext::getOptionalType(Type *innerTy) {
   auto *ot = make<OptionalType>(SourceLocation(), innerTy);
   OptionalTypes[innerTy] = ot;
   return ot;
+}
+
+AtomicType *ASTContext::getAtomicType(Type *innerTy) {
+  auto it = AtomicTypes.find(innerTy);
+  if (it != AtomicTypes.end())
+    return it->second;
+  auto *at = make<AtomicType>(SourceLocation(), innerTy);
+  AtomicTypes[innerTy] = at;
+  return at;
+}
+
+TaskType *ASTContext::getTaskType(Type *innerTy) {
+  auto it = TaskTypes.find(innerTy);
+  if (it != TaskTypes.end())
+    return it->second;
+  auto *tt = make<TaskType>(SourceLocation(), innerTy);
+  TaskTypes[innerTy] = tt;
+  return tt;
 }
 
 // -- Canonical tuple types
@@ -164,8 +184,8 @@ ASTContext::ClassTypeBuilder::method(const std::string &name, Type *retTy,
 
 ASTContext::ClassTypeBuilder &
 ASTContext::ClassTypeBuilder::field(const std::string &name, Type *ty,
-                                    bool weak) {
-  Ty->addField(name, ty, weak);
+                                    bool weak, Qualifier qual) {
+  Ty->addField(name, ty, weak, qual);
   return *this;
 }
 
@@ -303,6 +323,16 @@ std::string typeName(Type *ty) {
   }
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return suffixed(ot->getInnerType()) + "?";
+  if (auto *at = dyn_cast<AtomicType>(ty))
+    return "atomic " + typeName(at->getInnerType());
+  if (auto *tt = dyn_cast<TaskType>(ty))
+    return "Task<" + typeName(tt->getInnerType()) + ">";
+  if (auto *qt = dyn_cast<QualifiedType>(ty)) {
+    std::string s = qt->getQualifier().spelling();
+    if (qt->getInnerType())
+      s += std::string(s.empty() ? "" : " ") + typeName(qt->getInnerType());
+    return s;
+  }
   // A slice is spelled as its parameter's type is, its mode aside.
   if (auto *st = dyn_cast<SliceType>(ty))
     return suffixed(st->getElementType()) + "[]";

@@ -344,8 +344,19 @@ void optimizeModule(llvm::Module &module, unsigned level) {
       llvm::OptimizationLevel::O3,
   };
   llvm::OptimizationLevel lvl = levels[level < 4 ? level : 3];
-  if (lvl == llvm::OptimizationLevel::O0)
-    return;
+  // At -O0 nothing is optimized, except a module with a coroutine (an
+  // `async fn` on the MLIR async runtime, the concurrency prototype),
+  // which takes the O1 pipeline: the coroutines must be split, and a frame
+  // split with every local in its stack slot (the O0 pipeline, mem2reg or
+  // not) is resumed on a worker with the caller's slots gone.  The design's
+  // own runtime (#362) replaces this lowering.
+  if (lvl == llvm::OptimizationLevel::O0) {
+    if (llvm::none_of(module, [](const llvm::Function &f) {
+          return f.isPresplitCoroutine();
+        }))
+      return;
+    lvl = llvm::OptimizationLevel::O1;
+  }
 
   llvm::LoopAnalysisManager LAM;
   llvm::FunctionAnalysisManager FAM;

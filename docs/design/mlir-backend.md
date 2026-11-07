@@ -26,6 +26,7 @@ this repository, always built and the default; other backends are plugins
 | C | EmitC, printed by MLIR's C emitter (`--emit-c`) |
 | Options | `--emit-mlir=<stage>`, `pir`, `scf`, `llvm` or `emitc`: the program after that stage, on stdout |
 | Backends | `mlir` alone, always built and the default; it replaced `c` and `llvm`, whose `PAYKAN_BACKENDS` names now build it, with a warning (step 6) |
+| The concurrency prototype | `pir.parallel`, `pir.async_call` and `pir.await`; the LLVM path takes them to OpenMP and to MLIR's async runtime, the C path runs them in order ([below](#the-concurrency-prototype)) |
 
 ## Why one lowering
 
@@ -218,6 +219,62 @@ there, at the MLIR level:
   empty parameter list is printed `(void)`, not the C++ `()` of MLIR's
   emitter; and a string constant longer than the 4095 characters C11
   promises in a literal is a braced array of character constants.
+
+## The concurrency prototype
+
+The `pir` dialect has an op for each of the three forms the prototype
+added to PIR (docs/pir.md §6; docs/design/concurrency.md), defined in
+`src/Backends/MLIR/Dialect/PIR.td`: `pir.parallel` is a `while`'s
+`parallel` annotation as a counted loop over its one block argument, the
+index, with the counter local, the privates, a partial local per reduction
+and the reductions' ops (0 `add`, 1 `mul`); `pir.async_call` starts an
+`async fn` (a `pir.func` with the `pir.async` attribute) as a task, a
+`!pir.ptr`; and `pir.await` is a task's result.  The shared lowering
+(`src/Backends/MLIR/Lowering/PIRToStandard.cpp`) takes them one way per
+target, the pass's `sequential` flag.  On the LLVM path a `pir.parallel`
+becomes an `scf.parallel` loop over at most 256 chunks of the index range
+(chunk `c` runs `[c*q + min(c, r), c*q + min(c, r) + q + (c < r))` for
+`q = count / K` and `r = count % K`, the design's reproducible chunking),
+each chunk with slots of its own for the privates and a partial per
+reduction, which are folded with the op in chunk order into the loop's
+partial after it; a loop whose body has no call and no loop of its own
+runs in order below 4096 iterations, decided by its trip count at run
+time, since the fork and the join cost more than such a loop
+(benchmarks/README.md).  An `async fn` becomes an `async.func` whose body
+is an `async.execute` region, a `pir.async_call` an `async.call` (the task
+an `!async.value<i64>`, the 64 bits of the result, cast to the `!pir.ptr`
+PIR holds) and a `pir.await` an `async.await` followed by a drop of the
+task's reference.  `addLLVMDialectPasses`
+(`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`) then runs upstream's
+`convert-scf-to-openmp`, which makes the `scf.parallel` an
+`omp.parallel` around an `omp.wsloop`, and the backend's own
+`DynamicSchedulePass` (`pir-dynamic-schedule`), which gives every
+worksharing loop without a schedule `schedule(dynamic, 1)`: the default,
+a static split of the chunks, lets a slow core of a hybrid CPU set the
+loop's time, and the result is the same whichever thread runs a chunk;
+then `async-func-to-async-runtime`, `async-to-async-runtime` and
+`convert-async-to-llvm`, which make an async function a coroutine on
+MLIR's async runtime (an await is a suspension point, so the pass lowers
+the `scf` around one to `cf` itself); the OpenMP dialect is translated to
+LLVM IR with the rest.  The C path (`sequential`) runs a parallel loop in
+order as an `scf.for`, compiles an `async fn` as a plain function that
+returns the 64 bits of its result in a pointer, calls it at the
+`async_call` and casts the pointer back at the `await`, so `--emit-c`
+needs nothing beyond `Runtime.h`.
+
+The two runtimes are shared libraries of the LLVM the compiler is built
+with, `libmlir_async_runtime` and `libomp` (`src/Backends/LLVM/JIT/CMakeLists.txt`
+names them in that LLVM's library directory, with the platform's
+shared-library suffix; the prebuilt release a default configure
+downloads ships both).  A
+program's LLVM IR says whether it needs them, by the functions it declares
+(`mlirAsyncRuntime*`; `__kmpc_*` or `omp_*`): `paykan run` loads each one
+a program needs into the JIT (`JIT.cpp`), and `paykan build` links it,
+`-lmlir_async_runtime` and `-lomp` from that directory, which it also
+writes as an rpath (`src/Backends/LLVM/CodeGen/NativeBuild.cpp`).  They
+are the prototype's: the finished feature runs on a runtime of Paykan's
+own, the one the design's Runtime section describes (#362), which
+replaces both.
 
 ## Steps
 

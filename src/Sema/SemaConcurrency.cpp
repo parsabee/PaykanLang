@@ -1,0 +1,1370 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: Apache-2.0
+// The concurrency prototype's checks (docs/design/concurrency.md): what a
+// `parallel for` body may read and write, what an async call takes across
+// to its task (the send check), and assignments to `atomic` variables.
+
+#include "Names.h"
+#include "NativeABI.h"
+#include "Sema.h"
+#include "SemaInternal.h"
+
+#include <algorithm>
+
+namespace paykan::sema {
+
+namespace {
+
+std::string at(ast::SourceLocation loc) {
+  return std::to_string(loc.getLineStart()) + ":" +
+         std::to_string(loc.getColumnStart());
+}
+
+/// A value of plain parts: a number, bool, char or enum.
+bool isPlainValue(ast::Type *ty) {
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
+    return bt->getTypeKind() != ast::BuiltinType::Void;
+  return ast::isa<ast::EnumType>(ty);
+}
+
+} // namespace
+
+bool Sema::isOuterScope(Scope *owner) const {
+  if (ParallelStack.empty() || !owner)
+    return false;
+  for (Scope *s = owner; s; s = s->Parent)
+    if (s == ParallelStack.back().Boundary)
+      return false; // bound by the loop, or inside its body
+  return true;
+}
+
+bool Sema::checkParallelRead(const std::string &name, ast::Type *ty,
+                             ast::SourceLocation loc) {
+  if (!isOuterScope(CurrentScope->findOwner(name)))
+    return true;
+  if (isPlainValue(ty) || ast::isa<ast::AtomicType>(ty))
+    return true;
+  // A `mem::Buffer<T>` of plain values: read at any index, written at the
+  // loop's variable only (checkParallelBufferCall), its object never
+  // counted by the body.
+  if (ast::Type *elem = bufferElementType(ty); elem && isPlainValue(elem))
+    return true;
+  // A handle: a `locked` cell or an `atomic shared` object.
+  if (const ast::Qualifier q = qualifierOfVar(name);
+      q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicShared)
+    return true;
+  ast::Type *elem = nullptr;
+  if (auto *a = ast::dyn_cast<ast::ArrayType>(ty))
+    elem = a->getElementType();
+  else if (auto *f = ast::dyn_cast<ast::FixedArrayType>(ty))
+    elem = f->getElementType();
+  else if (auto *s = ast::dyn_cast<ast::SliceType>(ty))
+    elem = s->getElementType();
+  if (elem && isPlainValue(elem))
+    return true;
+  error(loc, "'" + name + "' (a '" + typeName(ty) +
+                 "') cannot be used in a 'parallel for' body: an iteration "
+                 "uses only values, arrays of values and 'atomic' variables "
+                 "of the enclosing function");
+  return false;
+}
+
+bool Sema::checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy) {
+  const std::string &name = node->getVarName();
+  ast::Expr *value = node->getValue();
+  ast::Type *valTy = resolveExprType(value, varTy);
+  if (!valTy)
+    return false;
+  // `s += e`, `s -= e` or `s *= e` on a number: a reduction.
+  auto *bt = ast::dyn_cast<ast::BuiltinType>(varTy);
+  auto *be = ast::dyn_cast<ast::BinaryExpr>(value);
+  auto *lhs = be ? ast::dyn_cast<ast::Identifier>(be->getLHS()) : nullptr;
+  const bool reduction = bt && bt->isNumeric() && lhs &&
+                         lhs->getName() == name &&
+                         (be->getOpcode() == ast::BinaryOpcode::Add ||
+                          be->getOpcode() == ast::BinaryOpcode::Sub ||
+                          be->getOpcode() == ast::BinaryOpcode::Mul);
+  if (!reduction) {
+    error(node->getLocation(),
+          "cannot assign to '" + name +
+              "' in a 'parallel for' body: a variable of the enclosing "
+              "function changes only by a reduction ('" +
+              name + " += e', '" + name + " -= e', '" + name +
+              " *= e') or, if 'atomic', by its "
+              "operations");
+    return false;
+  }
+  if (!checkAssignable(varTy, valTy, value)) {
+    error(node->getLocation(), "cannot assign value of type '" +
+                                   typeName(valTy) + "' to variable '" + name +
+                                   "' of type '" + typeName(varTy) + "'");
+    return false;
+  }
+  ParallelStack.back().Loop->addReduction(Ctx.intern(name), be->getOpcode());
+  return true;
+}
+
+// -- Atomic places (the prototype): a variable or a class field of an
+// `atomic` type is a cell, and an assignment to it one atomic operation.
+
+bool Sema::isPlaceChain(const ast::Expr *e) {
+  if (ast::isa<ast::Identifier>(e))
+    return true;
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return isPlaceChain(ma->getReceiver());
+  return false;
+}
+
+bool Sema::samePlace(const ast::Expr *a, const ast::Expr *b) {
+  const auto *ia = ast::dyn_cast<ast::Identifier>(a);
+  const auto *ib = ast::dyn_cast<ast::Identifier>(b);
+  if (ia || ib)
+    return ia && ib && ia->getName() == ib->getName();
+  const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(a);
+  const auto *mb = ast::dyn_cast<ast::MemberAccessExpr>(b);
+  return ma && mb && ma->getFieldName() == mb->getFieldName() &&
+         samePlace(ma->getReceiver(), mb->getReceiver());
+}
+
+/// Whether @p e reads @p place: a walk of the operators, accesses and calls
+/// of an expression (any read of an atomic place on the right of an `=` to
+/// it would read and write the cell separately).
+bool Sema::readsPlace(const ast::Expr *e, const ast::Expr *place) {
+  if (!e)
+    return false;
+  if (samePlace(e, place))
+    return true;
+  if (const auto *be = ast::dyn_cast<ast::BinaryExpr>(e))
+    return readsPlace(be->getLHS(), place) || readsPlace(be->getRHS(), place);
+  if (const auto *ue = ast::dyn_cast<ast::UnaryExpr>(e))
+    return readsPlace(ue->getOperand(), place);
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return readsPlace(te->getCondition(), place) ||
+           readsPlace(te->getTrueExpr(), place) ||
+           readsPlace(te->getFalseExpr(), place);
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return readsPlace(ma->getReceiver(), place);
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return readsPlace(se->getArray(), place) ||
+           readsPlace(se->getIndex(), place);
+  if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    for (const ast::Expr *arg : ce->getArguments())
+      if (readsPlace(arg, place))
+        return true;
+    return false;
+  }
+  if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    if (readsPlace(mc->getReceiver(), place))
+      return true;
+    for (const ast::Expr *arg : mc->getArguments())
+      if (readsPlace(arg, place))
+        return true;
+  }
+  return false;
+}
+
+std::optional<ast::AssignStmt::AtomicKind>
+Sema::checkAtomicValue(const ast::Expr *place, ast::Expr *value,
+                       ast::AtomicType *at, ast::SourceLocation loc,
+                       ast::Type *valTy) {
+  using K = ast::AssignStmt::AtomicKind;
+  const std::string what = placeText(place);
+  ast::Type *inner = at->getInnerType();
+  // `x += e` and `x -= e` (the parser's `x = x + e`): one atomic add.  The
+  // other compound operators would read and write the cell separately.
+  if (auto *be = ast::dyn_cast<ast::BinaryExpr>(value);
+      be && samePlace(be->getLHS(), place)) {
+    const bool add = be->getOpcode() == ast::BinaryOpcode::Add;
+    const bool sub = be->getOpcode() == ast::BinaryOpcode::Sub;
+    if (!add && !sub) {
+      error(loc, "'" + what +
+                     "' is 'atomic': this operator reads and writes "
+                     "it separately; its atomic operations are '+=', '-=', "
+                     "'exchange' and 'compareExchange'");
+      return std::nullopt;
+    }
+    ast::Type *rhsTy = resolveExprType(be->getRHS(), inner);
+    if (!rhsTy)
+      return std::nullopt;
+    if (!checkAssignable(inner, rhsTy, be->getRHS())) {
+      error(loc, "cannot add a '" + typeName(rhsTy) + "' to '" + what +
+                     "', an '" + typeName(at) + "'");
+      return std::nullopt;
+    }
+    be->getLHS()->setResolvedType(inner); // the parser's copy: never read
+    be->setResolvedType(inner);
+    return add ? K::Add : K::Sub;
+  }
+  if (readsPlace(value, place)) {
+    error(loc, "'" + what + "' is 'atomic': '" + what +
+                   " = ...' reads and writes it separately; write '" + what +
+                   " += e', or use 'exchange' or 'compareExchange'");
+    return std::nullopt;
+  }
+  if (!valTy)
+    valTy = resolveExprType(value, inner);
+  if (!valTy)
+    return std::nullopt;
+  if (!checkAssignable(inner, valTy, value)) {
+    error(loc, "cannot store a '" + typeName(valTy) + "' in '" + what +
+                   "', an '" + typeName(at) + "'");
+    return std::nullopt;
+  }
+  return K::Store;
+}
+
+bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
+  // A `let` cell is read through its name and never changed by it: `=`,
+  // `+=` and `-=` assign to it.
+  if (varKind(node->getVarName()) == VarKind::Let) {
+    error(node->getLocation(), "'" + node->getVarName() +
+                                   "' is declared with 'let' and cannot be "
+                                   "reassigned");
+    return false;
+  }
+  auto kind = checkAtomicValue(node->getLHS(), node->getValue(), at,
+                               node->getLocation());
+  if (!kind)
+    return false;
+  node->setAtomicKind(*kind);
+  warnAtomicEveryIteration(node->getLHS(), node->getLocation());
+  return true;
+}
+
+void Sema::warnAtomicEveryIteration(const ast::Expr *place,
+                                    ast::SourceLocation loc) {
+  // The body's own statements run every iteration; one in an `if` or a
+  // `match` inside it is in a scope of its own below the body's.
+  if (ParallelStack.empty() ||
+      CurrentScope->Parent != ParallelStack.back().Boundary)
+    return;
+  const ast::Identifier *root = placeRoot(place);
+  if (!root || !isOuterScope(CurrentScope->findOwner(root->getName())))
+    return;
+  warning(loc, "'" + placeText(place) +
+                   "' changes on every iteration of the 'parallel for': "
+                   "each atomic operation moves its cache line between "
+                   "cores, a thousand times a reduction's cost on 16 "
+                   "threads (benchmarks/README.md); count in a reduction "
+                   "(a plain variable of the enclosing function, '+='), "
+                   "or change it less often");
+}
+
+bool Sema::checkAtomicMemberAssign(ast::MemberAssignStmt *node,
+                                   ast::AtomicType *at) {
+  using K = ast::AssignStmt::AtomicKind;
+  ast::Expr *value = node->getValue();
+  ast::Type *valTy = nullptr;
+  // `self.f = p` in `__init__`, `p` an `atomic` place: the field takes its
+  // cell (the default `__init__` is all such).
+  const auto *recv = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+  const bool inInit = recv && recv->getName() == names::kSelf &&
+                      CurrentClassCtx &&
+                      CurrentClassCtx->MethodName == names::kMethodInit;
+  if (inInit && isPlaceChain(value)) {
+    WantAtomicHandle = true;
+    valTy = resolveExprType(value, at->getInnerType());
+    WantAtomicHandle = false;
+    if (!valTy)
+      return false;
+    if (ast::isa<ast::AtomicType>(valTy)) {
+      if (valTy != at) {
+        error(node->getLocation(),
+              "cannot give field '" + node->getFieldName() + "', an '" +
+                  typeName(at) + "', the cell of an '" + typeName(valTy) + "'");
+        return false;
+      }
+      node->setAtomicKind(K::Cell);
+      return true;
+    }
+  }
+  // Synthetic member access of the field: the place the value goes to.
+  ast::MemberAccessExpr place(node->getLocation(), node->getReceiver(),
+                              node->getFieldName());
+  auto kind = checkAtomicValue(&place, value, at, node->getLocation(), valTy);
+  if (!kind)
+    return false;
+  node->setAtomicKind(*kind);
+  warnAtomicEveryIteration(&place, node->getLocation());
+  return true;
+}
+
+ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
+                                       ast::AtomicType *at) {
+  const std::string &m = node->getMethodName();
+  ast::Type *inner = at->getInnerType();
+  const bool exchange = m == names::kMethodExchange;
+  const bool compare = m == names::kMethodCompareExchange;
+  if (!exchange && !compare) {
+    error(node->getLocation(), "'" + typeName(at) + "' has no method '" + m +
+                                   "': an atomic place has 'exchange(v)' and "
+                                   "'compareExchange(expected, desired)'");
+    return nullptr;
+  }
+  // Both change the cell, which a `let` variable's name never does (a cell
+  // field of a `let` object is the object's own, and changes).
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+      id && !id->isFunctionRef() && varKind(id->getName()) == VarKind::Let) {
+    error(node->getLocation(), "'" + id->getName() +
+                                   "' is declared with 'let' and cannot be "
+                                   "changed by '" +
+                                   m + "'");
+    return nullptr;
+  }
+  const size_t want = exchange ? 1 : 2;
+  if (node->getNumArguments() != want) {
+    error(node->getLocation(), "method '" + m + "' expects " +
+                                   std::to_string(want) + " argument(s), got " +
+                                   std::to_string(node->getNumArguments()));
+    return nullptr;
+  }
+  for (size_t i = 0; i < want; ++i) {
+    ast::Expr *arg = node->getArguments()[i];
+    ast::Type *ty = resolveExprType(arg, inner);
+    if (!ty)
+      return nullptr;
+    if (!checkAssignable(inner, ty, arg)) {
+      error(arg->getLocation(), "argument " + std::to_string(i + 1) + " of '" +
+                                    m + "' has type '" + typeName(ty) +
+                                    "', expected '" + typeName(inner) + "'");
+      return nullptr;
+    }
+  }
+  ast::Type *result = exchange ? inner : Ctx.getBoolTy();
+  node->setResolvedType(result);
+  return result;
+}
+
+// -- Copyable and the send check (docs/design/concurrency.md, "Copies and
+// `move`", "The send check")
+
+bool Sema::isCopyablePart(ast::Type *ty, ast::Qualifier q, std::string *why) {
+  if (ty && ast::isRefType(ty))
+    return q.Form == ast::QualForm::Shared ||
+           q.Form == ast::QualForm::AtomicShared ||
+           q.Form == ast::QualForm::Locked;
+  return isCopyable(ty, why);
+}
+
+bool Sema::isCopyable(ast::Type *ty, std::string *why) {
+  auto part = [&](const std::string &what, ast::Type *t, ast::Qualifier q) {
+    if (why && why->empty())
+      *why = what + " ('" + qualifiedName(q, t) + "')";
+  };
+  if (!ty || ast::isa<ast::PoisonType>(ty) || ast::isa<ast::BuiltinType>(ty) ||
+      ast::isa<ast::AtomicType>(ty))
+    return true;
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return isCopyable(ot->getInnerType(), why);
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    if (isCopyable(ft->getElementType(), why))
+      return true;
+    part("its elements", ft->getElementType(), {});
+    return false;
+  }
+  // A struct's fields carry qualifiers (a `shared` one copies); a tuple's
+  // elements do not.  Before the tuple case, which a struct is too.
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    const auto &types = st->getElementTypes();
+    for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
+      const ast::Qualifier q = st->findFieldQualifier(st->getFieldName(i));
+      if (!isCopyablePart(types[i], q, why)) {
+        part("field '" + st->getFieldName(i) + "'", types[i], q);
+        return false;
+      }
+    }
+    return true;
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    const auto &types = tt->getElementTypes();
+    for (size_t i = 0; i < types.size(); ++i)
+      if (!isCopyable(types[i], why)) {
+        part("element '." + std::to_string(i) + "'", types[i], {});
+        return false;
+      }
+    return true;
+  }
+  if (auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (ast::StructType *p = et->getPayload(i); p && !isCopyable(p, why))
+        return false;
+    return true;
+  }
+  // `Str`, a class, a function value, a task: move-only.
+  return false;
+}
+
+ast::Type *Sema::bufferElementType(ast::Type *ty) const {
+  const auto *st = ty ? ast::dyn_cast<ast::StructType>(ty) : nullptr;
+  if (!st)
+    return nullptr;
+  const std::string &n = st->getName();
+  const size_t lt = n.find('<');
+  if (lt == std::string::npos)
+    return nullptr;
+  const std::string base = n.substr(0, lt);
+  const bool named =
+      base == "Buffer" ||
+      (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
+  if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
+      st->getElementTypes()[0] != Ctx.getObjTy())
+    return nullptr;
+  // `view fn at(i: unsigned) -> view T`: its result is `T`.
+  const ast::MethodDecl *at = st->findMethod("at");
+  return at ? at->getReturnType() : nullptr;
+}
+
+bool Sema::checkParallelBufferCall(const ast::MethodCallExpr *node,
+                                   const std::string &name) {
+  const std::string &m = node->getMethodName();
+  if (m == "at" || m == "get" || m == "len")
+    return true;
+  const std::string &var = ParallelStack.back().Loop->getVar()->getName();
+  if (m == "set" && node->getNumArguments() == 2) {
+    // `set(i, v)`, or `set(unsigned<int>(i), v)`: the index is the loop's
+    // variable, possibly converted.
+    const ast::Expr *idx = node->getArguments()[0];
+    if (const auto *conv = ast::dyn_cast<ast::CallExpr>(idx);
+        conv && conv->getNumArguments() == 1 &&
+        isConversionTarget(conv->getCalleeName()))
+      idx = conv->getArguments()[0];
+    const auto *id = ast::dyn_cast<ast::Identifier>(idx);
+    if (id && id->getName() == var)
+      return true;
+    error(node->getArguments()[0]->getLocation(),
+          "'" + name +
+              "' is written in a 'parallel for' body at an index other than "
+              "the loop's variable '" +
+              var + "': two iterations could write one element");
+    return false;
+  }
+  error(node->getLocation(),
+        "'" + name + "' (a '" +
+            typeName(node->getReceiver()->getResolvedType()) +
+            "' of the enclosing function) is read ('at', 'get', 'len') and "
+            "written at the loop's variable ('set') in a 'parallel for' "
+            "body; '" +
+            m + "' could move its storage under the other iterations");
+  return false;
+}
+
+std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
+                              const std::string &path) {
+  auto at = [&](const std::string &what) {
+    return path.empty() ? what : "field '" + path + "' " + what;
+  };
+  if (!ty || ast::isa<ast::PoisonType>(ty) || ast::isa<ast::BuiltinType>(ty) ||
+      ast::isa<ast::AtomicType>(ty))
+    return "";
+  if (ast::isa<ast::FunctionType>(ty))
+    return at("is a function value, whose captures are not known");
+  if (auto *tt = ast::dyn_cast<ast::TaskType>(ty))
+    return uncrossable(tt->getInnerType(), {}, path);
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return uncrossable(ot->getInnerType(), q, path);
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return uncrossable(ft->getElementType(), q, path);
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    // `mem::Buffer<T>` crosses when `T` does (the design's table): its one
+    // field is the runtime's buffer object, whose walk freezes the
+    // elements (PaykanBuffer_walk), so the check is of `T`, by `at`'s
+    // result.
+    if (ast::Type *elem = bufferElementType(st))
+      return uncrossable(elem, {}, path);
+    const auto &types = st->getElementTypes();
+    for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
+      const std::string &f = st->getFieldName(i);
+      std::string sub = path;
+      if (!sub.empty())
+        sub += '.';
+      sub += f;
+      std::string why = uncrossable(types[i], st->findFieldQualifier(f), sub);
+      if (!why.empty())
+        return why;
+    }
+    return "";
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    const auto &types = tt->getElementTypes();
+    for (size_t i = 0; i < types.size(); ++i) {
+      const std::string e = "." + std::to_string(i);
+      std::string why = uncrossable(types[i], {}, path + e);
+      if (!why.empty())
+        return why;
+    }
+    return "";
+  }
+  if (auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (ast::StructType *p = et->getPayload(i))
+        if (std::string why = uncrossable(p, {}, path); !why.empty())
+          return why;
+    return "";
+  }
+  // A reference: by its qualifier, then by what the object holds.
+  if (q.Form == ast::QualForm::Shared)
+    return at("is '" + qualifiedName(q, ty) +
+              "': a 'shared' reference is aliased on its own thread");
+  if (q.Form == ast::QualForm::Locked || q.Form == ast::QualForm::AtomicShared)
+    return ""; // a handle: its contents were checked when it was made
+  auto *ct = ast::dyn_cast<ast::ClassType>(ty);
+  if (!ct || ct == Ctx.getStrTy())
+    return "";
+  if (ct == Ctx.getObjTy())
+    return at("is an 'Obj', which may be any class");
+  // A class's own and inherited fields.  A class reached again on the way
+  // (a list's `next: Node?`) is being checked already.
+  static thread_local std::vector<const ast::ClassType *> onTheWay;
+  if (std::find(onTheWay.begin(), onTheWay.end(), ct) != onTheWay.end())
+    return "";
+  onTheWay.push_back(ct);
+  std::string why;
+  for (const ast::ClassType *c = ct; c && why.empty(); c = c->getSuperClass())
+    for (const auto &[f, fty] : c->getFields()) {
+      std::string sub = path;
+      if (!sub.empty())
+        sub += '.';
+      sub += f;
+      if (c->isWeakField(f)) {
+        why = "field '" + sub + "' is 'weak': a weak load is a plain retain";
+        break;
+      }
+      why = uncrossable(fty, c->findFieldQualifier(f), sub);
+      if (!why.empty())
+        break;
+    }
+  onTheWay.pop_back();
+  return why;
+}
+
+bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
+  if (!ParallelStack.empty()) {
+    error(call->getLocation(),
+          "a task cannot be started in a 'parallel for' body");
+    return false;
+  }
+  const std::vector<ast::Expr *> &args = call->getArguments();
+  bool ok = true;
+  for (size_t i = 0; i < args.size() && i < sig.ParamTypes.size(); ++i) {
+    ast::Type *p = sig.ParamTypes[i];
+    ast::Expr *arg = args[i];
+    ast::Type *ty = arg->getResolvedType();
+    if (!ty || ast::isa<ast::AtomicType>(p) || ast::isa<ast::AtomicType>(ty))
+      continue; // a cell: its handle is shared
+    const ast::Qualifier q = qualifierOf(arg);
+    auto *u = ast::dyn_cast<ast::UnaryExpr>(arg);
+    const bool moved = u && u->getOpcode() == ast::UnaryOpcode::Move;
+    const ast::Expr *inner = moved ? u->getOperand() : arg;
+    const bool place = isPlaceChain(inner) ||
+                       ast::isa<ast::SubscriptExpr>(inner) ||
+                       ast::isa<ast::TupleIndexExpr>(inner);
+    const std::string text = placeText(inner);
+    // A handle (`locked`, `atomic shared`) is copied; a `shared`
+    // reference never crosses; a unique one (`mut` or not) crosses by `move`,
+    // or as a temporary of the caller's.
+    if (ast::isRefType(ty)) {
+      if (q.Form == ast::QualForm::Shared) {
+        error(arg->getLocation(),
+              "'" + text + "' is '" + qualifiedName(q, ty) +
+                  "': it never crosses to a task (a 'shared' reference is "
+                  "aliased on its own thread)");
+        ok = false;
+        continue;
+      }
+      if (q.Form == ast::QualForm::Locked ||
+          q.Form == ast::QualForm::AtomicShared)
+        continue; // a handle: another reference to the same cell or object
+      if (place && !moved) {
+        error(arg->getLocation(),
+              "cannot copy '" + text + "' (a unique '" + typeName(ty) +
+                  "') into a task: " +
+                  (ast::isa<ast::Identifier>(inner)
+                       ? "write 'move " + text + "' to transfer it"
+                       : "move it out first ('move " + text +
+                             "' of an owned variable, or 'mem::replace')"));
+        ok = false;
+        continue;
+      }
+    } else if (!sharesStorage(ty)) {
+      continue; // a plain value: copied
+    } else if (place && !moved) {
+      // A value holding references: a Copyable one (shared parts, handles)
+      // copies; one holding a unique part moves.
+      std::string part;
+      if (!isCopyable(ty, &part)) {
+        std::string msg = "cannot copy '";
+        msg += text;
+        msg += "' (";
+        if (part.empty()) {
+          msg += "a move-only '";
+          msg += typeName(ty);
+          msg += "'";
+        } else {
+          msg += "a '";
+          msg += typeName(ty);
+          msg += "' holding ";
+          msg += part;
+        }
+        msg += ") into a task: write 'move ";
+        msg += text;
+        msg += "' to transfer it";
+        error(arg->getLocation(), msg);
+        ok = false;
+        continue;
+      }
+    }
+    // What crosses holds nothing of this thread: no `shared` or `weak`
+    // part, no function value, no `Obj`.
+    if (std::string why = uncrossable(ty, q, ""); !why.empty()) {
+      std::string msg = "cannot send '";
+      msg += text;
+      msg += "' (a '";
+      msg += qualifiedName(q, ty);
+      msg += "'): ";
+      msg += why;
+      error(arg->getLocation(), msg);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
+bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
+                                const std::string &what,
+                                ast::SourceLocation loc) {
+  if (mode == ast::ParamMode::Value || q.isUnique())
+    return true;
+  // A borrow is written with no qualifier: it borrows the object whatever
+  // its qualifier and counts nothing.  A `view` is read-only already, and
+  // an `inout` of an immutable object could not change it.
+  const char *m = ast::paramModeName(mode);
+  error(loc, what + " is '" + m + " " + q.spelling() +
+                 "': a borrow carries no qualifier; a 'view' takes every "
+                 "form of the object (read-only through it) and an 'inout' "
+                 "a 'mut' or 'shared mut' one, with no retain or release; "
+                 "write '" +
+                 m + " T'");
+  return false;
+}
+
+bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
+                                 const std::vector<ast::Qualifier> &quals,
+                                 const std::vector<ast::Expr *> &args,
+                                 const std::string &callee) {
+  bool ok = true;
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (modes.mode(i) == ast::ParamMode::Value)
+      continue;
+    ast::Type *ty = args[i]->getResolvedType();
+    if (!ty || !ast::isRefType(ty))
+      continue;
+    // A `shared` object passes to a `view` or an `inout` as a unique one
+    // does, with no retain or release; an immutable one is frozen
+    // (inoutPlaceError) and a cell is reached in a `lock` block.
+    const ast::Qualifier q = qualifierOf(args[i]);
+    (void)quals;
+    const std::string text = placeText(args[i]);
+    const char *mode = ast::paramModeName(modes.mode(i));
+    if (q.Form == ast::QualForm::Locked) {
+      std::string msg = "'";
+      msg += text;
+      msg += "' is 'locked': a cell's contents are reached in a 'lock' "
+             "block, not borrowed by '";
+      msg += mode;
+      msg += "' parameter '";
+      msg += modes.name(i);
+      msg += "' of '";
+      msg += callee;
+      msg += "'";
+      error(args[i]->getLocation(), msg);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
+// -- Moves (docs/design/concurrency.md, "Use after move")
+
+std::string Sema::varKey(const Scope *owner, std::string_view name) {
+  std::string key(name);
+  key += '#';
+  key += std::to_string(owner ? owner->Id : 0);
+  return key;
+}
+
+std::string Sema::varKey(std::string_view name) const {
+  return varKey(CurrentScope ? CurrentScope->findOwner(name) : nullptr, name);
+}
+
+std::string_view Sema::keyName(std::string_view key) {
+  return key.substr(0, key.rfind('#'));
+}
+
+unsigned Sema::keyScope(std::string_view key) {
+  return static_cast<unsigned>(
+      std::stoul(std::string(key.substr(key.rfind('#') + 1))));
+}
+
+Sema::MatchMovesGuard::MatchMovesGuard(Sema &s, ast::MatchStmt *node) : S(s) {
+  S.MatchMoveStack.push_back({node, S.MovedVars, {}, true});
+}
+
+Sema::MatchMovesGuard::~MatchMovesGuard() {
+  MatchMoves m = std::move(S.MatchMoveStack.back());
+  S.MatchMoveStack.pop_back();
+  // A match no arm of which takes the subject falls through as it came.
+  if (!detail::matchIsExhaustive(m.Node)) {
+    m.Arms.push_back(std::move(m.Entry));
+    m.AllEnded = false;
+  }
+  S.joinMoves(m.Arms, "match", m.Node->getLocation());
+  S.FlowEnded = m.AllEnded;
+}
+
+Sema::ArmMovesGuard::ArmMovesGuard(Sema &s) : S(s) {
+  S.MovedVars = S.MatchMoveStack.back().Entry;
+  S.FlowEnded = false;
+}
+
+Sema::ArmMovesGuard::~ArmMovesGuard() {
+  MatchMoves &m = S.MatchMoveStack.back();
+  if (S.FlowEnded)
+    return;
+  m.Arms.push_back(S.MovedVars);
+  m.AllEnded = false;
+}
+
+void Sema::joinMoves(const std::vector<MovedMap> &paths, const char *what,
+                     ast::SourceLocation loc) {
+  if (paths.empty())
+    return; // nothing after is reached
+  MovedMap joined;
+  for (const MovedMap &p : paths)
+    for (const auto &[name, st] : p) {
+      auto it = joined.find(name);
+      if (it == joined.end())
+        joined[name] = st;
+      else if (st.Maybe && !it->second.Maybe)
+        it->second = st;
+    }
+  for (auto &[name, st] : joined) {
+    if (st.Maybe)
+      continue;
+    const bool onEveryPath =
+        std::all_of(paths.begin(), paths.end(),
+                    [&](const MovedMap &p) { return p.count(name) != 0; });
+    if (!onEveryPath) {
+      st.Maybe = true;
+      st.By = std::string("the '") + what + "' at " + at(loc);
+    }
+  }
+  MovedVars = std::move(joined);
+}
+
+void Sema::beginLoopMoves(ast::SourceLocation loc) {
+  LoopMoveStack.push_back({loc, LoopDepth + 1, MovedVars, {}, CurrentScope});
+  FlowEnded = false;
+}
+
+void Sema::finishLoopMoves() {
+  LoopMoves loop = std::move(LoopMoveStack.back());
+  LoopMoveStack.pop_back();
+  // The body's end is an iteration's end.
+  if (!FlowEnded)
+    checkLoopIteration(loop, loop.Loc);
+  // After the loop: no iteration at all, the last one's end, or a `break`.
+  std::vector<MovedMap> paths{std::move(loop.Entry)};
+  if (!FlowEnded)
+    paths.push_back(MovedVars);
+  for (MovedMap &b : loop.Breaks)
+    paths.push_back(std::move(b));
+  joinMoves(paths, "loop", loop.Loc);
+  FlowEnded = false;
+}
+
+void Sema::checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc) {
+  // The scopes the loop stands in: their variables are the enclosing
+  // function's.  The body's own (its locals, an arm's or a lock block's
+  // binding) are declared anew each iteration.
+  std::set<unsigned> outer;
+  for (const Scope *s = loop.Outer; s; s = s->Parent)
+    outer.insert(s->Id);
+  for (const auto &[key, st] : MovedVars) {
+    if (loop.Entry.count(key))
+      continue; // moved before the loop: reported at its use
+    if (auto d = DeclLoopDepth.find(key);
+        (d != DeclLoopDepth.end() && d->second >= loop.Depth) ||
+        !outer.count(keyScope(key)))
+      continue;
+    if (!LoopMovesReported.insert(key + "@" + at(loop.Loc)).second)
+      continue;
+    const std::string name(keyName(key));
+    error(st.At, "'" + name + "' is moved in the loop at " + at(loop.Loc) +
+                     " and not assigned again before the next iteration" +
+                     (at(loc) == at(loop.Loc)
+                          ? ""
+                          : " (the 'continue' at " + at(loc) + ")"));
+  }
+}
+
+ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
+                                  ast::MemberAccessExpr *ma) {
+  const ast::SourceLocation loc = node->getLocation();
+  const std::string what = placeText(ma);
+  // The root: an owned local or by-value parameter.
+  const ast::Expr *e = ma;
+  while (const auto *link = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    e = link->getReceiver();
+  const auto *root = ast::dyn_cast<ast::Identifier>(e);
+  if (!root || root->getName() == names::kSelf) {
+    error(loc, "cannot move '" + what +
+                   "': 'move' takes a variable, or a field of one it owns" +
+                   (root ? "; write 'mem::replace(" + what + ", v)'" : ""));
+    return nullptr;
+  }
+  const std::string &name = root->getName();
+  switch (varKind(name)) {
+  case VarKind::Plain:
+  case VarKind::Let:
+    break;
+  default:
+    error(loc, "cannot move '" + what + "': '" + name +
+                   "' is not an owned variable (a borrow, a capture or a "
+                   "'weak' reference); write 'mem::replace(" +
+                   what + ", v)'");
+    return nullptr;
+  }
+  ast::Type *ty = resolveExprType(ma); // the root live, not moved, not lent
+  if (!ty)
+    return nullptr;
+  // Every link a unique field: a `shared` one is an alias, a
+  // `weak` one no owner.
+  for (const ast::Expr *x = ma;
+       const auto *link = ast::dyn_cast<ast::MemberAccessExpr>(x);
+       x = link->getReceiver()) {
+    const ast::Qualifier q = qualifierOf(link);
+    const auto *ct = ast::dyn_cast<ast::ClassType>(
+        ast::stripOptional(link->getReceiver()->getResolvedType()));
+    if (ct && ct->isWeakField(link->getFieldName())) {
+      error(loc, "cannot move '" + placeText(link) +
+                     "': it is a 'weak' field, which owns nothing");
+      return nullptr;
+    }
+    if (q.Form != ast::QualForm::Unique) {
+      error(loc, "cannot move '" + placeText(link) + "': it is '" +
+                     qualifiedName(q, link->getResolvedType()) +
+                     "', not a unique part of '" + name + "'");
+      return nullptr;
+    }
+  }
+  if (!ast::isRefType(ty)) {
+    error(loc, "cannot move '" + what + "': it is a '" + typeName(ty) +
+                   "', a value (a value is copied; a field of a reference "
+                   "type moves out)");
+    return nullptr;
+  }
+  if (std::string why = viewedBy(name); !why.empty()) {
+    error(loc, why + "; it cannot be moved out of");
+    return nullptr;
+  }
+  MovedVars[varKey(name)] = MovedState{loc, false, ""};
+  return ty;
+}
+
+bool Sema::checkMovable(const std::string &name, ast::SourceLocation loc,
+                        const char *what) {
+  const std::string head = std::string("cannot ") + what + " '" + name + "'";
+  switch (varKind(name)) {
+  case VarKind::Plain:
+  case VarKind::Let:
+  case VarKind::ForVar: // an integer: read as it is
+    return true;
+  case VarKind::Inout:
+    error(loc, head + ": it is an 'inout' parameter, the caller's storage");
+    return false;
+  case VarKind::View:
+  case VarKind::ViewLocal:
+  case VarKind::ViewBinding:
+    error(loc, head + ": it is a 'view', a borrow");
+    return false;
+  case VarKind::Weak:
+  case VarKind::WeakView:
+    error(loc, head + ": a 'weak' variable holds no strong reference");
+    return false;
+  case VarKind::Captured:
+  case VarKind::CapturedWeak:
+    error(loc, head + ": the function captures it by copy");
+    return false;
+  }
+  return true;
+}
+
+ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
+  // `move x.f` (the prototype): the field leaves, and x ends.
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand()))
+    return checkPartialMove(node, ma);
+  auto *id = ast::dyn_cast<ast::Identifier>(node->getOperand());
+  if (!id) {
+    ast::Expr *operand = node->getOperand();
+    if (ast::isa<ast::SubscriptExpr>(operand) ||
+        ast::isa<ast::TupleIndexExpr>(operand)) {
+      error(node->getLocation(),
+            "cannot move '" + placeText(operand) +
+                "': an element leaves by 'mem::replace' or 'mem::take'");
+      return nullptr;
+    }
+    // `move` before a temporary (a call, a constructor, a literal): it is
+    // owned already, and nothing happens.
+    return resolveExprType(operand);
+  }
+  const std::string &name = id->getName();
+  if (name == names::kSelf) {
+    error(node->getLocation(),
+          "cannot move 'self': a method borrows its receiver");
+    return nullptr;
+  }
+  if (!checkMovable(name, node->getLocation(), "move"))
+    return nullptr;
+  ast::Type *ty = resolveExprType(id); // live, not moved, not lent inout
+  if (!ty)
+    return nullptr;
+  // A move is a write: not while a `view` local reads the variable.
+  if (std::string why = viewedBy(name); !why.empty()) {
+    error(node->getLocation(), why + "; it cannot be moved");
+    return nullptr;
+  }
+  // (A move in a loop of a variable declared outside it is checked at the
+  // iteration's end: checkLoopIteration.)
+  MovedVars[varKey(name)] = MovedState{node->getLocation(), false, ""};
+  return ty;
+}
+
+bool Sema::checkNotMoved(const std::string &name, ast::SourceLocation loc) {
+  auto moved = MovedVars.find(varKey(name));
+  if (moved == MovedVars.end())
+    return true;
+  const MovedState &st = moved->second;
+  if (st.Maybe)
+    error(loc, "'" + name + "' may have been moved (by " + st.By + ", at " +
+                   at(st.At) + "); it cannot be used after a move");
+  else if (st.By == "await")
+    error(loc, "'" + name + "' was awaited at " + at(st.At) +
+                   "; a task handle is spent by its 'await'");
+  else
+    error(loc, "'" + name + "' was moved at " + at(st.At) +
+                   "; it cannot be used after the move");
+  return false;
+}
+
+void Sema::checkTasksAwaited(const Scope *s, const char *exit,
+                             ast::SourceLocation loc) {
+  for (const auto &[name, ty] : s->Locals) {
+    if (!ty || !ast::isa<ast::TaskType>(ty))
+      continue;
+    auto moved = MovedVars.find(varKey(s, name));
+    if (moved != MovedVars.end() && !moved->second.Maybe)
+      continue;
+    auto decl = TaskLocals.find(varKey(s, name));
+    const ast::SourceLocation where = exit                       ? loc
+                                      : decl != TaskLocals.end() ? decl->second
+                                                                 : loc;
+    const std::string when =
+        exit ? std::string(" before this '") + exit + "'" : "";
+    if (moved == MovedVars.end())
+      error(where, "task '" + name + "' is " +
+                       (exit ? "not awaited" + when : "never awaited") +
+                       ": a task handle is spent by 'await' (or 'move') on "
+                       "every path before its scope ends; the prototype "
+                       "has no 'join', 'cancel' or 'detach'");
+    else
+      error(where, "task '" + name + "' may not be awaited" +
+                       (exit ? when : " when its scope ends") +
+                       ": it is spent on some paths only (by " +
+                       moved->second.By + ", at " + at(moved->second.At) +
+                       "); every path awaits it, or moves it");
+  }
+}
+
+void Sema::checkTasksAwaitedUpTo(const Scope *stop, const char *exit,
+                                 ast::SourceLocation loc) {
+  for (const Scope *s = CurrentScope; s && s != stop; s = s->Parent)
+    checkTasksAwaited(s, exit, loc);
+}
+
+// -- Qualifiers on places (docs/design/concurrency.md, "The qualifiers")
+
+ast::Qualifier Sema::qualifierOfVar(std::string_view name) const {
+  for (const Scope *s = CurrentScope; s; s = s->Parent) {
+    if (!s->contains(name))
+      continue;
+    auto it = s->Quals.find(name);
+    return it == s->Quals.end() ? ast::Qualifier{} : it->second;
+  }
+  return {};
+}
+
+ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
+  if (!e)
+    return {};
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return qualifierOf(te->getTrueExpr());
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
+    return u->getOpcode() == ast::UnaryOpcode::Move
+               ? qualifierOf(u->getOperand())
+               : ast::Qualifier{};
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return id->isFunctionRef() ? ast::Qualifier{}
+                               : qualifierOfVar(id->getName());
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    const ast::Qualifier recv = qualifierOf(ma->getReceiver());
+    ast::Type *rt = ast::stripOptional(
+        const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
+    ast::Qualifier q;
+    bool recvMut = recv.Mut;
+    if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt)) {
+      q = ct->findFieldQualifier(ma->getFieldName());
+    } else if (const auto *st = ast::dyn_cast<ast::StructType>(rt)) {
+      q = st->findFieldQualifier(ma->getFieldName());
+      // A struct is a value: the objects it holds follow the variable
+      // that holds it (its `let`), or the object it is part of.
+      recvMut = valueRootWritable(ma->getReceiver());
+    }
+    // A unique field follows its root: written under a `mut` receiver,
+    // immutable under an immutable one.  A `shared` field is the object's
+    // own form, kept through any root (`shared mut` is written through
+    // every alias); a cell and a frozen field are what they are.
+    if (q.Form == ast::QualForm::Unique)
+      q.Mut = recvMut;
+    return q;
+  }
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    // An element of a fixed-size array (a value) follows the variable that
+    // holds the array; a slice's its array's writability (`inout T[]`).
+    ast::Qualifier q = qualifierOf(se->getArray());
+    if (q.Form == ast::QualForm::Unique)
+      q.Mut = valueRootWritable(se->getArray());
+    return q;
+  }
+  if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+    ast::Qualifier q = qualifierOf(ti->getTuple());
+    if (q.Form == ast::QualForm::Unique)
+      q.Mut = valueRootWritable(ti->getTuple());
+    return q;
+  }
+  if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    if (const FunctionSig *sig = lookupFunction(ce->getCalleeName()))
+      return sig->ResultQual;
+    return {};
+  }
+  if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    ast::Type *rt = ast::stripOptional(
+        const_cast<ast::Expr *>(mc->getReceiver())->getResolvedType());
+    if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt))
+      if (const ast::MethodDecl *m = ct->findMethod(mc->getMethodName()))
+        return m->getResultQual();
+    return {};
+  }
+  return {};
+}
+
+std::string Sema::qualifiedName(ast::Qualifier q, ast::Type *ty) {
+  std::string s = q.spelling();
+  if (!s.empty() && ty)
+    s += ' ';
+  return s + (ty ? typeName(ty) : std::string());
+}
+
+bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
+                                 ast::SourceLocation loc) {
+  if (q.isUnique() || !inner)
+    return true;
+  // A struct, a tuple or an array is a value wherever it is, whatever it
+  // holds: it takes no qualifier.  One to share, or to freeze for every
+  // thread, goes in a `mem::Box<T>`, an object (`atomic shared
+  // mem::Box<Buffer<float>>`).
+  const bool ref = ast::isRefType(inner) || ast::isa<ast::AtomicType>(inner);
+  const std::string value =
+      "'" + typeName(inner) + "' is a value" +
+      (sharesStorage(inner) ? ": box it ('mem::Box<" + typeName(inner) +
+                                  ">') to share what it holds"
+                            : "");
+  switch (q.Form) {
+  case ast::QualForm::Unique: // `mut`
+    if (!ref) {
+      error(loc, "'mut' applies to objects; '" + typeName(inner) +
+                     "' is a value: its storage is rewritten by assignment, "
+                     "which 'let' fixes");
+      return false;
+    }
+    return true;
+  case ast::QualForm::Shared:
+    if (!ref) {
+      error(loc, std::string("'") + q.spelling() + "' qualifies a reference; " +
+                     value);
+      return false;
+    }
+    return true;
+  case ast::QualForm::AtomicShared:
+    if (!ref) {
+      error(loc, "'atomic shared' qualifies a reference; " + value);
+      return false;
+    }
+    return true;
+  case ast::QualForm::Locked:
+    if (!ast::isRefType(inner)) {
+      error(loc, std::string("'") + q.spelling() +
+                     "' holds an object in the prototype, not a '" +
+                     typeName(inner) + "' (wrap the value in a class)");
+      return false;
+    }
+    // The lock buys the writes: without `mut` it locks what nothing
+    // writes, which a frozen object gives with no lock.
+    if (!q.Mut)
+      warning(loc, "'locked " + typeName(inner) +
+                       "' locks an object nothing writes; 'atomic shared " +
+                       typeName(inner) +
+                       "' is read from every thread with no lock");
+    return true;
+  }
+  return true;
+}
+
+bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
+                              const std::string &what,
+                              ast::SourceLocation loc) {
+  ast::Type *ty = src ? src->getResolvedType() : nullptr;
+  // A value (a function value too) copies: the forms are of references,
+  // so it skips the conversions below, but not the copy rule, which sees
+  // the unique references it holds.
+  const bool value = ty && !ast::isa<ast::PoisonType>(ty) &&
+                     !ast::isRefType(ast::stripOptional(ty)) &&
+                     !ast::isa<ast::AtomicType>(ty) &&
+                     !ast::isa<ast::TaskType>(ty);
+  // A task handle read from a variable into an owning slot (a result,
+  // another variable) leaves with it: the variable is spent, as by
+  // `await` (the prototype's typestate, checkTasksAwaited).
+  if (ty && ast::isa<ast::TaskType>(ty))
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(src);
+        id && !id->isFunctionRef() && CurrentScope &&
+        CurrentScope->findOwner(id->getName()))
+      MovedVars[varKey(id->getName())] =
+          MovedState{src->getLocation(), false, "its use as a value"};
+  if (!ty || !sharesStorage(ty) || ast::isa<ast::PoisonType>(ty))
+    return true; // a value is copied
+  if (ast::isa<ast::NoneLiteral>(src))
+    return true;
+  const ast::Expr *inner = src;
+  bool moved = false;
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(src);
+      u && u->getOpcode() == ast::UnaryOpcode::Move) {
+    moved = true;
+    inner = u->getOperand();
+  }
+  const bool place = ast::isa<ast::Identifier>(inner) ||
+                     ast::isa<ast::MemberAccessExpr>(inner) ||
+                     ast::isa<ast::SubscriptExpr>(inner) ||
+                     ast::isa<ast::TupleIndexExpr>(inner);
+  const ast::Qualifier sq = qualifierOf(src);
+  // The conversions: a unique reference flows into any form, and gains
+  // `mut` only by `move` (or as a temporary, which nobody else holds); a
+  // `shared` reference, a frozen object and a cell convert only as they
+  // are.
+  bool ok = value || sq == dst;
+  if (!ok && sq.Form == ast::QualForm::Unique)
+    ok = sq.Mut || !dst.Mut || moved || !place;
+  if (!ok) {
+    auto article = [](const std::string &s) {
+      return std::string(!s.empty() && s[0] == 'a' ? "an '" : "a '") + s + "'";
+    };
+    error(loc, "cannot store " + article(qualifiedName(sq, ty)) + " in " +
+                   what + ", " + article(qualifiedName(dst, ty)) + ": " +
+                   (sq.Form == ast::QualForm::Unique
+                        ? "a reference gains 'mut' only by 'move'"
+                        : "a 'shared' reference, a frozen object and a cell "
+                          "convert only as they are"));
+    return false;
+  }
+  // A unique value (`mut` or not) that becomes a cell, or a frozen object,
+  // is made into one at this use: the send check runs on what it holds.
+  if (!value && sq.Form == ast::QualForm::Unique &&
+      dst.Form != ast::QualForm::Unique && dst.Form != ast::QualForm::Shared) {
+    if (std::string why = uncrossable(ty, sq, ""); !why.empty()) {
+      error(loc, "cannot make '" + placeText(inner) + "' (a '" +
+                     qualifiedName(sq, ty) + "') '" + dst.spelling() +
+                     "': " + why);
+      return false;
+    }
+    src->setMaterialize(dst.Form);
+  }
+  // The copy rule (--strict-ownership): a move-only value read from a
+  // place is moved, never copied.  A `shared` reference, a handle, and a
+  // value of such parts are Copyable.
+  std::string part;
+  if (StrictOwnership && place && !moved && sq.Form == ast::QualForm::Unique &&
+      !isCopyablePart(ty, sq, &part)) {
+    const std::string text = placeText(inner);
+    std::string msg = "cannot copy '" + text + "'";
+    if (ast::isRefType(ty))
+      msg += " (a unique '" + qualifiedName(sq, ty) + "')";
+    else
+      msg += ": '" + typeName(ty) + "' holds unique " + part;
+    if (ast::isa<ast::Identifier>(inner))
+      msg += "; write 'move " + text + "' to transfer it" +
+             (ast::isRefType(ty)
+                  ? ", or declare it '" +
+                        qualifiedName(
+                            ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty) +
+                        "'"
+                  : std::string());
+    else
+      msg += "; a field or element leaves by 'mem::replace' or 'mem::take'" +
+             (ast::isRefType(ty)
+                  ? ", or is declared '" +
+                        qualifiedName(
+                            ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty) +
+                        "'"
+                  : std::string());
+    error(loc, msg);
+    return false;
+  }
+  return true;
+}
+
+/// Why @p what (a variable, a field) cannot be written: its form @p q, of
+/// an object of type @p ty, is immutable, with the form that would allow it.
+static std::string immutableText(const std::string &what,
+                                 const ast::Qualifier &q,
+                                 const std::string &ty) {
+  switch (q.Form) {
+  case ast::QualForm::Unique:
+    return what + " is immutable (a '" + ty + "'; write 'mut " + ty +
+           "' to change it)";
+  case ast::QualForm::Shared:
+    return what + " is immutable (a 'shared " + ty + "'; write 'shared mut " +
+           ty + "' to change it)";
+  case ast::QualForm::AtomicShared:
+    return what + " is frozen (an 'atomic shared " + ty + "')";
+  case ast::QualForm::Locked:
+    return what + " is 'locked " + ty +
+           "', whose contents are never written; declare it 'locked mut " + ty +
+           "' to change them in a 'lock' block";
+  }
+  return "";
+}
+
+bool Sema::valueRootWritable(const ast::Expr *e) {
+  // Through the value's links (a struct's field, an array's or a tuple's
+  // element) to what holds the value: a variable, writable unless `let`
+  // (or a borrow, a loop's copy, a capture), or an object, writable when
+  // `mut`.
+  for (const ast::Expr *p = e;;) {
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(p)) {
+      if (id->isFunctionRef())
+        return false;
+      ast::Type *ty =
+          CurrentScope ? CurrentScope->lookup(id->getName()) : nullptr;
+      if (ty && ast::isRefType(ast::stripOptional(ty)))
+        return qualifierOfVar(id->getName()).Mut;
+      switch (varKind(id->getName())) {
+      case VarKind::Plain:
+      case VarKind::Inout:
+        return true;
+      default:
+        return false;
+      }
+    }
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p)) {
+      ast::Type *rt = ast::stripOptional(
+          const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
+      if (rt && ast::isa<ast::ClassType>(rt))
+        return qualifierOf(ma->getReceiver()).Mut;
+      p = ma->getReceiver();
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p)) {
+      ast::Type *at =
+          const_cast<ast::Expr *>(se->getArray())->getResolvedType();
+      if (at && ast::isa<ast::SliceType>(at))
+        return varKind(placeRoot(se->getArray())
+                           ? placeRoot(se->getArray())->getName()
+                           : "") == VarKind::Inout;
+      p = se->getArray();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p)) {
+      p = ti->getTuple();
+    } else {
+      return false; // a temporary: written by nobody
+    }
+  }
+}
+
+std::string Sema::constPlace(const ast::Expr *e) {
+  // The place as reached (qualifierOf: a unique field follows its root, a
+  // `shared` one reads immutable under an immutable root).  A value (a
+  // struct, an array, a tuple, a number) is written as its `let` allows,
+  // and so are the objects it holds.  A unique link that is immutable is
+  // so because of its root, which is what to change, as is a `shared mut`
+  // field read under an immutable root: the walk reports the first link
+  // that is immutable by its own declaration, else the root.  A `locked`
+  // cell's contents are reached in a `lock` block (checkNotLocked).
+  bool throughObject = false; // an object reached from the value
+  for (const ast::Expr *p = e;;) {
+    ast::Type *ty = const_cast<ast::Expr *>(p)->getResolvedType();
+    const bool ref = ty && ast::isRefType(ast::stripOptional(ty));
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(p)) {
+      if (!ref) {
+        // The value's own storage is `let`'s business (letValueRoot); the
+        // objects it holds follow it too.
+        if (throughObject && varKind(id->getName()) == VarKind::Let)
+          return "'" + id->getName() +
+                 "' is declared with 'let', and so are the objects it holds; "
+                 "drop 'let' to change them";
+        return "";
+      }
+      const ast::Qualifier q = qualifierOfVar(id->getName());
+      if (q.Form == ast::QualForm::Locked)
+        return "";
+      return q.isConst()
+                 ? immutableText("'" + id->getName() + "'", q, typeName(ty))
+                 : "";
+    }
+    const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p);
+    if (ref) {
+      throughObject = true;
+      const ast::Qualifier q = qualifierOf(p);
+      if (!q.isConst() || q.Form == ast::QualForm::Locked)
+        return "";
+      if (ma && q.Form != ast::QualForm::Unique) {
+        // Immutable by its own declaration, or only under its root?
+        ast::Type *rt = ast::stripOptional(
+            const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
+        ast::Qualifier declared;
+        if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt))
+          declared = ct->findFieldQualifier(ma->getFieldName());
+        else if (const auto *st = ast::dyn_cast<ast::StructType>(rt))
+          declared = st->findFieldQualifier(ma->getFieldName());
+        if (!declared.Mut)
+          return immutableText("field '" + ma->getFieldName() + "'", q,
+                               typeName(ty));
+      }
+    }
+    if (ma)
+      p = ma->getReceiver();
+    else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+      p = se->getArray();
+    else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p))
+      p = ti->getTuple();
+    else
+      return "";
+  }
+}
+
+bool Sema::checkNotLocked(const ast::Expr *place, ast::SourceLocation loc) {
+  if (LockOperand || !place)
+    return true;
+  if (qualifierOf(place).Form != ast::QualForm::Locked)
+    return true;
+  const std::string text = placeText(place);
+  error(loc, "'" + text + "' is 'locked': reach its contents in 'lock " + text +
+                 " as c: view { }' (or 'inout')");
+  return false;
+}
+
+} // namespace paykan::sema

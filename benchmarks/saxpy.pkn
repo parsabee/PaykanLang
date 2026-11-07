@@ -1,0 +1,36 @@
+// ys = a * xs + ys over whole arrays: a store at the loop's index per
+// iteration.  Arrays are at most 16384 elements in the prototype, so this
+// loop is short, and `reps` of them show whether so small a loop pays for
+// its fork and join.
+//   saxpy <n> <reps>    n <= 16384
+import ::io;
+import bench;
+
+fn main(args: view Str[]) -> int {
+  n = bench::arg(args, 1, 16384);
+  if n > 16384 { n = 16384; }
+  let reps = bench::arg(args, 2, 1000);
+  xs = [0.0; 16384];
+  ys = [0.0; 16384];
+  for i in 0..n { xs[i] = float(i % 7); ys[i] = 1.0; }
+  let a = 0.5;
+  best = 0;
+  total = 0;
+  let c0 = bench::cpu();
+  let w0 = bench::now();
+  for r in 0..reps {
+    let t0 = bench::now();
+    parallel for i in 0..n { ys[i] = a * xs[i] + ys[i]; }
+    let dt = bench::now() - t0;
+    total += dt;
+    if best == 0 || dt < best { best = dt; }
+  }
+  let cpu = bench::cpu() - c0;
+  let wall = bench::now() - w0;
+  check = 0.0;
+  for i in 0..n { check += ys[i]; }
+  io::println("saxpy n=" + Str(n) + " reps=" + Str(reps) + " ns_min="
+      + Str(best) + " ns_mean=" + Str(total / reps) + " wall_ns=" + Str(wall)
+      + " cpu_ns=" + Str(cpu) + " check=" + Str(check));
+  return 0;
+}

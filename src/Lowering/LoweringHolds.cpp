@@ -819,6 +819,19 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
     eval(recv);
     return {};
   }
+  // A buffer's element or length read in place (emitBufferRead): the
+  // receiver's storage is read and the number loaded at once, as a
+  // variable's value is, so nothing of it is in use once the read is made,
+  // and no later operand's write is read instead of it (a `view fn`'s
+  // receiver, below, is read where it is through the call).
+  if (L.isBufferReadInPlace(mc)) {
+    Use r = eval(recv);
+    within(r.Owners, [&] {
+      for (ast::Expr *a : mc->getArguments())
+        eval(a);
+    });
+    return {};
+  }
   // A struct's method runs on the receiver's storage, in use until it
   // returns, which it may replace when it may change `self`.
   if (auto *st = L.getExprStructType(recv);
@@ -964,6 +977,8 @@ void ModuleLowering::BorrowedReads::statement(ast::Stmt *s) {
     eval(x->getCondition());
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     eval(x->getCondition());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    eval(x->getCell());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     eval(x->getStart());
     eval(x->getEnd());
@@ -1305,6 +1320,9 @@ void ModuleLowering::EffectScan::stmt(ast::Stmt *s) {
     stmt(x->getElseBranch());
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     expr(x->getCondition());
+    stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    expr(x->getCell());
     stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     expr(x->getStart());
@@ -1840,6 +1858,9 @@ void ModuleLowering::BufferUses::stmt(ast::Stmt *s) {
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     expr(x->getCondition());
     stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    expr(x->getCell());
+    stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     expr(x->getStart());
     expr(x->getEnd());
@@ -2093,6 +2114,9 @@ void ModuleLowering::FieldStoreScan::stmt(ast::Stmt *s) {
     stmt(x->getElseBranch());
   } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
     expr(x->getCondition());
+    stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
+    expr(x->getCell());
     stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
     expr(x->getStart());

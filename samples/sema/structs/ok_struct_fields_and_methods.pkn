@@ -58,9 +58,9 @@ fn main() -> int {
   bump(q.y);
   l = Line(p, q);
   l.a.y = 0;
-  let s = Shape(Point::origin());
+  let s: mut = Shape(Point::origin());
   s.at.shift(3);
-  ps: Point[2] = [p, q];
+  ps = [p, q];
   ps[1].x = 9;
   let pair = twice(p);
   io::println(show(l) + " " + Str(p == q) + " " + Str(p.hash()));

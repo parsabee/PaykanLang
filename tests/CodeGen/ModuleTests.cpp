@@ -163,7 +163,7 @@ TEST(Module, QualifiedTypeParamRuns) {
   writeTempFile(tmpDir.string(), "geometry/point.pkn", R"(
 class Point {
   x: int; y: int;
-  fn sum() -> int { return self.x + self.y; }
+  view fn sum() -> int { return self.x + self.y; }
 }
 
 impl Point {
@@ -194,7 +194,7 @@ TEST(Module, QualifiedTypeFieldRuns) {
   writeTempFile(tmpDir.string(), "geometry/point.pkn", R"(
 class Point {
   x: int; y: int;
-  fn sum() -> int { return self.x + self.y; }
+  view fn sum() -> int { return self.x + self.y; }
 }
 
 impl Point {
@@ -206,7 +206,7 @@ impl Point {
 import geometry::point;
 class Box {
   origin: point::Point;
-  fn total() -> int { return self.origin.sum(); }
+  view fn total() -> int { return self.origin.sum(); }
 }
 
 impl Box {
@@ -255,7 +255,7 @@ class Box {
   view fn total() -> int { return self.origin.sum(); }
 }
 class Watcher {
-  weak box: Box?;
+  weak box: shared mut Box?;
   view fn equals(other: Obj) -> bool {
     match other {
       w: Watcher {
@@ -270,8 +270,8 @@ class Watcher {
   }
 }
 fn main() -> int {
-  w = Watcher(None);
-  b = Box(point::Point(15, 27, w));
+  w: mut = Watcher(None);
+  b: shared mut = Box(point::Point(15, 27, w));
   w.box = b;
   io::println(Str(b.total()));
   io::println(Str(b.total()));
@@ -385,7 +385,7 @@ fn count() -> int {
 import lib::gen;
 import mid;
 fn main() -> int {
-  b = mid::make(30);
+  b: mut = mid::make(30);
   b.set(b.get() + gen::Box<int>(4).get());
   pair: gen::Box<int>[2] = [b, mid::make(0)];
   return b.get() + mid::count() + gen::sum(pair, 1);
@@ -413,7 +413,7 @@ TEST(Module, CacheInvalidatesOnTransitiveLayoutChange) {
   writeTempFile(tmpDir.string(), "base.pkn", R"(
 class Point {
   x: int; y: int;
-  fn sum() -> int { return self.x + self.y; }
+  view fn sum() -> int { return self.x + self.y; }
 }
 
 impl Point {
@@ -448,7 +448,7 @@ fn main() -> int { return mid::total(); }
   writeTempFile(tmpDir.string(), "base.pkn", R"(
 class Point {
   tag: int; x: int; y: int;
-  fn sum() -> int { return self.x + self.y; }
+  view fn sum() -> int { return self.x + self.y; }
 }
 
 impl Point {
@@ -692,8 +692,8 @@ fn square(x: int) -> int { return x * x; }
 fn pick<T>(x: T) -> (int) -> int { return square; }
 class Keeper<T> {
   v: T;
-  fn code() -> (int) -> int { return square; }
-  fn same(f: (int) -> int) -> bool { return f == square; }
+  view fn code() -> (int) -> int { return square; }
+  view fn same(f: (int) -> int) -> bool { return f == square; }
 }
 )");
 

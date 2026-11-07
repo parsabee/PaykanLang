@@ -1,0 +1,31 @@
+// The concurrency prototype's checks (docs/design/concurrency.md): each
+// line marked `error` is rejected by Sema.
+import ::io;
+
+class Node {
+  id: int;
+}
+
+async fn consume(n: Node) -> int { return n.id; }
+
+fn main() -> int {
+  let a = Node(1);
+  let t1 = consume(a);          // error: cannot copy 'a' into a task: write 'move a'
+  let b = Node(2);
+  let t2 = consume(move b);
+  io::println(Str(b.id));       // error: 'b' was moved
+  let s: shared = Node(3);
+  let t3 = consume(move s);     // error: 's' is shared: it never crosses
+  let nodes = [Node(4)];
+  total = 0;
+  parallel for i in 0..1 {
+    total = nodes[i].id;        // error: not a reduction; nodes is a reference
+  }
+  let xs = [0.0; 4];
+  ys = [0.0; 4];
+  ys[0] = 1.0;
+  parallel for i in 0..4 {
+    ys[3 - i] = xs[i];          // error: written at an index other than the loop's variable
+  }
+  return await t2;
+}

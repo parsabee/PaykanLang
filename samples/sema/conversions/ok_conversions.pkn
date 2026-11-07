@@ -1,23 +1,23 @@
-// Every conversion constructor `Target<Source>(value)` with its result type,
-// and Str's parses, which give the optional of their type.
+// Every conversion constructor `Target<Source>(value)`, whose result is a
+// `Target`, and Str's parses, which give the optional of their type.
 fn main() -> int {
   let i: int = 1;
   let f: float = 1.5;
   let b: bool = True;
   let c: char = 'c';
   let s: Str = "12";
-  let s1: Str = Str<int>(i);
-  let s2: Str = Str<float>(f);
-  let s3: Str = Str<bool>(b);
-  let s4: Str = Str<char>(c);
+  let s1 = Str<int>(i);
+  let s2 = Str<float>(f);
+  let s3 = Str<bool>(b);
+  let s4 = Str<char>(c);
   let p1: int? = s.toInt();     // None for an invalid string
   let p2: float? = s.toFloat();
-  let n1: int = int<float>(f);
-  let n2: float = float<int>(i);
-  let n3: int = int<bool>(b);
-  let n4: bool = bool<int>(i);
-  let n5: int = int<char>(c);
-  let n6: char = char<int>(i);
+  let n1 = int<float>(f);
+  let n2 = float<int>(i);
+  let n3 = int<bool>(b);
+  let n4 = bool<int>(i);
+  let n5 = int<char>(c);
+  let n6 = char<int>(i);
   let q1: bool? = s.toBool();   // exactly "True" / "False"
   // A parsed optional is unwrapped before it is formatted.
   match p1 {

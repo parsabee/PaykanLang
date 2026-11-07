@@ -73,7 +73,7 @@ class Counter {
   view fn i() { t: inout = self.n; }
   view fn child() -> Child { return self.c; }
   view fn ok() -> int {
-    o = Child();
+    o: mut = Child();
     o.tick();
     return self.n + self.xs.len() + self.c.k;
   }
@@ -149,8 +149,8 @@ fn main() -> int { return 0; }
             });
 }
 
-// `let` only fixes the variable: any method can be called on what it holds,
-// its own and the builtins', `view fn` or not.
+// `let` only fixes the variable: any method can be called on what a `mut`
+// reference it holds names, its own and the builtins', `view fn` or not.
 TEST(ViewFn, LetCanCallAnyMethod) {
   auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
@@ -162,8 +162,8 @@ impl Counter {
   fn __init__() { self.n = 0; }
 }
 fn main() -> int {
-  let c = Counter();
-  let s = "abc";
+  let c: mut Counter = Counter();
+  let s: mut Str = "abc";
   let xs = [1, 2];
   c.tick();
   s.concat("d");
@@ -238,8 +238,8 @@ impl Square {
 class Box<T> { v: T; n: int; fn get() -> T { return self.v; } fn count() -> int { return self.n; } }
 impl Box<T> { fn __init__(v: T) { self.v = v; self.n = 1; } }
 fn main() -> int {
-  b = Box<int>(1);
-  c = Box<Str>("a");
+  b: mut = Box<int>(1);
+  c: mut = Box<Str>("a");
   return Shape().twice() + b.get() + c.get().len() + b.count() + c.count();
 }
 fn twiceOf(n: int) -> int { return 2 * n; }
@@ -288,7 +288,7 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   auto both =
       semaCheck(boxes + "fn main() -> int {\n"
                         "  a = Box<int>(1, 2); b = Box<Str>(\"x\", 3);\n"
-                        "  c = Cell<int>(4); d = Cell<Str>(\"y\");\n"
+                        "  c: mut = Cell<int>(4); d: mut = Cell<Str>(\"y\");\n"
                         "  io::println(Str(a.get() + a.count() + b.count() + "
                         "c.get()) + b.get() + d.get());\n"
                         "  return 0;\n"
@@ -303,7 +303,7 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
             both.Diagnostics.rfind("'count' never"))
       << both.Diagnostics;
   auto ints = semaCheck(boxes + "fn main() -> int {\n"
-                                "  a = Box<int>(1, 2); c = Cell<int>(4);\n"
+                                "  a = Box<int>(1, 2); c: mut = Cell<int>(4);\n"
                                 "  return a.get() + c.get() + a.first();\n"
                                 "}\n");
   EXPECT_TRUE(ints.Ok) << ints.Diagnostics;
@@ -399,7 +399,7 @@ TEST(ViewFn, AcrossModules) {
 class Q : base::P { fn get() -> int { return 1; } }
 impl Q { fn __init__() { __super__(); } }
 fn main() -> int {
-  let p = base::P();
+  let p: mut base::P = base::P();
   p.set(2);
   return p.get();
 })"));

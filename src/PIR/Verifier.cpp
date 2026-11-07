@@ -611,7 +611,7 @@ private:
       // Only a call's arguments are lent or passed, and only a retain
       // lends (§6).
       if (!in.Own.empty() && in.Op != Opcode::Call && in.Op != Opcode::VCall &&
-          in.Op != Opcode::ICall)
+          in.Op != Opcode::ICall && in.Op != Opcode::AsyncCall)
         error(std::string("'") + opName(in) +
               "' gives its operands an ownership (only a call's arguments "
               "have one)");
@@ -783,6 +783,33 @@ private:
         result(in, it->second->Sig.Ret);
         break;
       }
+      case Opcode::AsyncCall: {
+        auto it = MV.Index.Functions.find(in.Callee);
+        if (it == MV.Index.Functions.end()) {
+          error("async_call of undeclared function '@" + in.Callee + "'");
+          for (const Operand &a : in.Args)
+            typeOf(a);
+          if (in.Result.Id != kNoValue)
+            define(in.Result);
+          break;
+        }
+        if (!it->second->IsAsync)
+          error("async_call of '@" + in.Callee + "', which is not an async fn");
+        expectArgs(in.Args, 0, it->second->Sig, "'@" + in.Callee + "'");
+        expectOwnership(in, it->second->Sig, lends(*it->second),
+                        "'@" + in.Callee + "'");
+        result(in, Type::Ptr);
+        break;
+      }
+      case Opcode::Await:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Ptr, "task of await");
+        if (in.Result.Ty == Type::Void || in.Result.Ty == Type::Mem ||
+            in.Result.Ty == Type::Weak)
+          error("await of " + std::string(typeName(in.Result.Ty)));
+        result(in, in.Result.Ty);
+        break;
       case Opcode::VCall: {
         if (in.Args.empty()) {
           error("vcall has no receiver");
@@ -1167,6 +1194,7 @@ private:
           expect(w->Cond, Type::Bool, "while condition");
           verifyBlock(*w->Body, /*inLoop=*/true);
           closeScope(cond);
+          verifyParallel(*w);
         } else if (std::holds_alternative<Break>(s) ||
                    std::holds_alternative<Continue>(s)) {
           if (!inLoop)
@@ -1190,6 +1218,29 @@ private:
       return terminated;
     }
 
+    /// The `parallel` annotation of @p w (the concurrency prototype): its
+    /// locals are the function's, its count an i64, its reductions by add
+    /// or mul.
+    void verifyParallel(const While &w) {
+      if (!w.Par)
+        return;
+      const Parallel &p = *w.Par;
+      auto local = [&](LocalId l, const char *what) {
+        if (l >= F.Locals.size())
+          error(std::string("parallel ") + what + " names local " +
+                std::to_string(l) + ", which the function has not");
+      };
+      local(p.Counter, "counter");
+      expect(p.Count, Type::I64, "parallel count");
+      for (LocalId l : p.Privates)
+        local(l, "private");
+      for (const Parallel::Reduction &r : p.Reductions) {
+        local(r.Partial, "reduction");
+        if (r.Op != Opcode::Add && r.Op != Opcode::Mul)
+          error("parallel reduction with '" + std::string(opcodeName(r.Op)) +
+                "' (only add and mul)");
+      }
+    }
     /// Like verifyBlock, but the block's definitions stay visible: they go
     /// into the caller's scope (for a while's condition region, whose values
     /// the body may use).
@@ -1223,6 +1274,7 @@ private:
           expect(w->Cond, Type::Bool, "while condition");
           verifyBlock(*w->Body, true);
           closeScope(cond);
+          verifyParallel(*w);
         }
       }
     }

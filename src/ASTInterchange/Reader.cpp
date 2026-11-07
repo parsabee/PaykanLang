@@ -1076,7 +1076,7 @@ private:
       ParamMode mode = ParamMode::Value;
       if (!pty || !paramMode(pf, mode) || !pf.done())
         return false;
-      out.push_back({pname, pty, mode, ploc});
+      out.push_back({pname, pty, mode, Qualifier{}, ploc});
     }
     return true;
   }
@@ -1172,6 +1172,10 @@ private:
                          "' has (qual static): only an 'impl' block's "
                          "method can (a 'static fn')"),
              nullptr;
+    // An `async fn` ends with `(async)` (the concurrency prototype).
+    const SExpr *async = f.optionalList("async");
+    if (async && !async->Items.empty())
+      return fail(*async, "(async) takes no fields"), nullptr;
     // Only a free function is generic, as the grammar has it.
     if (!tparams.empty() &&
         (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod))
@@ -1200,6 +1204,7 @@ private:
     fn->setInferredResult(inferred != nullptr);
     fn->setView(view);
     fn->setStatic(isStatic);
+    fn->setAsync(async != nullptr);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
     fn->setTypeParamBounds(std::move(bounds));
@@ -1224,7 +1229,10 @@ private:
   }
 
   /// @p discardable: the name may be "" (`_`), as a for loop's may.
-  VarDecl *varDecl(const SExpr &e, bool discardable = false) {
+  /// @p bindsLock: a `lock` block's binding, a borrow with no initialiser
+  /// (the cell's contents, the concurrency prototype).
+  VarDecl *varDecl(const SExpr &e, bool discardable = false,
+                   bool bindsLock = false) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name =
@@ -1251,7 +1259,11 @@ private:
     if (!paramMode(f, mode))
       return nullptr;
     const bool borrow = mode != ParamMode::Value;
-    if (borrow && !init)
+    if (bindsLock && (!borrow || init))
+      return fail(e, "a lock block's binding is a view or an inout with no "
+                     "initialiser"),
+             nullptr;
+    if (borrow && !init && !bindsLock)
       return fail(e, "a local borrow has an initialiser"), nullptr;
     const SExpr *let = f.optionalList("let");
     if (let && !let->Items.empty())
@@ -1335,6 +1347,55 @@ private:
                        "length must be 1 or more"),
                nullptr;
       return Ctx.make<FixedArrayType>(loc, elem, n);
+    }
+    // The concurrency prototype: `atomic T`, a task's type (never written
+    // by a program, kept for an AST that has one), and a qualified type
+    // (`shared Node`; `shared` alone where the type is inferred).
+    if (e.Text == "atomic-type" || e.Text == "task-type") {
+      Type *inner = nullptr;
+      {
+        Nested level(*this, e);
+        inner = level.ok() ? type(f, "the inner type") : nullptr;
+      }
+      if (!inner || !f.done())
+        return nullptr;
+      if (e.Text == "atomic-type")
+        return Ctx.make<AtomicType>(loc, inner);
+      return Ctx.make<TaskType>(loc, inner);
+    }
+    if (e.Text == "qualified-type") {
+      const std::string *spelling = f.string("the qualifier");
+      if (!spelling)
+        return nullptr;
+      Qualifier qual;
+      if (*spelling == "mut")
+        qual = {QualForm::Unique, true};
+      else if (*spelling == "shared")
+        qual = {QualForm::Shared, false};
+      else if (*spelling == "shared mut")
+        qual = {QualForm::Shared, true};
+      else if (*spelling == "atomic shared")
+        qual = {QualForm::AtomicShared, false};
+      else if (*spelling == "locked")
+        qual = {QualForm::Locked, false};
+      else if (*spelling == "locked mut")
+        qual = {QualForm::Locked, true};
+      else
+        return fail(e,
+                    "unknown qualifier \"" + *spelling +
+                        "\" (mut, shared, shared mut, atomic shared, locked, "
+                        "locked mut)"),
+               nullptr;
+      Type *inner = nullptr;
+      if (!f.atEnd()) {
+        Nested level(*this, e);
+        inner = level.ok() ? type(f, "the qualified type") : nullptr;
+        if (!inner)
+          return nullptr;
+      }
+      if (!f.done())
+        return nullptr;
+      return Ctx.make<QualifiedType>(loc, qual, inner);
     }
     if (e.Text == "optional-type") {
       Type *inner = nullptr;
@@ -1520,6 +1581,17 @@ private:
       if (!body)
         return nullptr;
       out = Ctx.make<WhileStmt>(loc, cond, body);
+    } else if (t == "lock") {
+      // (lock LOC CELL (var ...) BLOCK): the concurrency prototype's
+      // `lock cell as v: inout|view { }`.
+      Expr *cell = expr(f, "the locked cell");
+      const SExpr *v = cell ? f.list("var") : nullptr;
+      VarDecl *binding = v ? varDecl(*v, false, true) : nullptr;
+      CompoundStmt *body =
+          binding ? block(f, "the lock block's body") : nullptr;
+      if (!body)
+        return nullptr;
+      out = Ctx.make<LockStmt>(loc, cell, binding, body);
     } else if (t == "for") {
       // (for (var NAME TYPE-or-_ _) START END STEP-or-_ BLOCK (inclusive)?),
       // NAME "" for `for _`.
@@ -1548,8 +1620,14 @@ private:
       const SExpr *inclusive = f.optionalList("inclusive");
       if (inclusive && !inclusive->Items.empty())
         return fail(*inclusive, "(inclusive) takes no fields"), nullptr;
-      out = Ctx.make<ForStmt>(loc, var, start, end, step, inclusive != nullptr,
-                              body);
+      // `parallel for` ends with `(parallel)` (the concurrency prototype).
+      const SExpr *parallel = f.optionalList("parallel");
+      if (parallel && !parallel->Items.empty())
+        return fail(*parallel, "(parallel) takes no fields"), nullptr;
+      auto *fs = Ctx.make<ForStmt>(loc, var, start, end, step,
+                                   inclusive != nullptr, body);
+      fs->setParallel(parallel != nullptr);
+      out = fs;
     } else if (t == "break") {
       out = Ctx.make<BreakStmt>(loc);
     } else if (t == "continue") {
@@ -1999,6 +2077,10 @@ private:
         uop = UnaryOpcode::Not;
       else if (op->Text == "bitnot")
         uop = UnaryOpcode::BitNot;
+      else if (op->Text == "move")
+        uop = UnaryOpcode::Move;
+      else if (op->Text == "await")
+        uop = UnaryOpcode::Await;
       else
         return fail(*op, "unknown unary operator '" + op->Text +
                              "' (neg, not, bitnot)"),
@@ -2100,9 +2182,6 @@ private:
                  nullptr;
       }
       out = Ctx.make<EnumValueExpr>(loc, *en, *v, std::move(targs));
-    } else if (t == "mov") {
-      return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
-             nullptr;
     } else if (t == "call-value") {
       Link link(*this, e);
       Expr *callee = operand(f, e, "the function value", Operand::Receiver);

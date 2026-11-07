@@ -17,7 +17,29 @@ PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanObject_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanObject_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
+    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
 };
+
+// -- The walk and the freeze (the concurrency prototype)
+
+void PaykanObject_walk(PaykanObject *self) { (void)self; }
+
+void Paykan_freeze(PaykanObject *obj) {
+  if (!obj || obj->strong == PAYKAN_REF_MAX)
+    return;
+  obj->strong = PAYKAN_REF_MAX;
+  Paykan_vcall_walk(obj);
+}
+
+void Paykan_freeze_mem(const void *type, void *value) {
+  const PaykanType *t = (const PaykanType *)type;
+  for (int64_t k = 0; k < t->nrefs; ++k) {
+    const int64_t word = PaykanType_ref(t, k);
+    PaykanShared *ref =
+        *(PaykanShared **)((unsigned char *)value + (word >> 1));
+    Paykan_freeze(ref);
+  }
+}
 
 // -- Constructor / Destructor
 
@@ -63,6 +85,7 @@ static PaykanMethod PaykanNone_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanNone_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanNone_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
+    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
 };
 
 // Immortal: its strong count starts at 1, which nothing releases, so the
@@ -166,6 +189,12 @@ double Paykan_uint_to_f32(int64_t bits) {
 void Paykan_panic_index(int64_t index, int64_t len) {
   Paykan_runtime_panic("array index %lld out of bounds (len=%lld)",
                        (long long)index, (long long)len);
+}
+
+void Paykan_panic_buffer_index(int64_t index, int64_t len) {
+  // As Buffer.c's buffer_check_index prints it.
+  Paykan_runtime_panic("buffer index %llu out of bounds (len=%llu)",
+                       (unsigned long long)index, (unsigned long long)len);
 }
 
 void Paykan_panic_int_to_char(int64_t value) {

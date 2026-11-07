@@ -111,7 +111,7 @@ fn'`):
 import ::io;
 
 fn main() -> int {
-  let s = "to";
+  let s: mut = "to";  // `concat` writes the string: its variable is `mut`
   let t = s;          // t and s name one string
   s.concat("do");     // changes that string in place
   let u = s + "!";    // a new string; s is unchanged

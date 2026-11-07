@@ -1,0 +1,36 @@
+// The concurrency prototype: an `atomic shared` object
+// (docs/design/concurrency.md).  A unique value flowing into such a slot is
+// frozen with everything it holds; the handle copies into every task, and
+// reads inside count nothing.
+// expect-stdout: 32 33 0
+// expect-stdout: demo [0..100]
+// expect-leaks: the frozen object is immortal in the prototype
+
+import ::io;
+
+class Limits {
+  lo: int;
+  hi: int;
+}
+class Config {
+  name: Str;
+  limits: Limits;
+  weights: float[4];
+}
+
+// A frozen configuration, shared read-only by every task: no counts inside.
+async fn score(cfg: atomic shared Config, x: int) -> int {
+  if x < cfg.limits.lo || x > cfg.limits.hi { return 0; }
+  return x * cfg.name.len() + int(cfg.weights[x % 4]);
+}
+
+async fn main() -> int {
+  let cfg: atomic shared = Config("demo", Limits(0, 100), [1.0, 2.0, 3.0, 4.0]);
+  let a = score(cfg, 7);          // the handle is copied into each task
+  let b = score(cfg, 8);
+  let c = score(cfg, 500);
+  io::println(Str(await a) + " " + Str(await b) + " " + Str(await c));
+  io::println(cfg.name + " [" + Str(cfg.limits.lo) + ".." + Str(cfg.limits.hi)
+      + "]");
+  return 0;
+}

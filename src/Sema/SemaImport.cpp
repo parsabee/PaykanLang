@@ -189,6 +189,44 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
   return (ty && pos == name.size()) ? ty : nullptr;
 }
 
+/// The name a declaration's type is exported under: its qualifier's
+/// spelling, then the type's (`mut Node?`, `shared mut Node`), or the
+/// type's alone for the bare form.  The qualifier is part of the type of a
+/// parameter, a field or a result (docs/language/19-concurrency.md), so an
+/// importer reads it back (splitExportedQualifier).
+static std::string exportedTypeName(ast::Qualifier q, ast::Type *ty) {
+  std::string name = ast::typeName(ty);
+  if (q.isUnique())
+    return name;
+  return std::string(q.spelling()) + " " + name;
+}
+
+/// The qualifier an exported type name starts with (exportedTypeName), and
+/// the name of the type after it in @p rest; the bare form when it has
+/// none.
+static ast::Qualifier splitExportedQualifier(const std::string &name,
+                                             std::string &rest) {
+  struct Spelled {
+    const char *Prefix;
+    ast::Qualifier Q;
+  };
+  static const Spelled kQualifiers[] = {
+      {"atomic shared ", {ast::QualForm::AtomicShared, false}},
+      {"shared mut ", {ast::QualForm::Shared, true}},
+      {"locked mut ", {ast::QualForm::Locked, true}},
+      {"shared ", {ast::QualForm::Shared, false}},
+      {"locked ", {ast::QualForm::Locked, false}},
+      {"mut ", {ast::QualForm::Unique, true}},
+  };
+  for (const Spelled &s : kQualifiers)
+    if (name.starts_with(s.Prefix)) {
+      rest = name.substr(std::string_view(s.Prefix).size());
+      return s.Q;
+    }
+  rest = name;
+  return {};
+}
+
 /// True for the class names every ASTContext registers at construction (Obj,
 /// Str, Array, File, ...).  They are never exported: each context bootstraps
 /// its own copy, so they are always present on the importing side.
@@ -310,9 +348,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     mi.Name = m->isModulePrivateInit()
                   ? std::string(names::kMethodInitModulePrivate)
                   : m->getName();
-    mi.ReturnTypeName = ast::typeName(m->getReturnType());
-    for (auto *pty : m->getParamTypes())
-      mi.ParamTypeNames.push_back(ast::typeName(pty));
+    mi.ReturnTypeName =
+        exportedTypeName(m->getResultQual(), m->getReturnType());
+    for (size_t i = 0; i < m->getParamTypes().size(); ++i)
+      mi.ParamTypeNames.push_back(
+          exportedTypeName(m->getParamQual(i), m->getParamTypes()[i]));
     mi.Flags =
         static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
                              (m->isView() ? ast::MethodDecl::View : 0) |
@@ -354,7 +394,9 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
         ci.SuperClassName = "";
     }
     for (auto &[fname, fty] : ct->getFields())
-      ci.Fields.push_back({fname, ast::typeName(fty), ct->isWeakField(fname)});
+      ci.Fields.push_back({fname,
+                           exportedTypeName(ct->findFieldQualifier(fname), fty),
+                           ct->isWeakField(fname)});
     // __init__ and the `impl` methods have no vtable slot but are part of
     // the class's interface: a subclass in the importing module must call
     // __init__ through `__super__` with the right arguments, and importers
@@ -385,7 +427,9 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     si.OriginModule = si.IsLocal ? moduleName : lookupOrigin(name);
     for (size_t i = 0; i < st->getNumFields(); ++i)
       si.Fields.push_back(
-          {st->getFieldName(i), ast::typeName(st->getElementType(i))});
+          {st->getFieldName(i),
+           exportedTypeName(st->findFieldQualifier(st->getFieldName(i)),
+                            st->getElementType(i))});
     if (auto *init = st->findMethod(names::kMethodInit))
       si.Methods.push_back(methodInfo(init));
     for (auto *m : st->getImplMethods())
@@ -422,9 +466,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       continue;
     ModuleInfo::FunctionInfo fi;
     fi.Name = name;
-    fi.ReturnTypeName = ast::typeName(sig.ReturnType);
-    for (auto *pty : sig.ParamTypes)
-      fi.ParamTypeNames.push_back(ast::typeName(pty));
+    fi.ReturnTypeName = exportedTypeName(sig.ResultQual, sig.ReturnType);
+    for (size_t i = 0; i < sig.ParamTypes.size(); ++i)
+      fi.ParamTypeNames.push_back(exportedTypeName(
+          i < sig.ParamQuals.size() ? sig.ParamQuals[i] : ast::Qualifier{},
+          sig.ParamTypes[i]));
     fi.Modes = sig.Modes;
     fi.Native = sig.Native;
     info.ExportedFunctions.push_back(std::move(fi));
@@ -598,8 +644,12 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
     }
     return ctx;
   };
-  std::unordered_set<std::string_view> composite;
-  auto unknown = [&](const std::string &type) {
+  // The composite types already resolved.  It owns its names: the name
+  // checked is the record's with its qualifier taken off, a local.
+  std::unordered_set<std::string> composite;
+  auto unknown = [&](const std::string &qualified) {
+    std::string type;
+    splitExportedQualifier(qualified, type);
     ast::BuiltinType::Kind kind;
     if (std::binary_search(described.begin(), described.end(),
                            std::string_view(type)) ||
@@ -612,10 +662,15 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
       return false;
     if (!resolveExportedType(context(), type))
       return true;
-    composite.insert(type);
+    composite.insert(std::move(type));
     return false;
   };
   auto unknownType = [](const std::string &what, const std::string &type) {
+    // A task type names an `async fn` of the module (the prototype).
+    if (type.rfind("Task<", 0) == 0)
+      return Status::error(what + " is a task ('" + type +
+                           "'): a module that declares an 'async fn' cannot "
+                           "be imported in the prototype");
     return Status::error(what + " has unknown type '" + type + "'");
   };
   auto signature = [&](const auto &decl, const std::string &ret,
@@ -987,11 +1042,21 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   // the module's own and left out, so that `m::__f` resolves to nothing.
   const bool hiddenInject = qualifier == hiddenQualifier(moduleName);
 
-  auto resolveOrReport = [&](const std::string &tyName,
-                             const std::string &what) -> ast::Type * {
+  auto resolveOrReport = [&](const std::string &qualifiedName,
+                             const std::string &what,
+                             ast::Qualifier *qual = nullptr) -> ast::Type * {
+    std::string tyName;
+    const ast::Qualifier q = splitExportedQualifier(qualifiedName, tyName);
+    if (qual)
+      *qual = q;
     if (auto *ty = resolveExportedType(Ctx, tyName))
       return ty;
-    error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
+    if (tyName.rfind("Task<", 0) == 0)
+      error(loc, diagPrefix + what + " is a task ('" + tyName +
+                     "'): a module that declares an 'async fn' cannot be "
+                     "imported in the prototype");
+    else
+      error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
     return nullptr;
   };
 
@@ -1064,13 +1129,16 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   auto importedMethod = [&](const ModuleInfo::ClassInfo::MethodInfo &m,
                             const std::string &owner) -> ast::MethodDecl * {
     const std::string decl = "method '" + owner + "." + m.Name + "'";
-    auto *retTy = resolveOrReport(m.ReturnTypeName, "return type of " + decl);
+    ast::Qualifier resultQual;
+    auto *retTy = resolveOrReport(m.ReturnTypeName, "return type of " + decl,
+                                  &resultQual);
     bool sigOk = retTy != nullptr;
     std::vector<ast::Type *> params;
+    std::vector<ast::Qualifier> quals(m.ParamTypeNames.size());
     for (size_t i = 0; i < m.ParamTypeNames.size(); ++i) {
-      auto *pty =
-          resolveOrReport(m.ParamTypeNames[i],
-                          "parameter " + std::to_string(i + 1) + " of " + decl);
+      auto *pty = resolveOrReport(
+          m.ParamTypeNames[i],
+          "parameter " + std::to_string(i + 1) + " of " + decl, &quals[i]);
       if (pty)
         params.push_back(pty);
       else
@@ -1086,6 +1154,8 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
                                      : m.Name),
         retTy, std::move(params), m.Flags);
     md->setParamModes(m.Modes);
+    md->setResultQual(resultQual);
+    md->setParamQuals(std::move(quals));
     md->setModulePrivateInit(modulePrivateInit);
     return md;
   };
@@ -1216,25 +1286,29 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
       ct->reinheritVTable(ct->getSuperClass());
       ast::ASTContext::ClassTypeBuilder builder(Ctx, ct);
       for (auto &f : ci->Fields) {
-        auto *fty =
-            resolveOrReport(f.TypeName, "field '" + f.FieldName +
-                                            "' of class '" + ci->Name + "'");
+        ast::Qualifier fieldQual;
+        auto *fty = resolveOrReport(f.TypeName,
+                                    "field '" + f.FieldName + "' of class '" +
+                                        ci->Name + "'",
+                                    &fieldQual);
         if (!fty) {
           ok = false;
           continue;
         }
-        builder.field(f.FieldName, fty, f.Weak);
+        builder.field(f.FieldName, fty, f.Weak, fieldQual);
       }
       for (auto &m : ci->Methods) {
         const std::string decl = "method '" + ci->Name + "." + m.Name + "'";
-        auto *retTy =
-            resolveOrReport(m.ReturnTypeName, "return type of " + decl);
+        ast::Qualifier resultQual;
+        auto *retTy = resolveOrReport(m.ReturnTypeName,
+                                      "return type of " + decl, &resultQual);
         bool sigOk = retTy != nullptr;
         std::vector<ast::Type *> params;
+        std::vector<ast::Qualifier> quals(m.ParamTypeNames.size());
         for (size_t i = 0; i < m.ParamTypeNames.size(); ++i) {
-          auto *pty = resolveOrReport(m.ParamTypeNames[i],
-                                      "parameter " + std::to_string(i + 1) +
-                                          " of " + decl);
+          auto *pty = resolveOrReport(
+              m.ParamTypeNames[i],
+              "parameter " + std::to_string(i + 1) + " of " + decl, &quals[i]);
           if (pty)
             params.push_back(pty);
           else
@@ -1247,11 +1321,14 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
         // `___init__` is the initializer `__init__`, private to its module.
         const bool modulePrivateInit =
             m.Name == names::kMethodInitModulePrivate;
-        builder.method(modulePrivateInit ? std::string(names::kMethodInit)
-                                         : m.Name,
-                       retTy, std::move(params), m.Flags, m.Modes);
+        const std::string name =
+            modulePrivateInit ? std::string(names::kMethodInit) : m.Name;
+        builder.method(name, retTy, std::move(params), m.Flags, m.Modes);
+        ast::MethodDecl *md = ct->findMethod(name);
+        md->setResultQual(resultQual);
+        md->setParamQuals(std::move(quals));
         if (modulePrivateInit)
-          ct->findMethod(names::kMethodInit)->setModulePrivateInit(true);
+          md->setModulePrivateInit(true);
       }
       builder.build();
       // Abstractness is not exported: it follows from the pure slots.
@@ -1265,14 +1342,16 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     for (auto *si : createdStructs) {
       auto *st = Ctx.lookupStructType(si->Name);
       for (auto &f : si->Fields) {
-        auto *fty =
-            resolveOrReport(f.TypeName, "field '" + f.FieldName +
-                                            "' of struct '" + si->Name + "'");
+        ast::Qualifier fieldQual;
+        auto *fty = resolveOrReport(f.TypeName,
+                                    "field '" + f.FieldName + "' of struct '" +
+                                        si->Name + "'",
+                                    &fieldQual);
         if (!fty) {
           ok = false;
           continue;
         }
-        st->addField(f.FieldName, fty);
+        st->addField(f.FieldName, fty, fieldQual);
       }
       for (auto &m : si->Methods) {
         if (auto *md = importedMethod(m, si->Name))
@@ -1334,13 +1413,16 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     if (lookupFunction(name))
       return true; // same module already imported under this qualifier
     const std::string decl = "function '" + fi.Name + "'";
-    auto *retTy = resolveOrReport(fi.ReturnTypeName, "return type of " + decl);
+    ast::Qualifier resultQual;
+    auto *retTy = resolveOrReport(fi.ReturnTypeName, "return type of " + decl,
+                                  &resultQual);
     bool sigOk = retTy != nullptr;
     std::vector<ast::Type *> params;
+    std::vector<ast::Qualifier> quals(fi.ParamTypeNames.size());
     for (size_t i = 0; i < fi.ParamTypeNames.size(); ++i) {
-      auto *pty =
-          resolveOrReport(fi.ParamTypeNames[i],
-                          "parameter " + std::to_string(i + 1) + " of " + decl);
+      auto *pty = resolveOrReport(
+          fi.ParamTypeNames[i],
+          "parameter " + std::to_string(i + 1) + " of " + decl, &quals[i]);
       if (pty)
         params.push_back(pty);
       else
@@ -1351,6 +1433,8 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     declareFunction(name, retTy, std::move(params), /*isBuiltin=*/true);
     FunctionSig &sig = FunctionTable[name];
     sig.Modes = fi.Modes;
+    sig.ResultQual = resultQual;
+    sig.ParamQuals = std::move(quals);
     sig.Native = fi.Native;
     if (fi.Native)
       ImportedNatives.insert(name);

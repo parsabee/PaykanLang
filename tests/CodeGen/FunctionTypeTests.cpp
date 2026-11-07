@@ -97,7 +97,7 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
       };
     }
     fn main() -> int {
-      c = Counter(5);
+      c: mut = Counter(5);
       get = c.make();                  // captures self: the same object
       add = c.adder();
       add(10);
@@ -229,7 +229,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class O { cb: (int) -> int; n: int; }
-    fn reset(o: O) -> int {
+    fn reset(o: mut O) -> int {
       o.cb = fn(x: int) -> int { return x * 100; };
       o.n = o.n + 1;
       return o.n;
@@ -240,7 +240,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
     }
     fn main() -> int {
       k = 5;
-      o = O(fn(x: int) -> int { return x + k; }, 0);
+      o: mut = O(fn(x: int) -> int { return x + k; }, 0);
       a = o.cb(reset(o));              // the closure held before, with 1
       b = o.cb(1);                     // the replacement
       f = fn(x: int) -> int { return x + k; };
@@ -265,7 +265,7 @@ TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
       f = fn(x: int) -> int { return x + 1; };
       g = f;                           // the same closure
       h = fn(x: int) -> int { return x + 1; };
-      b = Box(f);
+      b: mut = Box(f);
       b.set(h);
       k = b.get() == h;                // a view of a function value: compared, not stored
       fs: ((int) -> int)[2] = [f, h];
@@ -304,7 +304,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
     struct Pair { f: (int) -> int; g: ((int) -> int)?; }
     class Holder { cb: ((int) -> int)?; }
     class Runner { run: (int) -> int; }
-    fn clear(x: Runner) -> int { x.run = square; return 2; }
+    fn clear(x: mut Runner) -> int { x.run = square; return 2; }
     fn main() -> int {
       a = square;
       b = square;
@@ -315,7 +315,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
       q = p;
       io::println(Str(k(3)) + " " + Str(q.f(3)) + " " + Str(p.g == None) + " " +
               Str(q.f == p.f));
-      h = Holder(None);
+      h: mut = Holder(None);
       e = h.cb == None;
       h.cb = adder(10);
       io::println(Str(e) + " " + Str(h.cb != None));
@@ -326,7 +326,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
       match pick(False) { f: (int) -> int { io::println("some"); } None { io::println("none"); } }
       match pick(True) { _ { io::println("any"); } }
       match pick(True) { f: (int) -> int { io::println(Str(f(4))); } _ { } }
-      run = Runner(adder(10));
+      run: mut = Runner(adder(10));
       io::println(Str(run.run(clear(run))) + " " + Str(run.run(2)));
       v = square;
       swapIn(v);
@@ -377,7 +377,7 @@ fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
   sq = ops::square;                    // an imported function as a value
   t = ops::twice(sq);                  // a closure made in the other module
-  b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
   k: (int) -> int = ops::twice(fn(x: int) -> int { return x + 1; });

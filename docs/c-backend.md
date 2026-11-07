@@ -161,8 +161,13 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   field is read or written through the object's address plus the field's
   byte offset, `*(T *)((uint8_t *)obj + offset)`.
 * **Vtables** are arrays of `Runtime.h`'s `PaykanMethod`, as the runtime's
-  own are: `PaykanMethod pkvt_zoo_SDog[4] = {(PaykanMethod)pk_zoo_SDog_2Edestroy,
-  (PaykanMethod)PaykanObject_toString, ...};`, with `NULL` in an empty
+  own are, the four slots every class has first (`destroy`, `toString`,
+  `equals`, `__walk`; [PIR](pir.md) §5) and the class's own after them.
+  A `class Dog` of module `zoo` with one method `sound` is
+  `PaykanMethod pkvt_zoo_SDog[5] = {(PaykanMethod)pk_zoo_SDog_2Edestroy,
+  (PaykanMethod)PaykanObject_toString, (PaykanMethod)PaykanObject_equals,
+  (PaykanMethod)pk_zoo_SDog_2E____walk, (PaykanMethod)pk_zoo_SDog_2Esound};`,
+  with `NULL` in an empty
   (`null`) slot, which the lowering never emits (a pure virtual method's
   slot holds its trap function, [PIR](pir.md) §5); another module's vtable
   is declared `extern PaykanMethod pkvt_...[];`.  A virtual call reads the object's vtable pointer as a

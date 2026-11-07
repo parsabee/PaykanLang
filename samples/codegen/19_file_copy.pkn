@@ -89,8 +89,8 @@ fn printFile(path: Str) -> int {
 }
 
 fn main(args: view Str[]) -> int {
-  let src: Str = scratchPath(args, "paykan_copy_src.txt");
-  let dst: Str = scratchPath(args, "paykan_copy_dst.txt");
+  let src = scratchPath(args, "paykan_copy_src.txt");
+  let dst = scratchPath(args, "paykan_copy_dst.txt");
 
   writeSource(src);    // write & close src
   printFile(src);

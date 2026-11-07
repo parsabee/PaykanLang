@@ -35,7 +35,7 @@ fn main() -> int {
   dogs.push(Dog("fido"));
   // A copy of an object is the caller's own reference: it shares the dog and
   // outlives the list's.
-  d = dogs.get(0);
+  d: mut = dogs.get(0);
   d.rename("max");
   io::println(dogs.at(0).name + " " + d.name);
   dogs.clear();
@@ -52,7 +52,7 @@ fn main() -> int {
 
   m = c::HashMap<Str, Dog>();
   m.put("a", Dog("ann"));
-  a = m.get("a");
+  a: mut = m.get("a");
   a.rename("amy");
   zed = m.getOr("z", Dog("zed"));
   io::println(m.at("a").name + " " + zed.name + " " + m.getOr("a", zed).name
@@ -60,7 +60,7 @@ fn main() -> int {
   m.remove("a");
   io::println(a.name + " " + Str(m.containsKey("a")));
 
-  l = c::LinkedList<Dog>();
+  l: mut = c::LinkedList<Dog>();
   l.pushBack(Dog("head"));
   l.pushBack(Dog("tail"));
   h = l.getFront();

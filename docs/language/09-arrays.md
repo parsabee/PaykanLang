@@ -321,7 +321,7 @@ impl TaskList {
 }
 
 fn main() -> int {
-  let list = TaskList();
+  let list: mut = TaskList();
   list.add("buy milk");
   list.add("fix the leak");
   list.add("call mum");
@@ -351,7 +351,9 @@ cleared 1
 `[Task(""); 8]` calls `Task("")` once, and a class value is a reference to its object, so
 the eight slots hold the same blank task. That is fine here: `add` puts a new task in a slot
 before anything changes it, and `complete` only reaches the slots in use. An array whose
-elements each need their own object from the start is filled in a loop.
+elements each need their own object from the start is filled in a loop. `list` is declared
+`mut`, since `add`, `complete` and `clearDone` change the list; `show` and `pending` only
+read it and are `view fn`s ([Classes](05-classes.md#methods-that-only-read-view-fn)).
 
 ---
 
@@ -648,7 +650,7 @@ class Counter { n: int; }
 
 fn main() -> int {
   let cs: Counter[2] = [Counter(1), Counter(2)];
-  let copy = cs;           // the same two counters
+  copy = cs;               // the same two counters
   copy[0].n = 10;
   names: Str[2] = ["ann", "bob"];
   names[1] = names[0] + "!";
@@ -736,7 +738,9 @@ elements`).
 
 A class's field can be an array: it is held inside its object, and `__init__` assigns it like
 any other field (a struct's field cannot be one yet). Its elements change only where the
-object can (`self.cells[0][1] = 5;` is not allowed in a `view fn`).
+object can: through a `mut` reference, as `b` is below, and not in a `view fn`
+(`self.cells[0][1] = 5;`) or through a reference that is not `mut` (`'b' is immutable (a
+'Board'; write 'mut Board' to change it); cannot assign to its elements`).
 
 ```pkn
 import ::io;
@@ -744,7 +748,7 @@ import ::io;
 class Board { cells: char[3][3]; }
 
 fn main() -> int {
-  let b = Board([['.'; 3]; 3]);
+  let b: mut = Board([['.'; 3]; 3]);
   b.cells[1][1] = 'x';
   io::println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
   return 0;

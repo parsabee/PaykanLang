@@ -53,6 +53,7 @@
     ["tests/CodeGen/*", ["codegen"]],
     ["tests/CodeGenTestUtils.h", ["codegen"]],
     ["tests/Backends/PIRMLIR*", ["pir-mlir"]],
+    ["tests/Backends/ParallelLowering*", ["pir-mlir"]],
     ["tests/Backends/*", ["pir-llvm"]],
     ["tests/PIR/*", ["pir"]],
     ["tests/PKM/*", ["pkm"]],

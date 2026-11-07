@@ -49,8 +49,8 @@ fn outer<T>(x: T) -> (int, int) {
 }
 
 fn main() -> int {
-  let r = R<int>(7);
-  let q = Q<Str>("q");
+  let r = R(7);
+  let q = Q("q");
   io::println(Str(r.bump(2)) + " " + Str(R<int>::twice(1)) + " "
       + Str(q.plus(3)));
   io::println(Str(r.bump(10)) + " " + r.show());

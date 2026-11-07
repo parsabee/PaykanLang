@@ -48,7 +48,7 @@ jobs:
       matrix:
         include:
           - label: macos-arm64
-            runner: macos-14
+            runner: macos-15
             generator: "Unix Makefiles"
           - label: linux-x86_64
             runner: ubuntu-latest

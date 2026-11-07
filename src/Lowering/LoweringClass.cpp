@@ -136,9 +136,13 @@ const char *ModuleLowering::builtinMethodSymbol(ast::ClassType *ct,
       return kPaykanObjectToString;
     if (name == kMethodEquals)
       return kPaykanObjectEquals;
+    if (name == kMethodWalk)
+      return kPaykanObjectWalk;
     return nullptr;
   }
   if (ct == ASTCtx.getStrTy()) {
+    if (name == kMethodWalk)
+      return kPaykanObjectWalk;
     if (name == kMethodDestroy)
       return kPaykanStringDestroy;
     if (name == kMethodToString)
@@ -243,7 +247,8 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
   // Method functions `Class.method(obj self, params...)`; `destroy` is the
   // synthetic destructor declared below.
   for (auto *funcDecl : node->getMethods()) {
-    if (funcDecl->getName() == kMethodDestroy)
+    if (funcDecl->getName() == kMethodDestroy ||
+        funcDecl->getName() == kMethodWalk)
       continue;
     if (auto *md = ct->findMethod(funcDecl->getName())) {
       pir::Function *fn =
@@ -258,6 +263,10 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
   pir::Function *dtor = getOrCreateFunction(
       node->getName() + kNameSep + kMethodDestroy, {{Type::Obj}, Type::Void});
   dtor->Params[0].Name = kSelf;
+  // The walk (the concurrency prototype): generated like the destructor.
+  pir::Function *walk = getOrCreateFunction(
+      node->getName() + kNameSep + kMethodWalk, {{Type::Obj}, Type::Void});
+  walk->Params[0].Name = kSelf;
   // Constructor `Class(initParams...) -> box`; an abstract class, which
   // nothing constructs, has none (its `__init__` is its subclasses').
   if (ct->isAbstract())
@@ -312,19 +321,27 @@ void ModuleLowering::emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
     auto *ma = ast::dyn_cast<ast::MemberAssignStmt>(stmts[i]);
     auto *recv =
         ma ? ast::dyn_cast<ast::Identifier>(ma->getReceiver()) : nullptr;
+    // `self.f = move p` (the generated `__init__`, the prototype) is a
+    // variable's value too.
+    const ast::Expr *value = ma ? ma->getValue() : nullptr;
+    if (const auto *u = value ? ast::dyn_cast<ast::UnaryExpr>(value) : nullptr;
+        u && u->getOpcode() == ast::UnaryOpcode::Move)
+      value = u->getOperand();
     if (!recv || recv->getName() != kSelf ||
         std::none_of(
             fields.begin(), fields.end(),
             [&](const auto &f) { return f.first == ma->getFieldName(); }) ||
         !assigned.insert(ma->getFieldName()).second ||
-        (selfUsable && !ast::isa<ast::Identifier>(ma->getValue()) &&
+        (selfUsable && !ast::isa<ast::Identifier>(value) &&
          !isNoneForOptional(ma->getValue())))
       break;
     FirstFieldStores.insert(ma);
     selfUsable = selfUsable || ma->completesInit();
   }
+  const bool outerInit = std::exchange(InInitBody, true);
   for (size_t i = first; i < stmts.size(); ++i)
     visit(stmts[i]);
+  InInitBody = outerInit;
   FirstFieldStores.clear();
 }
 
@@ -352,7 +369,8 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
 
   // 1. Method bodies.
   for (auto *funcDecl : node->getMethods()) {
-    if (funcDecl->getName() == kMethodDestroy)
+    if (funcDecl->getName() == kMethodDestroy ||
+        funcDecl->getName() == kMethodWalk)
       continue;
     auto *md = ct->findMethod(funcDecl->getName());
     if (!md)
@@ -387,8 +405,10 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
     emitImplicitReturn(fn->Sig);
   }
 
-  // 2. The synthetic destructor (so the destroy slot names it).
+  // 2. The synthetic destructor (so the destroy slot names it), and the
+  //    walk (the concurrency prototype).
   emitDestructor(node, ct);
+  emitWalk(node, ct);
 
   // 3. Vtable targets: the most-derived concrete function per slot.
   const auto &vtable = ct->getVTable();
@@ -418,6 +438,29 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
   }
   B.emitRet(shared);
   return Val();
+}
+
+// `void Class.__walk(obj self)` (the concurrency prototype): freezes what
+// the object holds, for Paykan_freeze: every reference field but a `weak`
+// one, and the references in every field held in memory.
+void ModuleLowering::emitWalk(ast::ClassDecl *node, ast::ClassType *ct) {
+  pir::Function *fn = FuncByName.at(node->getName() + kNameSep + kMethodWalk);
+  FunctionStateGuard fnState(*this, fn, nullptr, ct);
+  Val self(pir::Operand::value(fn->Params[0]), Type::Obj);
+  for (auto &[fname, fty] : allFieldsInOrder(ct)) {
+    if (ast::isMemType(fty)) {
+      if (memHoldsRefs(fty))
+        callRuntime(kPaykanFreezeMem,
+                    {emitTypeDescriptor(fty),
+                     B.fieldAddr(self, ct->getName(), fname, fname + ".addr")});
+      continue;
+    }
+    if (!ast::isRefType(fty) || ct->isWeakField(fname))
+      continue;
+    Val box = B.fieldLoad(self, ct->getName(), fname, Type::Box, fname);
+    callRuntime(kPaykanFreeze, {emitSharedGet(box, fname + ".obj")});
+  }
+  B.emitRetVoid();
 }
 
 // `void Class.destroy(obj self)`: the user `destroy` body (if any), then a
@@ -496,7 +539,11 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
 
-  if (ast::isMemType(fieldASTTy)) {
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldASTTy)) {
+    // An `atomic` field (the prototype): one operation on its cell.
+    if (!emitAtomicFieldAssign(node, at, ct, objPtr))
+      return Val();
+  } else if (ast::isMemType(fieldASTTy)) {
     emitMemAssign(B.fieldAddr(objPtr, ct->getName(), node->getFieldName(),
                               node->getFieldName() + ".addr"),
                   node->getValue());
@@ -504,9 +551,18 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     // The slot owns a box (or, for a `weak` field, a weak reference):
     // retain/steal the new one, release the old one.
     Val newShared;
-    if (isNoneForOptional(node->getValue()))
+    // A unique value flowing into an `atomic shared` or `locked` field (the
+    // prototype) is frozen, or made a cell, at this store, as one flowing
+    // into a variable or a parameter of that form is (emitAsShared).
+    const ast::QualForm made = node->getValue()->getMaterialize();
+    if (made == ast::QualForm::AtomicShared || made == ast::QualForm::Locked) {
+      newShared = emitAsShared(node->getValue(), /*lend=*/false);
+      if (!newShared)
+        return Val();
+    } else if (isNoneForOptional(node->getValue()))
       newShared = Val::null(Type::Box);
-    if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
+    if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue());
+        rhsId && !newShared) {
       if (CurrentScope && holdsBox(rhsId->getName())) {
         newShared = loadVarBox(rhsId->getName());
         emitRetain(newShared, /*lend=*/false,
@@ -587,6 +643,16 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   getOrCreateClass(ct);
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
+  // An `atomic` field (the prototype): its cell as a handle, or its value.
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldASTTy)) {
+    Val cell = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
+                           Type::Box, node->getFieldName() + ".cell");
+    Val out = node->isAtomicHandle() ? cell
+                                     : emitAtomicLoad(at->getInnerType(), cell,
+                                                      node->getFieldName());
+    releaseIfOwned(recv.Owned);
+    return out;
+  }
   const bool weak = ct->isWeakField(node->getFieldName());
   Type fieldTy = weak ? Type::Weak : toPIRType(fieldASTTy);
   if (fieldTy == Type::Void)

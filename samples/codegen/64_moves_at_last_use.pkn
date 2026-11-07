@@ -61,7 +61,7 @@ class Slot {
 }
 
 /// Gives @p s a new node, letting the old one go.
-fn replace(s: Slot) -> Str {
+fn replace(s: mut Slot) -> Str {
   s.node = Node("other");
   return "!";
 }
@@ -113,7 +113,7 @@ fn pass(n: Node) -> Str {
 /// be used: the read takes a reference of its own, so `x`, which also holds
 /// that node, need not keep it alive and is handed on to `name`.
 fn fieldRead() -> Str {
-  let sl = Slot(Node("first" + Str(1)));
+  let sl: mut = Slot(Node("first" + Str(1)));
   let x = sl.node;
   let took = name(x);
   let got = sl.node.name + replace(sl);
@@ -210,7 +210,7 @@ fn main() -> int {
   io::println(" | dropped: " + name(made) + " " + state(wmade));
 
   // `self` is never handed on: the caller's reference keeps it alive.
-  let s = Node("n");
+  let s: mut = Node("n");
   let ws = Watch(s);
   io::print("self: ");
   let back = s.relay();
@@ -229,7 +229,7 @@ fn main() -> int {
   // hand-off keeps every hand-off before it, to the variable's release, a
   // copy.
   io::println("field read: " + fieldRead());
-  let wk = Walker(Node("one" + Str(1)), "");
+  let wk: mut = Walker(Node("one" + Str(1)), "");
   io::println("method: " + wk.step(Node("two" + Str(2))) + " | " + wk.log);
   io::println("view: " + viewed());
 

@@ -9,7 +9,7 @@ fn show(l: view collections::LinkedList<Str>) -> Str {
 }
 
 fn main() -> int {
-  l = collections::LinkedList<Str>();
+  l: mut = collections::LinkedList<Str>();
   io::println(show(l) + " " + Str(l.isEmpty()));
   l.pushBack("b");
   l.pushBack("c");
@@ -33,16 +33,16 @@ fn main() -> int {
   io::println(show(l));
 
   // Elements of any type: an enum, an optional, a tuple.
-  suits = collections::LinkedList<Suit>();
+  suits: mut = collections::LinkedList<Suit>();
   suits.pushBack(Suit::Spades);
   suits.pushFront(Suit::Hearts);
   io::println(Str(suits.popBack() == Suit::Spades) + " " + Str(suits.len()));
-  pairs = collections::LinkedList<(int, Str)>();
+  pairs: mut = collections::LinkedList<(int, Str)>();
   pairs.pushBack((1, "one"));
   pairs.pushBack((2, "two"));
   p = pairs.popFront();
   io::println(Str(p.0) + p.1 + " " + Str(pairs.contains((2, "two"))));
-  opts = collections::LinkedList<int?>();
+  opts: mut = collections::LinkedList<int?>();
   opts.pushBack(None);
   opts.pushBack(3);
   io::println(Str(opts.contains(None)) + " " + Str(opts.len()));

@@ -48,9 +48,11 @@ TEST(SharedNew, TheHeaderIsAVTableAndTwo32BitCounts) {
 // -- Paykan_retain
 
 TEST(SharedRetainDeathTest, ACountPastTheLimitPanics) {
-  // A count never wraps: one reference past PAYKAN_REF_MAX panics.
+  // A count never wraps: one reference past the limit panics.  The limit
+  // of a strong count is PAYKAN_REF_MAX - 1: PAYKAN_REF_MAX itself marks an
+  // immortal object (the concurrency prototype's cells).
   PaykanObject *obj = PaykanObject_new();
-  obj->strong = PAYKAN_REF_MAX;
+  obj->strong = PAYKAN_REF_MAX - 1;
   EXPECT_DEATH(Paykan_retain(obj), "too many strong references");
   EXPECT_DEATH(PaykanShared_new(obj), "too many strong references");
   EXPECT_DEATH(Paykan_weak_load(obj), "too many strong references");
@@ -179,7 +181,7 @@ PaykanShared *counted() {
 } // namespace
 
 TEST(SharedInline, RetainIncrementsAsPaykanRetain) {
-  for (int32_t n : {1, 2, 1000, PAYKAN_REF_MAX - 1}) {
+  for (int32_t n : {1, 2, 1000, PAYKAN_REF_MAX - 2}) {
     PaykanShared *a = counted();
     PaykanShared *b = counted();
     a->strong = n;
@@ -198,7 +200,7 @@ TEST(SharedInline, RetainIncrementsAsPaykanRetain) {
 TEST(SharedInlineDeathTest, ARetainPastTheLimitPanics) {
   // The limit is the function's: the inline path calls it there.
   PaykanShared *s = counted();
-  s->strong = PAYKAN_REF_MAX;
+  s->strong = PAYKAN_REF_MAX - 1;
   EXPECT_DEATH(Paykan_retain_inline(s), "too many strong references");
   s->strong = 1;
   Paykan_release(s);
@@ -251,7 +253,7 @@ TEST(SharedInline, AWeakReferenceOutlivesTheLastRelease) {
 // The variants for a box that is never NULL do the same at every count.
 TEST(SharedInline, TheNonNullVariantsCountAsTheOthers) {
   gDestroys = 0;
-  for (int32_t n : {1, 2, 1000, PAYKAN_REF_MAX - 1}) {
+  for (int32_t n : {1, 2, 1000, PAYKAN_REF_MAX - 2}) {
     PaykanShared *s = counted();
     s->strong = n;
     Paykan_retain_nonnull_inline(s);
@@ -273,7 +275,7 @@ TEST(SharedInline, TheNonNullVariantsCountAsTheOthers) {
 
 TEST(SharedInlineDeathTest, ANonNullRetainPastTheLimitPanics) {
   PaykanShared *s = counted();
-  s->strong = PAYKAN_REF_MAX;
+  s->strong = PAYKAN_REF_MAX - 1;
   EXPECT_DEATH(Paykan_retain_nonnull_inline(s), "too many strong references");
   s->strong = 1;
   Paykan_release(s);

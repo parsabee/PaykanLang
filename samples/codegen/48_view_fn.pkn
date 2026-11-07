@@ -50,19 +50,19 @@ fn report(c: view Counter) {
 }
 
 fn main() -> int {
-  let c = Counter();
+  let c: mut = Counter();
   c.tick();
   c.tick();
   let done = c;
   done.tick();
   report(done);
 
-  let f: Counter = Fast();
+  let f: mut Counter = Fast();
   f.tick();
   f.tick();
   report(f);
 
-  let box = Box<int>(7);
+  let box = Box(7);
   let names = ["a", "b"];
   io::println("box " + Str(box.get()) + ", names " + Str(names.len())
       + ", printable " + Str(names[0].toString().len() > 0));

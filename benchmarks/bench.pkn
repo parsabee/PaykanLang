@@ -1,0 +1,26 @@
+// Shared by the benchmark programs: the command line's numbers and a
+// monotonic clock (clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW), macOS).
+
+// The n-th argument as an int, or @p dflt.
+fn arg(args: view Str[], i: int, dflt: int) -> int {
+  if args.len() <= i { return dflt; }
+  match args[i].toInt() {
+    v: int { return v; }
+    _ { return dflt; }
+  }
+}
+
+native fn now_ns(id: int) -> int = "clock_gettime_nsec_np";
+
+// Nanoseconds since an arbitrary point, monotonic.
+fn now() -> int {
+  return now_ns(4);
+}
+
+native fn clock_ticks() -> int = "clock";
+
+// The process's CPU time, every thread, in nanoseconds (clock(), whose
+// tick is a microsecond on macOS).
+fn cpu() -> int {
+  return clock_ticks() * 1000;
+}

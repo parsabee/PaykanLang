@@ -162,7 +162,7 @@ impl Counter {
     }
     return self.n;
   }
-  static fn twice(c: Counter) -> int { return c.run(2); }
+  static fn twice(c: mut Counter) -> int { return c.run(2); }
 }
 class ByTwo : Counter {
   fn step() -> int { return 2; }
@@ -171,8 +171,8 @@ class ByTen : Counter {
   fn step() -> int { return 10; }
 }
 fn main() -> int {
-  a: Counter = ByTwo();
-  b: Counter = ByTen();
+  a: mut Counter = ByTwo();
+  b: mut Counter = ByTen();
   io::println(Str(a.run(3)) + " " + Str(Counter::twice(b)));
   return 0;
 }
@@ -249,14 +249,14 @@ class Widget {
   view fn width() -> int { return 0; }
 }
 impl Widget {
-  fn __init__(p: Panel) { self.id = 1; p.add(self); p.show(); }
+  fn __init__(p: mut Panel) { self.id = 1; p.add(self); p.show(); }
 }
 class Label : Widget {
   text: Str;
   view fn width() -> int { return self.text.len(); }
 }
 impl Label {
-  fn __init__(p: Panel, t: Str) {
+  fn __init__(p: mut Panel, t: Str) {
     __super__(p);
     p.show();
     if t.len() > 3 { self.text = t; } else { self.text = t + "!"; }
@@ -264,7 +264,7 @@ impl Label {
   }
 }
 fn main() -> int {
-  p = Panel(None);
+  p: mut = Panel(None);
   a = Label(p, "hi");
   b = Label(p, "hello");
   p.show();
@@ -313,16 +313,16 @@ class Shape {
   view fn sides() -> int;
 }
 impl Shape {
-  fn __init__(b: Board) { self.n = 0; b.s = self; }
+  fn __init__(b: mut Board) { self.n = 0; b.s = self; }
 }
 class Square : Shape {
   label: Str;
   view fn sides() -> int { return self.label.len(); }
 }
 impl Square {
-  fn __init__(b: Board) { __super__(b); self.n = b.count(); self.label = "four"; }
+  fn __init__(b: mut Board) { __super__(b); self.n = b.count(); self.label = "four"; }
 }
-fn main() -> int { b = Board(None); s = Square(b); return s.n; }
+fn main() -> int { b: mut = Board(None); s = Square(b); return s.n; }
 )"}) {
     fflush(stdout);
     fflush(stderr);
@@ -357,7 +357,7 @@ fn describe(o: Obj) -> Str {
   }
 }
 fn main() -> int {
-  scene = Scene(Rect("r", 1.0, 2.0), None);
+  scene: mut = Scene(Rect("r", 1.0, 2.0), None);
   scene.extra = Square("s", 3.0);
   match scene.extra {
     e: Shape { io::println(e.report()); }

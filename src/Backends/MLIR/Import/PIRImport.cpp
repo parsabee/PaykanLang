@@ -181,6 +181,8 @@ private:
         f.Symbol.empty() ? StringAttr() : B.getStringAttr(f.Symbol));
     if (f.Shared)
       fn->setAttr(kSharedAttr, B.getUnitAttr());
+    if (f.IsAsync)
+      fn->setAttr(kAsyncAttr, B.getUnitAttr());
     if (f.IsExtern) {
       // A declaration: private, as a symbol without a definition must be.
       fn.setPrivate();
@@ -219,9 +221,55 @@ private:
   }
 
   void importBlock(const P::Block &b) {
-    for (const P::Stmt &s : b.Stmts) {
+    for (const P::Stmt &s : b.Stmts)
+      importStmt(s);
+  }
+
+  /// A `while` with the parallel annotation (pir::Parallel): a pir.parallel
+  /// whose body is the loop's, with the counter's first load the index and
+  /// its first store, the increment, left out.
+  void importParallel(const P::While &w) {
+    if (!w.Par.has_value())
+      return;
+    const P::Parallel &p = *w.Par;
+    SmallVector<Value> privates, partials;
+    SmallVector<int64_t> reductions;
+    for (P::LocalId l : p.Privates)
+      privates.push_back(Locals[l]);
+    for (const P::Parallel::Reduction &r : p.Reductions) {
+      partials.push_back(Locals[r.Partial]);
+      reductions.push_back(r.Op == P::Opcode::Mul ? 1 : 0);
+    }
+    auto op = ParallelOp::create(B, Loc, operand(p.Count), Locals[p.Counter],
+                                 privates, partials,
+                                 B.getDenseI64ArrayAttr(reductions));
+    OpBuilder::InsertionGuard guard(B);
+    Block *body = &op.getBody().emplaceBlock();
+    Value index = body->addArgument(B.getI64Type(), Loc);
+    B.setInsertionPointToEnd(body);
+    bool loaded = false, stored = false;
+    for (const P::Stmt &s : w.Body->Stmts) {
+      if (const auto *in = std::get_if<P::Instr>(&s)) {
+        if (!loaded && in->Op == P::Opcode::Load && in->Local == p.Counter) {
+          Values[in->Result.Id] = index;
+          loaded = true;
+          continue;
+        }
+        if (!stored && in->Op == P::Opcode::Store && in->Local == p.Counter) {
+          stored = true;
+          continue;
+        }
+      }
+      importStmt(s);
+    }
+  }
+
+  void importStmt(const P::Stmt &s) {
+    {
       if (const auto *in = std::get_if<P::Instr>(&s)) {
         importInstr(*in);
+      } else if (const auto *w = std::get_if<P::While>(&s); w && w->Par) {
+        importParallel(*w);
       } else if (const auto *i = std::get_if<P::If>(&s)) {
         auto op = IfOp::create(B, Loc, operand(i->Cond));
         importRegion(op.getThenRegion(), i->Then.get());
@@ -469,6 +517,20 @@ private:
                             B, Loc, results(in), in.Callee,
                             callOperands(in, 0, f.Sig, P::lends(f)))));
     }
+    // The concurrency prototype.
+    case P::Opcode::AsyncCall: {
+      auto callee = Functions.find(in.Callee);
+      if (callee == Functions.end()) {
+        fail("async_call of undeclared function '@" + in.Callee + "'");
+        return;
+      }
+      const P::Function &f = *callee->second;
+      return define(
+          in, AsyncCallOp::create(B, Loc, PtrType::get(&Ctx), in.Callee,
+                                  callOperands(in, 0, f.Sig, P::lends(f))));
+    }
+    case P::Opcode::Await:
+      return define(in, AwaitOp::create(B, Loc, type(in.Result.Ty), arg(0)));
     case P::Opcode::VCall:
       return define(in,
                     resultOf(VCallOp::create(

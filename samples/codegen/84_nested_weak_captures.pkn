@@ -58,7 +58,7 @@ fn main() -> int {
   let late = three()();
   io::println(late());
   // A method's `weak me = self`, captured two lambdas deep, in self.
-  let c = B(7, None);
+  let c: mut = B(7, None);
   c.wire();
   match c.f {
     g: () -> Str { io::println(g()); }

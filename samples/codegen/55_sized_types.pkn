@@ -56,7 +56,7 @@ fn main() -> int {
   io::println(Str(b) + " " + Str(d) + " " + Str(f) + " " + Str(h));
 
   // unsigned: the same bits as int, read unsigned.
-  let u: unsigned = unsigned(-1);
+  let u = unsigned(-1);
   io::println(Str(u) + " " + Str(u / 2) + " " + Str(u % 10) + " " + Str(u > 1)
       + " " + Str(i32(u32(u))));
 

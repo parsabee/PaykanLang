@@ -29,10 +29,10 @@ fn main() -> int {
   if None == a {
     io::println("none == a");
   }
-  io::println(Str<bool>(a == b));
-  io::println(Str<bool>(b == l));    // subtype-compatible optionals
+  io::println(Str(a == b));
+  io::println(Str(b == l));    // subtype-compatible optionals
   let s: Str? = "x";
   let t: Str? = "x";
-  io::println(Str<bool>(s == t));
+  io::println(Str(s == t));
   return 0;
 }

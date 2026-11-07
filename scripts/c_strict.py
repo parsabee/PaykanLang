@@ -14,7 +14,10 @@ from a --module-path directory: the 13_pkm sample's.  Every executable must
 exit like `paykan run --track-heap` does, print the same stdout and stderr
 (apart from the heap statistics, and from the warnings `paykan run` prints
 while it compiles the program, before running it: the executable, compiled
-already, prints none) and end with 0 live heap blocks.
+already, prints none) and end with 0 live heap blocks; a program with a
+`// expect-leaks: <why>` line (samples_parity.py: the concurrency
+prototype's cells and frozen objects are immortal) must end with a heap
+report, whatever it counts.
 
 Usage:
     c_strict.py --paykan build/bin/paykan --cc gcc --cc clang \\
@@ -75,10 +78,16 @@ def run_exe(exe, sample, outdir):
     return sp.normalise(p)
 
 
-def compare(ref, got):
+def compare(ref, got, leaks=None):
+    """How @p got, a C executable's run, differs from @p ref, `paykan run`'s;
+    with @p leaks (the sample's `// expect-leaks:` reason) the live blocks
+    are not counted, only the heap report required."""
     rc, out, err, live = got
     problems = []
-    if live != ref[3]:
+    if leaks is not None:
+        if live is None:
+            problems.append(f"no heap report (exit {rc})")
+    elif live != ref[3]:
         problems.append(f"live blocks {live}, expected {ref[3]}")
     if rc != ref[0]:
         problems.append(f"exit code {rc}, expected {ref[0]}")
@@ -165,8 +174,12 @@ def check_sample(args, sample, idx, runtimes, outdir, flags):
                   *sp.sample_args(sample, outdir)])
     ref_p.stderr = WARNINGS_RE.sub("", ref_p.stderr, count=1)
     ref = sp.normalise(ref_p)
-    if ref[3] not in (0, None):  # None: a panic aborts before the report
-        return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]
+    leaks = sp.expects_leaks(sample)
+    if leaks is None and ref[3] not in (0, None):  # None: a panic aborts
+        return [("reference run",                   # before the report
+                 [f"live blocks {ref[3]} (exit {ref[0]})"])]
+    if leaks is not None and ref[3] is None:
+        return [("reference run", [f"no heap report (exit {ref[0]})"])]
     emitted = tool([args.paykan, *flags, "--emit-c", str(sample)])
     if emitted.returncode != 0:
         return [("emit-c", [emitted.stderr.strip()])]
@@ -196,7 +209,8 @@ def check_sample(args, sample, idx, runtimes, outdir, flags):
         if p.returncode != 0:
             results.append((label, ["compile failed:\n" + p.stderr]))
             continue
-        results.append((label, compare(ref, run_exe(exe, sample, outdir))))
+        results.append((label, compare(ref, run_exe(exe, sample, outdir),
+                                       leaks)))
     return results
 
 

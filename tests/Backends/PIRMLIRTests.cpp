@@ -752,7 +752,10 @@ fn @main() -> i64 {
   EXPECT_EQ(count(c, "Paykan_retain_nonnull_inline("), 1u) << c;
   EXPECT_EQ(count(c, "Paykan_release_nonnull_inline("), 1u) << c;
   EXPECT_EQ(count(c, "Paykan_release_inline("), 1u) << c;
-  EXPECT_EQ(count(c, "Paykan_retain_inline("), 0u) << c;
+  // The `box`'s, which takes a reference to its object (a box of a null
+  // object is null), and no PaykanShared_new.
+  EXPECT_EQ(count(c, "Paykan_retain_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "PaykanShared_new("), 0u) << c;
 }
 
 // A drop function links like its module's other functions (docs/pir.md §7):

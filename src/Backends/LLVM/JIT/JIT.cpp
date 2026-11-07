@@ -6,9 +6,12 @@
 #include "Runtime.h"
 
 #include <cassert>
+#include <condition_variable>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -17,6 +20,7 @@
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
+#include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/TargetSelect.h>
@@ -77,6 +81,26 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanWeakNew,         reinterpret_cast<void *>(&Paykan_weak_new)},
     {kPaykanWeakLoad,        reinterpret_cast<void *>(&Paykan_weak_load)},
     {kPaykanWeakRelease,     reinterpret_cast<void *>(&Paykan_weak_release)},
+    {kPaykanAtomicNew,       reinterpret_cast<void *>(&PaykanAtomic_new)},
+    {kPaykanAtomicLoad,      reinterpret_cast<void *>(&PaykanAtomic_load)},
+    {kPaykanAtomicStore,     reinterpret_cast<void *>(&PaykanAtomic_store)},
+    {kPaykanAtomicAdd,       reinterpret_cast<void *>(&PaykanAtomic_add)},
+    {kPaykanAtomicExchange,  reinterpret_cast<void *>(&PaykanAtomic_exchange)},
+    {kPaykanAtomicCompareExchange,
+     reinterpret_cast<void *>(&PaykanAtomic_compare_exchange)},
+    {kPaykanAtomicFNew,      reinterpret_cast<void *>(&PaykanAtomic_fnew)},
+    {kPaykanAtomicFLoad,     reinterpret_cast<void *>(&PaykanAtomic_fload)},
+    {kPaykanAtomicFStore,    reinterpret_cast<void *>(&PaykanAtomic_fstore)},
+    {kPaykanAtomicFAdd,      reinterpret_cast<void *>(&PaykanAtomic_fadd)},
+    {kPaykanAtomicFExchange, reinterpret_cast<void *>(&PaykanAtomic_fexchange)},
+    {kPaykanAtomicFCompareExchange,
+     reinterpret_cast<void *>(&PaykanAtomic_fcompare_exchange)},
+    {kPaykanLockedNew,       reinterpret_cast<void *>(&PaykanLocked_new)},
+    {kPaykanLockedLock,      reinterpret_cast<void *>(&PaykanLocked_lock)},
+    {kPaykanLockedUnlock,    reinterpret_cast<void *>(&PaykanLocked_unlock)},
+    {kPaykanObjectWalk,      reinterpret_cast<void *>(&PaykanObject_walk)},
+    {kPaykanFreeze,          reinterpret_cast<void *>(&Paykan_freeze)},
+    {kPaykanFreezeMem,       reinterpret_cast<void *>(&Paykan_freeze_mem)},
 
     {kPaykanPanicDivByZero,  reinterpret_cast<void *>(&Paykan_panic_div_by_zero)},
     {kPaykanPanicDivOverflow, reinterpret_cast<void *>(&Paykan_panic_div_overflow)},
@@ -88,6 +112,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanIntToF32,        reinterpret_cast<void *>(&Paykan_int_to_f32)},
     {kPaykanUintToF32,       reinterpret_cast<void *>(&Paykan_uint_to_f32)},
     {kPaykanPanicIndex,      reinterpret_cast<void *>(&Paykan_panic_index)},
+    {kPaykanPanicBufferIndex, reinterpret_cast<void *>(&Paykan_panic_buffer_index)},
     {kPaykanPanicForStep,    reinterpret_cast<void *>(&Paykan_panic_for_step)},
     {kPaykanPanicPureVirtual, reinterpret_cast<void *>(&Paykan_panic_pure_virtual)},
     {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
@@ -178,6 +203,45 @@ namespace {
 
 extern "C" void exitOnAbort(int sig) { std::_Exit(128 + sig); }
 
+/// MLIR's async runtime runs a task's coroutine on a worker thread, and the
+/// worker that makes a task's token available (waking an `await` in `main`)
+/// goes on running the coroutine's last instructions, its frame's release
+/// and its return into the runtime, which are this session's code.  The
+/// session ends only once every worker is past them: one job per worker,
+/// each waiting until all of them run, holds every worker at once, so none
+/// is still in a coroutine.  (Ending sooner, the program's code is unmapped
+/// under a worker, which Linux showed as a crash after `main` returned.)
+void waitForAsyncWorkers() {
+  using Execute = void (*)(void *, void (*)(void *));
+  using WorkerCount = int64_t (*)();
+  auto *execute = reinterpret_cast<Execute>(
+      llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(
+          "mlirAsyncRuntimeExecute"));
+  auto *workerCount = reinterpret_cast<WorkerCount>(
+      llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(
+          "mlirAsyncRuntimGetNumWorkerThreads")); // (the runtime's spelling)
+  if (!execute || !workerCount)
+    return;
+  struct Gate {
+    std::mutex Mutex;
+    std::condition_variable Changed;
+    int64_t Workers = 0, Arrived = 0, Left = 0;
+  } gate;
+  gate.Workers = workerCount();
+  for (int64_t i = 0; i < gate.Workers; ++i)
+    execute(&gate, [](void *p) {
+      Gate &g = *static_cast<Gate *>(p);
+      std::unique_lock<std::mutex> lock(g.Mutex);
+      ++g.Arrived;
+      g.Changed.notify_all();
+      g.Changed.wait(lock, [&g] { return g.Arrived == g.Workers; });
+      ++g.Left;
+      g.Changed.notify_all();
+    });
+  std::unique_lock<std::mutex> lock(gate.Mutex);
+  gate.Changed.wait(lock, [&gate] { return gate.Left == gate.Workers; });
+}
+
 class AbortAsExitStatus {
 public:
   AbortAsExitStatus() : Prev(std::signal(SIGABRT, exitOnAbort)) {}
@@ -218,6 +282,21 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   unsigned mainParamCount = 0;
   if (auto *mainIRFn = module->getFunction("main"))
     mainParamCount = mainIRFn->arg_size();
+  // The concurrency prototype: tasks run on MLIR's async runtime and
+  // parallel loops on LLVM's OpenMP runtime, shared libraries of the LLVM
+  // this compiler was built with, loaded into this process when the code
+  // calls them and resolved by name.  (The async-to-LLVM lowering declares
+  // the async runtime's whole interface in every module, calls or not.)
+  bool needsAsyncRuntime = false, needsOpenMP = false;
+  for (const llvm::Function &f : module->functions()) {
+    if (!f.isDeclaration() || f.use_empty())
+      continue;
+    if (f.getName().starts_with("mlirAsyncRuntime"))
+      needsAsyncRuntime = true;
+    else if (f.getName().starts_with("__kmpc_") ||
+             f.getName().starts_with("omp_"))
+      needsOpenMP = true;
+  }
 
   // Take ownership of the module and its context together, before any early
   // return.  ThreadSafeModule destroys the module before the context; left in
@@ -319,7 +398,15 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
       return cannotLoad(std::move(err));
     }
   }
-  if (!nativeObjects.empty()) {
+  for (const char *lib :
+       {needsAsyncRuntime ? PAYKAN_MLIR_ASYNC_RUNTIME : nullptr,
+        needsOpenMP ? PAYKAN_OPENMP_RUNTIME : nullptr}) {
+    std::string err;
+    if (lib && llvm::sys::DynamicLibrary::LoadLibraryPermanently(lib, &err))
+      return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                     "cannot load '%s': %s", lib, err.c_str());
+  }
+  if (!nativeObjects.empty() || needsAsyncRuntime || needsOpenMP) {
     auto libc = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
         jit->getDataLayout().getGlobalPrefix());
     if (!libc)
@@ -334,6 +421,7 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
 
   AbortAsExitStatus panicsExit;
 
+  int rc;
   if (mainParamCount == 2) {
     // main(args: view Str[]): a slice of the arguments' strings.
     std::vector<PaykanShared *> argv;
@@ -341,14 +429,16 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
     for (const auto &s : args)
       argv.push_back(PaykanShared_new((PaykanObject *)PaykanString_new(
           s.c_str(), static_cast<int64_t>(s.size()))));
-    int rc = mainAddr->toPtr<int (*)(void *, int64_t)>()(
+    rc = mainAddr->toPtr<int (*)(void *, int64_t)>()(
         argv.data(), static_cast<int64_t>(argv.size()));
     for (PaykanShared *arg : argv)
       Paykan_release(arg);
-    return rc;
+  } else {
+    rc = mainAddr->toPtr<int (*)()>()();
   }
-
-  return mainAddr->toPtr<int (*)()>()();
+  if (needsAsyncRuntime)
+    waitForAsyncWorkers();
+  return rc;
 }
 
 } // namespace paykan::jit
