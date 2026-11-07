@@ -5,14 +5,15 @@
 //            function `first<T>` with explicit and inferred type arguments,
 //            constructor-argument inference (`Box(5)`), an instantiation as a
 //            field / parameter / return / array element type, `match` on an
-//            instantiation, an instantiation copied into a new local, and `==` via `equals`.
+//            instantiation, an instantiation cloned (`impl Cloneable for
+//            Box<T>`) and one moved into a new local, and `==` via `equals`.
 
 import ::io;
 
 class Box<T> {
   v: T;
   view fn get() -> view T { return self.v; }
-  fn set(v: T)            { self.v = v; }
+  fn set(v: T)            { self.v = move v; }
   view fn equals(other: Obj) -> bool {
     match other {
       o: Box<T> {
@@ -23,8 +24,10 @@ class Box<T> {
   }
 }
 
+impl Cloneable for Box<T> {}
+
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
 class Pair<K, V> {
@@ -35,7 +38,7 @@ class Pair<K, V> {
 }
 
 impl Pair<K, V> {
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
+  fn __init__(k: K, v: V) { self.k = move k; self.v = move v; }
 }
 
 class Stack<T> {
@@ -47,14 +50,14 @@ class Stack<T> {
   }
   fn pop() -> T {
     self.count = self.count - 1;
-    return self.items[self.count];
+    return self.items[self.count].clone();
   }
   view fn empty() -> bool { return self.count == 0; }
 }
 
 impl Stack<T> {
-  // Up to four items; the free slots hold `blank`.
-  fn __init__(blank: T) { self.items = [blank; 4]; self.count = 0; }
+  // Up to four items; each free slot holds its own clone of `blank`.
+  fn __init__(blank: T) { self.items = [blank.clone(); 4]; self.count = 0; }
 }
 
 class Holder {
@@ -74,7 +77,7 @@ fn unbox<T>(b: Box<T>) -> T {
   return b.get();
 }
 
-fn describe(o: Obj) -> Str {
+fn describe(o: view Obj) -> Str {
   match o {
     b: Box<int> {
       return "Box<int> holding " + Str<int>(b.get());
@@ -96,7 +99,7 @@ fn main() -> int {
   let p = Pair<Str, int>("age", 42);
   io::println(p.key() + "=" + Str<int>(p.value()));  // age=42
 
-  let bb = Box<Box<int>>(bi);                  // nested instantiation
+  let bb = Box<Box<int>>(bi.clone());          // nested instantiation
   io::println(Str(bb.get().get()));            // 3
 
   let s: mut = Stack<Str>("");
@@ -126,7 +129,7 @@ fn main() -> int {
   io::println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
   io::println(Str<bool>(bi == Box<int>(4)));  // False
 
-  let alias: Box<int> = bi;                  // shares the box
+  let alias: Box<int> = move bi;             // takes the box over
   io::println(Str(alias.get()));               // 3
   return 0;
 }

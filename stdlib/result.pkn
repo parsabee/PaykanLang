@@ -29,12 +29,12 @@ enum Result<T, E> {
 /// type the Result flows into (`return res::ok(n);` in a function returning a
 /// `Result<int, Error>`).
 fn ok<T, E>(value: T) -> Result<T, E> {
-  return Result::Ok(value);
+  return Result::Ok(move value);
 }
 
 /// The Result of an operation that failed with @p error.  `T` is taken from
 /// the type the Result flows into (`return res::fail(e);` in a function
 /// returning a `Result<int, err::Error>`).
 fn fail<T>(error: err::Error) -> Result<T, err::Error> {
-  return Result::Err(error);
+  return Result::Err(move error);
 }

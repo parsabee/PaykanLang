@@ -48,7 +48,7 @@ class Shape {
 }
 
 impl Shape {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = move name; }
   view fn report() -> Str {
     return self.label() + ": " + Str(self.area()) + " / " +
            Str(self.perimeter());
@@ -63,7 +63,7 @@ class Polygon : Shape {
 
 impl Polygon {
   fn __init__(name: Str, sides: int, side: float) {
-    __super__(name);
+    __super__(move name);
     self.sides = sides;
     self.side = side;
   }
@@ -75,7 +75,7 @@ class Square : Polygon {
 }
 
 impl Square {
-  fn __init__(name: Str, side: float) { __super__(name, 4, side); }
+  fn __init__(name: Str, side: float) { __super__(move name, 4, side); }
 }
 
 class Rect : Shape {
@@ -88,7 +88,7 @@ class Rect : Shape {
 
 impl Rect {
   fn __init__(name: Str, w: float, h: float) {
-    __super__(name);
+    __super__(move name);
     self.w = w;
     self.h = h;
   }
@@ -173,7 +173,7 @@ class ByTen : Counter {
 fn main() -> int {
   a: mut Counter = ByTwo();
   b: mut Counter = ByTen();
-  io::println(Str(a.run(3)) + " " + Str(Counter::twice(b)));
+  io::println(Str(a.run(3)) + " " + Str(Counter::twice(move b)));
   return 0;
 }
 )",
@@ -226,16 +226,17 @@ fn main() -> int {
                             "made as a shape, then a square; tile of 1\n");
 }
 
-// A superclass's `__init__` may give `self` away once its own fields are
-// assigned.  Until the subclass's `__init__` has assigned every field of its
-// own (on every path: in both branches here), the object stays one of the
-// superclass, so a virtual call or a type test made through that reference
-// meanwhile sees the superclass, never a subclass's field without a value.
+// A superclass's `__init__` may give a `weak` reference to `self` away once
+// its own fields are assigned (it cannot hand `self` itself on: a strong
+// reference is an error).  Until the subclass's `__init__` has assigned
+// every field of its own (on every path: in both branches here), the object
+// stays one of the superclass, so a virtual call or a type test made
+// through that reference meanwhile sees the superclass, never a subclass's
+// field without a value.
 TEST(PureVirtual, AGivenAwaySelfIsTheSuperclassUntilTheSubclassFieldsAreSet) {
   expectRunsOnEveryFrontend("GivenAway", R"(import ::io;
-class Panel { kid: Widget?; }
+class Panel { weak kid: Widget?; }
 impl Panel {
-  fn add(w: Widget) { self.kid = w; }
   view fn show() {
     match self.kid {
       l: Label { io::println("label " + l.text + " " + Str(l.width())); }
@@ -249,22 +250,22 @@ class Widget {
   view fn width() -> int { return 0; }
 }
 impl Widget {
-  fn __init__(p: mut Panel) { self.id = 1; p.add(self); p.show(); }
+  fn __init__(p: shared mut Panel) { self.id = 1; p.kid = self; p.show(); }
 }
 class Label : Widget {
   text: Str;
   view fn width() -> int { return self.text.len(); }
 }
 impl Label {
-  fn __init__(p: mut Panel, t: Str) {
+  fn __init__(p: shared mut Panel, t: Str) {
     __super__(p);
     p.show();
-    if t.len() > 3 { self.text = t; } else { self.text = t + "!"; }
+    if t.len() > 3 { self.text = move t; } else { self.text = t + "!"; }
     p.show();
   }
 }
 fn main() -> int {
-  p: mut = Panel(None);
+  p: shared mut = Panel(None);
   a = Label(p, "hi");
   b = Label(p, "hello");
   p.show();
@@ -274,15 +275,30 @@ fn main() -> int {
                             "widget 0\nwidget 0\nlabel hi! 3\n"
                             "widget 0\nwidget 0\nlabel hello 5\n"
                             "label hello 5\n");
+  auto r = compileAndRun(R"(
+class Panel { kid: Widget?; }
+impl Panel { fn add(w: Widget) { self.kid = move w; } }
+class Widget { id: int; }
+impl Widget {
+  fn __init__(p: shared mut Panel) { self.id = 1; p.add(self); }
+}
+fn main() -> int { p: shared mut = Panel(None); w = Widget(p); return 0; }
+)");
+  EXPECT_FALSE(r.CompileOk);
+  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mut Widget'); a "
+                          "method borrows its receiver (a 'shared fn' hands "
+                          "on a shared one)"),
+            std::string::npos)
+      << r.StdErr;
 }
 
 // An abstract class's `__init__` that calls a pure virtual method, its
 // fields assigned, reaches the slot's trap: the object is one of the
 // abstract class while that runs, so the program stops with the runtime's
 // message (tests/Runtime/ObjectTests.cpp) instead of reading a field the
-// subclass has not assigned yet.  So does a call through a reference that
-// `__init__` gave away, made by the subclass's `__init__` before its own
-// field has a value: the object is still one of the abstract class.
+// subclass has not assigned yet.  So does a call through a `weak` reference
+// that `__init__` gave away, made by the subclass's `__init__` before its
+// own field has a value: the object is still one of the abstract class.
 TEST(PureVirtual, AbstractInitCallingAPureMethodAborts) {
   for (const char *source : {R"(
 class Shape {
@@ -302,7 +318,7 @@ impl Square {
 fn main() -> int { s = Square(); return s.n; }
 )",
                              R"(
-class Board { s: Shape?; }
+class Board { weak s: Shape?; }
 impl Board {
   view fn count() -> int {
     match self.s { s: Shape { return s.sides(); } None { return 0; } }
@@ -313,16 +329,16 @@ class Shape {
   view fn sides() -> int;
 }
 impl Shape {
-  fn __init__(b: mut Board) { self.n = 0; b.s = self; }
+  fn __init__(b: shared mut Board) { self.n = 0; b.s = self; }
 }
 class Square : Shape {
   label: Str;
   view fn sides() -> int { return self.label.len(); }
 }
 impl Square {
-  fn __init__(b: mut Board) { __super__(b); self.n = b.count(); self.label = "four"; }
+  fn __init__(b: shared mut Board) { __super__(b); self.n = b.count(); self.label = "four"; }
 }
-fn main() -> int { b: mut = Board(None); s = Square(b); return s.n; }
+fn main() -> int { b: shared mut = Board(None); s = Square(b); return s.n; }
 )"}) {
     fflush(stdout);
     fflush(stderr);
@@ -338,18 +354,38 @@ fn main() -> int { b: mut = Board(None); s = Square(b); return s.n; }
     ASSERT_TRUE(WIFEXITED(status)) << source;
     EXPECT_EQ(WEXITSTATUS(status), 128 + SIGABRT) << source;
   }
+  // A strong reference to `self` cannot be given away in `__init__`.
+  auto r = compileAndRun(R"(
+class Board { s: Shape?; }
+class Shape {
+  n: int;
+  view fn sides() -> int;
+}
+impl Shape {
+  fn __init__(b: shared mut Board) { self.n = 0; b.s = self; }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.CompileOk);
+  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mut Shape'); a "
+                          "method borrows its receiver (a 'shared fn' hands "
+                          "on a shared one)"),
+            std::string::npos)
+      << r.StdErr;
 }
 
 // Abstract types as fields, optionals, tuple elements and type arguments,
-// matched and unwrapped: every reference is released.
+// matched and unwrapped: every reference is released.  The Rect moves from
+// the field to the box and on to the tuple (`mem::replace`).
 TEST(PureVirtual, AbstractTypesHoldAndReleaseTheirObjects) {
   expectRunsOnEveryFrontend("Types", withShapes(R"(
+import ::memory as mem;
 class Box<T> { item: T; }
 class Scene {
   main: Shape;
   extra: Shape?;
 }
-fn describe(o: Obj) -> Str {
+fn describe(o: view Obj) -> Str {
   match o {
     s: Square { return "square " + s.name; }
     r: Rect { return "rect " + r.name; }
@@ -363,8 +399,8 @@ fn main() -> int {
     e: Shape { io::println(e.report()); }
     None { io::println("none"); }
   }
-  box = Box<Shape>(scene.main);
-  pair: (Shape, int) = (box.item, 2);
+  box: mut = Box<Shape>(mem::replace<Shape>(scene.main, Square("m", 1.0)));
+  pair: (Shape, int) = (mem::replace<Shape>(box.item, Square("i", 1.0)), 2);
   o: Obj = Square("t", 1.0);
   io::println(describe(pair.0) + ", " + describe(o) + ", " + describe(box));
   return 0;

@@ -42,7 +42,7 @@ fn main() -> int {
   words: Str[7] = ["a", "bb", "a", "ccc", "bb", "a", "dddd"];
   i: int = 0;
   while i < words.len() {
-    counts.put(words[i], counts.getOr(words[i], 0) + 1);
+    counts.put(words[i].clone(), counts.getOr(words[i], 0) + 1);
     i = i + 1;
   }
   io::println(Str(counts.len()) + " a=" + Str(counts.get("a")) + " bb="

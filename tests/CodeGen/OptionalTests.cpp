@@ -35,7 +35,7 @@ static const char *const kNode = R"pkn(
 TEST(Optional, StrSomeAndNone) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
-    fn describe(s: Str?) -> Str {
+    fn describe(s: view Str?) -> Str {
       match s {
         v: Str { return "some(" + v + ")"; }
         None   { return "none"; }
@@ -74,7 +74,7 @@ TEST(Optional, ClassSomeAndNone) {
         n: Node { io::println(Str<int>(n.v)); }
         None    { io::println("none"); }
       }
-      b = a;                 // share
+      b = move a;            // hand over
       a = None;
       match b {
         n: Node { io::println(Str<int>(n.v)); }
@@ -89,18 +89,21 @@ TEST(Optional, ClassSomeAndNone) {
 }
 
 // -- Linked list: optional field, insertion, traversal via match
+//
+// The list owns its nodes: `sum` walks it with a `weak` cursor, and `find`
+// returns a borrow of the node it finds.
 
 TEST(Optional, LinkedListInsertAndTraverse) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
     fn push_front(head: Node?, v: int) -> Node {
       n: mut Node = Node(v);
-      n.next = head;
+      n.next = move head;
       return n;
     }
-    fn sum(head: Node?) -> int {
+    fn sum(head: view Node?) -> int {
       total: int = 0;
-      cur: Node? = head;
+      weak cur = head;
       while (cur != None) {
         match cur {
           n: Node { total = total + n.v; cur = n.next; }
@@ -109,24 +112,20 @@ TEST(Optional, LinkedListInsertAndTraverse) {
       }
       return total;
     }
-    fn find(head: Node?, key: int) -> Node? {
-      cur: Node? = head;
-      while (cur != None) {
-        match cur {
-          n: Node {
-            if (n.v == key) { return n; }
-            cur = n.next;
-          }
-          None { }
+    fn find(head: view Node?, key: int) -> view Node? {
+      match head {
+        n: Node {
+          if (n.v == key) { return n; }
+          return find(n.next, key);
         }
+        None { return head; }
       }
-      return None;
     }
     fn main() -> int {
       head: Node? = None;
-      head = push_front(head, 3);
-      head = push_front(head, 2);
-      head = push_front(head, 1);
+      head = push_front(move head, 3);
+      head = push_front(move head, 2);
+      head = push_front(move head, 1);
       io::println(Str<int>(sum(head)));
       match find(head, 2) {
         n: Node { io::println("found " + Str<int>(n.v)); }
@@ -156,8 +155,8 @@ TEST(Optional, OptionalFieldReleasedByDestructor) {
     fn main() -> int {
       a: mut Node = Node(1);
       b: Node = Node(2);
-      a.next = b;
-      a.next = None;      // releases b's reference held by the field
+      a.next = move b;
+      a.next = None;      // releases b, which the field held
       a.next = Node(3);   // field owns the temporary
       return 0;
     }
@@ -244,25 +243,25 @@ TEST(Optional, CompareTwoOptionals) {
 TEST(Optional, OptionalCopiedAndRelayed) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
-    fn describe(s: Str?) -> Str {
+    fn describe(s: view Str?) -> Str {
       match s {
-        v: Str { return v; }
+        v: Str { return v.clone(); }
         None   { return "none"; }
       }
     }
     fn relay(s: Str?) -> Str? { return s; }
     fn main() -> int {
       a: Str? = "moved";
-      b = a;
+      b = move a;
       io::println(describe(b));
       a = "revived";
       io::println(describe(a));
       n: Str? = None;
-      m = n;                      // copying None copies a NULL slot
+      m = n.clone();              // copying None copies a NULL slot
       io::println(describe(m));
-      io::println(describe(relay(b)));
+      io::println(describe(relay(move b)));
       io::println(describe(relay(None)));
-      c: Str? = a;
+      c: Str? = a.clone();
       io::println(describe(c));
       return 0;
     }
@@ -291,7 +290,7 @@ TEST(Optional, ParamAndReturnThroughFunctions) {
       io::println(Str<int>(unwrapOr(pass(Node(2)), 0)));
       io::println(Str<int>(unwrapOr(None, 4)));
       n: Node = Node(5);
-      io::println(Str<int>(unwrapOr(n, 0)));    // T widened to T?
+      io::println(Str<int>(unwrapOr(move n, 0)));    // T widened to T?
       return 0;
     }
   )pkn");
@@ -305,8 +304,8 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
   auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
     class List {
       head: Node?;
-      fn link(n: Node?) { self.head = n; }
-      fn first() -> Node? { return self.head; }
+      fn link(n: Node?) { self.head = move n; }
+      view fn first() -> view Node? { return self.head; }
       fn firstOr(d: int) -> int {
         match self.head {
           n: Node { return n.v; }
@@ -404,7 +403,8 @@ TEST(Optional, SubclassArmThenInnerArm) {
 TEST(Optional, ArrayOfOptionals) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
-    fn show(n: Node?) -> Str {
+    import ::memory as mem;
+    fn show(n: view Node?) -> Str {
       match n {
         x: Node { return Str<int>(x.v); }
         None    { return "-"; }
@@ -419,12 +419,10 @@ TEST(Optional, ArrayOfOptionals) {
       i: int = 0;
       while (i < xs.len()) { io::print(show(xs[i]) + " "); i = i + 1; }
       io::println("");
-      p: Node? = xs[2];       // None
-      q: Node? = xs[1];       // Node(1), taken out of its slot
-      xs[1] = None;
+      p: Node? = mem::take(xs[2]);   // None
+      q: Node? = mem::take(xs[1]);   // Node(1), taken out of its slot
       io::println(show(p) + show(q));
-      e: Node? = xs[0];       // retains the element
-      xs[0] = None;
+      e: Node? = mem::take(xs[0]);   // takes the element, leaves None
       io::println(show(e));
       ss: Str?[2] = [None, None];
       ss[0] = "a";
@@ -449,7 +447,7 @@ TEST(Optional, TernaryToOptional) {
       b: Str? = pick(False);
       c: bool = False;
       d: Str? = if c then "x" else None;
-      e: Str? = if c then a else b;
+      e: Str? = (if c then a else b).clone();
       io::println(Str<bool>(a != None));
       io::println(Str<bool>(b == None));
       io::println(Str<bool>(d == None));
@@ -465,8 +463,8 @@ TEST(Optional, TernaryToOptional) {
 TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
-    fn firstOver(head: Node?, limit: int) -> int {
-      cur: Node? = head;
+    fn firstOver(head: view Node?, limit: int) -> int {
+      weak cur = head;
       while (True) {
         match cur {
           n: Node {
@@ -483,8 +481,8 @@ TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
       a: mut Node = Node(1);
       b: mut Node = Node(5);
       c: Node = Node(9);
-      a.next = b;
-      b.next = c;
+      b.next = move c;
+      a.next = move b;
       io::println(Str<int>(firstOver(a, 4)));
       io::println(Str<int>(firstOver(a, 20)));
       io::println(Str<int>(firstOver(None, 0)));
@@ -540,23 +538,19 @@ TEST(Optional, ImportedOptionalSignatures) {
     class Node {
       v: int;
       next: Node?;
-      fn tail() -> Node? { return self.next; }
+      view fn tail() -> view Node? { return self.next; }
     }
 
     impl Node {
       fn __init__(x: int) { self.v = x; }
     }
-    fn find(head: Node?, key: int) -> Node? {
-      cur: Node? = head;
-      while (cur != None) {
-        match cur {
-          n: Node { if (n.v == key) { return n; } cur = n.next; }
-          None    { }
-        }
+    fn find(head: view Node?, key: int) -> view Node? {
+      match head {
+        n: Node { if (n.v == key) { return n; } return find(n.next, key); }
+        None    { return head; }
       }
-      return None;
     }
-    fn count(head: Node?) -> int {
+    fn count(head: view Node?) -> int {
       match head {
         n: Node { return 1 + count(n.next); }
         None    { return 0; }
@@ -568,7 +562,7 @@ import list;
 fn main() -> int {
   a: mut list::Node = list::Node(1);
   b: mut list::Node = list::Node(2);
-  a.next = b;
+  a.next = move b;
   io::println(Str<int>(list::count(a)));
   io::println(Str<int>(list::count(None)));
   match list::find(a, 2) {
@@ -579,9 +573,14 @@ fn main() -> int {
     n: list::Node { io::println("found " + Str<int>(n.v)); }
     None          { io::println("not found"); }
   }
-  match b.tail() {
-    list::Node { io::println("has tail"); }
-    _          { io::println("no tail"); }
+  match a.next {
+    n: list::Node {
+      match n.tail() {
+        list::Node { io::println("has tail"); }
+        _          { io::println("no tail"); }
+      }
+    }
+    None { }
   }
   return 0;
 }
@@ -595,16 +594,18 @@ fn main() -> int {
 
 // Interaction with tuples (#4): an optional reference element is a box that
 // is NULL for None; destructuring, equality, printing and arrays must stay
-// leak-free.
+// leak-free.  (The Node is unique: `show` is given a clone of a tuple, and
+// the tuple compared with one holding the same Node is the tuple itself.)
 
 TEST(OptionalTuple, TupleWithOptionalElements) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
-    fn pick(n: Node?, k: int) -> (Node?, int) { return (n, k); }
+    impl Cloneable for Node {}
+    fn pick(n: Node?, k: int) -> (Node?, int) { return (move n, k); }
     fn show(t: (Node?, int)) -> Str {
-      x, k = t;
+      x, k = move t;
       match x {
         n: Node { return "some " + Str<int>(n.v) + "/" + Str<int>(k); }
         None    { return "none/" + Str<int>(k); }
@@ -613,17 +614,17 @@ TEST(OptionalTuple, TupleWithOptionalElements) {
     fn main() -> int {
       a: Node? = Node(7);
       b: Node? = None;
-      t: (Node?, int) = pick(a, 1);
-      u = pick(b, 2);
-      io::println(show(t));
-      io::println(show(u));
+      t: (Node?, int) = pick(move a, 1);
+      u = pick(move b, 2);
+      io::println(show(t.clone()));
+      io::println(show(u.clone()));
       io::println(u);
-      io::println(Str<bool>(t == pick(a, 1)));
+      io::println(Str<bool>(t == t));
       io::println(Str<bool>(u == pick(None, 2)));
       io::println(Str<bool>(t == u));
-      y: Node?, j: int = u;
+      y: Node?, j: int = u.clone();
       io::println(Str<bool>(y == None));
-      ts: (Node?, int)[2] = [t, u];
+      ts: (Node?, int)[2] = [move t, move u];
       io::println(Str<int>(ts.len()));
       return 0;
     }
@@ -641,7 +642,7 @@ TEST(OptionalTuple, ImportedTupleOfOptionals) {
   writeFile(tmp, "lib.pkn", R"pkn(
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
-    fn mk(n: Node?) -> (Node?, int) { return (n, 5); }
+    fn mk(n: Node?) -> (Node?, int) { return (move n, 5); }
   )pkn");
   auto main = writeFile(tmp, "main.pkn", R"pkn(import ::io;
 import lib;
@@ -678,7 +679,7 @@ fn pick(ok: bool) -> Suit? {
   if ok { return Suit::Spades; }
   return None;
 }
-fn describe(p: Point?) -> Str {
+fn describe(p: view Point?) -> Str {
   match p {
     q: Point { return "point " + q.name + Str(q.x); }
     None { return "nothing"; }
@@ -710,7 +711,7 @@ fn main() -> int {
   xs: Point?[2] = [Point(1, "m"), None];
   io::println(xs[0]);
   io::println(xs[1]);
-  w = (Point(5, "w"), b);
+  w = (Point(5, "w"), move b);
   io::println(w);
   return 0;
 }
@@ -777,7 +778,8 @@ TEST(Optional, StructWithReferencesWrappedAsAnArgument) {
 }
 
 // None of an optional tuple or struct whose value holds references, in a
-// buffer's slot: all zeros is None, not a slot that was never set.
+// buffer's slot: all zeros is None, not a slot that was never set.  (The
+// Node is Cloneable, so a buffer of Items has the checked read, copy().)
 TEST(Optional, NoneOfAStructWithReferencesInABuffer) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
@@ -786,6 +788,7 @@ TEST(Optional, NoneOfAStructWithReferencesInABuffer) {
     import ::memory;
     class Node { n: int; }
     impl Node { fn __init__(n: int) { self.n = n; } }
+    impl Cloneable for Node {}
     struct Item { name: Str; node: Node; }
     fn main() -> int {
       l = collections::List<(int, Str)?>();

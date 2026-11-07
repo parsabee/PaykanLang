@@ -57,7 +57,8 @@ managed by automatic reference counting: there is no garbage collector.
 15. [Modules and imports](15-modules.md): import forms, path resolution, non-transitivity,
     module files and the compilation cache.
 16. [Memory](16-memory.md): reference counting, destruction, `--track-heap`, reference
-    cycles, weak references and ownership transfers.
+    cycles, weak references, and ownership: move-only and Copyable values, `move`,
+    `clone()`, borrows and `mem::replace`.
 17. [The `paykan` command](17-the-paykan-command.md): every option, the backends and the
     compilation cache.
 18. [Appendix: a calculator](18-appendix-calculator.md): a complete multi-module program,
@@ -65,8 +66,7 @@ managed by automatic reference counting: there is no garbage collector.
 19. [Concurrency and ownership](19-concurrency.md): the qualifiers on references (the bare
     type, immutable and unique; `mut`, `shared`, `shared mut`, `atomic`, `locked mut`,
     `atomic shared`), `move`, tasks with `async fn` and `await`, the send check,
-    `parallel for`, `lock` blocks, atomic cells, frozen objects, `Copyable` and
-    `--strict-ownership`.
+    `parallel for`, `lock` blocks, atomic cells, frozen objects and `Copyable`.
 
 The [grammar](../grammar.md) is the specification of the concrete syntax that every
 frontend implements.

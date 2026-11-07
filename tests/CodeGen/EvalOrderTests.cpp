@@ -10,7 +10,9 @@
 // closure that reaches it, must not change the value used.  Each program
 // runs as the driver runs one (the moves at last use, the lending and the
 // reference-count elimination) and without the passes, under the tracking
-// allocator: the copy the caller takes is released once it is used.
+// allocator: the copy the caller takes is released once it is used.  The
+// objects a later call is given are `shared mut`, so the caller still
+// reads them; a Named's name is a `shared Str`, so a Named copies.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -25,10 +27,10 @@ namespace {
 /// The declarations every program here shares.
 const std::string kPrelude = R"(import ::io;
 struct P { a: int; }
-struct Named { name: Str; n: int; }
+struct Named { name: shared Str; n: int; }
 class C { p: P; named: Named; n: int; t: (int, int); }
 fn first(p: P, x: int) -> int => p.a;
-fn reset(c: mut C) -> int {
+fn reset(c: shared mut C) -> int {
   c.p = P(9);
   c.named = Named("z" + Str(9), 9);
   c.t = (9, 9);
@@ -68,7 +70,7 @@ void expectOutput(const char *label, const std::string &body,
 // replaces, and the left operand of `==`.
 TEST(EvalOrder, MemArgumentIsTheValueRead) {
   expectOutput("field", R"(fn main() -> int {
-  c: mut = fresh();
+  c: shared mut = fresh();
   io::println(Str(first(c.p, reset(c))));
   p = P(1);
   io::println(Str(first(p, bump(p))));
@@ -100,7 +102,7 @@ fn main() -> int {
   io::println(tag(e, bumpE(e)));
   e = E::A(1);
   io::println(Str(e == (if bumpE(e) == 0 then E::B else E::B)));
-  c: mut = fresh();
+  c: shared mut = fresh();
   io::println(Str(firstT(c.t, reset(c))));
   t = (1, 2);
   io::println(Str(t == (bumpT(t) + 1, 2)));
@@ -116,7 +118,7 @@ TEST(EvalOrder, FunctionValueCalls) {
                R"(fn firstT(t: (int, int), x: int) -> int => t.0;
 class Holder { f: (P, int) -> int; }
 fn main() -> int {
-  c: mut = fresh();
+  c: shared mut = fresh();
   g = first;
   k = fn() -> int => reset(c);
   io::println(Str(g(c.p, k())));
@@ -151,14 +153,14 @@ impl Counter {
 }
 fn bumpCounter(c: inout Counter) -> int { c = Counter(9); return 0; }
 class Counted { k: Counter; }
-fn recount(c: mut Counted) -> int { c.k = Counter(9); return 0; }
+fn recount(c: shared mut Counted) -> int { c.k = Counter(9); return 0; }
 class Shown { p: P; x: int; }
 struct Made { p: P; x: int; }
 class Base { p: P; }
 impl Base { fn __init__(p: P, x: int) { self.p = p; } }
 class Derived : Base { y: int; }
 impl Derived {
-  fn __init__(c: mut C) {
+  fn __init__(c: shared mut C) {
     __super__(c.p, reset(c));
     self.y = 0;
   }
@@ -167,9 +169,9 @@ struct Pair { p: P; q: P; }
 impl Pair { fn bumpQ() -> int { self.q = P(7); return 0; } }
 fn main() -> int {
   r = Reader(0);
-  c: mut = fresh();
+  c: shared mut = fresh();
   io::println(Str(r.first(c.p, reset(c))));
-  counted: mut = Counted(Counter(1));
+  counted: shared mut = Counted(Counter(1));
   io::println(Str(counted.k.get(recount(counted))));
   k = Counter(1);
   io::println(Str(k.take(bumpCounter(k))));
@@ -194,14 +196,14 @@ TEST(EvalOrder, ViewsSlicesAndNesting) {
   expectOutput("views", R"(fn look(p: view P, x: int) -> int => p.a;
 fn total(xs: view int[], x: int) -> int => xs[0] + xs[2];
 class Arr { a: int[3]; }
-fn resetArr(h: mut Arr) -> int { h.a = [9, 9, 9]; return 0; }
+fn resetArr(h: shared mut Arr) -> int { h.a = [9, 9, 9]; return 0; }
 fn apply(f: () -> int) -> int => f();
 struct Slot { p: P; q: P; }
 impl Slot { fn slot() -> inout P { return self.p; } }
 fn main() -> int {
-  c: mut = fresh();
+  c: shared mut = fresh();
   io::println(Str(look(c.p, reset(c))));
-  h: mut = Arr([1, 2, 3]);
+  h: shared mut = Arr([1, 2, 3]);
   io::println(Str(total(h.a, resetArr(h))));
   c = fresh();
   io::println(Str(first(c.p, first(c.p, reset(c)))));
@@ -228,22 +230,22 @@ class Kept { s: Str; }
 impl Kept { fn __init__(ss: view Str[], x: int) { self.s = ss[1] + ""; } }
 fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2];
 fn names(ss: view Str[], x: int) -> Str => ss[0] + ss[2];
-fn resetA(a: mut A) -> int {
+fn resetA(a: shared mut A) -> int {
   a.xs = [9, 9, 9];
   a.ss = ["z" + Str(1), "z" + Str(2), "z" + Str(3)];
   return 0;
 }
-fn ints(xs: view int[], a: mut A) -> int => total(xs, resetA(a));
-fn strs(ss: view Str[], a: mut A) -> Str => names(ss, resetA(a));
-fn method(ss: view Str[], a: mut A) -> Str => K(0).pick(ss, resetA(a));
-fn made(ss: view Str[], a: mut A) -> Str => Kept(ss, resetA(a)).s;
-fn value(ss: view Str[], a: mut A) -> Str {
+fn ints(xs: view int[], a: shared mut A) -> int => total(xs, resetA(a));
+fn strs(ss: view Str[], a: shared mut A) -> Str => names(ss, resetA(a));
+fn method(ss: view Str[], a: shared mut A) -> Str => K(0).pick(ss, resetA(a));
+fn made(ss: view Str[], a: shared mut A) -> Str => Kept(ss, resetA(a)).s;
+fn value(ss: view Str[], a: shared mut A) -> Str {
   f = names;
   return f(ss, resetA(a));
 }
 fn freshA() -> A => A([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
 fn main() -> int {
-  a: mut = freshA();
+  a: shared mut = freshA();
   io::println(Str(ints(a.xs, a)));
   a = freshA();
   io::println(strs(a.ss, a));
@@ -266,7 +268,7 @@ TEST(EvalOrder, CopyKeepsItsReferences) {
                R"(fn label(v: Named, x: int) -> Str => v.name + Str(v.n);
 fn bumpNamed(v: inout Named) -> int { v = Named("y" + Str(8), 8); return 0; }
 fn main() -> int {
-  c: mut = fresh();
+  c: shared mut = fresh();
   io::println(label(c.named, reset(c)));
   v = Named("b" + Str(2), 2);
   io::println(label(v, bumpNamed(v)));
@@ -285,17 +287,17 @@ fn main() -> int {
 TEST(EvalOrder, ControlsThatAlreadyWorked) {
   expectOutput("controls", R"(class D { c: C; }
 fn firstN(n: int, x: int) -> int => n;
-fn shout(s: inout Str) -> Str { s = s + "!"; return s; }
-fn swapIn(d: mut D) -> int { d.c = fresh(); d.c.p = P(5); return 0; }
+fn shout(s: inout Str) -> Str { s = s + "!"; return s.clone(); }
+fn swapIn(d: shared mut D) -> int { d.c = fresh(); d.c.p = P(5); return 0; }
 fn bumpN(n: inout int) -> int { n = 9; return 0; }
-fn reads(c: C) -> int => c.p.a;
+fn reads(c: view C) -> int => c.p.a;
 struct Pair { p: P; q: P; }
 fn main() -> int {
   c: mut = fresh();
   io::println(Str(firstN(c.n, bumpN(c.n))));
   s: mut = "hi";
   io::println(s + shout(s));
-  d: mut = D(fresh());
+  d: shared mut = D(fresh());
   io::println(Str(first(d.c.p, swapIn(d))));
   pair = Pair(P(1), P(2));
   io::println(Str(first(pair.q, bump(pair.p))));

@@ -40,7 +40,7 @@ class Labeled {
 }
 
 impl Labeled {
-  fn __init__(l: Str, v: int) { self.label = l; self.value = v; }
+  fn __init__(l: Str, v: int) { self.label = move l; self.value = v; }
 }
 
 // ---- Helper functions -------------------------------------------------------
@@ -215,7 +215,7 @@ fn main() -> int {
   io::println("=== str concat vtable ===");
   let ca: mut Str = "hello";
   let cb: Str = " world";
-  ca.concat(cb);
+  ca.concat(move cb);
   io::println(ca);                            // hello world
   io::println(Str(ca.len()));        // 11
 
@@ -254,7 +254,7 @@ fn main() -> int {
   io::println("=== 2D Str array ===");
   let s0: Str[3] = ["a", "b", "c"];
   let s1: Str[3] = ["d", "e", "f"];
-  let grid: Str[2][3] = [s0, s1];
+  let grid: Str[2][3] = [move s0, move s1];
   io::println(Str(grid.len()));          // 2
   io::println(grid[0][0]);                    // a
   io::println(grid[1][2]);                    // f
@@ -275,7 +275,7 @@ fn main() -> int {
   io::println("=== 2D Point array ===");
   let pr0: Point[2] = [Point(0, 0), Point(1, 0)];
   let pr1: Point[2] = [Point(0, 1), Point(1, 1)];
-  let grid2: Point[2][2] = [pr0, pr1];
+  let grid2: Point[2][2] = [move pr0, move pr1];
   io::println(Str<int>(grid2.len()));         // 2
   io::println(grid2[0][0].toString());        // (0,0)
   io::println(grid2[1][1].toString());        // (1,1)

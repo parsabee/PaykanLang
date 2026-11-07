@@ -9,9 +9,10 @@
 //   IDENT  ::= [A-Za-z_] [A-Za-z0-9_]*
 //
 // A `factor` may be a variable name, looked up in the shared environment
-// (a calc::hashmap::HashMap). A leading `IDENT '='` is an assignment; anything
-// else is an expression — so the parser saves its position and backtracks if
-// the `=` does not materialise.
+// (a `shared mut` calc::hashmap::HashMap, which the parser and its caller
+// both hold). A leading `IDENT '='` is an assignment; anything else is an
+// expression — so the parser saves its position and backtracks if the `=`
+// does not materialise.
 //
 // Errors are recorded in `error: Str?` (None while parsing succeeds) rather
 // than aborting, so the REPL can report them and continue. parseStatement()
@@ -36,11 +37,11 @@ fn applyOp(op: Op, a: float, b: float) -> float {
 class Parser {
   input: Str;
   pos: int;
-  env: hashmap::HashMap;
+  env: shared mut hashmap::HashMap;
   error: Str?;   // the first error, or None
 
   // Record the first error only; later errors are usually cascades.
-  fn fail(msg: Str)      { if self.error == None { self.error = msg; } }
+  fn fail(msg: Str)      { if self.error == None { self.error = move msg; } }
 
   view fn done() -> bool { return self.pos >= self.input.len(); }
 
@@ -163,8 +164,8 @@ class Parser {
     if self.atIsIdentStart() {
       let name = self.parseIdent();
       match self.env.lookup(name) {
-        e: hashmap::Entry {
-          return e.value;
+        v: float {
+          return v;
         }
         None {
           self.fail("undefined variable '" + name + "'");
@@ -219,21 +220,21 @@ class Parser {
         self.advance(); // consume '='
         let v = self.parseExpr();
         self.skipWs();
-        let target: Str? = name;
-        return (target, v);
+        let target: Str? = move name;
+        return (move target, v);
       }
       self.pos = start; // not an assignment — rewind and parse as an expression
     }
     let v = self.parseExpr();
     self.skipWs();
     let noName: Str? = None;
-    return (noName, v);
+    return (move noName, v);
   }
 }
 
 impl Parser {
-  fn __init__(s: Str, env: hashmap::HashMap) {
-    self.input = s;
+  fn __init__(s: Str, env: shared mut hashmap::HashMap) {
+    self.input = move s;
     self.pos = 0;
     self.env = env;
   }

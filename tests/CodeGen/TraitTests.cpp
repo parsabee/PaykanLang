@@ -80,13 +80,13 @@ TEST(Traits, BoundedGenericsRun) {
     }
 
     impl Holder<T> {
-      fn __init__(v: T) { self.v = v; }
+      fn __init__(v: T) { self.v = move v; }
     }
     fn main() -> int {
       a = A(1);
       b = B();
-      h = Holder<A>(b);
-      ab: A[2] = [a, b];
+      h = Holder<A>(B());
+      ab: A[2] = [A(1), B()];
       io::println(greet(a) + " " + greet(b) + " " + Str(total(ab)) + " " +
               h.label() + " " + Str(a.same(b)) + " " + Str(a.same(A(1))));
       io::println(show("s"));
@@ -113,7 +113,7 @@ class Box<T: Show> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 )pkn";
   std::ofstream(dir / "main.pkn") << R"pkn(import ::io;
@@ -171,7 +171,7 @@ trait Named { view fn name() -> Str; }
 struct Keyed<K: Hashable> { k: K; }
 impl Hashable for Keyed<K> { view fn hash() -> int { return self.k.hash(); } }
 class GBox<T> { v: T; }
-impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl GBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
 impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
 fn mkKeyed() -> Keyed<int> { return Keyed<int>(7); }
@@ -243,7 +243,7 @@ TEST(Traits, ScalarsShow) {
 // as before, with `io::println`, `toString()` and through a `T: Show`
 // bound: a function value inside an object (which shows itself through
 // its class) does not stop the struct holding the object from showing
-// itself.
+// itself.  The struct holds it `shared`, so the struct copies.
 TEST(Traits, AggregatesOfShowPartsShow) {
   LeakGuard guard;
   auto r = compileAndRun(R"pkn(import ::io;
@@ -252,7 +252,7 @@ TEST(Traits, AggregatesOfShowPartsShow) {
       view fn toString() -> Str { return "h" + Str(self.f(1)); }
     }
     impl Handler { fn __init__() { self.f = fn(x: int) => x + 1; } }
-    struct P { x: int; h: Handler; }
+    struct P { x: int; h: shared Handler; }
     struct Q { p: P; at: (float, char?); }
     enum E { A(q: Q), B(n: int?), N }
     enum Maybe<X> { Just(v: X), Nothing }

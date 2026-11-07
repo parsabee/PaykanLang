@@ -53,6 +53,13 @@ private:
   const Token &peek(size_t k = 0);
   const Token &cur() { return peek(0); }
   Tok kind(size_t k = 0) { return peek(k).Kind; }
+  /// At a method: `fn`, `view fn`, `shared fn` or `shared view fn`.
+  bool atMethodStart() {
+    size_t k = kind() == Tok::KwShared ? 1 : 0;
+    if (kind(k) == Tok::KwView)
+      ++k;
+    return kind(k) == Tok::KwFn;
+  }
   bool at(Tok k) { return kind() == k; }
   /// The current token, consumed: a reference into Buf, which holds until
   /// the next token is lexed (copy it to keep it past a peek()).

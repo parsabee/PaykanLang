@@ -60,8 +60,8 @@ native fn _stdin() -> Obj = "Paykan_io_stdin";
 /// The Result of a read: the @p text read, or the error its @p errno says
 /// (`EndOfFile` for 0, nothing left to read).
 fn _readResult(text: Str?, errno: int) -> res::Result<Str, err::Error> {
-  match text {
-    t: Str { return res::ok(t); }
+  match move text {
+    t: Str { return res::ok(move t); }
     None {
       if errno == 0 {
         return res::fail(err::Error(err::ErrorCode::EndOfFile, None));
@@ -81,7 +81,7 @@ class File {
 
 impl File {
   /// Made by `open` and `stdin` only: the initializer is the module's.
-  fn ___init__(handle: Obj) { self.__handle = handle; }
+  fn ___init__(handle: Obj) { self.__handle = move handle; }
   /// Writes @p s to the file: no error, or why it could not.
   view fn write(s: view Str) -> err::Error
                             { return err::fromErrno(_write(self.__handle, s)); }
@@ -109,7 +109,7 @@ fn open(path: view Str, mode: view Str) -> res::Result<File, err::Error> {
   errno = 0;
   match _open(path, mode, errno) {
     handle: Obj {
-      return res::ok(File(handle));
+      return res::ok(File(move handle));
     }
     None {
       return res::fail(err::fromErrno(errno));

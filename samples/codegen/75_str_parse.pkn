@@ -35,7 +35,7 @@ class Sensor {
 }
 
 impl Sensor {
-  fn __init__(label: Str) { self.label = label; }
+  fn __init__(label: Str) { self.label = move label; }
 }
 
 fn byte(s: view Str) -> u8? {

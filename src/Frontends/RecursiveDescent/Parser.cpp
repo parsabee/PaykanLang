@@ -311,7 +311,8 @@ void Parser::skipToTopLevelBoundary() {
     case Tok::Eof:
       return;
     case Tok::KwView:
-      if (depth == 0 && kind(1) == Tok::KwFn)
+    case Tok::KwShared:
+      if (depth == 0 && atMethodStart())
         return;
       break;
     case Tok::KwFn:
@@ -346,7 +347,8 @@ void Parser::skipToMemberBoundary() {
     case Tok::Eof:
       return;
     case Tok::KwView:
-      if (depth == 0 && kind(1) == Tok::KwFn)
+    case Tok::KwShared:
+      if (depth == 0 && atMethodStart())
         return;
       break;
     case Tok::KwFn:
@@ -501,14 +503,16 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwShared:
     case Tok::KwView:
-      if (kind(1) != Tok::KwFn) {
+      if (!atMethodStart()) {
         errorAtCurrent("expected 'import', 'class', 'struct', 'enum', 'trait', "
                        "'impl' or 'fn' at top level");
         ok = false;
         break;
       }
-      [[fallthrough]]; // `view fn`: Sema says only a method can be one
+      [[fallthrough]]; // `view fn`, `shared fn`: Sema says only a method can
+                       // be one
     case Tok::KwAsync:
       if (kind() == Tok::KwAsync && kind(1) != Tok::KwFn) {
         errorAtCurrent("expected 'fn' after 'async'");
@@ -757,7 +761,7 @@ ClassDecl *Parser::parseClassDecl() {
   ClassBody body;
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
-    if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    if (atMethodStart()) {
       if (auto *m = parseFuncDecl(FuncKind::ClassMethod)) {
         body.Methods.push_back(m);
         continue;
@@ -846,8 +850,7 @@ StructDecl *Parser::parseStructDecl() {
       errorAtCurrent("a struct field cannot be 'weak': a weak reference is a "
                      "field of a class or a local (a struct is a value, "
                      "copied with its fields)");
-    } else if (at(Tok::KwFn) || at(Tok::KwStatic) ||
-               (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    } else if (at(Tok::KwStatic) || atMethodStart()) {
       errorAtCurrent("a struct body holds fields only ('name: Type;'); a "
                      "method goes in an 'impl' block: 'impl " +
                      std::string(name) + " { fn ... }'");
@@ -957,35 +960,82 @@ EnumDecl *Parser::parseEnumDecl() {
 
 // implDecl ::= "impl" ( typeAnnotation "for" )? modulePath
 //              "{" implMember* "}"
-// implMember ::= ( "view" | "static" )? "fn" ... ( block | "=>" expr ";" )
+// implMember ::= ( "shared"? "view"? | "static" ) "fn" ... ( block | "=>" expr
+// ";" )
 ImplDecl *Parser::parseImplDecl() {
   SourceLocation start = consume().Loc; // "impl"
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a type name after 'impl'");
     return nullptr;
   }
+  // `impl List<T: Cloneable>`: a generic type whose parameters carry bounds
+  // (a `:` inside its angle brackets), read as a type parameter list.  The
+  // block is part of the instances whose arguments meet them (#369).
+  auto boundedTarget = [&] {
+    if (!at(Tok::Ident) || kind(1) != Tok::Less)
+      return false;
+    int depth = 1;
+    for (size_t k = 2;; ++k) {
+      const Tok t = kind(k);
+      if (t == Tok::Eof || t == Tok::LBrace || t == Tok::Semi)
+        return false;
+      if (t == Tok::Less)
+        ++depth;
+      else if (t == Tok::Greater && --depth == 0)
+        return false;
+      else if (depth == 1 && t == Tok::Colon && kind(k - 1) == Tok::Ident)
+        return true;
+    }
+  };
+  std::string typeName;
+  std::vector<const std::string *> typeParams;
+  TypeParamBounds bounds;
+  auto parseBounded = [&] {
+    typeName = consume().Text;
+    consume(); // "<"
+    return parseTypeParamList(typeParams, &bounds) &&
+           expect(Tok::Greater, "to close the type parameter list");
+  };
   // `impl Show for A`: the trait (`Into<int>`, `fmt::Show`) comes first.
   Type *trait = nullptr;
-  Type *target = parseTypeAnnotation();
-  if (!target)
-    return nullptr;
+  Type *target = nullptr;
   const char *after = "after 'impl'";
-  if (accept(Tok::KwFor)) {
-    trait = target;
-    after = "after 'for'";
-    if (!at(Tok::Ident)) {
-      errorAtCurrent("expected a type name after 'for'");
+  if (boundedTarget()) {
+    if (!parseBounded())
+      return nullptr;
+    if (at(Tok::KwFor)) {
+      errorAtCurrent("the bounds go on the type after 'for' ('impl Trait "
+                     "for " +
+                     typeName + "<T: Bound>')");
       return nullptr;
     }
+  } else {
     target = parseTypeAnnotation();
     if (!target)
       return nullptr;
+    if (accept(Tok::KwFor)) {
+      trait = target;
+      target = nullptr;
+      after = "after 'for'";
+      if (!at(Tok::Ident)) {
+        errorAtCurrent("expected a type name after 'for'");
+        return nullptr;
+      }
+      if (boundedTarget()) {
+        if (!parseBounded())
+          return nullptr;
+      } else {
+        target = parseTypeAnnotation();
+        if (!target)
+          return nullptr;
+      }
+    }
   }
   // The type by its name; a generic one (`Box<T>`) names its parameters.
   // A built-in type is Sema's to reject.
-  std::string typeName;
-  std::vector<const std::string *> typeParams;
-  if (auto *named = dyn_cast<ClassType>(target)) {
+  if (!target) {
+    // Read above, with its bounds.
+  } else if (auto *named = dyn_cast<ClassType>(target)) {
     typeName = named->getName();
   } else if (isa<BuiltinType>(target)) {
     typeName = ast::typeName(target);
@@ -1026,7 +1076,7 @@ ImplDecl *Parser::parseImplDecl() {
     if (isStatic && !at(Tok::KwFn)) {
       errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
                      "'self', so it is never a 'view fn')");
-    } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    } else if (atMethodStart()) {
       if (auto *m = parseFuncDecl(isStatic ? FuncKind::StaticFn
                                            : FuncKind::ImplMethod)) {
         m->setStatic(isStatic);
@@ -1045,12 +1095,15 @@ ImplDecl *Parser::parseImplDecl() {
   leaveNesting();
   if (!expectCloseBrace("to close the impl block", open) || !ok)
     return nullptr;
-  return Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
-                            trait, std::move(typeParams));
+  auto *im =
+      Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
+                         trait, std::move(typeParams));
+  im->setTypeParamBounds(std::move(bounds));
+  return im;
 }
 
 // traitDecl ::= "trait" IDENT ( "<" typeParamList ">" )? "{" traitMember* "}"
-// traitMember ::= "view"? "fn" IDENT "(" paramList ")"
+// traitMember ::= "shared"? "view"? "fn" IDENT "(" paramList ")"
 //                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 TraitDecl *Parser::parseTraitDecl() {
   SourceLocation start = consume().Loc; // "trait"
@@ -1076,7 +1129,7 @@ TraitDecl *Parser::parseTraitDecl() {
   bool ok = true;
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
-    if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    if (atMethodStart()) {
       if (auto *m = parseFuncDecl(FuncKind::Requirement)) {
         methods.push_back(m);
         continue;
@@ -1099,7 +1152,8 @@ TraitDecl *Parser::parseTraitDecl() {
 
 // -- Functions
 //
-// funcDecl ::= "view"? "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
+// funcDecl ::= "shared"? "view"? "fn" IDENT ( "<" typeParamList ">" )? "("
+// paramList ")"
 //              ( "->" ( "view" | "inout" )? typeAnnotation )? block
 //              -- or ";" in a class body: a pure virtual method
 // paramList ::= ( param ( "," param )* )?
@@ -1175,6 +1229,8 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   SourceLocation start = cur().Loc;
   // `async fn` (the concurrency prototype): a free function that is a task.
   const bool async = !native && accept(Tok::KwAsync);
+  // `shared fn`, `shared view fn` (a method whose `self` is shared; Sema).
+  const bool shared = !native && accept(Tok::KwShared);
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
   if (native && !expect(Tok::KwFn, "after 'native'"))
@@ -1289,6 +1345,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr);
     fn->setView(view);
+    fn->setShared(shared);
     fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
@@ -1341,6 +1398,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr, std::move(typeParams));
     fn->setView(view);
+    fn->setShared(shared);
     fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
@@ -1379,6 +1437,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
                                 body, std::move(typeParams));
   fn->setInferredResult(expressionBody && !retTy);
   fn->setView(view);
+  fn->setShared(shared);
   fn->setAsync(async);
   fn->setResultMode(resultMode);
   fn->setModulePrivateInit(modulePrivateInit);

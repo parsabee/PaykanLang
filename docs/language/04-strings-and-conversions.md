@@ -98,23 +98,26 @@ on non-array type 'Str'`). To change a string, build a new one with `+`. The ord
 operators (`<`, `>`, `<=`, `>=`) are not defined on strings (`operator '<' is not defined
 for types 'Str' and 'Str'`); compare characters instead.
 
-Besides `len()`, a string has the methods every object has, `toString()` (a copy of the
-string) and `equals(o)`, and `hash()` (a `Str` is `Hashable`, so it can be a `HashMap`
-key; see [Traits](06-traits.md)). Twelve methods parse it, `s.toInt()` … `s.toBool()`
-([Parsing a string](#parsing-a-string)). One more method, `s.concat(t)`, appends `t` to `s`
-in place. A string is an object, shared by every variable, field or parameter that holds it,
-so the change is seen through all of them, while `+` leaves its operands alone; `concat`
-cannot be called through a `view` (`'s' is a 'view' parameter; 'concat' is not a 'view
-fn'`):
+Besides `len()`, a string has the methods every object has, `toString()` and `equals(o)`,
+`clone()`, a new string with the same text (a `Str` is
+[`Cloneable`](06-traits.md#cloneable)), and `hash()` (a `Str` is `Hashable`, so it can be a
+`HashMap` key; see [Traits](06-traits.md)). Twelve methods parse it, `s.toInt()` …
+`s.toBool()` ([Parsing a string](#parsing-a-string)). One more method, `s.concat(t)`,
+appends `t` to `s` in place. A string is an object with one owner, as every object is:
+`let t = s;` is an error (`cannot copy 's' (a unique 'mut Str'); write 'move s' to transfer
+it, 's.clone()' to copy it, or declare it 'shared mut Str'`), so a change through `s` is
+seen through no other name. A `shared mut Str` is one string that several names hold, and
+the change is seen through all of them, while `+` leaves its operands alone; `concat` cannot
+be called through a `view` (`'s' is a 'view' parameter; 'concat' is not a 'view fn'`):
 
 ```pkn
 import ::io;
 
 fn main() -> int {
-  let s: mut = "to";  // `concat` writes the string: its variable is `mut`
-  let t = s;          // t and s name one string
-  s.concat("do");     // changes that string in place
-  let u = s + "!";    // a new string; s is unchanged
+  let s: shared mut Str = "to";  // `concat` writes the string, which s and t share
+  let t = s;                     // t and s name one string
+  s.concat("do");                // changes that string in place
+  let u = s + "!";               // a new string; s is unchanged
   io::println(s + " " + t + " " + u);
   return 0;
 }
@@ -280,7 +283,7 @@ Every other value with a text converts the same way:
 | a struct | its name and fields: `Size(w: 2, h: 3)` |
 | an enum | its variant, then the variant's fields: `North`, `Circle(r: 1.5)` |
 | an object, an `Obj` | its `toString()`, the one of its own class ([Classes](05-classes.md)); a class without one prints `Object@0x...`, its address |
-| a `Str` | the string itself |
+| a `Str` | a new string with its text |
 
 ```pkn
 import ::io;
@@ -314,12 +317,12 @@ None hi Point(1, 2) None
 True
 ```
 
-`Str(s)` of a `Str` is the string itself, the same object, and so is `Str<Str>(s)`. Being
-the same object, which `concat` can change, it takes no `view` of a string
-([A `view` stays a `view`](03-functions.md#a-view-of-a-reference-stays-a-view)): with `v`
-a `view Str` parameter, `Str(v)` is an error (`'v' is a 'view' parameter; it can only be
-passed to a 'view' parameter, and parameter 1 of 'Str' is not one`), as `return v` is.
-`v.toString()` is a copy of the string, and takes a `view`. In a generic function,
+`Str(s)` of a `Str` is a new string with the same text, as `s.clone()` is, and so is
+`Str<Str>(s)`: `s` is left as it was, and the result is the caller's own. It takes no
+`view` of a string ([A `view` stays a `view`](03-functions.md#a-view-of-a-reference-stays-a-view)):
+with `v` a `view Str` parameter, `Str(v)` is an error (`'v' is a 'view' parameter; it can
+only be passed to a 'view' parameter, and parameter 1 of 'Str' is not one`), as `return v`
+is. `v.toString()` and `v.clone()` are copies of the string, and take a `view`. In a generic function,
 `Str(x)` with `x: T` works for every `T` it is instantiated with that has a text, except
 that a `view T` at `T` = `Str` is that error; `x.toString()` works for every `T`.
 
@@ -643,7 +646,7 @@ What each specialization does:
 | `f16<float>(f)`, `float<f32>(x)`, … | float → float | Rounded to the target's precision; too large is its infinity (`f16(0.1)` is `0.0999756`, `f16(70000.0)` is `inf`) |
 | `Str<u8>(b)`, `Str<f32>(x)`, … | sized → `Str` | As `Str<int>` / `Str<float>`; `Str<unsigned>` prints the unsigned value |
 | `Str<Point>(p)`, `Str<int?>(o)`, `Str<(int, Str)>(t)`, … | any other type with a text → `Str` | `x.toString()`: an object's own, an optional's `None` or its value's, a tuple's, struct's or enum's text |
-| `Str<Str>(s)`     | `Str` → `Str`      | The string itself                                             |
+| `Str<Str>(s)`     | `Str` → `Str`      | A new string with the same text, as `s.clone()`               |
 
 **The set is closed** for every target but `Str`, whose sources are the types with a
 text. When no specialization's source is the argument's type, a user class included, the
@@ -706,7 +709,7 @@ are 32 above the uppercase ones:
 import ::io;
 
 fn padRight(s: Str, width: int) -> Str {
-  out = s;
+  out = move s;
   while out.len() < width {
     out = out + " ";
   }
@@ -718,7 +721,7 @@ fn isSpace(c: char) -> bool {
 }
 
 // The characters of `s` from index `from` up to (not including) `to`.
-fn slice(s: Str, from: int, to: int) -> Str {
+fn slice(s: view Str, from: int, to: int) -> Str {
   out = "";
   i = from;
   while i < to {
@@ -761,8 +764,10 @@ Output:
 Call the plumber
 ```
 
-`padRight` builds its result with `+`, not `concat`: `out = s` makes `out` the caller's
-string, and `out.concat(" ")` would change that string too.
+`padRight` owns `s`, which its caller hands over, so `out` takes it by `move`; with `out: mut
+= move s;` it could append in place with `out.concat(" ")`, since no other name holds that
+string. `slice` only reads its string, so it takes a `view Str`, and `trim` and
+`capitalize` lend it the string they own and go on using it.
 
 The helpers are written out here to show the loops. A program can use the standard
 library's instead ([Strings](../stdlib/collections.md#strings)), with `split`, `lines`,

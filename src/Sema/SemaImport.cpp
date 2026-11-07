@@ -357,6 +357,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
         static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
                              (m->isView() ? ast::MethodDecl::View : 0) |
                              (m->isImpl() ? ast::MethodDecl::Impl : 0) |
+                             (m->isShared() ? ast::MethodDecl::Shared : 0) |
                              (m->isPure() ? ast::MethodDecl::Pure : 0));
     mi.Modes = m->getParamModes();
     return mi;
@@ -483,6 +484,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
 static_assert(ast::MethodDecl::Private == pkm::kMethodPrivate &&
                   ast::MethodDecl::View == pkm::kMethodView &&
                   ast::MethodDecl::Impl == pkm::kMethodImpl &&
+                  ast::MethodDecl::Shared == pkm::kMethodShared &&
                   ast::MethodDecl::Pure == pkm::kMethodPure,
               "the IFACE method flag bits are ast::MethodDecl's");
 
@@ -1436,6 +1438,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     sig.ResultQual = resultQual;
     sig.ParamQuals = std::move(quals);
     sig.Native = fi.Native;
+    sig.Imported = true;
     if (fi.Native)
       ImportedNatives.insert(name);
     return true;

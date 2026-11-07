@@ -911,10 +911,12 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
       fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
   clone->setView(fn->isView());
+  clone->setShared(fn->isShared());
   clone->setStatic(fn->isStatic());
   clone->setModulePrivateInit(fn->isModulePrivateInit());
   clone->setResultMode(fn->getResultMode());
   clone->setInferredResult(fn->hasInferredResult());
+  clone->setDerivedClone(fn->isDerivedClone());
   if (fn->isNative())
     clone->setNativeSymbol(in(fn->getNativeSymbol()));
   return clone;
@@ -1000,8 +1002,10 @@ ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,
   std::vector<FuncDecl *> methods;
   for (auto *m : im->getMethods())
     methods.push_back(cloneFuncDecl(m, m->getName()));
-  return Ctx.make<ImplDecl>(im->getLocation(), in(newTypeName),
-                            std::move(methods), cloneType(im->getTrait()));
+  auto *out = Ctx.make<ImplDecl>(im->getLocation(), in(newTypeName),
+                                 std::move(methods), cloneType(im->getTrait()));
+  out->setTypeParamBounds(cloneBounds(im->getTypeParamBounds()));
+  return out;
 }
 
 ImplDecl *ASTCloner::cloneTemplate(ImplDecl *im) {
@@ -1009,9 +1013,11 @@ ImplDecl *ASTCloner::cloneTemplate(ImplDecl *im) {
   std::vector<const std::string *> params;
   for (auto *p : im->getTypeParams())
     params.push_back(&in(*p));
-  return Ctx.make<ImplDecl>(copy->getLocation(), copy->getTypeName(),
-                            copy->getMethods(), copy->getTrait(),
-                            std::move(params));
+  auto *out = Ctx.make<ImplDecl>(copy->getLocation(), copy->getTypeName(),
+                                 copy->getMethods(), copy->getTrait(),
+                                 std::move(params));
+  out->setTypeParamBounds(copy->getTypeParamBounds());
+  return out;
 }
 
 FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
@@ -1023,10 +1029,12 @@ FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
                                  copy->getParams(), copy->getReturnType(),
                                  copy->getBody(), std::move(params));
   out->setView(copy->isView());
+  out->setShared(copy->isShared());
   out->setStatic(copy->isStatic());
   out->setModulePrivateInit(copy->isModulePrivateInit());
   out->setResultMode(copy->getResultMode());
   out->setInferredResult(copy->hasInferredResult());
+  out->setDerivedClone(copy->isDerivedClone());
   out->setTypeParamBounds(cloneBounds(fn->getTypeParamBounds()));
   if (copy->isNative())
     out->setNativeSymbol(copy->getNativeSymbol());

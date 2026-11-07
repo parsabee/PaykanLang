@@ -211,7 +211,7 @@ class Task {
 
 impl Task {
   fn __init__(title: Str, priority: Priority) {
-    self.title = title;
+    self.title = move title;
     self.done = False;
     self.priority = priority;
   }
@@ -249,7 +249,9 @@ The rest of this chapter gives the precise rules.
 - Arm patterns:
   - `TypeName { … }`: type/variant pattern, no binding.
   - `name: TypeName { … }`: type pattern that **binds** the narrowed object to `name`; on
-    an enum, `name: Variant { … }` binds the variant's fields.
+    an enum, `name: Variant { … }` binds the variant's fields. On a variable or a field,
+    a binding of a move-only part is a borrow of it, a `view`; `match move x { … }` binds
+    owned parts and moves `x` ([Bindings](#bindings)).
   - `name: view TypeName { … }` / `name: inout TypeName { … }`: the binding borrows the
     subject, read-only or as its storage ([Borrowing the subject](#borrowing-the-subject)).
   - `literal { … }`: value pattern (`int`, `float`, `bool`, `char`, or `Str` literal, or
@@ -376,15 +378,85 @@ match x {
 }
 ```
 
-A binding is an ordinary reference to the matched object: it can be passed to functions,
-stored into fields or array slots, and assigned to variables that outlive the `match`; the
-object's lifetime is managed by ARC like any other reference (see [Memory](16-memory.md)).
-It takes no qualifier and is a copy of the subject in the subject's form: under a bare
-subject it reads the object and calls its `view fn` methods (`'d' is immutable (a 'Dog';
-write 'mut Dog' to change it); 'tick' is not a 'view fn'`), and under a `mut` one it
-changes the object as the subject does. To change it with no copy, match on a `mut`
-variable or field with an `inout` binding
+What a binding may do with what it names depends on what is matched:
+
+- On a variable, a parameter or a field, a binding of a move-only part (an object, a
+  `Str`, a value holding one) is a **borrow** of the subject, a `view`: the subject keeps
+  the object, and the binding reads it, calls its `view fn` methods and is passed on to
+  `view` parameters, but is not stored, moved, returned or written through (the errors are
+  below). A copy of it is made with `clone()` when its type is
+  [Cloneable](06-traits.md#cloneable).
+- `match move x` binds owned parts instead: `x` is moved at the `match`, as by `move x`,
+  and the arm owns what it binds, which it may store, return or hand on with `move d`;
+  under a `mut` subject the binding writes the object too.
+- On a temporary (a call's result, a constructor), the binding owns what it binds, as a
+  local does.
+- A Copyable part (a number, a `bool`, an enum of such fields) is copied into the
+  binding.
+
+An owned binding takes no qualifier and is in the subject's form: under a bare subject it
+reads the object and calls its `view fn` methods (`'d' is immutable (a 'Dog'; write 'mut
+Dog' to change it); cannot assign to its field 'n'`). To change the subject's object in
+place, match on a `mut` variable or field with an `inout` binding
 ([Borrowing the subject](#borrowing-the-subject)).
+
+```pkn
+import ::io;
+
+class Animal { n: int; }
+class Dog : Animal { }
+
+fn keep(d: Dog) -> int { return d.n; }
+fn show(d: view Dog) -> int { return d.n; }
+
+fn main() -> int {
+  let a: mut Animal = Dog(1);
+  match a {
+    d: Dog { io::println(show(d)); }               // a borrow: a keeps the Dog
+    _ { }
+  }
+  match move a {
+    d: Dog { d.n = 2; io::println(keep(move d)); } // the arm owns it
+    _ { }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+1
+2
+```
+
+```pkn
+class Animal { n: int; }
+class Dog : Animal { }
+
+fn keep(d: Dog) -> int { return d.n; }
+
+fn main() -> int {
+  let a: mut Animal = Dog(1);
+  match a {
+    d: Dog {
+      d.n = 2;
+      let e = d;
+      let k = keep(d);
+    }
+    _ { }
+  }
+  return 0;
+}
+```
+
+Error:
+
+```
+'d' is a 'match' binding, a borrow of 'a' ('match move a' binds what it owns); cannot assign to its field 'n'
+'d' is a 'match' binding, a borrow of 'a' ('match move a' binds what it owns); it cannot be stored, only read or passed to a 'view' parameter
+'d' is a 'match' binding, a borrow of 'a' ('match move a' binds what it owns); it can only be passed to a 'view' parameter, and parameter 1 of 'keep' is not one
+```
 
 The binding is scoped to its arm body. Redeclaring the binding name inside the same body is an
 error:
@@ -430,9 +502,9 @@ fn describe(a: Animal) -> Str {
 
 With `inout`, the binding stands for the subject, narrowed to the arm's type, like an
 `inout` local of it: assigning to it, or to its fields, changes the matched variable or
-field. The binding holds the matched value (a copy, as a plain binding does), which goes
-back into the subject after the binding's last use in the arm, or when the arm ends before
-then, whichever way it ends: `return`, `break` or `continue`.
+field. The binding holds the matched value, which goes back into the subject after the
+binding's last use in the arm, or when the arm ends before then, whichever way it ends:
+`return`, `break` or `continue`.
 
 ```pkn
 import ::io;
@@ -521,8 +593,10 @@ that is not a variant of the subject enum is an error, and so is a qualified arm
 for the full enum treatment.
 
 On a tagged union, an arm `name: Variant { … }` binds the fields of a variant that has them
-([Variants With Fields](07-enums.md#variants-with-fields)): a copy, or with `view` or `inout`
-a borrow of the subject's own ([Borrowing the subject](#borrowing-the-subject)):
+([Variants With Fields](07-enums.md#variants-with-fields)): a copy when they are Copyable, a
+borrow of a variable's or a field's move-only fields ([Bindings](#bindings)), or with
+`view` or `inout` a borrow of the subject's own
+([Borrowing the subject](#borrowing-the-subject)):
 
 ```pkn
 fn area(s: Shape) -> float {

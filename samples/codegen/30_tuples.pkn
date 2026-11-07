@@ -8,9 +8,10 @@
 //            rendering `(1, a)`, a tuple meeting a `T: Show` bound, and
 //            covariant elements (`(int, Str)` where `(int, Obj)` is expected).
 // A tuple is a value held in place, like `T[n]`: its elements sit side by side
-// in the variable, field or array slot that holds it.  Copying a tuple copies
-// its elements (the references in it are retained once per copy), so a copy
-// is independent of its source.
+// in the variable, field or array slot that holds it.  A tuple with a
+// move-only element (a `Str`, a unique reference) is itself moved, not copied;
+// `t.clone()` copies its elements (a `shared` reference in it is retained once
+// per copy), so a clone is independent of its source.
 
 import ::io;
 
@@ -42,7 +43,7 @@ fn divmod(a: int, b: int) -> (int, int) {
 }
 
 fn label(p: Point) -> (Str, Point) {
-  return ("point", p);
+  return ("point", move p);
 }
 
 class Box<T> {
@@ -51,7 +52,7 @@ class Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
 fn bracket<T: Show>(x: view T) -> Str {
@@ -102,10 +103,11 @@ fn main() -> int {
   let b = (1, "s");
   io::println(Str(a == b));               // True
   io::println(Str(a != (2, "s")));           // True
-  io::println(Str(label(pt) == label(pt)));  // True  (same Point object)
+  let lp = label(move pt);
+  io::println(Str(lp == lp));                // True  (the same Point object)
 
-  // A copy is its own value; re-assigning the source leaves the copy intact.
-  let m = a;
+  // A clone is its own value; re-assigning the source leaves the clone intact.
+  let m = a.clone();
   a = (0, "reset");
   io::println(m.1 + a.1);                     // sreset
 

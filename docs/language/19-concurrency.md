@@ -178,16 +178,15 @@ class Config {
   name: Str;
   limits: Limits;
   view fn span() -> int { return self.limits.hi - self.limits.lo; }
-  fn rename(n: Str) { self.name = n; }
+  fn rename(n: Str) { self.name = move n; }
 }
 
 fn main() -> int {
   let base = Config("demo", Limits(0, 100));      // the bare type: nothing writes it
-  let l = base.limits;                            // a unique field follows its root: immutable too
   let cfg: mut Config = Config("x", Limits(0, 1));
-  cfg.rename(base.name);                          // written through a mut reference
-  cfg.limits.hi = l.hi;
-  io::println(cfg.name + " " + Str(cfg.span()) + " " + Str(l.hi));
+  cfg.rename(base.name.clone());                  // written through a mut reference
+  cfg.limits.hi = base.limits.hi;                 // and so is its unique field
+  io::println(cfg.name + " " + Str(cfg.span()) + " " + Str(base.limits.hi));
   return 0;
 }
 ```
@@ -207,7 +206,7 @@ class Limits {
 class Config {
   name: Str;
   limits: Limits;
-  fn rename(n: Str) { self.name = n; }
+  fn rename(n: Str) { self.name = move n; }
 }
 
 fn grow(l: inout Limits) { l.hi += 1; }
@@ -217,7 +216,7 @@ fn main() -> int {
   cfg.name = "x";
   cfg.rename("y");
   grow(cfg.limits);
-  let l = cfg.limits;
+  let l = move cfg.limits;
   l.hi = 5;
   let s = "a";
   s.concat("b");
@@ -240,15 +239,17 @@ Error:
 the object's own form and keeps its writes through any root, and a `shared`
 field is never written through its object: `field 'cache' is immutable (a 'shared Cache';
 write 'shared mut Cache' to change it); cannot assign to its field 'hits'`. A unique field is
-never written `mut`, since it follows its root. A `match` binding takes no qualifier and is
-a copy of the subject in the subject's form: it writes under a `mut` subject and reads under
-a bare one, and an `inout` binding on a `mut` place ([Match statements](08-match.md))
-writes what it names with no copy.
+never written `mut`, since it follows its root. A `match` binding takes no qualifier: on a
+variable or a field, a binding of a move-only part is a borrow of it, a `view`; `match move
+x` binds owned parts in the subject's form, which write under a `mut` subject and read under
+a bare one; and an `inout` binding on a `mut` place writes what it names in place
+([Bindings](08-match.md#bindings)).
 
 ## Values take no qualifier: `mem::Box`
 
 A struct, a tuple or an array is a value: it lives in its variable and is copied by
-assignment ([Structs](11-structs.md), [Tuples](10-tuples.md), [Arrays](09-arrays.md)), so
+assignment when its parts are Copyable, and moved when one is move-only
+([Structs](11-structs.md), [Tuples](10-tuples.md), [Arrays](09-arrays.md)), so
 there is no object for a qualifier to describe, and `shared Point` is an error. `mut` never
 goes on a value either, a number, a `bool` or a `char` included: `let` alone decides whether
 a value's storage is rewritten. What a value holds keeps its own qualifiers: a struct with a
@@ -334,13 +335,70 @@ Error:
 'ro' is immutable (a 'Box<Point>'; write 'mut Box<Point>' to change it); 'get' is not a 'view fn'
 ```
 
+### Parts of a type take no qualifier
+
+A qualifier qualifies a whole variable, field, parameter or result, not a part of a type: a
+tuple's element, a type argument, an array's element or a function type's parameter or
+result takes none in this version (#368). So `(Str, shared Node)`, `List<shared Node>`,
+`mem::Box<shared mut Node>` and `(shared Node) -> int` are errors, and a tuple or an array
+literal does not hold a `shared` reference, a frozen object or a cell either: its element's
+type has no qualifier, so the reference would come back out of it unique.
+
+```pkn
+class Node { id: int; }
+
+fn first(p: (Str, shared Node)) -> int { return p.1.id; }
+
+fn main() -> int {
+  let s: shared Node = Node(1);
+  let t = ("a", s);
+  return 0;
+}
+```
+
+Error:
+
+```
+'shared' cannot qualify a part of a type yet (a tuple's element, a type argument, an array's element or a function type's parameter or result): only a whole variable, field, parameter or result takes one; hold the reference in a struct field to qualify it
+cannot store a 'shared Node' in an element of the tuple, a 'Node': a 'shared' reference, a frozen object and a cell convert only as they are
+```
+
+A struct's field takes a qualifier, so a struct holds the reference instead, and a tuple,
+an array or a container holds the struct:
+
+```pkn
+import ::io;
+
+class Node { id: int; }
+
+struct Pair {
+  n: shared Node;
+  k: int;
+}
+
+fn main() -> int {
+  let s: shared Node = Node(1);
+  let ps = [Pair(s, 1), Pair(s, 2)];      // two elements, one node
+  let t = (ps[1], "b");                   // a Copyable struct is copied in
+  io::println(Str(ps[0].n.id + t.0.n.id + t.0.k));
+  return 0;
+}
+```
+
+Output:
+
+```
+4
+```
+
 ## `move`: an explicit transfer
 
 `move x` is `x`'s value, which `x` no longer holds: the reference goes to the destination,
-and `x` cannot be read again. The compiler still infers a transfer at a variable's last use
-([Ownership transfers](16-memory.md#ownership-transfers)); `move` is for where the program
-must say it: sending a reference to a task, converting a unique object into another form,
-giving a reference `mut` (`let m: mut Job = move a`), or ending a variable early.
+and `x` cannot be read again. It is how a move-only value read from a variable reaches an
+owning slot, a unique object, a `Str` or a value holding one ([Ownership
+transfers](16-memory.md#ownership-transfers)): another variable, a field, a plain parameter,
+a task, a reference of another form (`let s: shared Job = move a`), or one that gains `mut`
+(`let m: mut Job = move a`). A `return` of a variable moves it with no `move` written.
 
 ```pkn
 import ::io;
@@ -1205,10 +1263,10 @@ cannot store a 'shared Node' in variable 'f', an 'atomic shared Node': a 'shared
 ## `Copyable`
 
 `Copyable` is a built-in trait of the types a program may copy freely: numbers, `bool`,
-`char`, `atomic` handles, and enums, tuples, structs, fixed arrays and optionals whose parts
-are Copyable (a struct's `shared` field counts). A unique reference, a `Str`, a function
-value and a task are move-only. It is structural, so `impl Copyable for X` is an error, and
-it bounds a type parameter that copies its value:
+`char`, `shared` references, handles, function values, and enums, tuples, structs, fixed
+arrays and optionals whose parts are Copyable (a struct's `shared` field counts). A unique
+reference, a `Str`, a container and a task are move-only. It is structural, so `impl Copyable
+for X` is an error, and it bounds a type parameter that copies its value:
 
 ```pkn
 import ::io;
@@ -1265,55 +1323,16 @@ Error:
 
 ```
 'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented
-'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str', a function value or a task is move-only
-'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str', a function value or a task is move-only
+'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
+'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
 ```
 
 A qualifier is not part of a type argument in this version (`twice(s)` with `s: shared Node`
 is checked as a `Node`, and rejected), so a `shared` reference reaches a template inside a
-struct, as `Ref` above.
-
-## The copy rule: `--strict-ownership`
-
-Without the option, a unique reference read from a variable still copies into another
-variable, a parameter or a result, as it always has, and the compiler infers transfers at
-a last use. `paykan --strict-ownership` turns on the design's copy rule: a move-only value
-read from a place (a unique reference, or a struct, tuple or array holding one) flows into
-an owning slot only by `move`, and `[v; n]` of one is an error, since it copies `v`. A
-`shared` reference, a handle and a value made of those are Copyable and flow as before.
-
-```pkn
-import ::io;
-
-class Node {
-  id: int;
-}
-
-fn make() -> Node {
-  let n = Node(1);
-  return n;                     // strict: write 'return move n'
-}
-
-fn take(n: Node) -> int { return n.id; }
-
-fn main() -> int {
-  let a = Node(2);
-  let b = a;                    // strict: a unique reference does not copy
-  let s: shared Node = Node(3);
-  let t = s;                    // fine: a shared reference is Copyable
-  io::println(Str(take(a)) + " " + Str(take(move b)) + " " + Str(t.id + make().id));
-  return 0;
-}
-```
-
-```text
-$ paykan --check-only --strict-ownership copies.pkn
-copies.pkn:9:3: error: cannot copy 'n' (a unique 'Node'); write 'move n' to transfer it, or declare it 'shared Node'
-copies.pkn:16:3: error: cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare it 'shared Node'
-copies.pkn:19:24: error: cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare it 'shared Node'
-```
-
-Without the option the program compiles and prints `2 2 4`.
+struct, as `Ref` above. A value that is not Copyable reaches another owner by `move`, a
+`clone()` or a borrow: the copy rule is the memory model, in every module
+([Ownership transfers](16-memory.md#ownership-transfers)), and
+[`Cloneable`](06-traits.md#cloneable) is the trait of the values that have a `clone()`.
 
 ## Runtime
 
@@ -1338,7 +1357,9 @@ that the finished feature needs; what `parallel for` costs, and why, is in
   write), `atomic T` (a cell holding a number, `bool` or `char`), `locked mut T` (a cell
   holding an object written under its mutex; `locked T` alone is a warning), `atomic shared
   T` (a frozen object). A struct, a tuple or an array takes none, and so does a number;
-  `mem::Box<T>` does.
+  `mem::Box<T>` does. A part of a type (a tuple's element, a type argument, an array's
+  element, a function type's parameter or result) takes none either: a struct with a
+  qualified field holds the reference in its place.
 - A unique reference converts into every form; `mut T` flows into `T` freely, and `T` gains
   `mut` only by `move` or as a temporary; a `shared` reference, a frozen object and a cell
   convert only as they are (`shared T` and `shared mut T` never into each other). Nothing
@@ -1375,10 +1396,10 @@ that the finished feature needs; what `parallel for` costs, and why, is in
   `atomic mut T`, two qualifiers on one type and any `const` are syntax errors, and `atomic
   N` with `N` a class is an error that names the two forms an object crosses in, `atomic
   shared N` and `locked mut N`.
-- `Copyable` is a built-in, structural trait: numbers, `bool`, `char`, handles and values of
-  such parts. `T: Copyable` bounds a template; `impl Copyable for X` is an error.
-- `--strict-ownership`: a move-only value read from a place flows into an owning slot by
-  `move` only.
+- `Copyable` is a built-in, structural trait: numbers, `bool`, `char`, `shared` references,
+  handles and values of such parts. `T: Copyable` bounds a template; `impl Copyable for X`
+  is an error. A move-only value read from a place flows into an owning slot by `move`, a
+  `clone()` or a borrow only ([Ownership transfers](16-memory.md#ownership-transfers)).
 
 ---
 
@@ -1397,7 +1418,8 @@ that the finished feature needs; what `parallel for` costs, and why, is in
 
 A qualifier is written before the type of a variable (`let n: mut Node = ...`, or alone,
 `let n: mut = ...`), a parameter (`cfg: atomic shared Config`), a field (`hits: atomic
-int`, `cache: shared Cache`, `next: shared mut Node`) and a result (`-> mut Node`). Each
+int`, `cache: shared Cache`, `next: shared mut Node`) and a result (`-> mut Node`), never
+inside a type ([Parts of a type take no qualifier](#parts-of-a-type-take-no-qualifier)). Each
 word buys one thing: `mut`, the writes through the owner; `shared`, several owners;
 `atomic shared`, an object frozen for every thread (`atomic`, the reference crosses threads;
 `shared`, the object has several owners, one on each thread at least); `locked mut`, an
@@ -1424,25 +1446,28 @@ lock`).
 The declared type of the destination converts, in every declaration, assignment, argument,
 return and store:
 
-| Into \ from | a new object, or `move` of a `T` or `mut T` | a `T` read from a place | a `mut T` read from a place | `shared` | `shared mut` | `atomic shared` | `atomic`, `locked`, `locked mut` |
-|---|---|---|---|---|---|---|---|
-| `T` | moves | copies | copies | error | error | error | error |
-| `mut T` | moves | error | copies | error | error | error | error |
-| `shared` | converts | converts | converts | copies | error | error | error |
-| `shared mut` | converts | error | converts | error | copies | error | error |
-| `atomic shared` | send check, then frozen | the same | the same | error | error | copies | error |
-| `locked` | send check, then a new cell | the same | the same | error | error | error | copies, the same form |
-| `locked mut` | send check, then a new cell | error | the same | error | error | error | copies, the same form |
+| Into \ from | a new object, or `move` of a `T` or `mut T` | `shared` | `shared mut` | `atomic shared` | `atomic`, `locked`, `locked mut` |
+|---|---|---|---|---|---|
+| `T` | moves | error | error | error | error |
+| `mut T` | moves | error | error | error | error |
+| `shared` | converts | copies | error | error | error |
+| `shared mut` | converts | error | copies | error | error |
+| `atomic shared` | send check, then frozen | error | error | copies | error |
+| `locked` | send check, then a new cell | error | error | error | copies, the same form |
+| `locked mut` | send check, then a new cell | error | error | error | copies, the same form |
 
 A unique reference converts into every form, and gains `mut` only by `move` or as a
-temporary: `cannot store a 'Node' in variable 'm', a 'mut Node': a reference gains 'mut'
+temporary. A `T` or a `mut T` read from a place (a variable, a parameter, a field) without
+`move` converts into nothing: it would be a second owner of the object, which is the copy
+rule's error (`cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare
+it 'shared Node'`, [Ownership transfers](16-memory.md#ownership-transfers)), and into a
+`mut` slot `cannot store a 'Node' in variable 'm', a 'mut Node': a reference gains 'mut'
 only by 'move'`. Everything else converts only as it is: `cannot store a 'shared mut Node'
 in variable 'r', a 'shared Node': a 'shared' reference, a frozen object and a cell convert
 only as they are`, and the same for a `shared Node` into a `Node` or an `atomic shared
 Node`, an `atomic shared Config` into a `Config`, a `locked Node` into a `locked mut Node`.
-(Without `--strict-ownership` a copy of a `T` or `mut T` read from a place is a copy, and
-the compiler transfers at a last use, [Moves](#moves).) A `view T` parameter takes every
-form of `T`; an `inout T` takes a `mut` or `shared mut` one.
+A `view T` parameter takes every form of `T`; an `inout T` takes a `mut` or `shared mut`
+one.
 
 ## Moves
 
@@ -1462,9 +1487,9 @@ form of `T`; an `inout T` takes a `mut` or `shared mut` one.
 - An assignment revives a moved variable; `move x.f` ends `x` until it is assigned whole.
 - A move is a write: not of a variable a `view` local reads until the local's last use, and
   not beside a borrow of the same variable in one call.
-- `move` before a temporary does nothing. Without `--strict-ownership`, a copy where a
-  `move` could be written is still a copy, and transfers at a last use are still inferred
-  ([Ownership transfers](16-memory.md#ownership-transfers)).
+- `move` before a temporary does nothing. A move-only value read from a place reaches an
+  owning slot only by `move` (or a `clone()`, or a borrow), and `return x` of a variable
+  moves it with no `move` ([Ownership transfers](16-memory.md#ownership-transfers)).
 
 ## Tasks
 
@@ -1595,15 +1620,19 @@ form of `T`; an `inout T` takes a `mut` or `shared mut` one.
   module that declares an `async fn` cannot be imported. Its parameters are numbers,
   references and handles, not a struct, a tuple, an array or a function value, and its result
   a number, a `bool`, a `char`, a reference or nothing.
-- A qualifier is not part of a type argument: `List<shared Node>` is a `List<Node>`, and a
-  `shared Node` does not satisfy `T: Copyable`.
+- A qualifier is not part of a type (#368): on a tuple's element, a type argument, an
+  array's element or a function type's parameter or result (`(Str, shared Node)`,
+  `List<shared Node>`) it is an error, and a literal's element is no `shared` reference; a
+  struct with a qualified field holds one ([Parts of a type take no
+  qualifier](#parts-of-a-type-take-no-qualifier)). A `shared Node` argument meets a
+  template's `T` as a `Node`, so it does not satisfy `T: Copyable`.
 - `atomic` holds one number, `bool` or `char`: no atomic arrays, no `atomic` field in a
   struct, and `compareExchange` does not write the value found back into `expected`.
 - `locked` holds an object, not a value: wrap a value in a class.
 - `break` and `continue` cannot be used in a `parallel for` body.
-- A `match` binding takes no qualifier (it is a copy of the subject in the subject's form;
-  an `inout` binding on a `mut` place writes with no copy), and a move out of borrowed
-  storage is not checked at run time.
+- A `match` binding takes no qualifier (on a place, a borrow of a move-only part; with
+  `match move`, owned parts in the subject's form; an `inout` binding on a `mut` place
+  writes in place), and a move out of borrowed storage is not checked at run time.
 - An object held in a struct, a tuple or an array is reached through the value, which takes
   no `mut`: the variable's `let` fixes the value's own storage and the objects it holds
   (`'p' is declared with 'let', and so are the objects it holds; drop 'let' to change
@@ -1617,6 +1646,7 @@ form of `T`; an `inout T` takes a `mut` or `shared mut` one.
 |-------|---------|
 | Conversion refused | `let u: Node = s` with `s: shared Node`; `let m: mut Node = a` with `a` a `Node` read from a place (`a reference gains 'mut' only by 'move'`); a `shared mut` into a `shared` slot or back; a `shared` into an `atomic shared` slot; an `atomic shared` into anything but `atomic shared`; a `locked` into a `locked mut` slot |
 | Qualifier on a value | `shared int`, `shared mut Point`, `shared int[2]`, `atomic shared Pair`; `mut int`, `mut (int, int)` (`'mut' applies to objects; ... which 'let' fixes`) |
+| Qualifier on a part of a type | `(Str, shared Node)`, `List<shared Node>`, `mem::Box<shared mut Node>`, `(shared Node) -> int`; a `shared` reference, frozen object or cell as a tuple's or an array literal's element |
 | Qualifier on a borrow | `n: view mut Node`, `n: inout shared Node` |
 | Spelling (syntax errors) | `atomic shared mut N`; `mut shared N`, `mut locked N`; `atomic mut int`, `mut atomic int`; `shared mut shared N` and any second qualifier; `atomic N` with `N` a class (Sema's) |
 | Write through an immutable reference | `cfg.name = "x"` with `cfg` a `Config` (`'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its field 'name'`); `c.xs[0] = 1` (`cannot assign to its elements`); through a `shared` field (`field 'cache' is immutable (a 'shared Cache'; write 'shared mut Cache' to change it)`), a frozen object (`'cfg' is frozen (an 'atomic shared Config')`); `mark(cfg)` to an `inout` parameter (`it cannot be passed to 'inout' parameter 'n'`); a `match` binding |
@@ -1633,4 +1663,4 @@ form of `T`; an `inout T` takes a `mut` or `shared mut` one.
 | Atomic read and write | `hits = hits * 2 + 1`, `hits *= 2`, `hits.load()`, `atomic Str`, an `atomic` field in a struct, `hits += 1.5` on an `atomic int` |
 | Locked contents | `counts.total` outside a `lock`; `await` or a `lock` in a `lock` block; `lock n` of what is not `locked`; `locked int` |
 | `Copyable` | `impl Copyable for X`; `twice(Node(2))` with `twice<T: Copyable>` |
-| Copy rule (`--strict-ownership`) | `let b = a` with `a` a unique `Node`; `return n`; `take(a)`; `[Node(1); 3]` |
+| Copy rule ([Ownership transfers](16-memory.md#ownership-transfers)) | `let b = a` with `a` a unique `Node`; `take(a)`; `let s: shared Node = a`; `[Node(1); 3]` |

@@ -5,7 +5,7 @@ class Animal {
 }
 
 impl Animal {
-  fn __init__(n: Str) { self.name = n; }
+  fn __init__(n: Str) { self.name = move n; }
 }
 
 class Dog : Animal {
@@ -15,7 +15,7 @@ class Dog : Animal {
 impl Dog {
   fn __init__(n: Str, b: Str) {
     // missing: __super__(n);
-    self.breed = b;
+    self.breed = move b;
   }
 }
 

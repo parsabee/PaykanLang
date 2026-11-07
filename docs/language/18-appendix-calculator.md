@@ -2,7 +2,7 @@
 
 This appendix walks through a complete program from the repository,
 [`samples/imports/12_calc`](../../samples/imports/12_calc/main.pkn): an arithmetic calculator
-with variables, a command history and an interactive mode. At about 870 lines in four
+with variables, a command history and an interactive mode. At about 890 lines in four
 modules it uses most of what this reference covers: classes, an enum, `match` in three of its
 four modes (all but matching classes), arrays, tuples, optionals, a generic class, modules,
 standard input and command-line arguments. The test suite runs it on every backend, and the
@@ -63,9 +63,12 @@ import calc::utils;
 ## The variable store: `calc/hashmap.pkn`
 
 Variables live in a hash table with separate chaining. The table is a fixed array of eight
-buckets, `Entry?[8]`: each bucket is the first `Entry` of a linked chain, or `None` while it
-is empty, and each entry's `next` field links the one after it. `append` walks a chain by
-handing the new entry on until it reaches the entry that has no `next`:
+buckets, `Entry[8]`, each the head of a linked chain: a head holds no key, and its `next`
+field is the bucket's first entry, or `None` while the bucket is empty; each entry's `next`
+links the one after it. Every entry has one owner, the entry before it (or the head), so
+the table owns its chains, and a chain is changed in place through its head, by methods of
+`Entry` that work on the entries after the one they are called on. `append` hands the new
+entry on until it reaches the entry that has no `next`:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
@@ -77,145 +80,159 @@ class Entry {
   // Link `e` at the end of the chain that starts here.
   fn append(e: Entry) {
     match self.next {
-      n: inout Entry { n.append(e); }
-      None { self.next = e; }
+      n: inout Entry { n.append(move e); }
+      None { self.next = move e; }
     }
   }
 // ...
 
 impl Entry {
-  fn __init__(k: Str, v: float) { self.key = k; self.value = v; }
+  fn __init__(k: Str, v: float) { self.key = move k; self.value = v; }
 }
 // ...
 
+// Eight empty buckets: a head each, with no key.
+fn heads() -> Entry[8] {
+  return [Entry("", 0.0); 8];
+}
+
 class HashMap {
-  buckets: Entry?[8];
+  buckets: Entry[8];
   size: int;
 // ...
 
 impl HashMap {
-  fn __init__() { self.buckets = [None; 8]; self.size = 0; }
+  fn __init__() { self.buckets = heads(); self.size = 0; }
 }
 ```
 
-`next` is optional, so it starts as `None` and `Entry`'s `__init__` leaves it alone.
-`[None; 8]` is eight `None`s, so every bucket starts empty, and `clear` assigns it again. The
-hash is folded into `self.buckets.len()`, so the lookups follow the field's type rather than
+`next` is optional, so it starts as `None` and `Entry`'s `__init__` leaves it alone. `heads`
+makes a head for each of the eight buckets: an `Entry` is not Copyable, so `[Entry("", 0.0);
+8]` evaluates `Entry("", 0.0)` once per element ([Arrays](09-arrays.md#repeated-values)), and
+`clear` assigns them again. The hash is
+folded into `self.buckets.len()`, so the lookups follow the field's type rather than
 repeating the number of buckets. `append` walks the chain through an `inout` binding, which
-reaches each entry with no copy and changes the last one
-([Match](08-match.md#borrowing-the-subject)).
+reaches each entry in place and changes the last one
+([Match](08-match.md#borrowing-the-subject)), and hands the new entry on with `move` at
+each step, as a move-only value goes from one owner to the next
+([Ownership transfers](16-memory.md#ownership-transfers)).
 
-Looking a key up returns an **optional**, a `mut Entry?`, so a missing variable is `None`
-rather than a special value, and the entry found can be changed: it is the one stored in the
-table, and `insert` changes it, which is why `lookup` is not a `view fn`. The loop is the
-linked-list walk from [Optionals](12-optionals.md), on a `mut` variable with an `inout`
-binding; `e` borrows `cur` until its last use, so the next entry is read into `after` before
-`cur` moves on.
+Looking a key up returns an **optional**, a `float?`, so a missing variable is `None` rather
+than a special value. `find` walks the chain by recursion through plain bindings, each a
+borrow of the entry it names: it only reads, so it and `lookup` are `view fn`s:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
-  fn lookup(key: Str) -> mut Entry? {
-    cur: mut = self.buckets[self.indexFor(key)];
-    while cur != None {
-      match cur {
-        e: inout Entry {
-          if e.key.equals(key) {
-            return e;
-          }
-          let after = e.next;
-          cur = after;
+  view fn find(key: view Str) -> float? {
+    match self.next {
+      n: Entry {
+        if n.key.equals(key) {
+          return n.value;
         }
-        None { }
+        return n.find(key);
       }
+      None { return None; }
     }
-    return None;
+  }
+// ...
+  view fn lookup(key: view Str) -> float? {
+    return self.buckets[self.indexFor(key)].find(key);
   }
 ```
 
-and `insert` unwraps it with an optional-mode `match` on `found`, the `mut Entry?` it keeps
-the result in. Because `Entry` is a class, `e`, bound `inout`, is the entry stored in the
-table, so assigning `e.value` updates the table in place. A new key goes into its bucket,
-which it starts when the bucket is `None`; otherwise it goes at the end of the chain, so a
-bucket keeps its keys in the order they were added:
+`insert` changes the value of a key the table has in place, through `update`, an `inout`
+walk like `append`'s, and otherwise appends a new entry, whose key is a copy of the one it
+was given, `key.clone()`, since `key` is a `view` and the entry keeps its key. A new key goes
+at the end of its bucket's chain, so a bucket keeps its keys in the order they were added:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
-  fn insert(key: Str, value: float) -> bool {
-    found: mut = self.lookup(key);
-    match found {
-      e: inout Entry {
-        e.value = value; // update in place (Entry is a reference type)
-        return False;
-      }
-      None {
-        let b = self.indexFor(key);
-        first: mut = self.buckets[b];
-        match first {
-          f: inout Entry {
-            f.append(Entry(key, value));
-          }
-          None {
-            self.buckets[b] = Entry(key, value);
-          }
+  fn update(key: view Str, value: float) -> bool {
+    match self.next {
+      n: inout Entry {
+        if n.key.equals(key) {
+          n.value = value; // update in place
+          return True;
         }
-        return True;
-      }
-    }
-  }
-```
-
-The `match` covers both cases and returns from each arm, so the function needs no `return`
-after it. Keys are compared with `e.key.equals(key)`, which compares contents just like
-`e.key == key` would. (The comment at the top of the module, which says that `==` compares
-strings by identity and that there is no `char` to `int` conversion, is out of date.)
-
-Removing a key unlinks its entry: the first one of a bucket by storing its `next` in the
-bucket, any other by `Entry.unlink`, which links the entry before it to the one after it.
-
-```pkn
-// from: samples/imports/12_calc/calc/hashmap.pkn
-  fn remove(key: Str) -> bool {
-    let b = self.indexFor(key);
-    first: mut = self.buckets[b];
-    match first {
-      f: inout Entry {
-        if f.key.equals(key) {
-          self.buckets[b] = f.next; // the chain now starts at the second
-        } elif !f.unlink(key) {
-          return False;
-        }
-        self.size = self.size - 1;
-        return True;
+        return n.update(key, value);
       }
       None { return False; }
     }
   }
+// ...
+  fn insert(key: view Str, value: float) -> bool {
+    let b = self.indexFor(key);
+    if self.buckets[b].update(key, value) {
+      return False;
+    }
+    self.buckets[b].append(Entry(key.clone(), value));
+    return True;
+  }
 ```
 
-For the `:vars` command, the map gives out the number of buckets and the first entry of
-each, `bucket(b)`; `listVars` in `main.pkn` follows the `next` links from there. `bucket` is
-not a `view fn` either: it hands out an entry the table holds, which a `view fn` could only
-lend as a `view`, so `listVars` takes the map as a `mut hashmap::HashMap`, though it only
-reads the entries, through plain `hashmap::Entry` bindings:
+Keys are compared with `n.key.equals(key)`, which compares contents just like `n.key == key`
+would.
+
+Removing a key unlinks its entry. `unlink` walks the chain through `inout` bindings to the
+entry before the one with the key; there the binding's last use has passed, and `mem::take`
+moves the entry with the key out of `self.next`, leaving `None`. The arm owns that entry, as
+the binding of a temporary, and `move n.next` hands the rest of the chain back to
+`self.next` ([Fields and elements](16-memory.md#fields-and-elements-memreplace-memtake-and-memswap)):
+
+```pkn
+// from: samples/imports/12_calc/calc/hashmap.pkn
+  fn unlink(key: view Str) -> bool {
+    match self.next {
+      n: inout Entry {
+        if !n.key.equals(key) {
+          return n.unlink(key);
+        }
+      }
+      None { return False; }
+    }
+    match mem::take(self.next) {
+      n: Entry { self.next = move n.next; }
+      None { }
+    }
+    return True;
+  }
+// ...
+  fn remove(key: view Str) -> bool {
+    if !self.buckets[self.indexFor(key)].unlink(key) {
+      return False;
+    }
+    self.size = self.size - 1;
+    return True;
+  }
+```
+
+For the `:vars` command, the map gives out the number of buckets and a `view` of the first
+entry of each, `bucket(b)`. `listVars` in `main.pkn` takes the map as a `view`, and
+`listChain` follows the `next` links from there, recursively, through `view` parameters:
+nothing is copied out of the table, and nothing in it changes.
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-fn listVars(env: mut hashmap::HashMap) {
+// List the variables of the chain of entries that starts at `e`.
+fn listChain(e: view hashmap::Entry) {
+  io::println("  " + e.key + " = " + show(e.value));
+  match e.next {
+    n: hashmap::Entry { listChain(n); }
+    None { }
+  }
+}
+
+// List every stored variable, walking each bucket's chain of entries.
+fn listVars(env: view hashmap::HashMap) {
   if env.count() == 0 {
     io::println("(no variables)");
     return;
   }
   b = 0;
   while b < env.bucketCount() {
-    cur = env.bucket(b);
-    while cur != None {
-      match cur {
-        e: hashmap::Entry {
-          io::println("  " + e.key + " = " + show(e.value));
-          cur = e.next;
-        }
-        None { }
-      }
+    match env.bucket(b) {
+      e: hashmap::Entry { listChain(e); }
+      None { }
     }
     b = b + 1;
   }
@@ -242,9 +259,11 @@ fn applyOp(op: Op, a: float, b: float) -> float {
 }
 ```
 
-The `Parser` class holds the input and a position in it. Its `error` field is a `Str?`:
-optional fields start as `None`, so `__init__` leaves it alone, and `fail` keeps only the
-first error:
+The `Parser` class holds the input and a position in it. Its `env` field is the variable
+store, a `shared mut hashmap::HashMap`: `main` and the parser hold the one map, and both
+change it ([Concurrency](19-concurrency.md#who-holds-an-object-the-qualifiers)). Its
+`error` field is a `Str?`: optional fields start as `None`, so `__init__` leaves it alone,
+and `fail` keeps only the first error, which it takes by `move`:
 
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
@@ -252,16 +271,16 @@ first error:
 class Parser {
   input: Str;
   pos: int;
-  env: hashmap::HashMap;
+  env: shared mut hashmap::HashMap;
   error: Str?;   // the first error, or None
 
   // Record the first error only; later errors are usually cascades.
-  fn fail(msg: Str)      { if self.error == None { self.error = msg; } }
+  fn fail(msg: Str)      { if self.error == None { self.error = move msg; } }
 // ...
 
 impl Parser {
-  fn __init__(s: Str, env: hashmap::HashMap) {
-    self.input = s;
+  fn __init__(s: Str, env: shared mut hashmap::HashMap) {
+    self.input = move s;
     self.pos = 0;
     self.env = env;
   }
@@ -290,16 +309,16 @@ chained conditional expression:
   }
 ```
 
-A factor that is a name is looked up in the variable store. The `match` names the type as
-`hashmap::Entry`, since it comes from another module:
+A factor that is a name is looked up in the variable store, and the `float?` that `lookup`
+returns is unwrapped by an optional-mode `match`:
 
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
     if self.atIsIdentStart() {
       let name = self.parseIdent();
       match self.env.lookup(name) {
-        e: hashmap::Entry {
-          return e.value;
+        v: float {
+          return v;
         }
         None {
           self.fail("undefined variable '" + name + "'");
@@ -313,7 +332,7 @@ Finally, a whole line is either an assignment, `name = expr`, or an expression.
 `parseStatement` returns both answers at once as a tuple `(Str?, float)`: the name assigned
 to, or `None`, and the value. The `target` and `noName` variables give the `Str?` element
 its type, since a bare `None` in a tuple literal with no declared destination would be an
-`Obj`:
+`Obj`; `target` takes the name by `move`, and the tuple each variable by `move` in turn:
 
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
@@ -327,15 +346,15 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
         self.advance(); // consume '='
         let v = self.parseExpr();
         self.skipWs();
-        let target: Str? = name;
-        return (target, v);
+        let target: Str? = move name;
+        return (move target, v);
       }
       self.pos = start; // not an assignment — rewind and parse as an expression
     }
     let v = self.parseExpr();
     self.skipWs();
     let noName: Str? = None;
-    return (noName, v);
+    return (move noName, v);
   }
 ```
 
@@ -370,9 +389,12 @@ class Ring<T> {
 // ...
 
 impl Ring<T> {
-  // Every slot starts as `blank`, until an item is added there.
+  // Every slot starts as a clone of `blank`, until an item is added there.
   fn __init__(blank: T) {
-    self.items = [blank; 16];
+    self.items = [blank.clone(), blank.clone(), blank.clone(), blank.clone(),
+        blank.clone(), blank.clone(), blank.clone(), blank.clone(),
+        blank.clone(), blank.clone(), blank.clone(), blank.clone(),
+        blank.clone(), blank.clone(), blank.clone(), move blank];
     self.count = 0;
     self.start = 0;
   }
@@ -380,17 +402,19 @@ impl Ring<T> {
 ```
 
 An array always holds all of its elements, so `__init__` takes a `blank` item and fills the
-slots with `[blank; 16]` until they are used, as the task list in
-[Arrays](09-arrays.md#project-the-task-list) does. `add` stores its item with `move`: a slot
-of the buffer is the ring's to change, and a reference becomes `mut` only by `move`, as the
-stack in [Generics](13-generics.md#project-undo-with-a-generic-stack) does (for a tuple of a
-string and a number the move is a copy). The history holds `(Str, float)` tuples, the
-statement and its value, so its type is `Ring<(Str, float)>`, a `mut` one since `add`
-changes it, and its blank is an empty statement:
+slots with it until they are used, as the task list in
+[Arrays](09-arrays.md#project-the-task-list) does: fifteen clones and `blank` itself, since
+`[blank; 16]` would copy it, which a tuple holding a `Str` does not allow
+([Cloneable](06-traits.md#cloneable)). `add` stores its item with `move`, as a move-only
+value goes into a slot only by `move`, as the stack in
+[Generics](13-generics.md#project-undo-with-a-generic-stack) does. The history holds
+`(Str, float)` tuples, the statement and its value, so its type is `Ring<(Str, float)>`, and
+its blank is an empty statement. It is a variable that is not `let`, since the functions
+that add to it take it as an `inout` parameter:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  let history: mut = Ring(("", 0.0));
+  history: mut = Ring(("", 0.0));
 ```
 
 ### Evaluating a statement
@@ -398,14 +422,16 @@ changes it, and its blank is an empty statement:
 `evalStatement` ties the pieces together. It destructures the parser's tuple, checks the
 optional `error` field with a `match`, and then matches on the optional target name to decide
 between printing an assignment and printing an expression's value. It changes the
-environment and the history, so it takes both as `mut`, and the parser it makes is `mut`
-too, since parsing moves it along its input:
+environment, which it shares with the parser, so it takes it as a `shared mut` reference,
+and the history in place, an `inout` parameter. The parser it makes is `mut`, since parsing
+moves it along its input, and is given a copy of the statement, `src.clone()`, as is the
+history, since `evalStatement` prints `src` too:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-fn evalStatement(src: Str, env: mut hashmap::HashMap,
-                 history: mut Ring<(Str, float)>, quiet: bool) {
-  let p: mut = parser::Parser(src, env);
+fn evalStatement(src: Str, env: shared mut hashmap::HashMap,
+                 history: inout Ring<(Str, float)>, quiet: bool) {
+  let p: mut = parser::Parser(src.clone(), env);
   target, value = p.parseStatement();
 
   match p.error {
@@ -421,7 +447,7 @@ fn evalStatement(src: Str, env: mut hashmap::HashMap,
   }
 
   env.put("ans", value);
-  history.add((src, value));
+  history.add((src.clone(), value));
   match target {
     name: Str {
       env.put(name, value);

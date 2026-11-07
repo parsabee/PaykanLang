@@ -36,6 +36,25 @@ bool Sema::checkViewFnDecl(const ast::FuncDecl *method,
                                      "'self'");
     return false;
   }
+  // A `shared fn`: `self` is shared, which an initializer's is not (it is
+  // the new object, the constructor's result).  An override hands `self`
+  // on as the method it overrides does.
+  if (method->isShared() && method->getName() == names::kMethodInit) {
+    error(method->getLocation(),
+          "'" + std::string(names::kMethodInit) +
+              "' cannot be a 'shared fn': the new object is the "
+              "constructor's result, held as its caller declares");
+    return false;
+  }
+  if (base && base->isShared() != method->isShared()) {
+    error(method->getLocation(),
+          "override of '" + method->getName() + "' " +
+              (base->isShared() ? "must be a 'shared fn'"
+                                : "cannot be a 'shared fn'") +
+              ", like the method it overrides: a call of either takes its "
+              "receiver as the overridden method says");
+    return false;
+  }
   if (!base || base->isView() == method->isView())
     return true;
   if (base->isView())
@@ -54,9 +73,10 @@ bool Sema::rejectFreeViewFns(ast::TranslationUnit *tu) {
   bool ok = true;
   for (auto *fns : {&tu->getFuncDecls(), &tu->getGenericFuncDecls()})
     for (auto *fn : *fns)
-      if (fn->isView()) {
-        error(fn->getLocation(), "only a method can be a 'view fn': '" +
-                                     fn->getName() +
+      if (fn->isView() || fn->isShared()) {
+        error(fn->getLocation(), std::string("only a method can be a '") +
+                                     (fn->isShared() ? "shared" : "view") +
+                                     " fn': '" + fn->getName() +
                                      "' is a free function, with no 'self'");
         ok = false;
       }
@@ -95,6 +115,9 @@ void Sema::warnMissingViewFns() {
     for (const MethodUse *m : members) {
       introducedHere |= ownerOf(*m) == family.first;
       changes |= m->ChangesSelf;
+      // A `shared fn` hands on a `shared mut` self, which a `view fn`'s is
+      // not: it is no family to suggest the marker for.
+      changes |= m->Decl->isShared();
     }
     if (introducedHere && !changes && intro && !intro->isView())
       could.insert(family);

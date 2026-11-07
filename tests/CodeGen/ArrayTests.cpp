@@ -217,25 +217,25 @@ fn main() -> int {
 }
 
 TEST(RefField, MemberAccessPassedAsClassArg) {
-  // Passing a member access (borrowed box) as a class-typed argument to a
-  // user method must retain it: the callee consumes (releases) it, and the
-  // holder releases it on destruction, so without the retain the object is
-  // freed one time too many and a later use reads freed memory.
+  // Passing a member access moved out of its holder (`move nm.name`) as a
+  // class-typed argument to a user method: the callee consumes (releases)
+  // it, and the holder, which dies at return, must leave it alone, or the
+  // object is freed one time too many and a later use reads freed memory.
   auto r = compileAndRun(R"(import ::io;
 class Named { name: Str; }
-impl Named { fn __init__(n: Str){ self.name = n; } }
+impl Named { fn __init__(n: Str){ self.name = move n; } }
 class Store {
   saved: Str;
-  fn keep(s: Str) { self.saved = s; }
-  fn get() -> Str { return self.saved; }
+  fn keep(s: Str) { self.saved = move s; }
+  fn get() -> Str { return self.saved.clone(); }
 }
 
 impl Store {
   fn __init__(){ self.saved = ""; }
 }
-fn stash(st: mut Store) {
+fn stash(st: inout Store) {
   nm: Named = Named("hello");
-  st.keep(nm.name);   // member access as class arg; nm dies at return
+  st.keep(move nm.name);   // member access as class arg; nm dies at return
 }
 fn main() -> int {
   st: mut Store = Store();
@@ -258,7 +258,7 @@ class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
   items: Foo[2];
-  fn set1(f: Foo) { self.items[1] = f; }
+  fn set1(f: Foo) { self.items[1] = move f; }
   fn get1() -> int { return self.items[1].v; }
 }
 

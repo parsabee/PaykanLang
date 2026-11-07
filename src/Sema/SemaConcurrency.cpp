@@ -359,7 +359,14 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     if (isCopyable(ft->getElementType(), why))
       return true;
-    part("its elements", ft->getElementType(), {});
+    part("elements", ft->getElementType(), {});
+    return false;
+  }
+  // A container's storage, a `mem::Buffer<T>`: named as that, not by the
+  // buffer's private field.
+  if (ast::Type *elem = bufferElementType(ty)) {
+    if (why && why->empty())
+      *why = "storage ('" + typeName(ty) + "' of '" + typeName(elem) + "')";
     return false;
   }
   // A struct's fields carry qualifiers (a `shared` one copies); a tuple's
@@ -390,7 +397,107 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
         return false;
     return true;
   }
-  // `Str`, a class, a function value, a task: move-only.
+  // A function value: its closure, when it has one, is shared by its
+  // copies (a copy counts it), and holds copies of Copyable captures and
+  // `weak` references.  One with no captures is a function's address.
+  if (ast::isa<ast::FunctionType>(ty))
+    return true;
+  // `Str`, a class, a task: move-only.
+  return false;
+}
+
+bool Sema::hasBuiltinTraitImpl(const ast::Type *ty, const char *trait) {
+  auto has = [&](const ast::Type *t) {
+    if (auto it = TraitImpls.find(t); it != TraitImpls.end())
+      for (const auto &impl : it->second)
+        if (impl.Trait->IsBuiltin && impl.Trait->Decl->getName() == trait)
+          return true;
+    // A block of this module not checked yet (checkTraitImpl records it):
+    // the classes are populated before any is.
+    const auto *ct = ast::dyn_cast<ast::ClassType>(t);
+    const auto *st = ast::dyn_cast<ast::StructType>(t);
+    if (!ct && !st)
+      return false;
+    auto it = ImplsByClass.find(ct ? ct->getName() : st->getName());
+    if (it == ImplsByClass.end())
+      return false;
+    for (const ast::ImplDecl *im : it->second)
+      if (im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
+          traitAnnotationName(im->getTrait()) == trait)
+        return true;
+    return false;
+  };
+  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    for (const ast::ClassType *c = ct; c; c = c->getSuperClass())
+      if (has(c))
+        return true;
+    return false;
+  }
+  return has(ty);
+}
+
+bool Sema::isCloneablePart(ast::Type *ty, ast::Qualifier q, std::string *why) {
+  if (ty && ast::isRefType(ty) && q.Form != ast::QualForm::Unique)
+    return true; // the same object in the clone
+  return isCloneable(ty, why);
+}
+
+bool Sema::isCloneable(ast::Type *ty, std::string *why) {
+  auto part = [&](const std::string &what, ast::Type *t, ast::Qualifier q) {
+    if (why && why->empty())
+      *why = "its " + what + " ('" + qualifiedName(q, t) + "') " +
+             (what == "elements" ? "are" : "is") + " not Cloneable";
+  };
+  // Every Copyable type is Cloneable: its clone is the copy.
+  if (isCopyable(ty) || ty == Ctx.getStrTy())
+    return true;
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return isCloneable(ot->getInnerType(), why);
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    if (hasBuiltinTraitImpl(ct, names::kTraitCloneable))
+      return true;
+    if (why && why->empty())
+      *why = "a class is Cloneable only with an 'impl Cloneable for " +
+             ct->getName() + "' block";
+    return false;
+  }
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    if (isCloneable(ft->getElementType()))
+      return true;
+    part("elements", ft->getElementType(), {});
+    return false;
+  }
+  // A struct with an `impl Cloneable for` block clones as it says; else a
+  // struct's fields carry qualifiers.  Before the tuple case.
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    if (hasBuiltinTraitImpl(st, names::kTraitCloneable))
+      return true;
+    const auto &types = st->getElementTypes();
+    for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
+      const ast::Qualifier q = st->findFieldQualifier(st->getFieldName(i));
+      if (!isCloneablePart(types[i], q)) {
+        part("field '" + st->getFieldName(i) + "'", types[i], q);
+        return false;
+      }
+    }
+    return true;
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    const auto &types = tt->getElementTypes();
+    for (size_t i = 0; i < types.size(); ++i)
+      if (!isCloneable(types[i])) {
+        part("element '." + std::to_string(i) + "'", types[i], {});
+        return false;
+      }
+    return true;
+  }
+  if (ast::isa<ast::EnumType>(ty)) {
+    if (why && why->empty())
+      *why = "an enum whose payloads are not Copyable is not Cloneable yet";
+    return false;
+  }
+  if (why && why->empty())
+    *why = "a task is never Cloneable";
   return false;
 }
 
@@ -857,12 +964,9 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
       return nullptr;
     }
   }
-  if (!ast::isRefType(ty)) {
-    error(loc, "cannot move '" + what + "': it is a '" + typeName(ty) +
-                   "', a value (a value is copied; a field of a reference "
-                   "type moves out)");
-    return nullptr;
-  }
+  // A value moves out as a copy of its bytes, which takes over the
+  // references among them; a Copyable one is the copy, so that generic code
+  // writes `move x.f` for any type (#369).  `x` ends either way.
   if (std::string why = viewedBy(name); !why.empty()) {
     error(loc, why + "; it cannot be moved out of");
     return nullptr;
@@ -1083,6 +1187,14 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
   // thread, goes in a `mem::Box<T>`, an object (`atomic shared
   // mem::Box<Buffer<float>>`).
   const bool ref = ast::isRefType(inner) || ast::isa<ast::AtomicType>(inner);
+  // A function value is one kind of value: its closure, when it has one,
+  // is shared by its copies, and nothing changes it.
+  if (ast::isFunctionValue(inner)) {
+    error(loc, std::string("a function value takes no qualifier ('") +
+                   q.spelling() + " " + typeName(inner) +
+                   "'): it is Copyable, and its copies share its closure");
+    return false;
+  }
   const std::string value =
       "'" + typeName(inner) + "' is a value" +
       (sharesStorage(inner) ? ": box it ('mem::Box<" + typeName(inner) +
@@ -1129,9 +1241,30 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
   return true;
 }
 
+bool Sema::isOwnedBinder(const ast::Expr *e) {
+  const auto *id = e ? ast::dyn_cast<ast::Identifier>(e) : nullptr;
+  if (!id || id->isFunctionRef() || id->getName() == names::kSelf ||
+      !CurrentScope || !CurrentScope->findOwner(id->getName()))
+    return false;
+  const VarKind k = varKind(id->getName());
+  return k == VarKind::Plain || k == VarKind::Let;
+}
+
 bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
-                              const std::string &what,
-                              ast::SourceLocation loc) {
+                              const std::string &what, ast::SourceLocation loc,
+                              bool implicitMove, bool materialize) {
+  // A conditional's value is one of its branches: each flows as it would
+  // alone; the conditional is what becomes a cell or a frozen object.
+  if (auto *te = src ? ast::dyn_cast<ast::TernaryExpr>(src) : nullptr) {
+    bool ok = checkQualifiedFlow(dst, te->getTrueExpr(), what, loc,
+                                 implicitMove, /*materialize=*/false);
+    ok = checkQualifiedFlow(dst, te->getFalseExpr(), what, loc, implicitMove,
+                            /*materialize=*/false) &&
+         ok;
+    if (ok && materialize)
+      materializeFlow(dst, src, loc);
+    return ok;
+  }
   ast::Type *ty = src ? src->getResolvedType() : nullptr;
   // A value (a function value too) copies: the forms are of references,
   // so it skips the conversions below, but not the copy rule, which sees
@@ -1154,16 +1287,13 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
   if (ast::isa<ast::NoneLiteral>(src))
     return true;
   const ast::Expr *inner = src;
-  bool moved = false;
+  bool moved = implicitMove && isOwnedBinder(src);
   if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(src);
       u && u->getOpcode() == ast::UnaryOpcode::Move) {
     moved = true;
     inner = u->getOperand();
   }
-  const bool place = ast::isa<ast::Identifier>(inner) ||
-                     ast::isa<ast::MemberAccessExpr>(inner) ||
-                     ast::isa<ast::SubscriptExpr>(inner) ||
-                     ast::isa<ast::TupleIndexExpr>(inner);
+  const bool place = isCopyPlace(inner);
   const ast::Qualifier sq = qualifierOf(src);
   // The conversions: a unique reference flows into any form, and gains
   // `mut` only by `move` (or as a temporary, which nobody else holds); a
@@ -1184,50 +1314,127 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                           "convert only as they are"));
     return false;
   }
+  if (materialize && !value && !materializeFlow(dst, src, loc))
+    return false;
+  return checkCopyRule(src, loc, implicitMove);
+}
+
+bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
+                           ast::SourceLocation loc) {
   // A unique value (`mut` or not) that becomes a cell, or a frozen object,
   // is made into one at this use: the send check runs on what it holds.
-  if (!value && sq.Form == ast::QualForm::Unique &&
-      dst.Form != ast::QualForm::Unique && dst.Form != ast::QualForm::Shared) {
-    if (std::string why = uncrossable(ty, sq, ""); !why.empty()) {
-      error(loc, "cannot make '" + placeText(inner) + "' (a '" +
-                     qualifiedName(sq, ty) + "') '" + dst.spelling() +
-                     "': " + why);
-      return false;
-    }
-    src->setMaterialize(dst.Form);
-  }
-  // The copy rule (--strict-ownership): a move-only value read from a
-  // place is moved, never copied.  A `shared` reference, a handle, and a
-  // value of such parts are Copyable.
-  std::string part;
-  if (StrictOwnership && place && !moved && sq.Form == ast::QualForm::Unique &&
-      !isCopyablePart(ty, sq, &part)) {
-    const std::string text = placeText(inner);
-    std::string msg = "cannot copy '" + text + "'";
-    if (ast::isRefType(ty))
-      msg += " (a unique '" + qualifiedName(sq, ty) + "')";
-    else
-      msg += ": '" + typeName(ty) + "' holds unique " + part;
-    if (ast::isa<ast::Identifier>(inner))
-      msg += "; write 'move " + text + "' to transfer it" +
-             (ast::isRefType(ty)
-                  ? ", or declare it '" +
-                        qualifiedName(
-                            ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty) +
-                        "'"
-                  : std::string());
-    else
-      msg += "; a field or element leaves by 'mem::replace' or 'mem::take'" +
-             (ast::isRefType(ty)
-                  ? ", or is declared '" +
-                        qualifiedName(
-                            ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty) +
-                        "'"
-                  : std::string());
-    error(loc, msg);
+  const ast::Qualifier sq = qualifierOf(src);
+  if (sq.Form != ast::QualForm::Unique || dst.Form == ast::QualForm::Unique ||
+      dst.Form == ast::QualForm::Shared)
+    return true;
+  const ast::Expr *inner = src;
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(src);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    inner = u->getOperand();
+  ast::Type *ty = src->getResolvedType();
+  if (std::string why = uncrossable(ty, sq, ""); !why.empty()) {
+    error(loc, "cannot make '" + placeText(inner) + "' (a '" +
+                   qualifiedName(sq, ty) + "') '" + dst.spelling() +
+                   "': " + why);
     return false;
   }
+  src->setMaterialize(dst.Form);
   return true;
+}
+
+bool Sema::isCopyPlace(const ast::Expr *e) {
+  // A named function is no place: naming it makes a new function value.
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return !id->isFunctionRef();
+  // A part of a temporary (`make().a`) is no place either: the temporary
+  // ends with the statement, so its part leaves it.
+  return (ast::isa<ast::MemberAccessExpr>(e) ||
+          ast::isa<ast::SubscriptExpr>(e) ||
+          ast::isa<ast::TupleIndexExpr>(e)) &&
+         placeRoot(e) != nullptr;
+}
+
+bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
+                         bool implicitMove) {
+  if (auto *te = src ? ast::dyn_cast<ast::TernaryExpr>(src) : nullptr) {
+    bool ok = checkCopyRule(te->getTrueExpr(), loc, implicitMove);
+    return checkCopyRule(te->getFalseExpr(), loc, implicitMove) && ok;
+  }
+  ast::Type *ty = src ? src->getResolvedType() : nullptr;
+  if (!ty || !sharesStorage(ty) || ast::isa<ast::PoisonType>(ty) ||
+      ast::isa<ast::NoneLiteral>(src))
+    return true;
+  const ast::Expr *inner = src;
+  bool moved = implicitMove && isOwnedBinder(src);
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(src);
+      u && u->getOpcode() == ast::UnaryOpcode::Move) {
+    moved = true;
+    inner = u->getOperand();
+  }
+  if (moved || !isCopyPlace(inner))
+    return true;
+  // The copy rule: a move-only value read from a place is moved, never
+  // copied.  A `shared` reference, a handle, and a value of such parts are
+  // Copyable.  A borrow, or a part reached through one, is the borrow
+  // check's (checkViewNotStored, the parameter checks): it says where a
+  // `view` may go, before this rule would.
+  if (const ast::Identifier *root = placeRoot(inner)) {
+    const VarKind rk = varKind(root->getName());
+    if (rk == VarKind::View || rk == VarKind::ViewLocal ||
+        rk == VarKind::ViewBinding || rk == VarKind::WeakView)
+      return true;
+    // So is the read-only `self` of a `view fn`.
+    if (root->getName() == names::kSelf && CurrentClassCtx &&
+        CurrentClassCtx->ViewMethod)
+      return true;
+  }
+  const ast::Qualifier sq = qualifierOf(src);
+  std::string part;
+  if (sq.Form != ast::QualForm::Unique || isCopyablePart(ty, sq, &part))
+    return true;
+  const std::string text = placeText(inner);
+  std::string msg = "cannot copy '" + text + "'";
+  if (ast::isRefType(ty))
+    msg += " (a unique '" + qualifiedName(sq, ty) + "')";
+  else if (part.empty())
+    msg += " (a '" + typeName(ty) + "')";
+  else
+    msg += ": '" + typeName(ty) + "' holds unique " + part;
+  const auto *id = ast::dyn_cast<ast::Identifier>(inner);
+  const VarKind kind = id ? varKind(id->getName()) : VarKind::Plain;
+  // A Cloneable value has a copy too (#369).
+  const std::string clone =
+      isCloneable(ty) ? "'" + text + ".clone()' to copy it" : std::string();
+  const std::string shared =
+      ast::isRefType(ty)
+          ? qualifiedName(ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty)
+          : std::string();
+  if (id && id->getName() == names::kSelf)
+    msg += "; a method borrows its receiver" +
+           (clone.empty() ? "" : ": write " + clone) +
+           " (a 'shared fn' hands on a shared one)";
+  else if (kind == VarKind::Inout)
+    msg += "; it is an 'inout' borrow of the caller's storage" +
+           (clone.empty() ? "" : ": write " + clone);
+  else if (id)
+    msg += "; write 'move " + text + "' to transfer it" +
+           (clone.empty() ? "" : (shared.empty() ? ", or " : ", ") + clone) +
+           (shared.empty() ? "" : ", or declare it '" + shared + "'");
+  else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(inner);
+           se &&
+           ast::isa<ast::FixedArrayType>(se->getArray()->getResolvedType()))
+    // A fixed-size array's element is an `inout` place.
+    msg += "; an element leaves its array by 'mem::replace' or 'mem::take'" +
+           (clone.empty() ? "" : ", or " + clone);
+  else if (ast::isa<ast::SubscriptExpr>(inner))
+    msg += std::string("; an element stays its container's") +
+           (clone.empty() ? "" : ": write " + clone);
+  else
+    msg += "; a field leaves by 'mem::replace' or 'mem::take'" +
+           (clone.empty() ? "" : ", " + clone) +
+           (shared.empty() ? "" : ", or is declared '" + shared + "'");
+  error(loc, msg);
+  return false;
 }
 
 /// Why @p what (a variable, a field) cannot be written: its form @p q, of

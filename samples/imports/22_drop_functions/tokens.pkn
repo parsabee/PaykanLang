@@ -38,10 +38,12 @@ enum Token {
 }
 
 fn wide(s: Str) -> Wide {
-  let four = Four(s, s, s, s);
-  let sixteen = Sixteen(four, four, four, four);
-  let sixtyFour = SixtyFour(sixteen, sixteen, sixteen, sixteen);
-  return Wide(sixtyFour, sixtyFour, sixtyFour, sixtyFour, s + "!");
+  let four = Four(s.clone(), s.clone(), s.clone(), s.clone());
+  let sixteen = Sixteen(four.clone(), four.clone(), four.clone(), move four);
+  let sixtyFour = SixtyFour(sixteen.clone(), sixteen.clone(), sixteen.clone(),
+      move sixteen);
+  return Wide(sixtyFour.clone(), sixtyFour.clone(), sixtyFour.clone(),
+      move sixtyFour, s + "!");
 }
 
 fn make(i: int) -> Token {
@@ -63,7 +65,7 @@ fn kept(n: int) -> Str {
   l.removeAt(unsigned(0));
   out = Str(l.len());
   for i in 0..n - 1 {
-    match l.get(unsigned(i)) {
+    match l.at(unsigned(i)) {
       w: Word { out += " " + w.s; }
       b: Block { out += " " + b.w.name; }
     }

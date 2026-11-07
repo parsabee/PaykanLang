@@ -66,7 +66,7 @@ fn main() -> int {
       + Str(ok(1) == r) + " " + Str(r != ok(1)));
   let g = if n > 0 then Maybe::Just(n) else none();
   let h = if n > 0 then none() else Maybe::Just(n);
-  let i = if n > 0 then ok(1) else r;
+  let i = if n > 0 then ok(1) else move r;
   let j = if n > 5 then Maybe::Just(n) else (if n > 1 then none() else none());
   io::println(g.toString() + " " + h.toString() + " " + i.toString() + " "
       + j.toString());

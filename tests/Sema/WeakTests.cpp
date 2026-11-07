@@ -120,14 +120,15 @@ TEST(Weak, IsNotAnInoutPlace) {
 // A lambda inside a lambda captures the outer one's weak capture, weakly,
 // and it is read-only there as any capture is: it is not assigned, passed
 // to an `inout` parameter, named by an `inout` local or bound by an `inout`
-// arm.  It is read as any `T?` is.
+// arm.  It is read as any `T?` is (of a `shared` object here, so a read of
+// it may be kept in a strong local).
 TEST(Weak, NestedCaptureIsReadOnly) {
   auto r = semaCheck(R"(
     class B { n: int; }
     fn reset(p: inout B?) { p = None; }
     fn look(p: view B?) -> int { return 0; }
     fn main() -> int {
-      let b = B(1);
+      let b: shared B = B(1);
       weak me = b;
       let bad = fn() -> () -> int {
         return fn() -> int {
@@ -138,13 +139,13 @@ TEST(Weak, NestedCaptureIsReadOnly) {
           return 0;
         };
       };
-      let ok = fn() -> () -> B? {
-        return fn() -> B? {
+      let ok = fn() -> () -> int {
+        return fn() -> int {
           let n = look(me);
-          let keep: B? = me;
+          let keep: shared B? = me;
           v: view B? = me;
           match me { x: B { let sum = x.n + n; } None { } }
-          return if me == None then keep else me;
+          return if me == None then n else look(keep);
         };
       };
       return 0;
@@ -282,17 +283,20 @@ TEST(Weak, MatchedPartOfSelfReturnsAsAView) {
 
 // Otherwise a weak reference is an ordinary `T?`: assigned, compared,
 // matched, passed by value or as a `view`, returned, stored, captured and
-// shadowed; `weak y = x` infers `T?` from a `T` or a `T?`.
+// shadowed; `weak y = x` infers `T?` from a `T` or a `T?`.  Its object is
+// `shared` here, so what reads it may keep a strong reference.  A tuple holds
+// no `shared` reference, so the one a destructuring assigns from holds a new
+// object.
 TEST(Weak, IsOtherwiseAnOptional) {
   auto r = semaCheck(R"(
     class Point { x: int; }
-    class Holder { item: Point?; weak peek: Point?; }
-    fn take(p: Point?) -> int { return 0; }
+    class Holder { item: shared Point?; weak peek: shared Point?; }
+    fn take(p: shared Point?) -> int { return 0; }
     fn look(p: view Point?) -> int { return 0; }
-    fn pass(p: Point?) -> Point? { return p; }
+    fn pass(p: shared Point?) -> shared Point? { return p; }
     fn main() -> int {
-      x = Point(1);
-      o: Point? = x;
+      x: shared Point = Point(1);
+      o: shared Point? = x;
       weak w = x;
       weak u = o;
       weak e: Point?;
@@ -313,7 +317,7 @@ TEST(Weak, IsOtherwiseAnOptional) {
       match u { p: view Point { n = n + p.x; } None { } }
       f = fn() -> bool { return w == None; };
       { weak w = x; }
-      w, n = (x, 1);
+      w, n = (Point(2), 1);
       v: view Point? = w;
       return n;
     }

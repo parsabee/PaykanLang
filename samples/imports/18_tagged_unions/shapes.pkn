@@ -21,7 +21,7 @@ class Box {
 fn rectArea(r: Shape::Rect) => r.w * r.h;
 
 /// The area of @p s, rounded down.
-fn area(s: Shape) -> int {
+fn area(s: view Shape) -> int {
   match s {
     Empty { return 0; }
     c: Circle { return int(3.0 * c.r * c.r); }

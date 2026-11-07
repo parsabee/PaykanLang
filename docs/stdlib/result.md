@@ -14,7 +14,7 @@ import ::io;
 import ::error as err;
 import ::result as res;
 
-fn parsePort(s: Str) -> res::Result<int, err::Error> {
+fn parsePort(s: view Str) -> res::Result<int, err::Error> {
   match s.toInt() {
     n: int {
       if n > 0 && n < 65536 { return res::ok(n); }
@@ -48,10 +48,15 @@ error: InvalidArgument
 
 ## Using a result
 
-A `Result` is an enum whose variants have fields, a value held in place and copied on
-assignment ([Variants With Fields](../language/07-enums.md#variants-with-fields)). A
-`match` takes it apart: the arm `p: Ok` binds the `Ok` variant's field, `p.value`, and the
-arm `e: Err` the `Err` variant's, `e.error`, as `main` does above. An arm for each of the
+A `Result` is an enum whose variants have fields, a value held in place
+([Variants With Fields](../language/07-enums.md#variants-with-fields)). A `Result<T,
+err::Error>` is move-only, since an `Error` holds its message, a `Str?`: assigning one moves
+it (`let s = r;` is `cannot copy 'r': 'Result<int, Error>' holds unique field 'msg'
+('Str?'); write 'move r' to transfer it`). A `match` takes it apart: the arm `p: Ok` binds
+the `Ok` variant's field, `p.value`, and the arm `e: Err` the `Err` variant's, `e.error`, as
+`main` does above. On a call's result, as there, the arm owns what it binds, and `move
+p.value` takes the value out; on a variable it borrows it, and `match move r` gives the arm
+the fields to own ([Bindings](../language/08-match.md#bindings)). An arm for each of the
 two covers every case, so a function may return from both without a `return` after the
 `match`; a `_` arm stands for the one not named (`match f.readln() { l: Ok { ... } _ {
 break; } }`). To test for one code of an `Error`, compare it in the `Err` arm:

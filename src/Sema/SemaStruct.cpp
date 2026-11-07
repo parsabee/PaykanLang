@@ -372,10 +372,11 @@ ast::FuncDecl *Sema::defaultInit(ast::StructType *st, ast::SourceLocation loc) {
     const std::string &interned = Ctx.intern(st->getFieldName(i));
     params.push_back({&interned, st->getElementType(i), ast::ParamMode::Value,
                       st->findFieldQualifier(st->getFieldName(i)), loc});
-    // The field takes the parameter: a move-only one by `move` (the
-    // prototype's copy rule, --strict-ownership), a Copyable one as it is.
+    // The field takes the parameter by `move` (the copy rule), but an
+    // `atomic` handle, which copies into the cell's handle.  Not decided by
+    // Copyable: a struct field's struct may not have its fields yet.
     ast::Expr *value = Ctx.make<ast::Identifier>(loc, interned);
-    if (!isCopyable(st->getElementType(i)))
+    if (!ast::isa<ast::AtomicType>(st->getElementType(i)))
       value = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, value);
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
@@ -553,6 +554,10 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
   if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
     for (auto *im : it->second) {
+      // A block bounded on its parameters (`impl List<T: Cloneable>`) joins
+      // only the instances whose arguments meet the bounds (#369).
+      if (!implBoundsHold(im, args))
+        continue;
       Subst s;
       for (size_t i = 0; i < args.size(); ++i)
         s[*im->getTypeParams()[i]] = args[i];
@@ -787,26 +792,42 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
   for (auto *method : node->getMethods()) {
     ctx.MethodName = method->getName();
     ctx.ViewMethod = method->isView();
+    // A struct's `self` is the receiver's storage, which is never shared.
+    if (method->isShared()) {
+      error(method->getLocation(),
+            "a struct's method cannot be a 'shared fn': its 'self' is the "
+            "receiver's storage, a value, which is never shared");
+      ok = false;
+      continue;
+    }
     std::optional<TypeParamScope> params;
     implTypeParamScope(params, method);
 
     // The signature was resolved when the method joined the struct
     // (populateImplMethods); resolveType is idempotent.
     ast::Type *retTy = Ctx.getVoidTy();
+    // The result's qualifier (`-> shared N`) is what its `return`s flow
+    // into, as a class method's is.
+    ast::Qualifier resultQual = method->getResultQual();
     if (method->getReturnType()) {
       FixedArrayAllowed = true;
       retTy = resolveType(method->getReturnType(), method->getLocation(),
                           "method '" + method->getName() + "'");
+      if (ast::Qualifier q = takeQualifier(); resultQual.isUnique())
+        resultQual = q;
     }
     std::vector<ast::Type *> paramTys;
     for (auto &p : method->getParams()) {
       FixedArrayAllowed = true;
       auto *pty = resolveType(p.ParamType, method->getLocation(),
                               "parameter '" + p.getName() + "'");
+      (void)takeQualifier(); // the parameter's, recorded on it (p.Qual)
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
     auto *savedRetTy = CurrentReturnType;
     const ResultContext savedResult = CurrentResult;
+    const ast::Qualifier savedResultQual =
+        std::exchange(CurrentResultQual, resultQual);
     CurrentReturnType = retTy;
     {
       ScopeGuard guard(*this);
@@ -878,6 +899,7 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
     }
     CurrentReturnType = savedRetTy;
     CurrentResult = savedResult;
+    CurrentResultQual = savedResultQual;
   }
 
   CurrentClassCtx = savedCtx;

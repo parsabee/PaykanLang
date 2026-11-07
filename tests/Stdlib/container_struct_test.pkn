@@ -1,7 +1,7 @@
-// ::collections' containers are structs over the one object that holds their
-// state: a copy, a parameter or a field names the same container, a copy of a
-// HashMap stays one map across a rehash, and a container in a mem::Box is an
-// Obj.
+// ::collections' containers are move-only structs over the one object that
+// holds their state: an `inout` parameter or a borrow names the same
+// container, a field holds the one moved into it, a HashMap stays one map
+// across a rehash, and a container in a mem::Box is an Obj.
 import ::io;
 import ::collections as c;
 import ::memory as mem;
@@ -10,7 +10,7 @@ class Holder {
   xs: c::List<int>;
 }
 
-fn fill(xs: c::List<int>, n: int) {
+fn fill(xs: inout c::List<int>, n: int) {
   i = 0;
   while i < n {
     xs.push(i);
@@ -18,7 +18,7 @@ fn fill(xs: c::List<int>, n: int) {
   }
 }
 
-fn grow(m: c::HashMap<Str, int>) {
+fn grow(m: inout c::HashMap<Str, int>) {
   i = 0;
   while i < 40 {
     // past several rehashes
@@ -27,7 +27,7 @@ fn grow(m: c::HashMap<Str, int>) {
   }
 }
 
-fn describe(o: Obj) -> Str {
+fn describe(o: view Obj) -> Str {
   match o {
     b: mem::Box<c::List<int>> {
       return "a boxed list of " + Str(b.value().len());
@@ -37,51 +37,53 @@ fn describe(o: Obj) -> Str {
 }
 
 fn main() -> int {
-  // A copy and a parameter are the same list.
+  // An `inout` parameter and a borrow name the caller's list.
   xs = c::List<int>();
-  ys = xs;
-  fill(ys, 3);
+  fill(xs, 3);
   xs.push(9);
+  ys: view c::List<int> = xs;
   io::println(c::listToString(xs) + " " + c::listToString(ys) + " "
       + Str(xs == ys));
-  io::println(Str(xs == xs.copy()));
+  io::println(Str(xs == xs.clone()));
 
-  // A field holds the same list.
-  h: mut = Holder(xs);
+  // A field holds the list moved into it.
+  h: mut = Holder(move xs);
   h.xs.pop();
-  io::println(Str(xs.len()));
+  io::println(Str(h.xs.len()));
 
-  // A copy of a map is the same map, through rehashes.
+  // An `inout` parameter is the same map, through rehashes, and so is a
+  // borrow.
   m = c::HashMap<Str, int>();
   grow(m);
-  m2 = m;
+  m2: inout c::HashMap<Str, int> = m;
   m2.remove("k3");
-  io::println(Str(m.len()) + " " + Str(m2.len()) + " "
-      + Str(m.containsKey("k3")) + " " + Str(m.get("k39")));
+  let left = m2.len();
+  io::println(Str(m.len()) + " " + Str(left) + " " + Str(m.containsKey("k3"))
+      + " " + Str(m.get("k39")));
 
-  // The other containers.
+  // A borrow of each of the other containers writes it.
   s = c::HashSet<int>();
-  t = s;
+  t: inout c::HashSet<int> = s;
   t.add(1);
   st = c::Stack<Str>();
-  st2 = st;
+  st2: inout c::Stack<Str> = st;
   st2.push("a");
   q = c::Queue<Str>();
-  q2 = q;
+  q2: inout c::Queue<Str> = q;
   q2.enqueue("b");
   lo = c::MinPriorityQueue<Str>();
-  lo2 = lo;
+  lo2: inout c::MinPriorityQueue<Str> = lo;
   lo2.push("x", 2);
   hi = c::MaxPriorityQueue<Str>();
-  hi2 = hi;
+  hi2: inout c::MaxPriorityQueue<Str> = hi;
   hi2.push("y", 2);
   io::println(Str(s.contains(1)) + " " + st.pop() + " " + q.dequeue() + " "
       + lo.pop() + " " + hi.pop());
 
   // A container in a Box is an object.
-  b: mut = mem::Box(xs);
+  b: mut = mem::Box(mem::replace(h.xs, c::List<int>()));
   b.get().push(7);
-  o: Obj = b;
-  io::println(describe(o) + ", " + describe(h) + ", " + Str(xs.len()));
+  o: view Obj = b;
+  io::println(describe(o) + ", " + describe(h) + ", " + Str(b.value().len()));
   return 0;
 }

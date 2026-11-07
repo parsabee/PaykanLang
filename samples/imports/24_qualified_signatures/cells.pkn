@@ -1,16 +1,18 @@
-// Module: cells — a function, a method and a field whose types carry a
+// Module: cells — functions, a method and a field whose types carry a
 // qualifier, which an importer reads back from the module's interface.
 class Cell {
   n: int;
   next: shared mut Cell?;
-  fn bump()            { self.n += 1; }
-  fn me() -> mut Cell? { return self; }
+  fn bump()                          { self.n += 1; }
+  shared fn me() -> shared mut Cell? { return self; }
 }
 
 fn make(n: int) -> mut Cell {
   return Cell(n, None);
 }
 
-fn link(a: mut Cell, b: shared mut Cell) {
+// Links `a` to `b` and hands `a` back.
+fn link(a: mut Cell, b: shared mut Cell) -> mut Cell {
   a.next = b;
+  return a;
 }

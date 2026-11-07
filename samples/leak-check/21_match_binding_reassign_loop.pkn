@@ -1,7 +1,7 @@
 // Isolates: a match-arm binding reassigned in a loop.
-// The first assignment replaces the alias of the subject (nothing to
-// release); every later one releases the A the previous iteration created.
-// At the end of the arm the binding owns the last A.
+// `match move o` makes the binding own the subject's A, which the first
+// assignment releases; every later one releases the A the previous iteration
+// created.  At the end of the arm the binding owns the last A.
 //
 // Runtime allocation sites: four A objects (the subject and one per
 // iteration).
@@ -20,7 +20,7 @@ impl A {
 
 fn main() -> int {
   let o: A? = A(0);
-  match o {
+  match move o {
     a: A {
       i = 0;
       while i < 3 {

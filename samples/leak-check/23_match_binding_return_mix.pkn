@@ -1,7 +1,8 @@
-// Isolates: match-arm bindings reassigned in a loop and then returned, a
-// None arm returning a fresh object, and a binding reassigned and then
-// assigned to itself.  The returned binding hands its (owned) reference to
-// the caller; `a = a` must neither release nor double-retain it.
+// Isolates: match-arm bindings (of `match move`, which own what they bind)
+// reassigned in a loop and then returned, a None arm returning a fresh
+// object, and a binding reassigned and then moved into itself.  The returned
+// binding hands its (owned) reference to the caller; `a = move a` must not
+// release it.
 //
 // Runtime allocation sites: the A objects and their Str fields (literals and "n" + Str(i) concatenations).
 //
@@ -16,11 +17,11 @@ class A {
   s: Str;
 }
 impl A {
-  fn __init__(s: Str) { self.s = s; }
+  fn __init__(s: Str) { self.s = move s; }
 }
 
 fn pick(o: A?) -> A {
-  match o {
+  match move o {
     a: A {
       i = 0;
       while i < 3 {
@@ -36,12 +37,12 @@ fn pick(o: A?) -> A {
 
 fn main() -> int {
   let o: A? = A("z");
-  io::println(pick(o).s);
+  io::println(pick(A("z")).s);
   io::println(pick(None).s);
-  match o {
+  match move o {
     a: A {
       a = A("q");
-      a = a;
+      a = move a;
       io::println(a.s);
     }
     None { }

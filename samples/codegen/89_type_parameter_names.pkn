@@ -39,12 +39,12 @@ class Holder<U> {
   v: U;
 }
 
-fn g<U>(T: int, u: U) -> int {
+fn g<U>(T: int, u: view U) -> int {
   return T;
 }
 
 fn outer<T>(x: T) -> (int, int) {
-  let h = Holder<T>(1, x);
+  let h = Holder<T>(1, x.clone());
   return (g<T>(5, x) + h.T, h.T);
 }
 

@@ -197,7 +197,7 @@ static const char *kShape = "import ::io;\n"
 TEST(EnumCodeGen, VariantsMadeMatchedAndShown) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShape) + R"(
-fn area(s: Shape) -> int {
+fn area(s: view Shape) -> int {
   match s {
     Empty { return 0; }
     c: Circle { return int(c.r * c.r); }
@@ -223,8 +223,9 @@ fn main() -> int {
   g.expectNoLeaks("VariantsMadeMatchedAndShown");
 }
 
-// Assigning a variant releases the references of the one it replaces;
-// copies share them; an `inout` binding changes the subject's fields.
+// Assigning a variant releases the references of the one it replaces; a
+// `move` hands them over (a variant holding a unique `Tag` has no copy); an
+// `inout` binding changes the subject's fields.
 TEST(EnumCodeGen, VariantOwnership) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShape) + R"(
@@ -237,12 +238,12 @@ fn grow(s: inout Shape) {
 }
 fn main() -> int {
   s = Shape::Named("a", Tag(1));
-  copy = s;
+  copy = move s;
   s = Shape::Rect(1, 2);
   grow(s);
   grow(copy);
   io::println(s.toString() + " " + copy.toString());
-  s = copy;
+  s = move copy;
   s = Shape::Empty;
   return 0;
 }
@@ -261,7 +262,7 @@ fn main() -> int {
       + " " + Str(a != Shape::Empty) + " " + Str(Shape::Empty == Shape::Empty)
       + " " + Str(Shape::Named("x", None) == Shape::Named("x", None)));
   o: Shape? = None;
-  p: Shape? = a;
+  p: Shape? = move a;
   io::println(Str(o == None) + " " + Str(o == p));
   o = Shape::Rect(1, 2);
   io::println(Str(o == p));
@@ -274,7 +275,8 @@ fn main() -> int {
 }
 
 // A tagged union in a struct, a tuple, an optional, a List and an object's
-// field; passed, returned, captured; one variant's fields as a parameter.
+// field; passed (to a function and to a lambda), returned, moved out of the
+// List into the field; one variant's fields as a parameter.
 TEST(EnumCodeGen, TaggedUnionHeldEverywhere) {
   LeakGuard g;
   auto r =
@@ -292,12 +294,13 @@ fn main() -> int {
   l = col::List<Shape>();
   l.push(make(5));
   l.push(Shape::Rect(3, 4));
+  l.push(Shape::Empty);
   h: mut = Holder(Shape::Empty);
-  h.s = l.get(0);
-  f = fn() => slot.s.toString();
+  h.s = l.removeAt(0);
+  f = fn(x: view Slot) => x.s.toString();
   io::println(slot.toString() + " " + t.toString() + " " + o.toString());
-  io::println(h.s.toString() + " " + f() + " " + Str(l.len()));
-  match l.get(1) {
+  io::println(h.s.toString() + " " + f(slot) + " " + Str(l.len()));
+  match l.at(0) {
     r: Rect { io::println(rectArea(r)); }
     _ { }
   }
@@ -321,9 +324,9 @@ enum Maybe<T> { Just(value: T), Nothing }
 enum Result<T, E> { Ok(value: T), Err(error: E) }
 struct Cell<T> { m: Maybe<T>; n: int; }
 class Holder { m: Maybe<Str>; }
-fn unwrapOr<T>(m: Maybe<T>, d: T) -> T {
+fn unwrapOr<T>(m: view Maybe<T>, d: T) -> T {
   match m {
-    j: Just { return j.value; }
+    j: Just { return j.value.clone(); }
     Nothing { return d; }
   }
 }
@@ -340,8 +343,8 @@ fn main() -> int {
   io::println(unwrapOr(a, "x") + unwrapOr(b, "y"));
   io::println(Str(a == Maybe::Just("a")) + " " + Str(b == Maybe::Nothing));
   c = Cell(Maybe::Just(2), 3);
-  h: mut = Holder(b);
-  h.m = a;
+  h: mut = Holder(move b);
+  h.m = move a;
   io::println(c.toString() + " " + h.m.toString());
   xs: Maybe<int>[3] = [Maybe::Just(1), Maybe::Nothing, Maybe::Just(3)];
   total = 0;
@@ -377,8 +380,8 @@ import ::io;
 enum Maybe<T> { Just(value: T), Nothing }
 enum Result<T, E> { Ok(value: T), Err(error: E) }
 fn pick(n: int, s: Str) -> Str {
-  m = if n > 0 then Maybe::Nothing else Maybe::Just(s);
-  k = if n > 1 then Maybe::Just(s) else Maybe::Nothing;
+  m = if n > 0 then Maybe::Nothing else Maybe::Just(s.clone());
+  k = if n > 1 then Maybe::Just(move s) else Maybe::Nothing;
   return m.toString() + " " + k.toString() + " " +
          Str(Maybe::Nothing == m) + " " + Str(Maybe::Nothing != k);
 }
@@ -411,16 +414,16 @@ enum Maybe<T> { Just(value: T), Nothing }
 enum Result<T, E> { Ok(value: T), Err(error: E) }
 enum Pair<A, B> { Both(a: A, b: B), Left(a: A), Neither }
 fn none<T>() -> Maybe<T> => Maybe::Nothing;
-fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(v);
+fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(move v);
 fn pick(n: int, s: Str) -> Str {
-  m = if n > 0 then Maybe::Just(s) else none();
-  k = if n > 1 then none() else Maybe::Just(s);
-  r: Result<Str, int> = Result::Ok(s);
-  o = if n > 0 then ok(s + "!") else r;
-  p = if n > 0 then Pair::Left(s) else Pair::Both(s, n);
+  m = if n > 0 then Maybe::Just(s.clone()) else none();
+  k = if n > 1 then none() else Maybe::Just(s.clone());
+  r: Result<Str, int> = Result::Ok(s.clone());
+  o: view = if n > 0 then ok(s + "!") else r;
+  p = if n > 0 then Pair::Left(s.clone()) else Pair::Both(s.clone(), n);
   return m.toString() + " " + k.toString() + " " + o.toString() + " " +
-         p.toString() + " " + Str(Maybe::Just(s) == none()) + " " +
-         Str(none() != Maybe::Just(s)) + " " + Str(ok(s) == r);
+         p.toString() + " " + Str(Maybe::Just(s.clone()) == none()) + " " +
+         Str(none() != Maybe::Just(s.clone())) + " " + Str(ok(move s) == r);
 }
 fn main() -> int {
   io::println(pick(0, "a"));

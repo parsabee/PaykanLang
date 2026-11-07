@@ -68,6 +68,11 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
   const std::string &name = root->getName();
   if (name == names::kSelf && CurrentClassCtx &&
       !CurrentClassCtx->MethodName.empty()) {
+    // A `shared view fn`'s `self` is a `shared T` reference, which copies
+    // (stored, passed on); what it names is still read-only.
+    if (CurrentClassCtx->ViewMethod && CurrentClassCtx->SharedMethod && copy &&
+        e == root)
+      return "";
     if (CurrentClassCtx->ViewMethod)
       return "'self' is read-only in 'view fn " + CurrentClassCtx->MethodName +
              "'";
@@ -80,8 +85,20 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
     return "'" + name + "' is a 'view' parameter";
   case VarKind::ViewLocal:
     return "'" + name + "' is a 'view' local";
-  case VarKind::ViewBinding:
+  case VarKind::ViewBinding: {
+    // Of a subject the function owns (the copy rule's borrowed binding): a
+    // `match move` binds what it owns instead.
+    for (const Scope *s = CurrentScope; s; s = s->Parent)
+      if (auto it = s->ViewSubjects.find(name); it != s->ViewSubjects.end()) {
+        if (isOwnedBinder(placeRoot(it->second)) &&
+            ast::isa<ast::Identifier>(it->second))
+          return "'" + name + "' is a 'match' binding, a borrow of '" +
+                 placeText(it->second) + "' ('match move " +
+                 placeText(it->second) + "' binds what it owns)";
+        break;
+      }
     return "'" + name + "' is bound to a 'view'";
+  }
   case VarKind::WeakView:
     return "'" + name + "' is a 'weak' local of a 'view'";
   case VarKind::Captured:
@@ -132,6 +149,42 @@ bool Sema::checkChangeable(const ast::Expr *e, const std::string &what,
   if (why.empty())
     return true;
   error(loc, why + "; " + what);
+  return false;
+}
+
+bool Sema::checkSharedReceiver(const ast::MethodCallExpr *call,
+                               const ast::MethodDecl *method) {
+  if (!method->isShared())
+    return true;
+  const ast::Expr *recv = call->getReceiver();
+  // A temporary, `Counter().bump()` or `(move c).bump()`: nothing else
+  // holds it, so it may be shared from here on.
+  if (!isCopyPlace(recv))
+    return true;
+  const ast::Qualifier want{ast::QualForm::Shared, !method->isView()};
+  const ast::Qualifier have = qualifierOf(recv);
+  if (have == want)
+    return true;
+  ast::Type *ty =
+      ast::stripOptional(const_cast<ast::Expr *>(recv)->getResolvedType());
+  const std::string kind = method->isView() ? "shared view fn" : "shared fn";
+  std::string msg = "'" + method->getName() + "' is a '" + kind +
+                    "', which takes its receiver as a '" +
+                    qualifiedName(want, ty) + "'";
+  const auto *id = ast::dyn_cast<ast::Identifier>(recv);
+  if (id && id->getName() == names::kSelf && CurrentClassCtx &&
+      !CurrentClassCtx->MethodName.empty() && !CurrentClassCtx->SharedMethod)
+    msg += "; 'self' is borrowed in '" + CurrentClassCtx->MethodName +
+           "': make it a '" + kind + "' too";
+  else if (id && id->getName() == names::kSelf)
+    msg += "; 'self' is a '" + qualifiedName(have, ty) + "' here";
+  else
+    msg += "; '" + placeText(recv) + "' is a '" + qualifiedName(have, ty) +
+           "'" +
+           (ast::isa<ast::Identifier>(recv)
+                ? ": declare it '" + qualifiedName(want, ty) + "'"
+                : std::string());
+  error(call->getLocation(), msg);
   return false;
 }
 
@@ -395,6 +448,10 @@ bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
   // may return it, and so hands out a way to change `self`.  A `view`
   // belongs to the caller.
   const ast::Identifier *root = placeRoot(e);
+  // A `shared view fn`'s `self` is a `shared T`, which it returns.
+  if (root && root == e && root->getName() == names::kSelf && CurrentClassCtx &&
+      CurrentClassCtx->SharedMethod)
+    return true;
   if (root && root->getName() == names::kSelf && CurrentClassCtx &&
       !CurrentClassCtx->MethodName.empty()) {
     if (!CurrentClassCtx->ViewMethod) {

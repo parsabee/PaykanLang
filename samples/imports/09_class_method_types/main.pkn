@@ -10,10 +10,10 @@ import ::io;
 import shapes::lib;
 
 fn main() -> int {
-  let c: mut = lib::Cell(7);
+  let c = lib::Cell(7);
   let d = lib::Cell(4);
 
-  let p: lib::Pair = c.pairWith(d);     // method taking and returning module classes
+  let p: lib::Pair = c.pairWith(move d); // method taking and returning module classes
   f: view lib::Cell = p.first();        // ... from the class that was declared first, as a 'view'
   let k: lib::Kind = f.kindOf();        // method returning a module enum
   let s = lib::Splitter();

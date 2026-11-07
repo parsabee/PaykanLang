@@ -323,7 +323,7 @@ TEST(Enum, VariantFieldsNameAType) {
 fn size(b: E::B) -> int { return b.x + b.s.len(); }
 fn main() -> int {
   match E::B(2, "ab") {
-    b: B { return size(b); }
+    b: B { return size(move b); }
     _ { return 0; }
   }
 }
@@ -339,7 +339,7 @@ TEST(Enum, TaggedUnionIsAValue) {
     o: E? = E::B(1, "s");
     xs = [E::A; 2];
     l = col::List<E>();
-    l.push(xs[0]);
+    l.push(E::B(2, "t"));
     io::println(t);
     io::println(o);
   )"));
@@ -501,9 +501,9 @@ TEST(Enum, GenericVariantsInstantiate) {
 TEST(Enum, GenericEnumInGenericCode) {
   auto r = semaCheck(std::string(kGeneric) + R"(
 fn unwrapOr<T>(m: Maybe<T>, d: T) -> T {
-  match m { j: Just { return j.value; } Nothing { return d; } }
+  match move m { j: Just { return move j.value; } Nothing { return d; } }
 }
-fn wrap<T>(x: T) -> Maybe<T> => Maybe::Just(x);
+fn wrap<T>(x: T) -> Maybe<T> => Maybe::Just(move x);
 fn none<T>() -> Maybe<T> { return Maybe::Nothing; }
 struct Cell<T> { m: Maybe<T>; }
 )" + wrapMain(R"(
@@ -541,7 +541,7 @@ TEST(Enum, GenericVariantsTakeTheOtherSideEitherWay) {
     r = Result<int, Str>::Ok(1);
     o: bool = Result::Ok(1) == r;
     p: bool = Result::Err("no") != r;
-    q = if n > 0 then Result::Err("no") else r;
+    q = if n > 0 then Result::Err("no") else move r;
     small: Maybe<u8> = Maybe::Just(200);
     s: bool = Maybe::Just(200) == small;
   )"));
@@ -574,13 +574,14 @@ TEST(Enum, GenericCallsAndOpenVariantsTakeTheOtherSideEitherWay) {
     r = Result<int, Str>::Ok(1);
     g: bool = ok(1) == r;
     h: bool = r == ok(1);
-    i = if n > 0 then ok(1) else r;
-    j = if n > 0 then r else ok(1);
-    k: Result<int, Str> = i;
-    k = j;
+    r2 = Result<int, Str>::Ok(1);
+    i = if n > 0 then ok(1) else move r;
+    j = if n > 0 then move r2 else ok(1);
+    k: Result<int, Str> = move i;
+    k = move j;
     l: bool = Pair::Left(1) == Pair::Both(1, "s");
     o = if n > 0 then Pair::Left(1) else Pair::Both(1, "s");
-    p: Pair<int, Str> = o;
+    p: Pair<int, Str> = move o;
     q: bool = Maybe::Just(Maybe::Nothing) == Maybe::Just(Maybe::Just(1));
     s = if n > 0 then Maybe::Just(Maybe::Nothing) else Maybe::Just(Maybe::Just(1));
     t: Maybe<Maybe<int>> = s;

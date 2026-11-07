@@ -100,7 +100,7 @@ class Question {
 }
 
 impl Question {
-  fn __init__(t: Str) { self.text = t; }
+  fn __init__(t: Str) { self.text = move t; }
 }
 
 // ---- generics: T? with T = int ---------------------------------------------

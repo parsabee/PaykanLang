@@ -15,22 +15,22 @@ class Wrap<T> : Base {
 }
 
 impl Wrap<T> {
-  fn __init__(v: T, n: int) { __super__(n); self.v = v; }
+  fn __init__(v: T, n: int) { __super__(n); self.v = move v; }
 }
 
 class Node<T> {
   v: T;
   next: Obj;
-  fn link(n: Node<T>) { self.next = n; }
+  fn link(n: Node<T>) { self.next = move n; }
 }
 
 impl Node<T> {
-  fn __init__(v: T) { self.v = v; self.next = None; }
+  fn __init__(v: T) { self.v = move v; self.next = None; }
 }
 
 fn main() -> int {
   let w = Wrap("a", 5);
-  let b: Base = w;
+  b: view Base = w;
   let a: mut = Node(1);
   a.link(Node(2));
   return b.num() + w.num();

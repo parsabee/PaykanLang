@@ -7,6 +7,6 @@ fn name() -> Str {
 fn describe(n: int) -> Str {
   return name() + "<" + Str(n) + ">";
 }
-fn both(c: circle::Circle) -> Str {
+fn both(c: view circle::Circle) -> Str {
   return describe(c.r) + "+" + circle::describe(c);
 }

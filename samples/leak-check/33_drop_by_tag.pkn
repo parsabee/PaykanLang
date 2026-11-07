@@ -69,15 +69,16 @@ class Box {
   wide: Wide;
 }
 
-fn wide(s: Str) -> Wide => Wide(s, s, s, s, s);
+fn wide(s: view Str)
+        -> Wide => Wide(s.clone(), s.clone(), s.clone(), s.clone(), s.clone());
 
-fn quad(s: Str) -> Quad => Quad(wide(s), wide(s), wide(s), wide(s));
+fn quad(s: view Str) -> Quad => Quad(wide(s), wide(s), wide(s), wide(s));
 
 fn big(s: Str, shape: Shape) -> Big {
-  return Big(quad(s), quad(s), quad(s), quad(s), quad(s), shape);
+  return Big(quad(s), quad(s), quad(s), quad(s), quad(s), move shape);
 }
 
-fn describe(s: Shape) -> Str {
+fn describe(s: view Shape) -> Str {
   match s {
     c: Circle { return "circle " + c.name; }
     Empty { return "empty"; }
@@ -127,11 +128,10 @@ fn keep(b: Big, k: int) -> Big {
 }
 
 fn main() -> int {
-  let shapes = [Shape::Circle("c" + "1", "t"), Shape::Empty,
-      Shape::Square("s", 2), Shape::Label("x", "y", "z")];
-  for i in 0..4 {
-    io::println(pick(big("q", shapes[i]), 5));
-  }
+  io::println(pick(big("q", Shape::Circle("c" + "1", "t")), 5));
+  io::println(pick(big("q", Shape::Empty), 5));
+  io::println(pick(big("q", Shape::Square("s", 2)), 5));
+  io::println(pick(big("q", Shape::Label("x", "y", "z")), 5));
   line = pick(big("a", Shape::Empty), 0);
   line += " " + pick(big("b", Shape::Circle("n", "t")), 1);
   line += " " + pick(big("c", Shape::Square("n", 1)), 2);
@@ -140,10 +140,10 @@ fn main() -> int {
   line += " " + pick(big("v", Shape::Label("f", "g", "h")), 5);
   io::println(line);
   let w = Wide("a", "b", "c", "d", "e");
-  let b = Box(Shape::Circle("u", "v"), w);
+  let b = Box(Shape::Circle("u", "v"), move w);
   io::println(describe(b.shape) + " " + b.wide.e);
   let kept = keep(big("m", Shape::Label("p", "q", "r")), 5);
-  io::println(kept.w.p.a + " " + pick(kept, 5));
+  io::println(kept.w.p.a + " " + pick(move kept, 5));
   h = Holder(Shape::Label("p", "q", "r"), 1);
   h.s = Shape::Square("t", 3);
   io::println(describe(h.s));

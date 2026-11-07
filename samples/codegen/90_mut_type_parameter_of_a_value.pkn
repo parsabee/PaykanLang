@@ -3,12 +3,14 @@
 //            form (docs/design/concurrency.md, "Generics and Copyable"): a
 //            reference's writes for a class, the value itself for an `int`
 //            or a struct, as a template's `T?` of an optional T is that
-//            optional.  One `Vec<E>` hands out its elements writable
-//            (`-> mut E?`, a closure's `mut E`) for a class and as copies
-//            for a value.  `Vec<int>` was `'mut' applies to objects; 'int'
-//            is a value` at each `mut E`.
+//            optional.  One `Vec<E>` takes its elements out writable
+//            (`-> mut E?`, and an `e: mut E` local it lends to a closure's
+//            `inout E`): the reference for a class, the value for a value.
+//            `Vec<int>` was `'mut' applies to objects; 'int' is a value` at
+//            each `mut E`.
 // expect-stdout: 2 7 3
 import ::io;
+import ::collections as cl;
 import ::memory as mem;
 
 class Node {
@@ -21,42 +23,49 @@ struct P {
 }
 
 class Vec<E> {
-  storage: mem::Buffer<E>;
+  storage: cl::List<E>;
 }
 
 impl Vec<E> {
-  fn __init__()   { self.storage = mem::Buffer<E>(); }
+  fn __init__()   { self.storage = cl::List<E>(); }
 
-  fn append(e: E) { self.storage.push(e); }
+  fn append(e: E) { self.storage.push(move e); }
 
-  fn at(i: int) -> mut E? {
+  /// Takes element @p i out, or None past the end.
+  fn take(i: int) -> mut E? {
     if unsigned(i) >= self.storage.len() {
       return None;
     }
-    return self.storage.get(unsigned(i));
+    return self.storage.removeAt(unsigned(i));
   }
 
-  fn forEach(f: (mut E) -> void)
-                  { for i in 0..self.storage.len() { f(self.storage.get(i)); } }
+  /// Lends each element to @p f, which may change it, and puts it back.
+  fn forEach(f: (inout E) -> void) {
+    for i in 0..self.storage.len() {
+      e: mut E = self.storage.removeAt(i);
+      f(e);
+      self.storage.insert(i, move e);
+    }
+  }
 }
 
 fn main() -> int {
   let nodes: mut = Vec<Node>();
   nodes.append(Node(1));
-  nodes.forEach(fn(e: mut Node) { e.bump(); });
+  nodes.forEach(fn(e: inout Node) { e.bump(); });
 
-  let sum: mut = mem::Box(0);
+  let sum: shared mut = mem::Box(0);
   let ints: mut = Vec<int>();
   ints.append(3);
-  ints.forEach(fn(e: int) { s: inout = sum.get(); s += e; });
+  ints.forEach(fn(e: inout int) { s: inout = sum.get(); s += e; });
   let ps: mut = Vec<P>();
   ps.append(P(4));
-  ps.forEach(fn(e: P) { s: inout = sum.get(); s += e.x; });
+  ps.forEach(fn(e: inout P) { s: inout = sum.get(); s += e.x; });
 
-  match nodes.at(0) {
+  match nodes.take(0) {
     n: Node { io::print(Str(n.n) + " "); }
   }
-  match ints.at(0) {
+  match ints.take(0) {
     k: int { io::println(Str(sum.value()) + " " + Str(k)); }
   }
   return 0;

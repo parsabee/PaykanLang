@@ -20,7 +20,7 @@ TEST(Tuple, LiteralInferredAndIndexed) {
   auto r = semaCheck(wrapMain(R"(
     t = (1, "a", True);
     x: int = t.0;
-    s: Str = t.1;
+    s: Str = t.1.clone();
     b: bool = t.2;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -71,7 +71,7 @@ TEST(Tuple, IndexOnNonTuple) {
 TEST(Tuple, NestedIndexChain) {
   auto r = semaCheck(wrapMain(R"(
     t = ((1, "x"), 2.5);
-    s: Str = t.0.1;
+    s: Str = t.0.1.clone();
     f: float = t.1;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -261,7 +261,7 @@ TEST(Tuple, SatisfiesAShowBound) {
       item: T;
       view fn text() -> Str { return self.item.toString(); }
     }
-    impl Box<T> { fn __init__(v: T) { self.item = v; } }
+    impl Box<T> { fn __init__(v: T) { self.item = move v; } }
     fn main() -> int {
       s: Str = show((1, "a"));
       s2: Str = show(((1, 'c'), 2.5));
@@ -299,10 +299,10 @@ TEST(Tuple, NestedRefElementCovariance) {
     fn take(t: ((Obj, int), int)) -> int { return t.1; }
     fn main() -> int {
       nn: ((Str, int), int) = (("a", 1), 2);
-      no: ((Obj, int), int) = nn;
+      no: ((Obj, int), int) = nn.clone();
       no = (("b", 3), 4);
       deep: (int, ((Obj, A?), int)) = (1, (("a", B()), 2));
-      return take(nn);
+      return take(move nn);
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -417,20 +417,20 @@ TEST(Tuple, AsFieldParamReturnAndArrayElement) {
     class Holder {
       pair: (int, Str);
       view fn first() -> int { return self.pair.0; }
-      fn get() -> (int, Str) { return self.pair; }
+      fn get() -> (int, Str) { return self.pair.clone(); }
     }
 
     impl Holder {
-      fn __init__(p: (int, Str)) { self.pair = p; }
+      fn __init__(p: (int, Str)) { self.pair = move p; }
     }
-    fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }
+    fn swap(p: (int, Str)) -> (Str, int) { return (p.1.clone(), p.0); }
     fn main() -> int {
       h: mut Holder = Holder((1, "a"));
       q, r = h.get();
       pairs: (int, Str)[2] = [(1, "a"), (2, "b")];
-      pairs[1] = h.pair;
-      s, n = swap(pairs[0]);
-      inner: Str = pairs[1].1;
+      pairs[1] = h.pair.clone();
+      s, n = swap(pairs[0].clone());
+      inner: Str = pairs[1].1.clone();
       return h.first() + q + n;
     }
   )");
@@ -490,8 +490,8 @@ TEST(Tuple, TupleIsAnOrdinaryClassName) {
     impl Tuple { fn __init__() { self.x = 1; } }
     fn main() -> int {
       t: Tuple = Tuple();
-      p: (Tuple, int) = (t, 1);
-      return t.x + p.1 + p.0.x;
+      p: (Tuple, int) = (move t, 1);
+      return p.1 + p.0.x;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -591,8 +591,8 @@ class Pt { x: int; y: int; }
 impl Pt { fn __init__(x: int, y: int) { self.x = x; self.y = y; } }
 class Bag {
   pair: (int, Str);
-  fn get() -> (int, Str) { return self.pair; }
-  fn nested() -> (Pt, (int, Str)) { return (Pt(1, 2), self.pair); }
+  fn get() -> (int, Str) { return self.pair.clone(); }
+  fn nested() -> (Pt, (int, Str)) { return (Pt(1, 2), self.pair.clone()); }
 }
 
 impl Bag {
@@ -611,7 +611,7 @@ fn main() -> int {
   n, s = b.get();
   ps: (int, Str)[1] = geo::pairs();
   t: (geo::Pt, (int, Str)) = b.nested();
-  x: int = geo::take(t) + geo::take(b.nested()) + geo::count(ps);
+  x: int = geo::take(move t) + geo::take(b.nested()) + geo::count(ps);
   return q + r + n + x + ps[0].0;
 }
 )");

@@ -18,11 +18,11 @@ import ::io;
 class Pair<A, B> {
   first: A;
   second: B;
-  fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
+  view fn swap() -> Pair<B, A> { return Pair<B, A>(self.second.clone(), self.first.clone()); }
 }
 
 impl Pair<A, B> {
-  fn __init__(a: A, b: B) { self.first = a; self.second = b; }
+  fn __init__(a: A, b: B) { self.first = move a; self.second = move b; }
 }
 
 fn main() -> int {
@@ -70,8 +70,8 @@ fn indexOf<T>(xs: view T[], x: view T) -> int? {
   return None;
 }
 
-fn three<T>(x: T) -> T[3] {
-  return [x; 3];
+fn three<T: Cloneable>(x: T) -> T[3] {
+  return [x.clone(), x.clone(), move x];
 }
 
 fn main() -> int {
@@ -100,7 +100,10 @@ True
 A slice parameter (`view T[]`, see [Slices](09-arrays.md#slices)) takes `T` from the
 array's elements, so `lastOf` works on an array of any type and length. `lastOf` returns a
 `view` of the caller's element, and `indexOf` an `int?` that is `None` when the value is
-not there. [Inference](#inference) below gives the exact rules.
+not there. `three` makes its elements with `clone()`, which every `Cloneable` type has
+([Cloneable](06-traits.md#cloneable)), and requires it with a bound, `T: Cloneable`
+([below](#how-generic-code-is-checked)): `[x; 3]` copies `x`, which a `Str` does not allow.
+[Inference](#inference) below gives the exact rules.
 
 ## How generic code is checked
 
@@ -151,13 +154,18 @@ note: in instantiation of 'Doubler<bool>' requested here
 `Stack<Task>`, and since nothing about a stack depends on what it holds, `Stack<T>` is
 generic. It keeps its items in a `T?[8]` with a count, so its empty slots are `None`.
 `push` returns `False` when the stack is full, and `pop` returns `T?`, `None` when the stack
-is empty. `push` stores its item with `move`: the slot it fills is the stack's to change, a
-`mut T`, and a reference becomes `mut` only by `move`
-([Memory](16-memory.md#ownership-transfers)); for an `int` the move is a copy. `TaskList.add`
-stores its task the same way:
+is empty. `push` stores its item with `move`: `x` is the stack's own, and a move-only value
+goes into a slot only by `move` ([Memory](16-memory.md#ownership-transfers)); for an `int`
+the move is a copy. `TaskList.add` stores its task the same way. An item leaves its slot
+the same way, since reading it would copy it: `pop` takes the top item out by
+[`mem::take`](../stdlib/memory.md#moving-values-out-of-places-swap-replace-and-take), which
+leaves `None` in the slot, and `remove` moves the removed task and the ones after it by
+`mem::replace`, which leaves a blank task in each slot it empties. An array element is an
+`inout` place, as a variable is ([Functions](03-functions.md#inout-the-callers-storage)):
 
 ```pkn
 import ::io;
+import ::memory as mem;
 
 class Stack<T> {
   items: T?[8];
@@ -173,9 +181,7 @@ class Stack<T> {
   fn pop() -> T? {
     if self.count == 0 { return None; }
     self.count = self.count - 1;
-    let top = self.items[self.count];
-    self.items[self.count] = None;
-    return top;
+    return mem::take(self.items[self.count]);
   }
 
   view fn size() -> int { return self.count; }
@@ -193,7 +199,7 @@ class Task {
 }
 
 impl Task {
-  fn __init__(title: Str) { self.title = title; }
+  fn __init__(title: Str) { self.title = move title; }
 }
 
 class TaskList {
@@ -211,10 +217,10 @@ class TaskList {
   // Removes task number `n`, moving the ones after it down.
   fn remove(n: int) {
     if n < 1 || n > self.count { return; }
-    self.removed.push(self.tasks[n - 1]);
+    self.removed.push(mem::replace(self.tasks[n - 1], Task("")));
     i = n;
     while i < self.count {
-      self.tasks[i - 1] = self.tasks[i];
+      self.tasks[i - 1] = mem::replace(self.tasks[i], Task(""));
       i = i + 1;
     }
     self.count = self.count - 1;
@@ -223,8 +229,9 @@ class TaskList {
   fn undo() {
     match self.removed.pop() {
       t: Task {
-        if self.add(t) { io::println("restored '" + t.title + "'"); }
-        else { io::println("no room for '" + t.title + "'"); }
+        let title = t.title.clone();
+        if self.add(move t) { io::println("restored '" + title + "'"); }
+        else { io::println("no room for '" + title + "'"); }
       }
       None    { io::println("nothing to undo"); }
     }
@@ -523,7 +530,7 @@ class Slot<T> {
 
 impl Slot<T> {
   fn __init__() { self.v = None; }
-  fn put(x: T) { self.v = x; }
+  fn put(x: T) { self.v = move x; }
 }
 
 fn main() -> int {
@@ -695,7 +702,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument, 17 deep: `instantiating 'Bad<…>' exceeds the maximum instantiation depth (16); a generic class may not instantiate itself with an ever-growing type argument` |
 | Instantiation name too long | an instantiation inside one of its own template's that grows its type arguments from that one's, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
-| Instantiation name clash | this module's `Box<Str>` and an imported template's (also one a library's private template makes, `::collections`' `_Node<int>`), or an imported class `Box<int>`: one error, at this module's own instantiation, with notes at the other template's declaration and instantiation, or at the import |
+| Instantiation name clash | this module's `Box<Str>` and an imported template's (also one a library's private template makes, `::collections`' `_Table<int, int>`), or an imported class `Box<int>`: one error, at this module's own instantiation, with notes at the other template's declaration and instantiation, or at the import |
 
 ## Not Supported Yet
 

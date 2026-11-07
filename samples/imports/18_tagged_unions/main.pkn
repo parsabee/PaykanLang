@@ -18,7 +18,7 @@ fn main() -> int {
     r: Rect { io::println("| " + Str(shapes::rectArea(r)) + " |"); }
     _ {}
   }
-  s = all[0];
+  s = shapes::Shape::Rect(2, 3); // all[0]'s value, to widen in place
   shapes::widen(s);
   io::println(s.toString() + " " + Str(s == shapes::Shape::Rect(4, 3)));
   shapes::squares(2, 3);

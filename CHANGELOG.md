@@ -28,7 +28,7 @@ samples/concurrency/README.md.
   never written `mut`, while a `shared mut` field keeps its writes through any root; an
   object held in a struct, a tuple or an array follows the variable's `let` (`'p' is
   declared with 'let', and so are the objects it holds; drop 'let' to change them`); a
-  `match` binding is a copy of its subject in the subject's form. `mut T` flows
+  `match` binding that owns what it binds is in the subject's form. `mut T` flows
   into `T`; `T` gains `mut` only by `move` or straight from a temporary (`cannot store a 'T'
   in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`); `shared T` and
   `shared mut T`, a frozen object and a cell convert only as they are. The rejected
@@ -66,9 +66,34 @@ samples/concurrency/README.md.
   `atomic shared` or `locked`: a `shared` or `weak` part, a function value or an `Obj`
   cannot cross.
 - The built-in trait `Copyable` (docs/language/06-traits.md): structural, never implemented;
-  numbers, `bool`, `char`, enums, `shared` references, handles and values of such parts.
-- `paykan --strict-ownership` (docs/language/17-the-paykan-command.md): the design's copy rule,
-  under which a move-only value read from a place flows into an owning slot only by `move`.
+  numbers, `bool`, `char`, `shared` references, handles, and enums, structs, tuples, arrays
+  and optionals of such parts (an enum whose payloads are not Copyable is move-only).
+- The built-in trait `Cloneable`, `view fn clone() -> Self`, the explicit copy of a value
+  (docs/language/06-traits.md, "Cloneable", #369). Every Copyable type is Cloneable, its
+  clone the copy; `Str` is, `s.clone()` a new string; a struct, a tuple, a fixed array or
+  an optional is when every part is, and a struct with a part that is not may write its
+  own `clone`. A class opts in with `impl Cloneable for C`: an empty block derives `clone`
+  (unique fields cloned, Copyable fields copied, `shared` and `weak` fields the same object,
+  an `atomic` field a new cell holding the current value), or the block writes it. `clone`
+  is virtual, and a subclass of a Cloneable class has its own, derived or written, returning
+  its own class (`class 'D' inherits 'Cloneable' from 'C', whose 'clone' makes a 'C': write
+  'impl Cloneable for D {}' to derive its own, or a 'clone' of its own`); a derived clone of
+  a class with a field that is not Cloneable is `'impl Cloneable for C {}' cannot derive
+  'clone': its field ...`. An enum whose payloads are not Copyable is not Cloneable yet.
+  The copy error offers the clone when the type has one (`... 's.clone()' to copy it ...`).
+- `mem::swap<T>(a: inout T, b: inout T)`, `mem::replace<T>(slot: inout T, v: T) -> T` and
+  `mem::take<T>(slot: inout T?) -> T?` (docs/stdlib/memory.md): how a move-only value leaves
+  a field, in exchange for another value, `None` for `take`; `swap` trades the two values'
+  bytes with no count (`Paykan_mem_swap`, src/Runtime/Buffer.c). They reach an element of a
+  fixed-size array too (`mem::take(xs[i])`), which is now an `inout` place.
+- An element of a fixed-size array is an `inout` place where the array is one (a variable, a
+  field, another element, an `inout` result), and so is a struct field of one: it is passed
+  to an `inout` parameter, named by an `inout` local or arm, or returned `inout`, by its
+  address in the array's bytes after the index's bounds check (docs/language/03-functions.md).
+  Elements at different literal indexes are different places (`mem::swap(xs[0], xs[1])`); at
+  any other index an element may be any of them (`'xs' is passed to two 'inout' parameters`).
+  A slice's element is not a place yet (`an element of a slice cannot be passed to 'inout'
+  parameter 'n' yet`), nor is a temporary array's.
 - PIR's `async fn`, `async_call` and `await`, and a `parallel` annotation on `while` (docs/pir.md
   §3, §6), which every pass and the C path read as a plain `while`.
 - The binary form (docs/pir.md §11): `async_call` and `await` are opcodes 63 and 64, an `async
@@ -84,6 +109,12 @@ samples/concurrency/README.md.
   with no call into the memory module and no count on the buffer.
 - The `benchmarks/` directory: programs that measure `parallel for`, and `run.py`, which runs them
   over thread counts (benchmarks/README.md).
+- `clone()` on the containers and on `mem::Buffer<T>` whose elements are Cloneable: a new
+  container of clones of the elements (a `HashMap` when its keys and values are), as a struct's
+  clone is of its fields (docs/stdlib/collections.md, docs/stdlib/memory.md). A container of
+  elements that are not Cloneable is not (`'List<Node>' is not Cloneable: its field '__items'
+  ('Buffer<Node>') is not Cloneable`).
+- `mem::Buffer<T>.pop()`: removes the last slot and returns its value, which moves out.
 
 ### Changed
 
@@ -94,8 +125,95 @@ samples/concurrency/README.md.
   a frozen object are immortal (counts `PAYKAN_REF_MAX`), so a handle crosses threads with no count.
 - The runtime ABI version follows the release (`PAYKAN_RUNTIME_ABI_VERSION` is the version
   number): a `.pkm` built by 0.3.0 is rebuilt from source by 0.4.0, whose vtables differ.
+- **Breaking:** the copy rule is the memory model, always on, in every module, the standard
+  library's and every imported one included (docs/language/16-memory.md, "Ownership
+  transfers", #369). A move-only value (a unique reference `T` or `mut T`, a `Str`, a
+  container, a task handle, or a value holding one) read from a place (a
+  variable, a parameter, a field, an element) flows into an owning slot (a declaration, an
+  assignment or a store, a plain argument, a literal's element, a `return`) only by `move x`
+  or `move x.f`, by `x.clone()`, to a borrow (a `view` or `inout` parameter), or when it is
+  `shared`: `cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare it
+  'shared Node'`, `cannot copy 'p': 'Person' holds unique field 'name' ('Str'); write 'move
+  p' to transfer it, or 'p.clone()' to copy it`, and for a field `a field leaves by
+  'mem::replace' or 'mem::take'`. Copyable values copy as before, function values among
+  them. A store into a `weak` field or
+  variable, and the generated `__init__`'s parameter of a `weak` field, take nothing from the
+  owner. The compiler still turns a last use into a transfer, as an optimisation the rule
+  does not depend on. `paykan --strict-ownership`, which checked the rule in the file being
+  compiled only, is gone: in the default mode a "unique" reference copied into a second
+  owner, so a program could hand one owner to a task and keep using the other.
+- `return x` of a local or a by-value parameter moves it, with no `move` written: a
+  `return` is always the variable's last use (docs/language/16-memory.md, "`return` moves").
+- A plain `match` binding of a move-only part of a variable, a parameter or a field is a
+  borrow of the subject, a `view`: read and passed to `view` parameters, never stored,
+  moved, returned or written through (`'n' is a 'match' binding, a borrow of 'cur' ('match
+  move cur' binds what it owns); ...`). `match move x { ... }` binds owned parts and moves
+  `x`, an `n: inout T` arm writes through to the subject, and the bindings of a temporary
+  are owned (docs/language/08-match.md, "Bindings").
+- **Breaking:** a method borrows its receiver, so it cannot return, pass, store or capture
+  `self` (`cannot copy 'self' (a unique 'mut Counter'); a method borrows its receiver (a
+  'shared fn' hands on a shared one)`). A method declared `shared fn` (`shared view fn`)
+  has a `shared mut` (`shared`) `self`, which it may hand on, so `return self` chains calls;
+  it is called on a receiver held in that form or on a temporary (`'add' is a 'shared fn',
+  which takes its receiver as a 'shared mut Counter'; 'u' is a 'mut Counter': declare it
+  'shared mut Counter'`). An override keeps the marker, a trait's `shared fn` is met by one,
+  and `__init__`, a struct's method and a free function are none
+  (docs/language/05-classes.md, "Methods that hand on self: `shared fn`"). A module's
+  markers are in its interface: an IFACE method's flags gain bit 3, `shared fn`
+  (docs/design/pkm.md).
+- `[v; n]` of a value that is not Copyable evaluates `v` for each element, first to last, so
+  `[Node(); 3]` is three nodes (docs/language/09-arrays.md, "Repeated values"); a Copyable
+  `v` is evaluated once and copied, as before. A variable or a field there is `'[v; n]'
+  evaluates its value for each of its 3 elements, and 's' (a 'Str') is not Copyable: write a
+  value made for each, such as '[s.clone(); 3]'`, and a `move` in `v` is `... so it cannot
+  move 's' (that would move it 3 times)`.
+- A function value is Copyable: its copies share its closure, which counts them, and one
+  with no captures is just the function's address (docs/language/14-function-types.md,
+  "Function Values Are Values"). So it is captured, passed and stored as a number is, and
+  `f.clone()` is a copy. A qualifier on a function type is `a function value takes no
+  qualifier ('shared (int) -> int'): it is Copyable, and its copies share its closure`.
 - The generated `__init__` of a class or struct moves a move-only parameter into its field, so a
-  type holding a `Str` or a unique reference passes `--strict-ownership` with no `__init__` of its own.
+  type holding a `Str` or a unique reference needs no `__init__` of its own under the copy rule.
+- **Breaking:** a lambda captures by copy, so it captures only Copyable values (numbers, `shared`
+  and `shared mut` references, `atomic shared` and `locked` handles, aggregates of those) or a
+  `weak` local: a unique
+  object, a `Str`, a container, or a value holding one, is `cannot capture 's' (a unique
+  'Str'): a function captures by copy; declare it 'shared Str', or capture a 'weak' local
+  of it`. A function value is captured as it is copied, its closure shared. A clone is as move-only as its source; the variable is declared `shared`, the
+  value passed to the lambda as an argument, or what the lambda needs read into a Copyable
+  local first (docs/language/14-function-types.md, "Captures").
+- **Breaking:** an array or a tuple literal's element is an owning slot (`[move a, b.clone()]`),
+  and it holds no `shared` reference, frozen object or cell: an element's type keeps no
+  qualifier, so the reference would come back out unique (`cannot store a 'shared Node' in an
+  element of the tuple, a 'Node': a 'shared' reference, a frozen object and a cell convert
+  only as they are`). A struct with a qualified field holds one in its place.
+- **Breaking:** a qualifier on a part of a type is an error: a tuple's element, a type
+  argument, an array's element and a function type's parameter or result take none
+  (`(Str, shared Node)`, `List<shared Node>`, `mem::Box<shared mut Node>`, `(shared Node) ->
+  int`: `'shared' cannot qualify a part of a type yet (...): only a whole variable, field,
+  parameter or result takes one; hold the reference in a struct field to qualify it`;
+  qualifiers inside types are #368; docs/language/19-concurrency.md, "Parts of a type take no
+  qualifier").
+- **Breaking:** an enum variant's arguments (`Shape::Named(move t)`) and an imported function's
+  or constructor's arguments go through the copy rule, as every other owning slot does: an
+  imported call took a move-only place as it was, so a helper in another module that only
+  reads its argument takes a `view`.
+- **Breaking:** `Str(s)` of a `Str`, and `Str<Str>(s)`, is a new string with `s`'s text, as
+  `s.clone()` is; it was `s` itself (docs/language/04-strings-and-conversions.md). It still
+  takes no `view` of a string: `v.toString()` or `v.clone()` copies one.
+- **Breaking:** the containers own their elements (docs/stdlib/collections.md,
+  docs/stdlib/memory.md). The stores take the element by value and it moves in (`push(v: T)`,
+  `set`, `insert`, `pushFront`, `pushBack`, `enqueue`, `put(k: K, v: V)`, `add`, the priority
+  queues' `push`, `mem::Buffer`'s `set` and `push`), so a move-only value read from a variable
+  is passed with `move` or `clone()`; the reads lend a `view` (`at`, `last`, `front`, `back`,
+  `peek`, `atOr`); `pop`, `removeAt`, `popFront`, `popBack` and `dequeue` move the element
+  out. The copying methods (`get`, `getFront`, `getBack`, `getOr`, `keys`, `values`, `toList`,
+  `mem::Buffer`'s `get` and `copy(i)`, and `listOf`) clone, and exist only where the elements
+  are Cloneable (`impl X<T: Cloneable>` blocks: `no method 'get' on type 'List<Node>'` for a
+  class `Node` that is not); they are `view fn`s now. `LinkedList` keeps its nodes, and the
+  hash tables their entries and chains, in buffers linked by index, not in node objects with
+  `weak` back links, so every element is the container's alone and an end of a `LinkedList`
+  stays O(1) (amortised).
 - The samples, the benchmarks and the standard library leave out the types the compiler infers:
   a declaration's type when its initializer has exactly that type (`let n = Node(1)`,
   `cur: mut = self.buckets[b]`) and the type arguments its arguments determine (`Str(n)` for
@@ -123,7 +241,7 @@ samples/concurrency/README.md.
   struct `P`) is that value, as the design joins a template's qualifier with its type
   argument's form (docs/design/concurrency.md, "Generics and Copyable"): it was `'mut'
   applies to objects; 'int' is a value` at each `mut E` of the instantiation, so one
-  container could not hand out a class's elements writable and a value's as copies
+  container could not give out a class's elements writable and a value's as values
   (src/AST/AST.cpp, ASTCloner; samples/codegen/90_mut_type_parameter_of_a_value.pkn).
 - A method of an instantiation an import's interface gives, that the import's module file
   does not keep (it keeps of a copy it does not expose only what its own code reaches), is
@@ -159,6 +277,8 @@ samples/concurrency/README.md.
 
 ### Removed
 
+- `List<T>.copy()`: `clone()` copies a list whose elements are Cloneable. The private templates
+  `_Node` and `_Entry` of `::collections` are gone with the node objects (docs/stdlib/index.md).
 - The `mov` keyword, reserved since 0.2.0 removed it: `mov` is an ordinary identifier now, and
   the explicit transfer is `move` (docs/language/19-concurrency.md, "`move`: an explicit transfer").
 

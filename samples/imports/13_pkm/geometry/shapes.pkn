@@ -13,7 +13,7 @@ class Shape {
 }
 
 impl Shape {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = move name; }
 }
 
 class Rect : Shape {

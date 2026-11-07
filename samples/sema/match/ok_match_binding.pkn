@@ -6,7 +6,7 @@ class Dog {
 }
 
 impl Dog {
-  fn __init__(n: Str) { self.name = n; }
+  fn __init__(n: Str) { self.name = move n; }
 }
 
 fn main() -> int {

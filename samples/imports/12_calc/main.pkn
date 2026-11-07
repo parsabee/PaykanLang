@@ -3,7 +3,7 @@
 // Expressions support + - * / %, parentheses, unary minus, and decimals.
 // Results are remembered: assign with `x = expr`, then use `x` (and the
 // built-in `ans`, `pi`, `e`) in later expressions. Variables live in a
-// string-keyed hash map (calc/hashmap.pkn).
+// string-keyed hash map (calc/hashmap.pkn), which the parser shares.
 //
 // As a sample, it first replays a short scripted session (`demo` below)
 // through the same code path as the REPL, which ends by defining `a` and `b`;
@@ -109,9 +109,12 @@ class Ring<T> {
 }
 
 impl Ring<T> {
-  // Every slot starts as `blank`, until an item is added there.
+  // Every slot starts as a clone of `blank`, until an item is added there.
   fn __init__(blank: T) {
-    self.items = [blank; 16];
+    self.items = [blank.clone(), blank.clone(), blank.clone(), blank.clone(),
+        blank.clone(), blank.clone(), blank.clone(), blank.clone(),
+        blank.clone(), blank.clone(), blank.clone(), blank.clone(),
+        blank.clone(), blank.clone(), blank.clone(), move blank];
     self.count = 0;
     self.start = 0;
   }
@@ -123,16 +126,16 @@ fn show(v: float) -> Str {
 }
 
 // Seed the environment with the constants and the `ans` register.
-fn defineConstants(env: mut hashmap::HashMap) {
+fn defineConstants(env: shared mut hashmap::HashMap) {
   env.put("pi", 3.141592653589793);
   env.put("e", 2.718281828459045);
   env.put("ans", 0.0);
 }
 
 // Evaluate one statement line (an assignment or a bare expression) and print.
-fn evalStatement(src: Str, env: mut hashmap::HashMap,
-                 history: mut Ring<(Str, float)>, quiet: bool) {
-  let p: mut = parser::Parser(src, env);
+fn evalStatement(src: Str, env: shared mut hashmap::HashMap,
+                 history: inout Ring<(Str, float)>, quiet: bool) {
+  let p: mut = parser::Parser(src.clone(), env);
   target, value = p.parseStatement();
 
   match p.error {
@@ -148,7 +151,7 @@ fn evalStatement(src: Str, env: mut hashmap::HashMap,
   }
 
   env.put("ans", value);
-  history.add((src, value));
+  history.add((src.clone(), value));
   match target {
     name: Str {
       env.put(name, value);
@@ -168,30 +171,33 @@ fn evalStatement(src: Str, env: mut hashmap::HashMap,
   }
 }
 
+// List the variables of the chain of entries that starts at `e`.
+fn listChain(e: view hashmap::Entry) {
+  io::println("  " + e.key + " = " + show(e.value));
+  match e.next {
+    n: hashmap::Entry { listChain(n); }
+    None { }
+  }
+}
+
 // List every stored variable, walking each bucket's chain of entries.
-fn listVars(env: mut hashmap::HashMap) {
+fn listVars(env: view hashmap::HashMap) {
   if env.count() == 0 {
     io::println("(no variables)");
     return;
   }
   b = 0;
   while b < env.bucketCount() {
-    cur = env.bucket(b);
-    while cur != None {
-      match cur {
-        e: hashmap::Entry {
-          io::println("  " + e.key + " = " + show(e.value));
-          cur = e.next;
-        }
-        None { }
-      }
+    match env.bucket(b) {
+      e: hashmap::Entry { listChain(e); }
+      None { }
     }
     b = b + 1;
   }
 }
 
 // Print the remembered statements, oldest first, numbered from 1.
-fn listHistory(history: Ring<(Str, float)>) {
+fn listHistory(history: view Ring<(Str, float)>) {
   if history.len() == 0 {
     io::println("(no history)");
     return;
@@ -207,7 +213,7 @@ fn listHistory(history: Ring<(Str, float)>) {
 
 // Split a `:command arg` line into its command word (between ':' and the
 // first space) and its argument (everything after the spaces that follow).
-fn splitCommand(s: Str) -> (Str, Str) {
+fn splitCommand(s: view Str) -> (Str, Str) {
   word = "";
   i = 1;
   while i < s.len() && s[i] != ' ' {
@@ -222,12 +228,12 @@ fn splitCommand(s: Str) -> (Str, Str) {
     arg = arg + Str(s[i]);
     i = i + 1;
   }
-  return (word, arg);
+  return (move word, move arg);
 }
 
 // Run a `:command`. Returns False only for :quit (stop the REPL).
-fn runCommand(s: Str, env: mut hashmap::HashMap, history: Ring<(Str, float)>,
-              quiet: bool) -> bool {
+fn runCommand(s: view Str, env: shared mut hashmap::HashMap,
+              history: view Ring<(Str, float)>, quiet: bool) -> bool {
   word, arg = splitCommand(s);
 
   if word.equals("quit") || word.equals("q") || word.equals("exit") {
@@ -272,20 +278,20 @@ fn runCommand(s: Str, env: mut hashmap::HashMap, history: Ring<(Str, float)>,
 }
 
 // Handle one input line. Returns False only when the user asked to quit.
-fn handle(line: Str, env: mut hashmap::HashMap, history: mut Ring<(Str, float)>,
-          quiet: bool) -> bool {
+fn handle(line: view Str, env: shared mut hashmap::HashMap,
+          history: inout Ring<(Str, float)>, quiet: bool) -> bool {
   let s = utils::stripLine(line);
   if s.len() == 0 { return True; }
   if s[0] == ':' {
     return runCommand(s, env, history, quiet);
   }
-  evalStatement(s, env, history, quiet);
+  evalStatement(move s, env, history, quiet);
   return True;
 }
 
 // Read-evaluate-print loop over standard input.
-fn repl(env: mut hashmap::HashMap, history: mut Ring<(Str, float)>, quiet: bool)
-        -> int {
+fn repl(env: shared mut hashmap::HashMap, history: inout Ring<(Str, float)>,
+        quiet: bool) -> int {
   if !quiet {
     io::println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
   }
@@ -318,7 +324,7 @@ fn printHelp() {
 // The scripted session: each line goes through handle(), as if typed at the
 // REPL. It covers expressions, assignment, `ans`, the constants, every
 // command and a few errors, and ends with `a` and `b` defined.
-fn demo(env: mut hashmap::HashMap, history: mut Ring<(Str, float)>) {
+fn demo(env: shared mut hashmap::HashMap, history: inout Ring<(Str, float)>) {
   let script = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
       "(x + y) / 4", "ans * 2", "-x + 10 % 4", "2.5 * 2", ":vars", ":history",
       ":del y", "y + 1", ":del y", "1 / 0", "3 +", "4 4", ":frobnicate",
@@ -383,9 +389,9 @@ fn main(args: view Str[]) -> int {
     i = i + 1;
   }
 
-  let env: mut = hashmap::HashMap();
+  let env: shared mut = hashmap::HashMap();
   defineConstants(env);
-  let history: mut = Ring(("", 0.0));
+  history: mut = Ring(("", 0.0));
   if runDemo { demo(env, history); }
 
   // Batch mode: walk the arguments again and evaluate every expression, in

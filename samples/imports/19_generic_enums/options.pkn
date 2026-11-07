@@ -8,11 +8,11 @@ enum Maybe<T> {
   Nothing
 }
 
-fn wrap<T>(x: T) -> Maybe<T> => Maybe::Just(x);
+fn wrap<T>(x: T) -> Maybe<T> => Maybe::Just(move x);
 
 fn orElse<T>(m: Maybe<T>, d: T) -> T {
-  match m {
-    j: Just { return j.value; }
+  match move m {
+    j: Just { return move j.value; }
     Nothing { return d; }
   }
 }

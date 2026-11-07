@@ -20,25 +20,45 @@ namespace sema {
 
 namespace {
 
-/// The storage @p e names when it is a variable or a chain of fields on one
-/// (`k`, `self.n`, `a.b.n`); "" for anything else.
-std::string placePath(const ast::Expr *e) {
+/// The storage @p e names when it is a variable or a chain of fields and
+/// fixed-size array elements on one (`k`, `self.n`, `a.b.n`, `xs[1].n`); ""
+/// for anything else.  An element whose index is not a literal is any of
+/// them: its path is the whole array's, and @p whole is set, since a part of
+/// it is in any element (`xs[i].n` is `xs`).
+std::string placePath(const ast::Expr *e, bool &whole) {
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
     return id->getName();
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    std::string base = placePath(se->getArray(), whole);
+    const auto *lit = ast::dyn_cast<ast::IntegerLiteral>(se->getIndex());
+    if (base.empty() || whole || !lit ||
+        !ast::isa<ast::FixedArrayType>(se->getArray()->getResolvedType())) {
+      whole = true;
+      return base;
+    }
+    return base + "[" + std::to_string(lit->getValue()) + "]";
+  }
   const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
   if (!ma)
     return "";
-  std::string base = placePath(ma->getReceiver());
-  return base.empty() ? "" : base + "." + ma->getFieldName();
+  std::string base = placePath(ma->getReceiver(), whole);
+  return base.empty() || whole ? base : base + "." + ma->getFieldName();
 }
 
-/// Whether places @p a and @p b share storage: the same, or one a field
-/// chain on the other (`b` and `b.n`, not `b.c` and `b.n`).
+std::string placePath(const ast::Expr *e) {
+  bool whole = false;
+  return placePath(e, whole);
+}
+
+/// Whether places @p a and @p b share storage: the same, or one a field or
+/// element chain on the other (`b` and `b.n`, `xs` and `xs[1].n`, not `b.c`
+/// and `b.n`, nor `xs[0]` and `xs[1]`).
 bool overlaps(const std::string &a, const std::string &b) {
   const std::string &shorter = a.size() < b.size() ? a : b;
   const std::string &longer = a.size() < b.size() ? b : a;
   return longer.compare(0, shorter.size(), shorter) == 0 &&
-         (longer.size() == shorter.size() || longer[shorter.size()] == '.');
+         (longer.size() == shorter.size() || longer[shorter.size()] == '.' ||
+          longer[shorter.size()] == '[');
 }
 
 /// One place a call borrows: an argument's, or the receiver's.
@@ -189,8 +209,8 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
                                   const std::string &use) {
   // A struct's field is in the struct's own bytes: it is a place where the
   // struct is one (a variable, a field of an object or of another struct,
-  // an `inout` result), not in a temporary, which dies with the statement,
-  // and not in an array element (not yet, like the element itself).
+  // an element of a fixed-size array, an `inout` result), not in a
+  // temporary, which dies with the statement.
   const ast::Expr *root = place; // the variable (or field) holding it
   for (const ast::Expr *e = place;;) {
     const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
@@ -214,12 +234,24 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
   // field or an element.
   if (ast::isa<ast::TupleIndexExpr>(place))
     return "an element of a tuple cannot be " + use + ": tuples are immutable";
+  // A fixed-size array's element is in the array's own bytes, as a struct's
+  // field is in the struct's: a place where the array is one.  A slice's
+  // elements are another array's, which the slice does not say is a place.
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place)) {
-    const ast::Type *arr = se->getArray()->getResolvedType();
-    return ast::dyn_cast<ast::FixedArrayType>(arr) ||
-                   ast::dyn_cast<ast::SliceType>(arr)
-               ? "an array element cannot be " + use + " yet"
-               : "a character of a string cannot be " + use;
+    const ast::Expr *arr = se->getArray();
+    const ast::Type *arrTy = arr->getResolvedType();
+    if (ast::dyn_cast<ast::SliceType>(arrTy))
+      return "an element of a slice cannot be " + use + " yet";
+    if (!ast::dyn_cast<ast::FixedArrayType>(arrTy))
+      return "a character of a string cannot be " + use;
+    if (!ast::isa<ast::Identifier>(arr) &&
+        !ast::isa<ast::MemberAccessExpr>(arr) &&
+        !ast::isa<ast::SubscriptExpr>(arr) &&
+        !ast::isa<ast::TupleIndexExpr>(arr) && !isInoutResult(arr))
+      return "an element of an array that is not a variable or a field (a "
+             "temporary, which dies with the statement) cannot be " +
+             use;
+    return inoutPlaceError(arr, use);
   }
   const auto *id = ast::dyn_cast<ast::Identifier>(root);
   // A struct method's `self` is the receiver's storage, which an `inout`
@@ -338,7 +370,16 @@ void Sema::borrowedPaths(const ast::Expr *e, std::vector<std::string> &out) {
     borrowedPaths(te->getTrueExpr(), out);
     borrowedPaths(te->getFalseExpr(), out);
   } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
-    borrowedPaths(se->getArray(), out);
+    // A fixed-size array's element, or the whole of what holds it (a
+    // slice's, a string's, or an `inout` result's).
+    std::string path =
+        ast::isa<ast::FixedArrayType>(se->getArray()->getResolvedType())
+            ? placePath(e)
+            : std::string();
+    if (!path.empty())
+      out.push_back(std::move(path));
+    else
+      borrowedPaths(se->getArray(), out);
   } else if (const BorrowResult *r = borrowResultOf(e)) {
     for (const ast::Expr *from : r->From)
       borrowedPaths(from, out);
@@ -455,10 +496,15 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
     const std::string argN =
         "argument " + std::to_string(i + 1) + " of '" + callee + "'";
     std::string msg;
-    if (ast::isa<ast::SubscriptExpr>(arg)) {
-      msg = inoutPlaceError(arg, "passed to " + param);
+    // An element's place is said first: a string's character is none.
+    if (std::string why = ast::isa<ast::SubscriptExpr>(arg)
+                              ? inoutPlaceError(arg, "passed to " + param)
+                              : std::string();
+        !why.empty()) {
+      msg = std::move(why);
     } else if (!ast::isa<ast::Identifier>(arg) &&
-               !ast::isa<ast::MemberAccessExpr>(arg) && !isInoutResult(arg)) {
+               !ast::isa<ast::MemberAccessExpr>(arg) &&
+               !ast::isa<ast::SubscriptExpr>(arg) && !isInoutResult(arg)) {
       msg = argN + " must be a variable or a field: parameter '" +
             modes.name(i) + "' is 'inout'";
     } else if (!typesEqual(argTy, paramTys[i]) &&

@@ -1,9 +1,11 @@
 # `::memory`
 
 Storage that a program manages itself: `Buffer<T>`, a growable run of slots whose memory
-is the runtime's (the [containers](collections.md) keep their elements in buffers), and
-`Box<T>`, one value of a value type held in a shared object. A program imports the module
-with `import ::memory;`. A buffer reports what goes wrong as an [`::error`](error.md)
+is the runtime's (the [containers](collections.md) keep their elements in buffers),
+`Box<T>`, one value of a value type held in an object, and [`swap`, `replace` and
+`take`](#moving-values-out-of-places-swap-replace-and-take), which move a value out of a
+field or another place that `move` does not take. A program imports the module with
+`import ::memory;` (or `import ::memory as mem;`). A buffer reports what goes wrong as an [`::error`](error.md)
 `Error` (in a [`::result`](result.md) `Result` when the operation makes a value), so a
 program that looks at the errors imports `::error` too (`import ::error as err;`).
 
@@ -17,8 +19,7 @@ fn main() -> int {
   b.push("a");
   b.push("b");
   b.grow(1);                          // slot 2: unset
-  alias = b;                          // a copy shares the slots
-  alias.set(0, "A");
+  b.set(0, "A");                      // slot 0 holds "A" now
   io::println(Str(b.len()) + " " + b.at(0) + b.at(1));
   io::println(err::name(b.set(5, "x").code));
   match b.copy(2) {
@@ -57,9 +58,13 @@ struct Buffer<T> { ... }
 `Buffer<T>()` is an empty run of slots of `T`, with nothing allocated, whose storage is the
 runtime's, reached through [generic native
 functions](../language/03-functions.md#generic-native-functions). `Buffer` is a
-[struct](../language/11-structs.md) holding a reference to that storage, a runtime object:
-copying a buffer copies the reference, so every copy shares the same slots, as copies of a
-slice header do, and the storage goes with the last copy.
+[struct](../language/11-structs.md) holding a reference to that storage, a runtime object
+that the buffer owns: a buffer is move-only, of numbers too, so it is moved (`c = move b;`)
+and never copied (`c = b;` is an error that says to write `move b`), and the storage goes
+with it ([Ownership transfers](../language/16-memory.md#ownership-transfers)). `b.clone()`
+is a new buffer of as many slots, each holding a clone of `b`'s value (an unset slot stays
+unset), when the values are [Cloneable](../language/06-traits.md#cloneable); a buffer of
+values that are not is not Cloneable either (`'Buffer<Node>' is not Cloneable: ...`).
 
 A buffer has `len()` slots, and grows and shrinks only when asked to. A new slot holds zero
 bytes: `0`, `0.0`, `False`, char `0`, `None`, or an enum's first variant. Where zero bytes
@@ -102,8 +107,43 @@ Ok
 Named(s: n)
 ```
 
-The buffer holds its own reference to each value it stores, and drops it when the slot is
-overwritten or shrunk away, or the buffer goes. Every index and count is an `unsigned`.
+A buffer owns the values in its slots. A value goes in by a move: `set` and `push` take
+the one they are given (`b.push(move s)`, or `b.push(s.clone())` to keep `s`; a temporary
+or a Copyable value goes in as it is). It comes out lent, by `at` (the slot itself, a
+`view`, nothing copied); moved, by `pop`; or as a clone the caller keeps, by `get` and
+`copy`, which only a buffer of Cloneable values has: they are in an `impl Buffer<T:
+Cloneable>` block, so a `Buffer<int>` or a `Buffer<Str>` has them and a `Buffer<Node>` of
+a class that is not Cloneable has neither (`no method 'get' on type 'Buffer<Node>'`). A
+value is dropped when its slot is overwritten or shrunk away, or the buffer goes. Every
+index and count is an `unsigned`.
+
+```pkn
+import ::io;
+import ::memory as mem;
+
+class Node {
+  name: Str;
+}
+
+fn main() -> int {
+  let s = "a";
+  b = mem::Buffer<Str>();
+  b.push(s.clone());                  // a clone goes in, and s stays
+  b.push("b");
+  let c = b.clone();                  // a new buffer: Str is Cloneable
+  let last = b.pop();                 // moved out of the last slot
+  nodes = mem::Buffer<Node>();
+  nodes.push(Node("n"));
+  io::println(s + " " + b.get(0) + " " + last + " " + Str(c.len()) + " " + nodes.at(0).name);
+  return 0;
+}
+```
+
+Output:
+
+```
+a a b 2 n
+```
 
 What can go wrong is reported as an `::error` value, not a panic: the methods that can fail
 return an `err::Error` (or a `res::Result<T, err::Error>`) and leave the buffer unchanged
@@ -117,34 +157,35 @@ The errors are:
 | `InvalidArgument` | shrinking by more than `len()` |
 | `OutOfMemory` | the memory for new slots is not there (its message is C's, `Cannot allocate memory`) |
 
-Only `at(i)` and `get(i)` panic on a bad index or an unset slot, for code that has checked
-the index already, as reading a fixed-size array out of bounds does. `at` lends the slot
-as a `view` and `get` hands over a copy, as a [container's](collections.md) `at` and `get`
-do.
+Only `at(i)`, `get(i)` and `pop()` panic on a bad index or an unset slot, for code that has
+checked the index already, as reading a fixed-size array out of bounds does. `at` lends the
+slot as a `view` and `get` hands over a clone, as a [container's](collections.md) `at` and
+`get` do; `copy(i)` is the checked read.
 
 | Method | Does | When it fails |
 |--------|------|---------------|
 | `Buffer<T>()` | An empty buffer: no slots, nothing allocated | |
 | `view fn len() -> unsigned` | The number of slots | |
 | `view fn at(i: unsigned) -> view T` | Slot `i` itself, read in place, nothing copied | panics `buffer index <i> out of bounds (len=<n>)`, or `buffer value <i> was never set` for an unset slot |
-| `fn get(i: unsigned) -> T` | A copy of slot `i`, to keep | panics as `at` does |
-| `fn copy(i: unsigned) -> res::Result<T, err::Error>` | A copy of slot `i`, to keep | `OutOfRange`, `NotFound` |
-| `fn set(i: unsigned, v: view T) -> err::Error` | Stores `v` in slot `i`, dropping what it held | `OutOfRange` |
-| `fn push(v: view T) -> err::Error` | Adds a slot at the end holding `v` | `OutOfMemory` |
+| `view fn get(i: unsigned) -> T` | A clone of slot `i`'s value, to keep (Cloneable `T` only) | panics as `at` does |
+| `view fn copy(i: unsigned) -> res::Result<T, err::Error>` | A clone of slot `i`'s value, to keep (Cloneable `T` only) | `OutOfRange`, `NotFound` |
+| `fn set(i: unsigned, v: T) -> err::Error` | Stores `v`, which moves in, in slot `i`, dropping what it held | `OutOfRange` (and `v` is dropped) |
+| `fn push(v: T) -> err::Error` | Adds a slot at the end holding `v`, which moves in | `OutOfMemory` (and `v` is dropped) |
+| `fn pop() -> T` | Removes the last slot and returns its value, which moves out | panics on an empty buffer (`buffer index 18446744073709551615 out of bounds (len=0)`: the index `len() - 1` wraps) or an unset last slot (`buffer value <i> was never set`) |
 | `fn grow(by: unsigned) -> err::Error` | Adds `by` new slots at the end | `OutOfMemory` |
 | `fn reserve(n: unsigned) -> err::Error` | Makes the buffer at least `n` slots long, adding new slots at the end (a buffer already that long is unchanged) | `OutOfMemory` |
 | `fn shrink(by: unsigned) -> err::Error` | Drops the last `by` slots | `InvalidArgument` |
-| `fn swap(i: unsigned, j: unsigned) -> err::Error` | Exchanges slots `i` and `j` | `OutOfRange`, then `NotFound` |
+| `fn swap(i: unsigned, j: unsigned) -> err::Error` | Exchanges slots `i` and `j`: each value moves to the other's slot | `OutOfRange`, then `NotFound` |
+| `view fn clone() -> Buffer<T>` | A new buffer of clones of the values (Cloneable `T` only) | panics `out of memory: ...` when the slots cannot be allocated |
 
 `reserve(n)` changes `len()`: it is `grow(n - len())` when `n > len()`, not a request for
 capacity behind the slots. Growing one slot at a time is amortised O(1): the allocation at
 least doubles when it grows, and is halved once at most a quarter of it is in use.
 
-The methods that change the buffer are not `view fn`s, and neither are `copy` and
-`get`: a copy of an object shares it with the buffer, so it could be changed through the
-copy. A `view` parameter of type `memory::Buffer<T>` is read with `len` and `at`, which
-lends the slot as a `view`, and nothing changes through it (`'b' is a 'view' parameter;
-'push' is not a 'view fn'`, and the same for `get`).
+The methods that change the buffer are not `view fn`s; the reads are, the copying ones
+too, since a clone is a value of its own. A `view` parameter of type `memory::Buffer<T>` is
+read with `len`, `at`, `get` and `copy`, and nothing changes through it (`'b' is a 'view'
+parameter; 'push' is not a 'view fn'`).
 
 ---
 
@@ -157,8 +198,9 @@ class Box<T: ValueType> { ... }
 `Box<T>(v)`, or `Box(v)` with `T` inferred, holds one value of a
 [`ValueType`](../language/06-traits.md#valuetype) (`int`, `float`, `bool`, `char`, a sized
 number, an enum, a tuple, a struct or a function value) in an object, so the value can be
-shared: `Box` is a class, so assigning a box shares it, and a change through a `mut` name
-shows through every other. A `Str` or a class is not a `ValueType` (`'Str' does not implement
+shared: `Box` is a class, so a `shared` box is held by several names, and a change through
+a `shared mut` one shows through every other. A box with no qualifier has one owner, as
+every object does, and moves. A `Str` or a class is not a `ValueType` (`'Str' does not implement
 trait 'ValueType', which 'memory::Box' requires of 'T'`): it is shared by reference already.
 
 | Method | Does |
@@ -188,8 +230,8 @@ import ::memory;
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let hits: mut = memory::Box(0);
-  let alias: memory::Box<int> = hits;   // the same box, read through value()
+  let hits: shared mut memory::Box<int> = memory::Box(0);
+  let alias = hits;                     // the same box, read through value()
   bump(hits.get());
   n: inout int = hits.get();
   n = n * 10;
@@ -206,3 +248,70 @@ Output:
 ```
 10 two
 ```
+
+---
+
+## Moving values out of places: `swap`, `replace` and `take`
+
+```pkn
+native fn swap<T>(a: inout T, b: inout T)
+fn replace<T>(slot: inout T, v: T) -> T
+fn take<T>(slot: inout T?) -> T?
+```
+
+`move x` takes a variable. A move-only value in a field (a unique object, a `Str`, a value
+holding one) leaves it in exchange for another, which these functions make
+([Ownership transfers](../language/16-memory.md#fields-and-elements-memreplace-memtake-and-memswap)):
+
+| Function | Does |
+|----------|------|
+| `swap(a, b)` | Exchanges the values of `a` and `b`, each with what it owns: nothing is copied |
+| `replace(slot, v)` | Stores `v` in `slot` and returns what `slot` held |
+| `take(slot)` | Returns what the optional `slot` held and leaves `None` in it |
+
+```pkn
+import ::io;
+import ::memory as mem;
+
+class Node {
+  name: Str;
+}
+
+class Shelf {
+  top: Node;
+  spare: Node?;
+}
+
+fn main() -> int {
+  let s: mut = Shelf(Node("a"), Node("b"));
+  let old = mem::replace(s.top, Node("c"));   // s.top's node; s.top now holds c
+  let spare = mem::take(s.spare);             // s.spare's node; s.spare is None
+  x: mut = "x";
+  y: mut = "y";
+  mem::swap(x, y);
+  io::println(old.name + " " + s.top.name + " " + Str(s.spare == None) + " " + x + y);
+  match spare {
+    n: Node { io::println(n.name); }
+    None { }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+a c True yx
+b
+```
+
+Their places are `inout` parameters, so each is a place an `inout` argument can be: a
+variable that is not `let` (`mut` when it holds an object or a string), or a field of a
+`mut` object (`'s' is immutable (a 'Shelf'; write 'mut Shelf' to change it); it cannot be
+passed to 'inout' parameter 'slot'`), or an element of a fixed-size array that is one
+(`mem::take(xs[i])`), and two arguments of one call share no storage: `mem::swap(xs[0],
+xs[1])` swaps two elements, but two at indexes that are not literals may be one element
+(`'xs' is passed to two 'inout' parameters ('a' and 'b')`), so one moves to another by
+`xs[j] = mem::replace(xs[i], v)`. A slice's element is not a place yet (`an element of a
+slice cannot be passed to 'inout' parameter 'slot' yet`). `replace` and `take` are written with `swap`, which the runtime does with no
+count: the two values trade their bytes.

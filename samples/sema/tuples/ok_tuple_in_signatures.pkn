@@ -1,7 +1,7 @@
 import ::io;
 
 // OK: tuples as fields, parameters, return types and array elements; a field
-// tuple copied into a local; and reference elements are covariant
+// tuple cloned into a local; and reference elements are covariant
 // (`(int, Str)` to `(int, Obj)`) because tuples are immutable.
 class Holder {
   pair: (int, Str);
@@ -10,18 +10,19 @@ class Holder {
 }
 
 impl Holder {
-  fn __init__(p: (int, Str)) { self.pair = p; }
+  fn __init__(p: (int, Str)) { self.pair = move p; }
 }
 
 fn swap(p: (int, Str)) -> (Str, int) {
-  return (p.1, p.0);
+  n, s = move p;
+  return (move s, n);
 }
 
 fn main() -> int {
   let h = Holder((1, "one"));
   let n = h.get().0;
-  s2, n2 = swap(h.pair);
-  let copy = h.pair;
+  s2, n2 = swap(h.pair.clone());
+  let copy = h.pair.clone();
   let wide: (int, Obj) = (1, "s");
   io::println(h.pair);
   return h.first() + n + n2 + copy.0;

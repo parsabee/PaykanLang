@@ -994,6 +994,7 @@ private:
     Val emitUnsignedToInt(ast::MethodCallExpr *node);
     Val emitOptionalToStringCall(ast::MethodCallExpr *node);
     Val emitShowCall(ast::MethodCallExpr *node);
+    Val emitBuiltinClone(ast::MethodCallExpr *node);
     Val emitClassMethodCall(ast::MethodCallExpr *node, bool wantAddress);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     /// The panics before an integer `/` or `%`: a zero divisor, and for a
@@ -1088,9 +1089,9 @@ private:
   pir::Signature closureSignature(ast::FunctionType *fnt);
   /// A closure class @p name with a field per capture and an object's
   /// vtable [destroy, toString, equals] (the destructor declared, its body
-  /// to come).  @p captureWeak marks the captures of `weak` variables: a
-  /// weak field of the closure, loaded as a strong reference for a call's
-  /// duration.
+  /// to come).  @p captureWeak
+  /// marks the captures of `weak` variables: a weak field of the closure,
+  /// loaded as a strong reference for a call's duration.
   pir::Class *declareClosureClass(const std::string &name,
                                   const std::vector<ast::Type *> &captureTys,
                                   const std::vector<bool> &captureWeak);
@@ -1243,6 +1244,29 @@ private:
   std::vector<MemTemp> MemTemps;
   /// Release what was added to MemTemps since its size was @p mark.
   void releaseMemTemps(size_t mark);
+  // -- The builtin Cloneable (LoweringClone.cpp, #369)
+  /// The clone of the object @p obj of reference type @p refTy: a new
+  /// `Str`, or the object's `clone` through its vtable (+1).
+  Val emitCloneObject(const Val &obj, ast::Type *refTy);
+  /// emitCloneObject of the box @p box, null for a None of an optional
+  /// @p refTy.
+  Val emitCloneBox(const Val &box, ast::Type *refTy);
+  /// Replace the reference a copy retained at @p slot with its clone.
+  void cloneRefSlot(const Val &slot, ast::Type *refTy);
+  /// In a copy at @p addr of a value of type @p ty (its references
+  /// retained), replace each unique reference with its clone; a `shared`
+  /// one or a handle stays the same object.
+  void cloneMemParts(const Val &addr, ast::Type *ty);
+  /// A clone of the value of type @p ty at @p src, in a temporary: its
+  /// address.
+  Val emitMemClone(const Val &src, ast::Type *ty, const std::string &name);
+  /// The body of the `clone` of class @p ct an empty `impl Cloneable for`
+  /// block derives, into @p fn.
+  void emitDerivedClone(pir::Function *fn, ast::ClassType *ct);
+  /// Whether @p node is `x.clone()` of the builtin Cloneable: of a value
+  /// with no `clone` method of its own.
+  bool isBuiltinClone(const ast::MethodCallExpr *node) const;
+
   /// Retain, or release, every reference held by the value of type @p ty at
   /// @p addr (nothing for one of plain values).
   void emitMemRetain(const Val &addr, ast::Type *ty);
@@ -1316,7 +1340,7 @@ private:
   /// held in memory.
   void emitElementInit(ast::Expr *e, ast::Type *ty, const Val &dst);
   /// Initialise the array of type @p ft at @p dst from `[elem; n]`.
-  void emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
+  void emitFixedRepeat(ast::ArrayLiteralExpr *lit, ast::FixedArrayType *ft,
                        const Val &dst);
   /// A variable @p name of a type held in memory, initialised with @p init
   /// (zero without one), declared in the current scope: its local.

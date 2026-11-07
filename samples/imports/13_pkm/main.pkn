@@ -21,9 +21,9 @@ fn main() -> int {
   let s = shapes::Square(5);
   io::println(r.describe());
   io::println(s.describe());
-  let all: shapes::Shape[2] = [r, s];
+  let all: shapes::Shape[2] = [move r, move s];
   io::println(Str(shapes::total(all)));
-  io::println(shapes::kindName(r.kind()));
-  io::println(shapes::kindName(s.kind()));
+  io::println(shapes::kindName(all[0].kind()));
+  io::println(shapes::kindName(all[1].kind()));
   return 0;
 }

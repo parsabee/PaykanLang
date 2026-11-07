@@ -30,7 +30,7 @@ fn trimFloat(s: Str) -> Str {
 
 // Strip trailing newline, carriage-return, and spaces from a line.
 // Used to clean up input from io::stdin().readln().
-fn stripLine(s: Str) -> Str {
+fn stripLine(s: view Str) -> Str {
   end = s.len() - 1;
   while end >= 0 && (s[end] == '\n' || s[end] == '\r' || s[end] == ' ') {
     end = end - 1;

@@ -59,7 +59,7 @@ fn main() -> int {
   keep(move e);
   f = Job("f");
   g = move f;
-  n = n + keep(f) + keep(g);
+  n = n + keep(f) + keep(move g);
   h = Job("h");
   n = n + keep(pass(move h)) + param(Job("p"));
   return n;
@@ -113,10 +113,10 @@ fn main() -> int {
   n = n + keep(e);
   f = Job("f");
   if n > 3 { keep(move f); f = Job("ff"); } else { keep(move f); return n; }
-  n = n + keep(f);
+  n = n + keep(move f);
   g = Job("g");
   if n > 3 { keep(move g); return n; }
-  n = n + keep(g);
+  n = n + keep(move g);
   return n;
 })");
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
@@ -162,10 +162,10 @@ fn main() -> int {
   n = n + keep(c);
   d = Job("d");
   match o { x: Job { keep(move d); return n; } None { } }
-  n = n + keep(d);
+  n = n + keep(move d);
   e = Job("e");
   match n { 3 { keep(move e); e = Job("ee"); } _ { } }
-  n = n + keep(e);
+  n = n + keep(move e);
   return n;
 })");
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
@@ -202,7 +202,7 @@ fn main() -> int {
   for i in 0..2 { n = n + keep(move a); }
   b = Job("b");
   for i in 0..3 { n = n + keep(move b); b = Job("bb"); }
-  n = n + keep(b);
+  n = n + keep(move b);
   c = Job("c");
   while c.name.len() > 0 { keep(move c); }
   d = Job("d");
@@ -217,21 +217,21 @@ fn main() -> int {
     keep(move e);
     e = Job("ee");
   }
-  n = n + keep(e);
+  n = n + keep(move e);
   f = Job("f");
   for i in 0..3 {
     keep(move f);
     if i == 1 { f = Job("f1"); continue; }
     f = Job("f2");
   }
-  n = n + keep(f);
+  n = n + keep(move f);
   g = Job("g");
   for i in 0..2 { for k in 0..2 { keep(move g); } }
   for i in 0..2 { h = Job("h"); n = n + keep(move h); }
   for i in 0..2 { let k = Job("k"); n = n + keep(move k); n = n + keep(k); }
   m = Job("m");
   while n < 100 { n = n + 1; while n < 50 { keep(move m); m = Job("mm"); } }
-  n = n + keep(m);
+  n = n + keep(move m);
   return n;
 })");
   EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
@@ -275,7 +275,7 @@ fn main() -> int {
   }
   n = n + keep(a);
   a = Job("aa");
-  n = n + keep(a);
+  n = n + keep(move a);
   b = Job("b");
   while n < 100 {
     if n > 50 { keep(move b); break; }
@@ -286,7 +286,7 @@ fn main() -> int {
   for i in 0..3 {
     if i == 1 { keep(move c); return n; }
   }
-  n = n + keep(c);
+  n = n + keep(move c);
   d = Job("d");
   for i in 0..3 {
     if i == 1 { keep(move d); break; }
@@ -320,10 +320,10 @@ fn main() -> int {
   a = Job("a");
   n = keep(move a);
   a = Job("aa");
-  n = n + keep(a);
+  n = n + keep(move a);
   b = Job("b");
   if n > 3 { keep(move b); b = Job("bb"); }
-  n = n + keep(b);
+  n = n + keep(move b);
   let c = Job("c");
   n = n + keep(move c);
   c = Job("cc");
@@ -342,11 +342,12 @@ fn main() -> int {
 }
 
 // `move` takes an owned variable: not `self`, a `view` or `inout`
-// parameter, a `weak` variable, a variable a function captures by copy, a
-// variable a `view` local reads (a move is a write), an array element or a
-// tuple's member.  A `for` variable (an integer) is read as it is, a
-// temporary (a constructor, a call) is owned already and `move` before it
-// does nothing, and a lambda's own local moves like any other.
+// parameter, a `weak` variable, a variable a function captures by copy (a
+// `shared` one: a unique one cannot be captured at all), a variable a `view`
+// local reads (a move is a write), an array element or a tuple's member.  A
+// `for` variable (an integer) is read as it is, a temporary (a constructor,
+// a call) is owned already and `move` before it does nothing, and a lambda's
+// own local moves like any other.
 TEST(Move, WhatMoveRefuses) {
   auto r = semaCheck(R"(class Job {
   name: Str;
@@ -360,8 +361,8 @@ fn main() -> int {
   n = 0;
   weak w: Job? = Job("w");
   n = n + keep(move w);
-  a = Job("a");
-  f = fn() -> int { n2 = keep(a); return n2 + keep(move a); };
+  a: shared = Job("a");
+  f = fn() -> int { n2 = a.name.len(); return n2 + keep(move a); };
   n = n + f();
   b = Job("b");
   v: view Job = b;
@@ -385,7 +386,7 @@ fn keep2() -> Job { return Job("k"); })");
           "caller's storage",
           ":12:16: error: cannot move 'w': a 'weak' variable holds no strong "
           "reference",
-          ":14:52: error: cannot move 'a': the function captures it by copy",
+          ":14:57: error: cannot move 'a': the function captures it by copy",
           ":18:16: error: 'b' is viewed by 'view' local 'v' until 'v' is last "
           "used; it cannot be moved",
           ":21:16: error: cannot move 'xs[0]': an element leaves by "
@@ -524,12 +525,12 @@ fn main() -> int {
 
 // What `move x.f` refuses: the variable is used after it (the field left,
 // the holder ended); a `shared`, frozen (`atomic shared`) or `weak` field
-// is not a unique part of the variable (anywhere on the chain), nor is a
-// value field (an `int` of a class or a struct), and a field of `self`, of
-// a `view` or `inout` parameter, of a captured or `weak` variable, or of a
-// temporary is not a field of an owned variable, with the `mem::replace`
-// hint where a variable roots it.  A `view` local reading the variable
-// blocks the move as it blocks any write.
+// is not a unique part of the variable (anywhere on the chain), and a field
+// of `self`, of a `view` or `inout` parameter, of a captured (`shared`) or
+// `weak` variable, or of a temporary is not a field of an owned variable, with
+// the `mem::replace` hint where a variable roots it.  A `view` local reading
+// the variable blocks the move as it blocks any write.  A value field (an `int`
+// of a class or a struct) is not refused: it moves as a copy.
 TEST(Move, PartialMovesRefused) {
   auto r = semaCheck(R"(class Job {
   name: Str;
@@ -577,20 +578,17 @@ fn main() -> int {
   v: view Holder = g;
   n = n + keep(move g.job);
   n = n + v.n;
-  h = make();
+  h: shared = make();
   k = fn() -> int { n2 = h.n; return n2 + keep(move h.job); };
   n = n + k();
   weak w: Holder? = h;
   n = n + keep(move w.job);
   return n + keep(move make().job);
 })");
-  EXPECT_EQ(r.ErrorCount, 14u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 12u) << r.Diagnostics;
   const std::string kNotOwned =
       "' is not an owned variable (a borrow, a capture or a 'weak' "
       "reference); write 'mem::replace(";
-  const std::string kValue =
-      "': it is a 'int', a value (a value is copied; a field of a reference "
-      "type moves out)";
   for (const std::string &diag :
        {std::string(":15:34: error: cannot move 'self.job': 'move' takes a "
                     "variable, or a field of one it owns; write "
@@ -605,10 +603,8 @@ fn main() -> int {
                     "shared Job', not a unique part of 'c'"),
         std::string(":36:17: error: cannot move 'd.back': it is a 'weak' "
                     "field, which owns nothing"),
-        ":38:11: error: cannot move 'e.n" + kValue,
         std::string(":40:16: error: cannot move 'f.inner.other': it is "
                     "'shared Job', not a unique part of 'f'"),
-        ":42:11: error: cannot move 'p.n" + kValue,
         std::string(":45:16: error: 'g' is viewed by 'view' local 'v' until "
                     "'v' is last used; it cannot be moved out of"),
         ":48:48: error: cannot move 'h.job': 'h" + kNotOwned + "h.job, v)'",
@@ -620,11 +616,16 @@ fn main() -> int {
   // The hint names a variable to replace in; a temporary gets none.
   EXPECT_EQ(r.Diagnostics.find("mem::replace(make().job"), std::string::npos)
       << r.Diagnostics;
+  // The value fields move as copies.
+  for (const char *line : {".pkn:38:", ".pkn:42:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
 }
 
 // A variable that shadows another is a variable of its own: its moves and
 // awaits are its own, and the one it shadows keeps its state.  A `match`
-// arm's binding, a `lock` block's binding and a block's local named like a
+// arm's binding (of a call's result, so the arm owns it), a `lock` block's
+// binding and a block's local named like a
 // variable moved or awaited before are live; moving the shadowing one
 // leaves the outer one as it was; after the shadow's scope the outer one
 // is moved still (both branches of an `if` declaring their own was a
@@ -642,8 +643,8 @@ fn keep(j: Job) -> int { return j.name.len(); }
 fn main() -> int {
   let a = run(Job("a"));
   n = await a;
-  let opt: Job? = Job("o");
-  match opt {
+  let opt = fn() -> Job? { return Job("o"); };
+  match opt() {
     a: Job { n = n + keep(move a); }
     None { }
   }
@@ -651,30 +652,30 @@ fn main() -> int {
   lock acct as a: view { n = n + a.balance; }
   let b = Job("b");
   n = n + keep(move b);
-  if n > 0 { let b = Job("bb"); n = n + keep(b); }
+  if n > 0 { let b = Job("bb"); n = n + keep(move b); }
   let c = Job("c");
-  match opt {
+  match opt() {
     c: Job { n = n + keep(move c); }
     None { }
   }
-  n = n + keep(c);
+  n = n + keep(move c);
   let d = Job("d");
   n = n + keep(move d);
-  if n > 0 { let d = Job("d1"); n = n + keep(d); } else { let d = Job("d2"); }
+  if n > 0 { let d = Job("d1"); n = n + keep(move d); } else { let d = Job("d2"); }
   n = n + keep(d);
   e = Job("e");
   for i in 0..2 {
-    match opt {
+    match opt() {
       e: Job { n = n + keep(move e); }
       None { }
     }
   }
-  n = n + keep(e);
+  n = n + keep(move e);
   f = Job("f");
   for i in 0..2 {
     n = n + keep(move f);
     let f = Job("ff");
-    n = n + keep(f);
+    n = n + keep(move f);
   }
   return n;
 })");

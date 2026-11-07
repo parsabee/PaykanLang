@@ -13,14 +13,17 @@ types in parentheses and the result after `->`: `(int) -> int` is a function tak
 nothing. A value of a function type is a *closure*: a named function used without calling
 it (a function is a value just by its name), or a *lambda*, `fn(...) -> ... { ... }`
 without a name, written in place. It is stored, passed and returned like any other value
-and called like any function:
+and called like any function. A function value is Copyable: its copies share its closure,
+the captures it holds, and one with no captures is just the function's address, so it is
+passed and stored as an `int` is. A function that only calls one may still take it as a
+`view`, as `apply` does here:
 
 ```pkn
 import ::io;
 
 fn double(x: int) -> int { return x * 2; }
 
-fn apply(f: (int) -> int, x: int) -> int {
+fn apply(f: view (int) -> int, x: int) -> int {
   return f(x);
 }
 
@@ -43,9 +46,9 @@ Output:
 
 A lambda copies the variables it uses from the surrounding function at the moment it is
 written, and cannot assign to them: `addStep` keeps its own `step`, which the later
-assignment in `main` does not change. The copies, like every argument and result of a
-function value, are plain copies for value types and references for objects (see
-[Captures](#captures)).
+assignment in `main` does not change. Since a capture is a copy, a lambda captures only
+values that copy freely, such as numbers and `shared` references: a unique object or a
+`Str` cannot be captured (see [Captures](#captures)).
 
 ## Function Types
 
@@ -55,9 +58,9 @@ import ::io;
 fn square(x: int) -> int { return x * x; }
 fn greet(name: view Str) { io::println("hi " + name); }
 
-fn apply(f: (int) -> int, x: int) -> int { return f(x); }
-fn twice(f: (int) -> int) -> (int) -> int {
-  return fn(x: int) -> int { return f(f(x)); };
+fn apply(f: view (int) -> int, x: int) -> int { return f(x); }
+fn scale(k: int) -> (int) -> int {
+  return fn(x: int) -> int { return x * k; };
 }
 
 class Button {
@@ -68,10 +71,10 @@ class Button {
 fn main() -> int {
   let g: (int) -> int = square;          // a named function as a value
   let log: (view Str) -> void = greet;   // the modes are part of the type
-  let fs: ((int) -> int)[2] = [square, twice(square)];
-  let pair: ((int) -> int, Str) = (g, "square");
+  let fs: ((int) -> int)[2] = [square, scale(8)];
+  let pair: ((int) -> int, Str) = (move g, "square");
   log("there");
-  io::println(Str(apply(g, 3)) + " " + Str(fs[1](2)) + " " + Str(pair.0(5)) + " " + pair.1);
+  io::println(Str(apply(pair.0, 3)) + " " + Str(fs[1](2)) + " " + Str(pair.0(5)) + " " + pair.1);
   return 0;
 }
 ```
@@ -192,13 +195,15 @@ Bodies](03-functions.md#expression-bodies)).
 
 A lambda may use the variables of the function (or method, or lambda) it is written in.
 Each one it uses is **captured by copy when the lambda expression is evaluated**: the
-closure holds a copy of the variable's value as it was then, as a struct's field would.  A
-reference (an object, a `Str`, an array, an optional of one) is retained, so the closure
-and the variable share the object; a value held in place (a struct, a tuple, a fixed-size
-array) is copied, with its references retained.  Later assignments to the variable do not
-reach the closure, and the closure does not change the variable.  A closure is an object:
-one that captures an object and is stored in a field of it is a reference cycle, which
-[is not collected](16-memory.md#reference-cycles) — unless the captured variable is a
+closure holds a copy of the variable's value as it was then, as a struct's field would.  So
+a lambda captures only values that copy freely, [Copyable](06-traits.md#copyable) ones: a
+number, a `bool`, a `char`, a `shared` or `shared mut` reference (retained, so the closure
+and the variable share the object), an `atomic shared` or `locked` handle, and a struct, a
+tuple, a fixed-size array or an optional made only of such parts (copied, with their
+references retained).  Later assignments to the variable do not reach the closure, and the closure
+does not change the variable.  A closure is an object: one that captures an object and is
+stored in a field of it is a reference cycle, which [is not
+collected](16-memory.md#reference-cycles) — unless the captured variable is a
 [`weak`](16-memory.md#weak-references) one, which the closure captures weakly: it reads
 as the object while the object is alive and as `None` afterwards (`weak me = self;
 self.onClick = fn() -> Str { match me { ... } };`).
@@ -211,7 +216,7 @@ struct P { x: int; }
 
 fn main() -> int {
   n = 1;
-  let c: mut = Counter(1);
+  let c: shared mut = Counter(1);
   p = P(1);
   let f = fn() -> int { c.n = c.n + 1; return n + p.x + c.n; };   // n, p copied; c shared
   n = 100;
@@ -232,40 +237,74 @@ Inside the lambda a captured name is read-only: it cannot be assigned (`cannot a
 function is made, or keep it in an object)`), passed to an `inout` parameter, or, when
 it holds a value in place, have a field or an element assigned (`'p' is captured by copy
 by the function; cannot assign to its field 'x'`).  An object reached through a captured
-`mut` reference is changed through it as through any other (`c.n = c.n + 1` above, with
-`c` a `mut Counter`): to share a counter with a closure, keep it in an object. Read, a
-captured name is a value like any other: the lambda may return it, store it in a local or
-pass it to any parameter, a struct, a tuple or a tagged union as well as a string or an
-object (`fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }` works for
-every `T`), and the copy holds the references the capture does.
+`shared mut` reference is changed through it as through any other (`c.n = c.n + 1` above,
+with `c` a `shared mut Counter`): to share a counter with a closure, keep it in a `shared
+mut` object. Read, a captured name is a value like any other: the lambda may return it,
+store it in a local or pass it to any parameter, and the copy holds the references the
+capture does (`fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }` works
+for every Copyable `T`).
 
-What cannot be captured: a `view` or `inout` parameter or local, or a `match` binding of
-one (`'v' is a 'view' parameter; a function cannot capture a borrow (it may outlive the
-call that holds it)`); a variable that a live [local borrow](02-basics.md#local-borrows)
+A move-only value cannot be captured: a unique object, a `Str`, a container, or a struct,
+tuple, array or optional holding one (`cannot capture 's' (a unique 'Str'): a function
+captures by copy; declare it 'shared Str', or capture a 'weak' local of it`;
+`constant("s")` is `cannot capture 'x' (a unique 'Str') ...`, in the instantiation
+`constant<Str>`).  A clone is just as move-only, so cloning the value before the lambda
+does not help.  What the lambda needs
+reaches it another way:
+
+- declare the variable `shared` (`let s: shared = "abc";`, `let n: shared mut = Node(1);`),
+  and the closure and the function share the object;
+- read what the lambda uses into a Copyable local before it (`let k = s.len();`, then
+  `fn() => k`);
+- pass the value to the lambda as an argument instead (`fn(t: view Str) => t.len()`);
+- or capture a `weak` local of an object, which reads as the object while it lives.
+
+A function value is Copyable, so a lambda captures one as it does a number: `fn twice(f:
+(int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }` returns a
+closure whose closure holds `f`'s, shared. A function value takes no qualifier (`a function
+value takes no qualifier ('shared (int) -> int'): it is Copyable, and its copies share its
+closure`).
+
+Nor can a borrow be captured: a `view` or `inout` parameter or local, a `match` binding of
+one or a binding that borrows its subject's move-only part (`'v' is a 'view' parameter; a
+function cannot capture a borrow (it may outlive the call that holds it)`); a variable that a live [local borrow](02-basics.md#local-borrows)
 names (`'k' is borrowed by 'inout' local 'x' until 'x' is last used; a function cannot
 capture it`), or a `view` local views when it holds an object, a string or an array;
 `self` in a `view fn` (`'self' is read-only in 'view fn m'; a
 function cannot capture it (its copy could change the object)`); and `self` in a struct's
 method (`'self' is the receiver's storage in a method of struct 'P'; a function cannot
-capture it (copy it into a variable first)`).  `self` in a class method that is not a
-`view fn` is captured as a reference to the object, like any object, and the method then
-counts as one that changes `self` (the closure may):
+capture it (copy it into a variable first)`).  Nor is `self` in any other class
+method but a [`shared fn`](05-classes.md#methods-that-hand-on-self-shared-fn), whose `self`
+is a `shared` reference, which a closure holds as it holds any: a method borrows its
+receiver, and a capture is a copy (`cannot capture 'self': a method borrows its receiver,
+and a function captures by copy; capture a 'weak' local of it ('weak me = self;')`).  In
+any method, a closure reaches the object through a `weak` local of `self`,
+which owns nothing and reads as None once the object is gone. What it reads is a `view` of
+the object ([Weak References](16-memory.md#weak-references)), so the closure reads the
+object as it is when it runs, and the object is changed through the references that hold
+it; the method cannot be a `view fn`, since a `weak` local of a `view` is a borrow:
 
 ```pkn
 import ::io;
 
 class Counter {
   n: int;
-  fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
-  fn reader() -> () -> int { return fn() -> int { return self.n; }; }
+  fn plus() -> (int) -> int {
+    weak me = self;
+    return fn(d: int) -> int {
+      match me {
+        c: Counter { return c.n + d; }
+        None { return d; }
+      }
+    };
+  }
 }
 
 fn main() -> int {
   let c: mut = Counter(5);
-  let add = c.adder();
-  let get = c.reader();
-  add(10);
-  io::println(Str(get()) + " " + Str(c.n));
+  let add = c.plus();
+  c.n = 7;
+  io::println(Str(add(10)) + " " + Str(c.n));
   return 0;
 }
 ```
@@ -273,7 +312,7 @@ fn main() -> int {
 Output:
 
 ```
-15 15
+17 7
 ```
 
 A lambda inside a lambda captures the outer lambda's copy, so a closure returned from a
@@ -305,7 +344,7 @@ fn main() -> int {
   let h: mut = Handler(None);
   h.cb = fn(s: Str) -> Str { return s + "!"; };
   match h.cb {
-    f: (Str) -> Str { io::println(f(ops[0].name) + " " + f(ops[1].name)); }
+    f: (Str) -> Str { io::println(f(ops[0].name.clone()) + " " + f(ops[1].name.clone())); }
     None { io::println("no handler"); }
   }
   i = 0;
@@ -332,10 +371,11 @@ the function type ([Unwrapping with `match`](12-optionals.md#unwrapping-with-mat
 
 A function value is held in place, like a tuple: the code it runs and its *closure*, a
 reference-counted object holding the captures (none at all for a named function or a
-lambda that captures nothing).  Copying one (assigning it, passing it, storing it in a
-field or an element) copies the code and shares the closure; the last copy releases the
-closure and its captures.  Since captures are read-only, two copies cannot tell they
-share one.
+lambda that captures nothing, which is then just the code's address).  It is Copyable:
+assigning, passing or storing one copies the two words and counts the closure, which the
+copies share; nothing changes a closure, since its captures are read-only copies.  So
+`f.clone()` is a copy too ([Cloneable](06-traits.md#cloneable)), and `f.clone() == f`.  The
+closure is released with the last value that holds it, and its captures with it.
 
 Two function values are `==` when they run the same code with the same closure:
 
@@ -344,7 +384,7 @@ Two function values are `==` when they run the same code with the same closure:
   in another module is a different value for now;
 - the same lambda expression capturing nothing: `same() == same()` is `True` when `same`
   returns `fn(x: int) -> int { return x + 1; }`;
-- a copy of a value: `g = f; g == f` is `True`.
+- a value and one moved from it: `g = move f;` gives `g` what `f` held.
 
 Each evaluation of a lambda that captures something makes a new closure, so `adder(1) ==
 adder(1)` is `False`, and two different lambdas are never equal, even with the same body.
@@ -358,8 +398,9 @@ optional function value, `((int) -> int)?`, takes the same 16 bytes: `None` is t
 with no code.
 
 Parameter modes work on a function value as on any value held in place: a plain
-parameter is the callee's own copy, a `view` one reads it (it can be called, not stored),
-an `inout` one is the caller's variable, which the callee may set to another function.
+parameter is the callee's own, which the caller moves in (or passes a lambda or a named
+function), a `view` one reads it (it can be called, not stored), an `inout` one is the
+caller's variable, which the callee may set to another function.
 
 ## Generics and Modules
 
@@ -374,8 +415,8 @@ fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U { return f(xs[0]); }
 
 class Handler<T> { on: (T) -> T; }
 impl Handler<T> {
-  fn __init__(on: (T) -> T) { self.on = on; }
-  view fn run(x: T) -> T { return self.on(x); }
+  fn __init__(on: (T) -> T) { self.on = move on; }
+  view fn run(x: T) -> T { return self.on(move x); }
 }
 
 fn main() -> int {
@@ -398,17 +439,17 @@ Output:
 
 A function type crosses a module boundary in a signature or a field like any type, an
 imported function is a value under its qualifier (`ops::square`), and a closure made in
-one module is called in another. `click` hands a field of `self` to the function value, so
-it is not a `view fn`, and `b` is a `mut Button`:
+one module is called in another. `click` hands the function value a copy of a field of
+`self`, since the function's `Str` parameter owns what it is given:
 
 ```pkn
 // file: ops.pkn
 fn square(x: int) -> int { return x * x; }
-fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
+fn twice(f: view (int) -> int, x: int) -> int { return f(f(x)); }
 class Button {
   label: Str;
   onClick: (Str) -> Str;
-  fn click() -> Str { return self.onClick(self.label); }
+  view fn click() -> Str { return self.onClick(self.label.clone()); }
 }
 ```
 
@@ -418,9 +459,8 @@ import ::io;
 import ops;
 
 fn main() -> int {
-  let t = ops::twice(ops::square);
-  let b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
-  io::println(Str(t(3)) + " " + b.click());
+  let b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  io::println(Str(ops::twice(ops::square, 3)) + " " + b.click());
   return 0;
 }
 ```
@@ -444,7 +484,9 @@ Output:
 | Calling a non-function | `n = 1; n(2)`; `obj.n(1)` with `n: int`; an optional function value without `match` |
 | Wrong arguments | `f(1, 2)` for `f: (int) -> int`; `f("a")`; a `let` or a `view` to an `inout` parameter |
 | Assigning a captured name | `n = 1; g = fn() { n = 2; };`; `bump(n)` inside the lambda; `p.x = 2` for a captured struct |
-| Capturing a borrow or `self` | a `view` or `inout` parameter or local, a `view fn`'s `self`, a struct method's `self` |
+| Capturing a move-only value | `s = "a"; fn() => s.len()`; a unique object, a container, or a value holding one |
+| Capturing a borrow or `self` | a `view` or `inout` parameter or local, a borrowing `match` binding, `self` in a method that is not a `shared fn`, a struct method's `self` |
+| A qualified function value | `f: shared (int) -> int`; `mut`, `atomic shared`, `locked` likewise |
 | Capturing a borrowed variable | `x: inout = k;` then `fn() -> int { return k; }` while `x` is live; a reference a live `view` local views |
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
 | A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show`; the same for a tuple, struct or enum holding `f` |
@@ -454,8 +496,9 @@ Output:
 A borrowed result (`-> view T`, `-> inout T`) in a function type; a method as a value
 (`p.shift` bound to `p`: write `fn(d: int) { p.shift(d); }`); a generic function as a
 value (`first<int>`); a lambda with inferred parameter types (`fn(x) { ... }`); a capture by
-reference (a counter shared with a closure lives in
-an object); capturing a `view`, an `inout` or a struct method's `self`; a function value
+reference (a counter shared with a closure lives in a `shared mut` object); capturing a
+move-only value (a unique object or a `Str`: declare it `shared`);
+capturing a `view`, an `inout` or a struct method's `self`; a function value
 crossing into C, except as a type argument of a generic native function; `toString`,
 `print` and `hash` on a function value.
 

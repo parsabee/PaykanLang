@@ -311,10 +311,11 @@ fn main() -> int {
 // -- `Copyable`
 
 // `Copyable` is structural: numbers, `bool`, `char`, an `atomic` handle's
-// value, and an enum, tuple or struct of Copyable parts (a struct's
-// `shared` field counts) meet a `T: Copyable` bound.  A unique class, a
-// `Str`, a function value, and a struct holding a unique reference do not,
-// with the reason; and `impl Copyable for X` is an error.
+// value, a function value (its copies share its closure), and an enum,
+// tuple or struct of Copyable parts (a struct's `shared` field counts) meet
+// a `T: Copyable` bound.  A unique class, a `Str`, and a struct holding a
+// unique reference do not, with the reason; and `impl Copyable for X` is an
+// error.
 TEST(Concurrency, CopyableIsAStructuralBound) {
   auto ok = semaCheck(R"(class Node { id: int; }
 struct Point { x: int; y: int; }
@@ -332,6 +333,7 @@ fn main() -> int {
   let g = twice(m);
   let h = twice(True);
   let i = twice('c');
+  let k = twice(fn() => 1);
   return a.0 + b.1.x + c.0.n + c.1.s.id;
 })");
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
@@ -346,14 +348,12 @@ fn main() -> int {
   let d = twice(Named("d", 2));
   let e = twice(Pair(Node(2), 1));
   let g = twice("s");
-  let k = twice(fn() => 1);
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
   const std::string needs =
       "' does not implement trait 'Copyable', which 'twice' requires of 'T': ";
-  const std::string moveOnly =
-      "a reference, a 'Str', a function value or a task is move-only";
+  const std::string moveOnly = "a reference, a 'Str' or a task is move-only";
   // NOLINTBEGIN(bugprone-suspicious-missing-comma)
   expectErrors(r, {":5:1: error: 'Copyable' is built in: a type is Copyable by "
                    "what it "
@@ -362,8 +362,7 @@ fn main() -> int {
                    (":8:11: error: 'Pair" + needs +
                     "it holds move-only field 'left' ('Node')")
                        .c_str(),
-                   (":9:11: error: 'Str" + needs + moveOnly).c_str(),
-                   (":10:11: error: '() -> int" + needs + moveOnly).c_str()});
+                   (":9:11: error: 'Str" + needs + moveOnly).c_str()});
   // NOLINTEND(bugprone-suspicious-missing-comma)
 }
 
@@ -555,7 +554,7 @@ TEST(Concurrency, AtomicPlaces) {
       R"(class Stats { name: Str; served: atomic int; bytes: atomic float; done: atomic bool; }
 impl Stats {
   fn __init__(name: Str, served: atomic int) {
-    self.name = name; self.served = served; self.bytes = 0.0; self.done = False;
+    self.name = move name; self.served = served; self.bytes = 0.0; self.done = False;
   }
 }
 class Box { n: atomic int; }

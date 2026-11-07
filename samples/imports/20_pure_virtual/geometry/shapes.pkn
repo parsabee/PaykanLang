@@ -10,7 +10,7 @@ class Shape {
 }
 
 impl Shape {
-  fn __init__(name: Str)  { self.name = name; }
+  fn __init__(name: Str)  { self.name = move name; }
   view fn report() -> Str { return self.label() + ": " + Str(self.area()); }
 }
 
@@ -25,7 +25,10 @@ class Square : Polygon {
 }
 
 impl Square {
-  fn __init__(name: Str, side: float) { __super__(name, 4); self.side = side; }
+  fn __init__(name: Str, side: float) {
+    __super__(move name, 4);
+    self.side = side;
+  }
 }
 
 fn total(shapes: view Shape[]) -> float {

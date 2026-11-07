@@ -529,7 +529,7 @@ void ModuleLowering::bootstrapBuiltins() {
   }
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
-  IdentityCtors.insert(kString);
+  // (`Str(s)` of a `Str` is no identity: it copies, showCallOf.)
 }
 
 // -- Entry point

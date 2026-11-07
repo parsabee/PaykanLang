@@ -18,12 +18,12 @@ namespace {
 const char *kBox = R"(
   class Box<T> {
     v: T;
-    fn get() -> T { return self.v; }
-    fn set(v: T) { self.v = v; }
+    view fn get() -> view T { return self.v; }
+    fn set(v: T) { self.v = move v; }
   }
 
   impl Box<T> {
-    fn __init__(v: T) { self.v = v; }
+    fn __init__(v: T) { self.v = move v; }
   }
 )";
 
@@ -69,13 +69,13 @@ TEST(Generics, PairStrInt) {
     class Pair<K, V> {
       k: K;
       v: V;
-      fn key() -> K { return self.k; }
-      fn value() -> V { return self.v; }
+      view fn key() -> view K { return self.k; }
+      view fn value() -> view V { return self.v; }
       view fn toString() -> Str { return self.k + "=" + Str<int>(self.v); }
     }
 
     impl Pair<K, V> {
-      fn __init__(k: K, v: V) { self.k = k; self.v = v; }
+      fn __init__(k: K, v: V) { self.k = move k; self.v = move v; }
     }
   )",
                                   R"(
@@ -89,14 +89,15 @@ TEST(Generics, PairStrInt) {
   g.expectNoLeaks("PairStrInt");
 }
 
+// The inner Box moves into the outer one, and is changed through it.
 TEST(Generics, BoxOfBoxInt) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
     inner: mut Box<int> = Box<int>(5);
-    outer: mut Box<Box<int>> = Box<Box<int>>(inner);
+    outer: mut Box<Box<int>> = Box<Box<int>>(move inner);
     io::println(Str<int>(outer.get().get()));
-    outer.get().set(9);
-    io::println(Str<int>(inner.get()));
+    outer.v.set(9);
+    io::println(Str<int>(outer.get().get()));
     fresh: mut = Box<Box<int>>(Box<int>(1));
     io::println(Str<int>(fresh.get().get()));
   )"));
@@ -106,8 +107,9 @@ TEST(Generics, BoxOfBoxInt) {
 }
 
 // Stack<T> over a fixed-capacity T[4] field and a count, with Str and int
-// elements: the methods write and read the field in place, and an element
-// still on the stack is released with it.
+// elements: the methods write and read the field in place (`pop` returns a
+// clone, since an element stays its array's), and an element still on the
+// stack is released with it.
 TEST(Generics, StackOfStrAndInt) {
   LeakGuard g;
   auto r = compileAndRun(withMain(R"(
@@ -120,7 +122,7 @@ TEST(Generics, StackOfStrAndInt) {
       }
       fn pop() -> T {
         self.n = self.n - 1;
-        return self.items[self.n];
+        return self.items[self.n].clone();
       }
       view fn size() -> int { return self.n; }
       view fn empty() -> bool { return self.n == 0; }
@@ -128,7 +130,7 @@ TEST(Generics, StackOfStrAndInt) {
 
     impl Stack<T> {
       fn __init__(fill: T) {
-        self.items = [fill; 4];
+        self.items = [fill.clone(), fill.clone(), fill.clone(), move fill];
         self.n = 0;
       }
     }
@@ -176,8 +178,8 @@ TEST(Generics, GenericFirstOnIntAndStrArrays) {
 TEST(Generics, GenericFunctionOverInstantiation) {
   LeakGuard g;
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
-    fn unbox<T>(b: Box<T>) -> T { return b.v; }
-    fn rebox<T>(b: Box<T>) -> Box<T> { return Box<T>(b.v); }
+    fn unbox<T>(b: Box<T>) -> T { return move b.v; }
+    fn rebox<T>(b: Box<T>) -> Box<T> { return Box<T>(move b.v); }
   )",
                                   R"(
     io::println(Str<int>(unbox(Box<int>(4))));
@@ -212,13 +214,13 @@ TEST(Generics, MatchOnInstantiation) {
 TEST(Generics, InstantiationTransfer) {
   LeakGuard g;
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
-    fn consume(b: mut Box<Str>) -> Str { return b.get(); }
+    fn consume(b: mut Box<Str>) -> Str { return b.get().clone(); }
   )",
                                   R"(
     a: mut Box<Str> = Box<Str>("moved");
-    b: mut Box<Str> = a;
+    b: mut Box<Str> = move a;
     io::println(b.get());
-    io::println(consume(b));
+    io::println(consume(move b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "moved\nmoved\n");
@@ -230,7 +232,7 @@ TEST(Generics, EqualityDispatchesToEquals) {
   auto r = compileAndRun(withMain(R"(
     class Box<T> {
       v: T;
-      fn get() -> T { return self.v; }
+      view fn get() -> view T { return self.v; }
       view fn equals(other: Obj) -> bool {
         match other {
           o: Box<T> { return o.v == self.v; }
@@ -240,7 +242,7 @@ TEST(Generics, EqualityDispatchesToEquals) {
     }
 
     impl Box<T> {
-      fn __init__(v: T) { self.v = v; }
+      fn __init__(v: T) { self.v = move v; }
     }
   )",
                                   R"(
@@ -263,7 +265,7 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
     class Holder {
       b: Box<int>;
-      fn get() -> Box<int> { return self.b; }
+      view fn get() -> view Box<int> { return self.b; }
     }
 
     impl Holder {
@@ -317,16 +319,16 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
     class Wrap<T> : Base {
       v: T;
       view fn name() -> Str { return "wrap"; }
-      fn get() -> T { return self.v; }
+      view fn get() -> view T { return self.v; }
     }
 
     impl Wrap<T> {
-      fn __init__(v: T, n: int) { __super__(n); self.v = v; }
+      fn __init__(v: T, n: int) { __super__(n); self.v = move v; }
     }
   )",
                                   R"(
-    w: mut Wrap<Str> = Wrap<Str>("payload", 5);
-    b: Base = w;
+    w: shared mut Wrap<Str> = Wrap<Str>("payload", 5);
+    b: shared mut Base = w;
     io::println(b.name() + " " + Str<int>(b.n) + " " + w.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -370,16 +372,16 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
   auto r = compileAndRun(R"(import ::io;
     class Pair<A, B> {
       p: (A, B);
-      fn first() -> A { x, _ = self.p; return x; }
-      fn second() -> B { return self.p.1; }
-      fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+      fn first() -> A { x, _ = self.p.clone(); return x; }
+      fn second() -> B { return self.p.1.clone(); }
+      fn swap() -> (B, A) { return (self.p.1.clone(), self.p.0.clone()); }
     }
 
     impl Pair<A, B> {
-      fn __init__(a: A, b: B) { self.p = (a, b); }
+      fn __init__(a: A, b: B) { self.p = (move a, move b); }
     }
     fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
-    fn dup<T>(x: T) -> (T, T) { return (x, x); }
+    fn dup<T>(x: T) -> (T, T) { return (x.clone(), move x); }
     fn main() -> int {
       q: mut = Pair<Str, int>("a", 1);
       io::println(q.first());
@@ -399,6 +401,7 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
   g.expectNoLeaks("TupleFieldLiteralIndexAndDestructuring");
 }
 
+// `get` and `orElse` borrow: the slot keeps its value.
 TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -406,14 +409,14 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
     impl Node { fn __init__(x: int) { self.v = x; } }
     class Slot<T> {
       v: T?;
-      fn set(x: T) { self.v = x; }
-      fn get() -> T? { return self.v; }
+      fn set(x: T) { self.v = move x; }
+      view fn get() -> view T? { return self.v; }
     }
 
     impl Slot<T> {
       fn __init__() { }
     }
-    fn orElse<T>(x: T?, d: T) -> T {
+    fn orElse<T>(x: view T?, d: view T) -> view T {
       match x {
         v: T { return v; }
         None { return d; }
@@ -429,7 +432,7 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
       s: mut = Slot<Str>();
       io::println(orElse(s.get(), "dflt"));
       n: Node? = None;
-      m = ident<Node?>(n);
+      m = ident<Node?>(move n);
       io::println(Str<bool>(m == None));
       return 0;
     }
@@ -446,7 +449,7 @@ TEST(GenericsTypes, UnwrapArmOfAnOptionalTypeArgument) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { v: Str; }
-    impl Node { fn __init__(x: Str) { self.v = x; } }
+    impl Node { fn __init__(x: Str) { self.v = move x; } }
     class Slot<T> {
       v: T?;
       view fn describe() -> Str {
@@ -454,10 +457,10 @@ TEST(GenericsTypes, UnwrapArmOfAnOptionalTypeArgument) {
       }
     }
     impl Slot<T> {
-      fn __init__(v: T?) { self.v = v; }
+      fn __init__(v: T?) { self.v = move v; }
     }
     fn orElse<T>(x: T?, d: T) -> T {
-      match x {
+      match move x {
         v: T { return v; }
         None { return d; }
       }
@@ -469,7 +472,7 @@ TEST(GenericsTypes, UnwrapArmOfAnOptionalTypeArgument) {
       io::println(orElse<int?>(y, None).toString() + " " +
                   orElse<int?>(None, 7).toString());
       n: Node? = Node("n" + "1");
-      match orElse<Node?>(n, None) { m: Node { io::print(m.v); } None { } }
+      match orElse<Node?>(move n, None) { m: Node { io::print(m.v); } None { } }
       io::println(" " + orElse<Node?>(None, None).toString());
       return 0;
     }
@@ -483,8 +486,9 @@ TEST(GenericsTypes, UnwrapArmOfAnOptionalTypeArgument) {
 // template's other values of type T are: it is compared with a T and put in
 // a `(T, T)`, and through `x: inout T` (directly, or passed on to an `inout
 // T` parameter) it is assigned a T, None included, that goes back to the
-// subject.  So for an optional of a class, of a primitive, of a struct and
-// of a tagged union, next to the same templates with a T that is not one.
+// subject (the functions that make it borrow the old value).  So for an
+// optional of a class, of a primitive, of a struct and of a tagged union,
+// next to the same templates with a T that is not one.
 TEST(GenericsTypes, ArmOfAnOptionalTypeArgumentBindsAT) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -492,24 +496,24 @@ TEST(GenericsTypes, ArmOfAnOptionalTypeArgumentBindsAT) {
     enum Sh { E, L(s: Str) }
     class Slot<T> {
       v: T?;
-      fn poke(f: (T) -> T) { match self.v { x: inout T { x = f(x); } None { } } }
-      fn pass(f: (T) -> T) { match self.v { x: inout T { bump(x, f); } None { } } }
+      fn poke(f: (view T) -> T) { match self.v { x: inout T { x = f(x); } None { } } }
+      fn pass(f: (view T) -> T) { match self.v { x: inout T { bump(x, move f); } None { } } }
     }
-    fn holds<T>(x: T?, d: T) -> bool {
+    fn holds<T>(x: view T?, d: view T) -> bool {
       match x { v: T { return v == d; } None { return False; } }
     }
     fn pairWith<T>(x: T?, d: T) -> (T, T)? {
-      match x { v: T { return (v, d); } None { return None; } }
+      match move x { v: T { return (move v, move d); } None { return None; } }
     }
-    fn bump<T>(p: inout T, f: (T) -> T) { p = f(p); }
-    fn twice(s: Str) -> Str { return s + s; }
-    fn twiceO(s: Str?) -> Str? { match s { t: Str { return t + t; } None { return "-"; } } }
-    fn gone(s: Str?) -> Str? { return None; }
-    fn incO(n: int?) -> int? { match n { k: int { return k + 1; } None { return 0; } } }
-    fn noInt(n: int?) -> int? { return None; }
-    fn grow(p: P) -> P { return P(p.s + "+", p.n + 1); }
-    fn growO(p: P?) -> P? { match p { q: P { return P(q.s + "?", q.n * 10); } None { return None; } } }
-    fn shO(s: Sh?) -> Sh? {
+    fn bump<T>(p: inout T, f: (view T) -> T) { p = f(p); }
+    fn twice(s: view Str) -> Str { return s + s; }
+    fn twiceO(s: view Str?) -> Str? { match s { t: Str { return t + t; } None { return "-"; } } }
+    fn gone(s: view Str?) -> Str? { return None; }
+    fn incO(n: view int?) -> int? { match n { k: int { return k + 1; } None { return 0; } } }
+    fn noInt(n: view int?) -> int? { return None; }
+    fn grow(p: view P) -> P { return P(p.s + "+", p.n + 1); }
+    fn growO(p: view P?) -> P? { match p { q: P { return P(q.s + "?", q.n * 10); } None { return None; } } }
+    fn shO(s: view Sh?) -> Sh? {
       match s { t: Sh { match t { l: L { return Sh::L(l.s + "!"); } _ { return None; } } } None { return None; } }
     }
     fn main() -> int {
@@ -542,8 +546,8 @@ TEST(GenericsTypes, ArmOfAnOptionalTypeArgumentBindsAT) {
       io::println(Str(holds<Str?>(s, "s")) + " " + Str(holds<Str?>(s, None)) + " " +
                   Str(holds<int>(n, 1)) + " " + Str(holds<int?>(n, 1)) + " " +
                   Str(holds<int?>(n, None)) + " " + Str(holds<P?>(q, P("q", 3))));
-      io::println(pairWith<Str?>(s, None).toString() + " " + pairWith<int?>(n, 8).toString() +
-                  " " + pairWith<P?>(q, None).toString() + " " +
+      io::println(pairWith<Str?>(move s, None).toString() + " " + pairWith<int?>(n, 8).toString() +
+                  " " + pairWith<P?>(move q, None).toString() + " " +
                   pairWith<int>(n, 2).toString());
       return 0;
     }
@@ -564,10 +568,10 @@ TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndTuples) {
   {
     std::ofstream lib(dir / "lib.pkn");
     lib << R"(
-class Pair<A, B> { a: A; b: B; fn first() -> A { return self.a; } }
-impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = a; self.b = b; } }
-class Box<T> { v: T; fn get() -> T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+class Pair<A, B> { a: A; b: B; view fn first() -> view A { return self.a; } }
+impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = move a; self.b = move b; } }
+class Box<T> { v: T; view fn get() -> view T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
 fn mkBoxTuple() -> Box<(Str, int)> { return Box<(Str, int)>(("t", 3)); }
 )";
@@ -600,23 +604,27 @@ TEST(Generics, StaticFnOfAnInstantiation) {
   auto r = compileAndRun(R"(import ::io;
 class Box<T> { __v: T; }
 impl Box<T> {
-  fn __init__(v: T) { self.__v = v; }
+  fn __init__(v: T) { self.__v = move v; }
   view fn get() -> view T { return self.__v; }
-  static fn of(v: T) -> Box<T> { return Box<T>(v); }
-  static fn twice(v: T) -> (Box<T>, Box<T>) { b = Box<T>(v); return (b, Box<T>(b.__v)); }
+  static fn of(v: T) -> Box<T> { return Box<T>(move v); }
+  static fn twice(v: T) -> (Box<T>, Box<T>) {
+    b = Box<T>(move v);
+    c = Box<T>(b.__v.clone());
+    return (move b, move c);
+  }
 }
 struct Pair<A, B> { a: A; b: B; }
 impl Pair<A, B> {
-  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
-  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b, p.a); }
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(move a, move b); }
+  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b.clone(), p.a.clone()); }
 }
 fn main() -> int {
   b = Box<int>::of(1);
   s = Box<Str>::of("s");
   t = Box<Str>::twice("t");
   p = Pair<int, Str>::make(2, "p");
-  q = Pair<Str, int>::swapped(p);
-  n: Box<Pair<int, Str>> = Box<Pair<int, Str>>::of(p);
+  q = Pair<Str, int>::swapped(p.clone());
+  n: Box<Pair<int, Str>> = Box<Pair<int, Str>>::of(p.clone());
   io::println(Str(b.get()) + " " + s.get() + " " + t.0.get() + t.1.get() + " " + p.toString() + " " + q.toString() + " " + Str(n.get().a));
   return 0;
 }

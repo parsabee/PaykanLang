@@ -7,6 +7,11 @@
 //            held, so the objects die when the copy lets them go, which the
 //            `weak` references show.  A copy the variable is read after,
 //            and an element copied out of it, keep their own.
+// The nodes are `shared`, so a value holding them is Copyable and its moves
+// are the compiler's own; a unique reference, and a value holding one, would
+// leave a variable only by `move`.  A function value is never Copyable, so it
+// is moved explicitly.  A tuple's or an array's element takes no qualifier, so
+// the tuples and the array hold `Pair`s, structs whose field holds the node.
 // expect-stdout: tuple: alive | replaced: gone
 // expect-stdout: struct: alive | replaced: gone
 // expect-stdout: enum: alive | replaced: gone
@@ -35,39 +40,42 @@ fn state(w: view Watch) -> Str {
 }
 
 struct Pair {
-  node: Node;
+  node: shared Node;
   n: int;
 }
 
-enum Slot { Empty, Full(node: Node) }
+enum Slot {
+  Empty,
+  Full(node: shared Node)
+}
 
 class Holder {
-  pair: (Node, int);
+  held: (Pair, int);
 }
 
 /// A function value whose closure holds the only reference to @p n.
-fn closureOver(n: Node) -> () -> Str {
-  return fn() -> Str { return n.name; };
+fn closureOver(n: shared Node) -> () -> Str {
+  return fn() -> Str { return n.name.clone(); };
 }
 
 /// A struct built in a local and returned from it.
 fn makePair(name: Str) -> Pair {
-  let p = Pair(Node(name), 1);
+  let p = Pair(Node(move name), 1);
   return p;
 }
 
 fn main() -> int {
   // A tuple: `q = t` is t's last use, so q holds the node now.
-  let tn = Node("t");
+  let tn: shared = Node("t");
   let wt = Watch(tn);
-  let t = (tn, 1);
+  let t = (Pair(tn, 0), 1);
   q = t;
   io::print("tuple: " + state(wt));
-  q = (Node("u"), 2);
+  q = (Pair(Node("u"), 0), 2);
   io::println(" | replaced: " + state(wt));
 
   // A struct.
-  let sn = Node("s");
+  let sn: shared = Node("s");
   let ws = Watch(sn);
   let p = Pair(sn, 1);
   r = p;
@@ -76,7 +84,7 @@ fn main() -> int {
   io::println(" | replaced: " + state(ws));
 
   // A tagged union holding a node.
-  let en = Node("e");
+  let en: shared = Node("e");
   let we = Watch(en);
   let e = Slot::Full(en);
   e2 = e;
@@ -85,32 +93,32 @@ fn main() -> int {
   io::println(" | replaced: " + state(we));
 
   // A function value: its closure holds the node.
-  let fnode = Node("f");
+  let fnode: shared = Node("f");
   let wf = Watch(fnode);
   let g = closureOver(fnode);
-  h = g;
+  h = move g;
   io::print("function: " + h());
   h = fn() -> Str { return ""; };
   io::println(" | replaced: " + state(wf));
 
   // An optional tuple.
-  let on = Node("o");
+  let on: shared = Node("o");
   let wo = Watch(on);
-  let o: (Node, int)? = (on, 1);
+  let o: (Pair, int)? = (Pair(on, 0), 1);
   o2 = o;
   io::print("optional: " + state(wo));
   o2 = None;
   io::println(" | replaced: " + state(wo));
 
-  // A fixed-size array of references.
-  let a0 = Node("a");
-  let a1 = Node("b");
+  // A fixed-size array of structs holding references.
+  let a0: shared = Node("a");
+  let a1: shared = Node("b");
   let wa0 = Watch(a0);
   let wa1 = Watch(a1);
-  let arr = [a0, a1];
+  let arr = [Pair(a0, 0), Pair(a1, 1)];
   arr2 = arr;
   io::print("array: " + state(wa0) + " " + state(wa1));
-  arr2 = [Node("c"), Node("d")];
+  arr2 = [Pair(Node("c"), 0), Pair(Node("d"), 1)];
   io::println(" | replaced: " + state(wa0) + " " + state(wa1));
 
   // Returned from a local: the caller's variable holds what it held.
@@ -121,28 +129,28 @@ fn main() -> int {
   io::print(" | replaced: " + state(wm));
 
   // Assigned to a field at its last use: the field holds the node now.
-  let hn = Node("h");
+  let hn: shared = Node("h");
   let wh = Watch(hn);
-  holder: mut = Holder((Node("z"), 0));
-  let pair = (hn, 1);
-  holder.pair = pair;
+  holder: mut = Holder((Pair(Node("z"), 0), 0));
+  let held = (Pair(hn, 0), 1);
+  holder.held = held;
   io::print(" | field: " + state(wh));
-  holder = Holder((Node("y"), 0));
+  holder = Holder((Pair(Node("y"), 0), 0));
   io::println(" | let go: " + state(wh));
 
   // Read after the copy: the copy is one of its own.  An element copied
   // out of a value stays a copy too.
-  let cn = Node("c");
+  let cn: shared = Node("c");
   let wc = Watch(cn);
-  let kept = (cn, 1);
+  let kept = (Pair(cn, 0), 1);
   copy = kept;
-  copy = (Node("w"), 0);
-  io::print("read after: " + kept.0.name + " | " + state(wc));
-  let ek = Node("e");
+  copy = (Pair(Node("w"), 0), 0);
+  io::print("read after: " + kept.0.node.name + " | " + state(wc));
+  let ek: shared = Node("e");
   let wek = Watch(ek);
-  let outer = ((ek, 1), 2);
+  let outer = ((Pair(ek, 0), 1), 2);
   inner = outer.0;
-  inner = (Node("v"), 0);
-  io::println(" | element: " + outer.0.0.name + " | " + state(wek));
+  inner = (Pair(Node("v"), 0), 0);
+  io::println(" | element: " + outer.0.0.node.name + " | " + state(wek));
   return 0;
 }

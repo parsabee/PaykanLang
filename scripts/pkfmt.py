@@ -386,7 +386,7 @@ def declaration_rows(code, ind):
 
 # -- Layout -------------------------------------------------------------------
 
-MODIFIERS = {"pub", "view", "static", "native"}
+MODIFIERS = {"pub", "view", "static", "native", "shared"}
 
 
 class Formatter:

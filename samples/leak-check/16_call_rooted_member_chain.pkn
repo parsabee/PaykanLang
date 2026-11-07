@@ -1,8 +1,8 @@
 // Isolates: member chains rooted in a call result: the fresh receiver
 // (`makeH()` below) is owned by the member access and must be released after
-// the field is read, with a reference-typed field value retained first so it
-// survives the receiver's release.  Also exercises a new owner of a field's
-// value (x = h.a), which must retain it rather than take the field's
+// the field is read, with a reference-typed field value cloned first so the
+// clone survives the receiver's release.  Also exercises a new owner of a
+// clone of a field's value (z = h.a.clone()), which leaves the field its own
 // reference.
 //
 // Runtime allocation sites: the objects, PaykanString_new (String.c).
@@ -36,14 +36,14 @@ fn makeO() -> O {
 }
 
 fn main() -> int {
-  let x = makeH().a;     // chain used as a value
+  let x = makeH().a.clone(); // chain used as a value
   io::println(x);
   let n = makeH().a.len(); // chain used as a receiver
   io::println(Str(n));
-  let y = makeO().h.a;   // nested chain
+  let y = makeO().h.a.clone(); // nested chain
   io::println(y);
   let h = H();
-  let z = h.a;           // borrowed field read acquired by a new owner
+  let z = h.a.clone();   // borrowed field read cloned for a new owner
   io::println(z);
   return 0;
 }

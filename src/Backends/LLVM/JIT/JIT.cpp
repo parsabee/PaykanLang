@@ -149,6 +149,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanBufferReserve,   reinterpret_cast<void *>(&PaykanBuffer_reserve)},
     {kPaykanBufferGrow,      reinterpret_cast<void *>(&PaykanBuffer_grow)},
     {kPaykanBufferShrink,    reinterpret_cast<void *>(&PaykanBuffer_shrink)},
+    {kPaykanMemSwap,         reinterpret_cast<void *>(&Paykan_mem_swap)},
     {kPaykanBufferIsSet,     reinterpret_cast<void *>(&PaykanBuffer_isSet)},
     {kPaykanBufferTryGrow,   reinterpret_cast<void *>(&PaykanBuffer_tryGrow)},
     {kPaykanBufferTryReserve, reinterpret_cast<void *>(&PaykanBuffer_tryReserve)},

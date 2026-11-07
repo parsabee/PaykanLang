@@ -142,7 +142,7 @@ fn check(s: Str) -> int { return 7; }
 import strmod;
 fn main() -> int {
   s: Str = "hello";
-  return strmod::check(s);
+  return strmod::check(move s);
 }
 )");
 
@@ -174,7 +174,7 @@ impl Point {
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
 import geometry::point;
 fn total(p: point::Point) -> int { return p.sum(); }
-fn main() -> int { p = point::Point(15, 27); return total(p); }
+fn main() -> int { p = point::Point(15, 27); return total(move p); }
 )");
 
   auto r = compileAndRunFile(mainPath);
@@ -223,7 +223,8 @@ fn main() -> int { b = Box(); return b.total(); }
 }
 
 // Another module's method may run the program's code: `sum()` compares the
-// Point's peer with itself, and the `Watcher`'s `equals` replaces the
+// Point's peer with itself, and the `Watcher`'s `equals`, through the
+// closure it calls (its argument is lent, a `view`), replaces the
 // `Box.origin` that `total()` runs `sum()` on.  The field is stored outside
 // construction, so its read keeps a reference of its own across the call
 // (docs/pir.md §7), and `sum()` reads the Point it was called on, which dies
@@ -255,24 +256,21 @@ class Box {
   view fn total() -> int { return self.origin.sum(); }
 }
 class Watcher {
-  weak box: shared mut Box?;
+  fire: () -> void;
   view fn equals(other: Obj) -> bool {
-    match other {
-      w: Watcher {
-        match w.box {
-          b: Box { b.origin = point::Point(100, 200, None); }
-          None { }
-        }
-      }
-      _ { }
-    }
+    self.fire();
     return False;
   }
 }
 fn main() -> int {
-  w: mut = Watcher(None);
-  b: shared mut = Box(point::Point(15, 27, w));
-  w.box = b;
+  b: shared mut = Box(point::Point(15, 27, None));
+  weak box = b;
+  b.origin.peer = Watcher(fn() {
+    match box {
+      x: Box { x.origin = point::Point(100, 200, None); }
+      None { }
+    }
+  });
   io::println(Str(b.total()));
   io::println(Str(b.total()));
   return 0;
@@ -387,8 +385,8 @@ import mid;
 fn main() -> int {
   b: mut = mid::make(30);
   b.set(b.get() + gen::Box<int>(4).get());
-  pair: gen::Box<int>[2] = [b, mid::make(0)];
-  return b.get() + mid::count() + gen::sum(pair, 1);
+  pair: gen::Box<int>[2] = [move b, mid::make(0)];
+  return pair[0].get() + mid::count() + gen::sum(pair, 1);
 }
 )");
 
@@ -611,7 +609,7 @@ fn scale(v: inout int[2], by: int) {
   v[1] = v[1] * by;
 }
 fn corners(names: Str[2][2]) -> Str[2] {
-  return [names[0][0], names[1][1]];
+  return [names[0][0].clone(), names[1][1].clone()];
 }
 class Path { stops: Str[3]; }
 fn longest(ss: view Str[]) -> int {
@@ -738,8 +736,8 @@ impl P { fn ___init__(x: int) { self.x = x; } }
 fn origin() -> P { return P(0); }
 class Box<T> { v: T; }
 impl Box<T> {
-  fn ___init__(v: T) { self.v = v; }
-  static fn of(v: T) -> Box<T> { return Box<T>(v); }
+  fn ___init__(v: T) { self.v = move v; }
+  static fn of(v: T) -> Box<T> { return Box<T>(move v); }
 }
 )");
 
@@ -772,13 +770,13 @@ TEST(Module, StaticFnOfAnImportedInstantiation) {
   writeTempFile(tmpDir.string(), "lib.pkn", R"(
 class Box<T> { __v: T; }
 impl Box<T> {
-  fn ___init__(v: T) { self.__v = v; }
+  fn ___init__(v: T) { self.__v = move v; }
   view fn get() -> view T { return self.__v; }
-  static fn of(v: T) -> Box<T> { return Box<T>(v); }
+  static fn of(v: T) -> Box<T> { return Box<T>(move v); }
 }
 struct Pair<A, B> { a: A; b: B; }
 impl Pair<A, B> {
-  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(move a, move b); }
 }
 fn own() -> Box<Str> { return Box<Str>::of("own"); }
 )");

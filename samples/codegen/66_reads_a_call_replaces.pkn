@@ -7,9 +7,9 @@
 //            the one used, and it lives until it is used, also when the
 //            variable held its only reference: a string, an object, a
 //            struct's field, a tuple's and an array's element.  So does
-//            what a function is handed at a variable's last use, and what a
-//            variable handed on was sharing (docs/language/16-memory.md,
-//            "Ownership transfers").
+//            what a function is handed at a variable's last use (`move`),
+//            and what a variable handed on was sharing (a `shared mut Str`;
+//            docs/language/16-memory.md, "Ownership transfers").
 // expect-stdout: string: first1! other9
 // expect-stdout: assigned: other9!
 // expect-stdout: receiver: node1? new9
@@ -55,7 +55,7 @@ fn replArray(a: inout Node[2]) -> Str {
   return "%";
 }
 
-fn take(s: Str) -> Str {
+fn take(s: shared mut Str) -> Str {
   return s + ".";
 }
 
@@ -83,14 +83,14 @@ fn main() -> int {
   io::println("array: " + arr[0].greet(replArray(arr)) + " " + arr[0].name);
 
   let x: mut = Node("old" + Str(1));
-  io::println("handed on: " + use(x));
+  io::println("handed on: " + use(move x));
 
   let x2: mut = Node("x" + Str(2));
-  y: mut = x2;
+  y: mut = move x2;
   io::println("moved into: " + y.greet(replNode(y)) + " " + y.name);
 
-  let a: mut = "first" + Str(1);
-  s2: mut = a;
+  let a: shared mut = "first" + Str(1);
+  s2: shared mut = a;
   let t = take(a);
   io::println("shared: " + t + " " + (s2 + repl(s2)) + " " + s2);
   return 0;

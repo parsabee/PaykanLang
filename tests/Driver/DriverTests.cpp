@@ -1426,12 +1426,15 @@ TEST(Driver, EmitPirPrintsTheProgram) {
 
 // --stats: what the PIR passes did (docs/pir.md §12), on stderr, after the
 // last of them ran: for a program, and for the code of a module written to
-// a `.pkm` (whose compiled code is made by the same passes).
+// a `.pkm` (whose compiled code is made by the same passes).  The reference
+// is `shared`: a unique one is handed over by an explicit `move`, which
+// leaves the moves at last use no copy to turn into a transfer.
 TEST(Driver, StatsCountTheMovesAtLastUse) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("class N { n: int; }\n"
-                      "fn take(x: N) -> int { return x.n; }\n"
-                      "fn main() -> int { a = N(7); return take(a); }\n");
+  auto src =
+      writeTmp("class N { n: int; }\n"
+               "fn take(x: shared N) -> int { return x.n; }\n"
+               "fn main() -> int { a: shared N = N(7); return take(a); }\n");
   auto [rc, out] = run(paykanRun() + " --stats " + src + " 2>&1");
   EXPECT_EQ(rc, 7) << out;
   EXPECT_NE(out.find("paykan pass stats:\n"
@@ -1491,7 +1494,8 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
 // clears their mark (docs/pir.md §6, §12); and it lends the box parameters
 // their bodies never write (`lending parameters lent`, `handed on`, `owned
 // on entry`, `retains at keeps`; here take's x, whose release then asks the
-// bit).  --pir-skip=<pass>[,<pass>] (not in --help) leaves passes out: here
+// bit).  The reference is `shared`, the kind of reference a call copies.
+// --pir-skip=<pass>[,<pass>] (not in --help) leaves passes out: here
 // the lending pass, whose marks and prologues then stay in what --emit-pir
 // prints, and the reference-count elimination.  It leaves them out of the
 // code the run lowers only: code a `.pkm` holds went through them when it
@@ -1500,10 +1504,12 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
 // no pass has, and --emit-pkm, are refused.
 TEST(Driver, PirSkipLeavesPassesOut) {
   REQUIRE_BACKEND();
-  auto src =
-      writeTmp("class N { n: int; }\n"
-               "fn take(x: N) -> int { return x.n; }\n"
-               "fn main() -> int { a = N(7); return take(a) + take(a); }\n");
+  auto src = writeTmp("class N { n: int; }\n"
+                      "fn take(x: shared N) -> int { return x.n; }\n"
+                      "fn main() -> int {\n"
+                      "  a: shared N = N(7);\n"
+                      "  return take(a) + take(a);\n"
+                      "}\n");
   const std::string paykan = kPaykan;
   auto all = run(paykan + " --stats --emit-pir " + src + " 2>&1");
   EXPECT_EQ(all.exitCode, 0) << all.out;
@@ -2682,7 +2688,7 @@ TEST(Driver, FileUpdateModesKeepEveryWrite) {
          "  }\n"
          "  match io::open(path, mode) {\n"
          "    u: Ok {\n"
-         "      f = u.value;\n"
+         "      f = move u.value;\n"
          "      f.write(\"one\\n\");\n"
          "      f.write(shown(f.readbytes(2)));\n"
          "      f.write(shown(f.read()));\n"
@@ -2731,10 +2737,11 @@ TEST(Driver, FileUpdateModesKeepEveryWrite) {
 }
 
 // A memory::Buffer slot never set, of a type whose zero bytes are no value,
-// panics when at() or get() reads it, after what the program printed: a
-// tagged union whose first variant holds a Str, a function value, and a
-// struct holding one.  Before, at() lent the zeros as that first variant and
-// get() gave a function value whose call jumped to address 0.  On every
+// panics when at() reads it, after what the program printed: a tagged union
+// whose first variant holds a Str, a function value, and a struct holding
+// one (none is Cloneable, so none has the copying get()).  Before, at() lent
+// the zeros as that first variant and get() gave a function value whose
+// call jumped to address 0.  On every
 // path, at -O0 and -O2: `run`, `build`, and the C `--emit-c` prints, linked
 // with the runtime's sources and the standard library's compiled code.
 TEST(Driver, ABufferSlotNeverSetPanicsOnEveryPath) {
@@ -2755,11 +2762,11 @@ TEST(Driver, ABufferSlotNeverSetPanicsOnEveryPath) {
                         "  if args[1] == \"function\" {\n"
                         "    b = memory::Buffer<() -> int>();\n"
                         "    b.push(fn() => 1); b.grow(1);\n"
-                        "    f = b.get(1); io::println(f());\n"
+                        "    io::println(b.at(1)());\n"
                         "  }\n"
                         "  if args[1] == \"struct\" {\n"
                         "    b = memory::Buffer<Handler>(); b.grow(1);\n"
-                        "    h = b.get(0); io::println(h.run());\n"
+                        "    io::println(b.at(0).run());\n"
                         "  }\n"
                         "  return 0;\n"
                         "}\n";
@@ -2986,7 +2993,7 @@ void writeZooProject(const std::filesystem::path &dir) {
          "  view fn area() -> int { return self.w * self.h; } }\n"
          "impl Rect {\n"
          "  fn __init__(w: int, h: int) { self.w = w; self.h = h; } }\n"
-         "fn describe(r: Rect) -> Str { return \"rect\"; }\n";
+         "fn describe(r: view Rect) -> Str { return \"rect\"; }\n";
   std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
   std::ofstream(dir / "b" / "util.pkn") << "fn tag() -> int { return 2; }\n";
   std::ofstream(dir / "zoo.pkn")
@@ -3193,8 +3200,8 @@ TEST(Driver, BuildAndRunDefaultToO2) {
 // fields and methods, or the modules' `__` functions and classes.
 // What a container hands out through a `view` is a `view`: an object
 // element is read, not stored or changed, whatever the container.  Its
-// copies (get(), getFront()) share an object, so they are not taken through
-// a `view`.
+// copies (get(), getFront()) are clones, which only a Cloneable element has
+// (#369): a `Cell`'s container has none, through a `view` or not.
 TEST(Driver, StandardLibraryViewsDoNotChangeElements) {
   auto src = writeTmp(
       "import ::collections as c;\n"
@@ -3225,11 +3232,11 @@ TEST(Driver, StandardLibraryViewsDoNotChangeElements) {
         "the result of 'last' is a 'view'; it cannot be stored",
         "the result of 'peek' is a 'view'; cannot assign to its field 'n'",
         "the result of 'front' is a 'view'; cannot assign to its field 'n'",
-        "'b' is a 'view' parameter; 'get' is not a 'view fn'",
-        "'xs' is a 'view' parameter; 'get' is not a 'view fn'",
-        "'m' is a 'view' parameter; 'getOr' is not a 'view fn'",
-        "'q' is a 'view' parameter; 'get' is not a 'view fn'",
-        "'l' is a 'view' parameter; 'getBack' is not a 'view fn'"})
+        "no method 'get' on type 'Buffer<Cell>'",
+        "no method 'get' on type 'List<Cell>'",
+        "no method 'getOr' on type 'HashMap<int, Cell>'",
+        "no method 'get' on type 'MinPriorityQueue<Cell>'",
+        "no method 'getBack' on type 'LinkedList<Cell>'"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
 }
 
@@ -4431,7 +4438,8 @@ TEST(Driver, ABorrowALaterArgumentWritesIsASemaError) {
 // this is): `run`, `build`, `--emit-pkm`, `--list-modules` and the
 // `--emit-*` options that print code; `--check-only`, `--emit-ast` and
 // `--dump-ast` compile nothing and warn of nothing; at -O0 and at -O2 alike.
-// The program reads the elements as they were passed, run and built.
+// The program reads the elements as they were passed, run and built.  `c`
+// is `shared mut`: `sum` is passed both a slice of its field and `c`.
 TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
   REQUIRE_BACKEND();
   auto dir = freshDir("slice_copy_warning");
@@ -4446,28 +4454,28 @@ TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
          "fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + "
          "x;\n"
          "\n"
-         "fn reset(c: mut Counts) -> int {\n"
+         "fn reset(c: shared mut Counts) -> int {\n"
          "  c.xs = [0, 0, 0];\n"
          "  return 0;\n"
          "}\n"
          "\n"
-         "fn sum(xs: view int[], c: mut Counts) -> int => total(xs, "
+         "fn sum(xs: view int[], c: shared mut Counts) -> int => total(xs, "
          "reset(c)); // xs as passed\n"
          "\n"
          "fn main() -> int {\n"
-         "  let c: mut = Counts([1, 2, 3]);\n"
+         "  let c: shared mut = Counts([1, 2, 3]);\n"
          "  io::println(Str(sum(c.xs, c)) + \" \" + Str(sum(c.xs, c)));\n"
          "  return 0;\n"
          "}\n";
   const std::string warning =
       src +
-      ":14:55: warning: 'reset' in a later argument may write the elements "
+      ":14:62: warning: 'reset' in a later argument may write the elements "
       "of slice 'xs': they are copied to the heap before the call to "
       "'total'\n"
       " 13 | \n"
-      " 14 | fn sum(xs: view int[], c: mut Counts) -> int => total(xs, "
+      " 14 | fn sum(xs: view int[], c: shared mut Counts) -> int => total(xs, "
       "reset(c)); // xs as passed\n"
-      "    |                                                       ^~\n"
+      "    |                                                              ^~\n"
       " 15 | \n";
   const std::string exe = (dir / "counts").string();
   const std::string pkm = (dir / "counts.pkm").string();

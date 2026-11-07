@@ -22,7 +22,7 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
   return "/tmp/" + name;
 }
 
-fn writeIt(path: Str) {
+fn writeIt(path: view Str) {
   match io::open(path, "w") {
     f: Ok {
       f.value.write("line one\n");

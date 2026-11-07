@@ -3,7 +3,7 @@
 fn main() -> int {
   let t = (1, "a", True);
   let x: int = t.0;
-  let s: Str = t.1;
+  s: view Str = t.1;
   let b: bool = t.2;
   let u: (int, Str) = (2, "b");
   let paren: int = (1 + 2) * 3;

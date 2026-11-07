@@ -16,6 +16,10 @@
 //            callee clears.  The `weak` references show when each object
 //            dies: where it did before arguments were lent, when what
 //            last held it lets it go.
+// The nodes, the cells and holders handed around with them, and the strings
+// read from them are `shared` (`shared mut` where something writes them): a
+// unique reference is never lent, since it reaches a by-value parameter only
+// by `move`, so the arguments the compiler lends are copyable references.
 // expect-stdout: inner reads a
 // expect-stdout: in outer, after inner: gone
 // expect-stdout: in main, after outer: gone
@@ -65,7 +69,7 @@
 import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Watcher {
@@ -89,52 +93,52 @@ fn state(w: view Watcher) -> Str {
 // -- Lent, handed on, kept: each object dies where it did
 
 // Reads its parameter only.
-fn inner(n: Node) {
+fn inner(n: shared mut Node) {
   io::println("inner reads " + n.name);
 }
 
 // Hands its parameter on at its last use, then does more work.
-fn outer(n: Node, w: view Watcher) {
+fn outer(n: shared mut Node, w: view Watcher) {
   inner(n);
   report(w, "in outer, after inner");
 }
 
 // Reassigns its parameter.
-fn rebind(n: Node, w: view Watcher) {
+fn rebind(n: shared mut Node, w: view Watcher) {
   n = Node("other");
   report(w, "in rebind, after the assignment");
 }
 
 class Holder {
-  n: Node?;
+  n: shared mut Node?;
 }
 
 // Keeps its parameter in a field, then lets the field go.
-fn stash(h: mut Holder, n: Node, w: view Watcher) {
+fn stash(h: shared mut Holder, n: shared mut Node, w: view Watcher) {
   h.n = n;
   h.n = None;
   report(w, "in stash, after the field let go");
 }
 
 // Keeps its parameter in a field the caller reads afterwards.
-fn keep(h: mut Holder, n: Node) {
+fn keep(h: shared mut Holder, n: shared mut Node) {
   h.n = n;
 }
 
 fn handOffs() {
-  let a = Node("a");
+  let a: shared mut = Node("a");
   let wa = Watcher(a);
   outer(a, wa);              // a's last use: handed over
   report(wa, "in main, after outer");
 
-  let b = Node("b");
+  let b: shared mut = Node("b");
   let wb = Watcher(b);
   rebind(b, wb);
   report(wb, "in main, after rebind");
 
-  let c = Node("c");
+  let c: shared mut = Node("c");
   let wc = Watcher(c);
-  let h: mut = Holder(None);
+  let h: shared mut = Holder(None);
   stash(h, c, wc);
   report(wc, "in main, after stash");
 
@@ -143,13 +147,16 @@ fn handOffs() {
   outer(Node("t"), wt);
 
   // Lent to keep, which retains what it keeps.
-  let k = Node("k");
+  let k: shared mut = Node("k");
   let wk = Watcher(k);
-  let g: mut = Holder(None);
+  let g: shared mut = Holder(None);
   keep(g, k);
+  // Appending copies the name with the runtime's string helper: a `.clone()`
+  // or a `Str(...)` is a method call made while the field is read, which may
+  // release a reference, so it would keep the hand-offs above copies.
   label = "";
   match g.n {
-    m: Node { label = m.name; }
+    m: Node { label += m.name; }
     None { label = "none"; }
   }
   io::println("kept: " + label + " | " + k.name + " " + state(wk));
@@ -158,30 +165,30 @@ fn handOffs() {
 // -- Reads the caller holds
 
 class Pair {
-  n: Node?;
-  s: Str;
+  n: shared mut Node?;
+  s: shared Str;
 }
 
 // The callee replaces the field its argument was read from, then reads
 // the argument: the caller keeps the argument alive (a hold).
-fn clearThenRead(s: Str, p: mut Pair) {
+fn clearThenRead(s: shared Str, p: shared mut Pair) {
   p.s = "replaced";
   io::println("still have " + s);
 }
 
 // Given a node's name and the node at its last use: the node may die
 // inside, the name must not.
-fn nameAndNode(s: Str, n: Node, w: view Watcher) {
+fn nameAndNode(s: shared Str, n: shared mut Node, w: view Watcher) {
   n = Node("other");
   report(w, "in nameAndNode, after the assignment");
   io::println("name " + s);
 }
 
 fn hazards() {
-  let p: mut = Pair(None, "original " + "string");
+  let p: shared mut = Pair(None, "original " + "string");
   clearThenRead(p.s, p);
 
-  let x = Node("x" + "name");
+  let x: shared mut = Node("x" + "name");
   let wx = Watcher(x);
   nameAndNode(x.name, x, wx);   // x's last use
   report(wx, "in main, after nameAndNode");
@@ -189,12 +196,12 @@ fn hazards() {
 
 // -- Every way a callee writes its parameter: it owns it from its entry
 
-fn assign(n: Node, w: view Watcher) {
+fn assign(n: shared mut Node, w: view Watcher) {
   n = Node("b");
   io::println("  assign: old is " + state(w) + ", n = " + n.name);
 }
 
-fn compound(s: Str) {
+fn compound(s: shared Str) {
   s += "!";
   io::println("  compound: s = " + s);
 }
@@ -203,40 +210,40 @@ fn bump(n: inout Node) {
   n = Node("c");
 }
 
-fn viaInout(n: mut Node, w: view Watcher) {
+fn viaInout(n: shared mut Node, w: view Watcher) {
   bump(n);
   io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
 }
 
 fn pair(a: Node) -> (Node, int) {
-  return (a, 1);
+  return (move a, 1);
 }
 
-fn destructure(n: Node, w: view Watcher) {
+fn destructure(n: shared mut Node, w: view Watcher) {
   n, k = pair(Node("m"));
   io::println("  destructure: old is " + state(w) + ", n = " + n.name);
 }
 
-fn armInout(n: mut Node, w: view Watcher) {
+fn armInout(n: shared mut Node, w: view Watcher) {
   match n {
     s: inout Node { s = Node("arm"); }
   }
   io::println("  armInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn inoutLocal(n: mut Node, w: view Watcher) {
+fn inoutLocal(n: shared mut Node, w: view Watcher) {
   r: inout = n;
   r = Node("loc");
   io::println("  inoutLocal: old is " + state(w) + ", n = " + n.name);
 }
 
-fn toNone(n: Node?, w: view Watcher) {
+fn toNone(n: shared mut Node?, w: view Watcher) {
   n = None;
   io::println("  toNone: old is " + state(w));
 }
 
 fn writes() {
-  let a: mut = Node("a");
+  let a: shared mut = Node("a");
   let wa = Watcher(a);
   io::println("copies:");
   assign(a, wa);
@@ -248,22 +255,22 @@ fn writes() {
   inoutLocal(a, wa);
   io::println("after copies: a is " + state(wa) + ", a = " + a.name);
   io::println("moves:");
-  let b = Node("b0");
+  let b: shared mut = Node("b0");
   let wb = Watcher(b);
   assign(b, wb);
-  let c: mut = Node("c0");
+  let c: shared mut = Node("c0");
   let wc = Watcher(c);
   viaInout(c, wc);
-  let d = Node("d0");
+  let d: shared mut = Node("d0");
   let wd = Watcher(d);
   toNone(d, wd);
-  let e = Node("e0");
+  let e: shared mut = Node("e0");
   let we = Watcher(e);
   destructure(e, we);
-  let f: mut = Node("f0");
+  let f: shared mut = Node("f0");
   let wf = Watcher(f);
   armInout(f, wf);
-  let g: mut = Node("g0");
+  let g: shared mut = Node("g0");
   let wg = Watcher(g);
   inoutLocal(g, wg);
   io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd)
@@ -273,31 +280,31 @@ fn writes() {
 // -- A read the callee replaces, given to every kind of call
 
 class Cell {
-  n: Node;
+  n: shared mut Node;
 }
 
-fn direct(m: Node, h: mut Cell) {
+fn direct(m: shared mut Node, h: shared mut Cell) {
   h.n = Node("z");
   io::println("direct: " + m.name);
 }
 
 class Base {
-  view fn take(m: Node, h: mut Cell) { io::println("base"); }
+  view fn take(m: shared mut Node, h: shared mut Cell) { io::println("base"); }
 }
 
 class Derived: Base {
-  view fn take(m: Node, h: mut Cell) {
+  view fn take(m: shared mut Node, h: shared mut Cell) {
     h.n = Node("z");
     io::println("vcall: " + m.name);
   }
 }
 
 class Keeper {
-  m: Node;
+  m: shared mut Node;
 }
 
 impl Keeper {
-  fn __init__(m: Node, h: mut Cell) {
+  fn __init__(m: shared mut Node, h: shared mut Cell) {
     h.n = Node("z");
     self.m = m;
     io::println("ctor: " + m.name);
@@ -305,11 +312,11 @@ impl Keeper {
 }
 
 class Parent {
-  m: Node;
+  m: shared mut Node;
 }
 
 impl Parent {
-  fn __init__(m: Node, h: mut Cell) {
+  fn __init__(m: shared mut Node, h: shared mut Cell) {
     h.n = Node("z");
     self.m = m;
     io::println("super: " + m.name);
@@ -319,7 +326,7 @@ impl Parent {
 class Child: Parent { }
 
 impl Child {
-  fn __init__(h: mut Cell) { __super__(h.n, h); }
+  fn __init__(h: shared mut Cell) { __super__(h.n, h); }
 }
 
 struct S {
@@ -327,19 +334,19 @@ struct S {
 }
 
 impl S {
-  view fn meth(m: Node, h: mut Cell) {
+  view fn meth(m: shared mut Node, h: shared mut Cell) {
     h.n = Node("z");
     io::println("struct method: " + m.name);
   }
 }
 
-fn gen<T>(m: T, h: mut Cell) -> T {
+fn gen<T>(m: shared mut T, h: shared mut Cell) -> shared mut T {
   h.n = Node("z");
   return m;
 }
 
 fn kinds() {
-  let h: mut = Cell(Node("a" + "1"));
+  let h: shared mut = Cell(Node("a" + "1"));
   direct(h.n, h);
   h.n = Node("a" + "2");
   let b: Base = Derived();
@@ -350,7 +357,10 @@ fn kinds() {
   let s = S(1);
   s.meth(h.n, h);
   h.n = Node("a" + "5");
-  let f = fn(m: Node) -> Str { h.n = Node("z"); return m.name; };
+  let f = fn(m: shared mut Node) -> Str {
+    h.n = Node("z");
+    return m.name.clone();
+  };
   io::println("icall: " + f(h.n));
   h.n = Node("a" + "6");
   io::println("generic: " + gen(h.n, h).name);
@@ -362,8 +372,8 @@ fn kinds() {
 // -- Moves lent: a variable at its last use something else keeps alive
 
 class Tree {
-  l: Tree?;
-  r: Tree?;
+  l: shared Tree?;
+  r: shared Tree?;
 }
 
 fn grow(d: int) -> Tree {
@@ -375,7 +385,7 @@ fn grow(d: int) -> Tree {
 
 // Each child is lent to count: the matched value holds it until its match
 // ends.
-fn count(n: Tree) -> int {
+fn count(n: shared Tree) -> int {
   c = 1;
   match n.l {
     x: Tree { c = c + count(x); }
@@ -389,12 +399,12 @@ fn count(n: Tree) -> int {
 }
 
 class Slot {
-  n: Node?;
+  n: shared mut Node?;
 }
 
 // Lets go of the field its argument was matched from, then reads the
 // argument: the matched value keeps it alive until the match ends.
-fn dropAndRead(n: Node, s: mut Slot, w: view Watcher) {
+fn dropAndRead(n: shared mut Node, s: shared mut Slot, w: view Watcher) {
   s.n = None;
   report(w, "in dropAndRead, after the field let go");
   io::println("dropAndRead reads " + n.name);
@@ -403,16 +413,16 @@ fn dropAndRead(n: Node, s: mut Slot, w: view Watcher) {
 fn movesLent() {
   io::println("nodes: " + Str(count(grow(3))));
 
-  let m = Node("m");
+  let m: shared mut = Node("m");
   let wm = Watcher(m);
-  let s: mut = Slot(m);
+  let s: shared mut = Slot(m);
   match s.n {
     x: Node { dropAndRead(x, s, wm); }   // x's last use
     None { }
   }
   report(wm, "after the match");
 
-  let t = Node("t");
+  let t: shared mut = Node("t");
   let u = t;
   inner(u);                  // u's last use: t keeps the node
   io::println("t still " + t.name);

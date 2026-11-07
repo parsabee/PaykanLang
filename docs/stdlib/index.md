@@ -52,7 +52,7 @@ What the modules have in common:
 - **Private names.** The library's names that start with `_` are
   [private](../language/15-modules.md#private-to-the-module): a container's `__` fields and
   methods are reachable only from its own methods, and a module's `_` functions and classes
-  (`collections::_Entry`, `memory::_new`) only from inside the module. A program that names
+  (`collections::_Table`, `memory::_new`) only from inside the module. A program that names
   one is rejected (`'__table' is private to 'HashMap<int, int>': it is reachable only from
   its own methods`, `'memory::_new' is private to module '::memory'`). These pages do not
   document them.
@@ -66,14 +66,13 @@ What the modules have in common:
   'Result<Str, Error>' of 'Result' conflicts with an imported enum of the same name`, and
   so is a program's own `List<int>` next to `collections::List<int>`: give a generic type
   of your own a name of its own.
-- **Reserved private names.** `::collections` declares the private templates `_Node`
-  (of `LinkedList`, `Stack` and `Queue`), `_Entry` and `_Table` (of `HashMap` and
-  `HashSet`) and `_Heap` (of the priority queues), and the private struct `_Pieces`. A
-  program that imports it cannot declare a `_Pieces`, and its own `_Node<int>` conflicts
-  with the one a `Stack<int>` uses: `instantiation '_Node<int>' of '_Node' conflicts with
-  the instantiation '_Node<int>' of '::collections::_Node'`, reported at the program's
-  instantiation, with notes at the library's declaration and where the library
-  instantiates it. The library's function names are not reserved: a program may declare
+- **Reserved private names.** `::collections` declares the private templates `_Table` (of
+  `HashMap` and `HashSet`) and `_Heap` (of the priority queues), and the private struct
+  `_Pieces`. A program that imports it cannot declare a `_Pieces`, and its own
+  `_Table<int, int>` conflicts with the one a `HashMap<int, int>` uses: `instantiation
+  '_Table<int, int>' of '_Table' conflicts with the instantiation '_Table<int, int>' of
+  '::collections::_Table'`, reported at the program's instantiation, with notes at the
+  library's declaration and where the library instantiates it. The library's function names are not reserved: a program may declare
   its own `fn print`.
 - **Sized numeric types** ([`u8`, `i32`, `unsigned`, `f32`, ...](../language/02-basics.md#sized-numeric-types))
   are elements and keys like `int` and `float` (`List<u8>`, `HashMap<u32, Str>`,
@@ -95,7 +94,7 @@ fn main() -> int {
   let words: Str[5] = ["to", "be", "or", "not", "to"];
   i: int = 0;
   while i < words.len() {
-    counts.put(words[i], counts.getOr(words[i], 0) + 1);
+    counts.put(words[i].clone(), counts.getOr(words[i], 0) + 1);   // the map owns its keys
     i = i + 1;
   }
   io::println("to: " + Str(counts.get("to")) + ", keys: " + Str(counts.len()));

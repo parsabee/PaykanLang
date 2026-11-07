@@ -173,7 +173,7 @@ TEST(SizedTypes, UnsignedParsesRefuseEverySign) {
     signs: Str[4] = ["+1", "-0", "+0", "-1"];
     i = 0;
     while i < signs.len() {
-      s = signs[i];
+      s: view = signs[i];
       io::print(s.toU8()); io::print(" "); io::print(s.toU16()); io::print(" ");
       io::print(s.toU32()); io::print(" "); io::println(s.toUnsigned());
       i = i + 1;

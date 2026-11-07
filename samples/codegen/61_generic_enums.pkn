@@ -68,8 +68,8 @@ fn map<T, U>(m: view Maybe<T>, f: (view T) -> U) -> Maybe<U> {
 }
 
 fn orElse<T>(m: Maybe<T>, d: T) -> T {
-  match m {
-    j: Just { return j.value; }
+  match move m {
+    j: Just { return move j.value; }
     Nothing { return d; }
   }
 }

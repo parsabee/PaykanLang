@@ -79,15 +79,15 @@ TEST(Regression, MethodTupleParam) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Bag {
-      view fn second(t: (int, Str)) -> Str { return t.1; }
+      view fn second(t: (int, Str)) -> Str { return t.1.clone(); }
       view fn first(t: (int, Str)) -> int { return t.0; }
     }
     fn main() -> int {
       b = Bag();
       t: (int, Str) = (1, "one");
-      io::println(b.second(t));
+      io::println(b.second(t.clone()));
       io::println(b.second((2, "two")));
-      io::println(Str<int>(b.first(t)));
+      io::println(Str<int>(b.first(t.clone())));
       io::println(t.1);
       return 0;
     }
@@ -143,7 +143,7 @@ TEST(Regression, InferredClassTernaryReceiver) {
     fn pick(c: bool) -> int {
       p = Point(1, 2);
       q = Point(10, 20);
-      r = if c then p else q;
+      r = if c then move p else move q;
       return r.sum() + r.x;
     }
     fn main() -> int {
@@ -174,12 +174,13 @@ TEST(Regression, InferredTupleOptionalTernary) {
     impl Point {
       fn __init__(x: int) { self.x = x; }
     }
+    impl Cloneable for Point {}
     fn run(c: bool) -> int {
       p = Point(1);
       q = Point(2);
-      t: (int, Point) = (5, p);
-      tup = if c then t else (6, q);
-      opt = if c then p else None;
+      t: (int, Point) = (5, p.clone());
+      tup = if c then move t else (6, move q);
+      opt = if c then move p else None;
       n = 0;
       if opt != None { n = 100; }
       return tup.1.get() * 10 + tup.0 + n;
@@ -426,7 +427,7 @@ TEST(Regression, SubclassDeclaredBeforeBase) {
       fn __init__(w: int, h: int, tag: Str) {
         self.w = w;
         self.h = h;
-        self.tag = tag;
+        self.tag = move tag;
       }
     }
     fn main() -> int {
@@ -455,7 +456,7 @@ impl Rect {
   fn __init__(w: int, h: int, tag: Str) {
     self.w = w;
     self.h = h;
-    self.tag = tag;
+    self.tag = move tag;
   }
 }
 class Unit {
@@ -509,8 +510,8 @@ TEST(Regression, SuperLiteralArgumentsTakeTheParameterTypes) {
     impl Base {
       fn __init__(xs: float[2], link: Node?, pair: (Node?, int), q: int?) {
         self.xs = xs;
-        self.link = link;
-        self.pair = pair;
+        self.link = move link;
+        self.pair = move pair;
         self.q = q;
       }
     }
@@ -541,6 +542,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
     impl Point {
       fn __init__(x: int) { self.x = x; }
     }
+    impl Cloneable for Point {}
     class Base {
       p: Point;
       name: Str;
@@ -549,8 +551,8 @@ TEST(Regression, SuperArgumentsAreBoxed) {
 
     impl Base {
       fn __init__(p: Point, name: Str, xs: int[2]) {
-        self.p = p;
-        self.name = name;
+        self.p = move p;
+        self.name = move name;
         self.xs = xs;
       }
     }
@@ -568,7 +570,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
     class Fwd : Base {}
 
     impl Fwd {
-      fn __init__(p: Point, n: Str, xs: int[2]) { __super__(p, n, xs); }
+      fn __init__(p: Point, n: Str, xs: int[2]) { __super__(move p, move n, xs); }
     }
     fn main() -> int {
       a = Lit();
@@ -578,7 +580,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
       q = Point(3);
       s: Str = "fwd";
       ys: int[2] = [7, 8];
-      c = Fwd(q, s, ys);
+      c = Fwd(q.clone(), s.clone(), ys);
       io::println(c.name + Str<int>(c.p.x) + Str<int>(q.x) + s + Str<int>(ys.len()));
       return 0;
     }
@@ -742,7 +744,7 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
     }
 
     impl K {
-      fn __init__(name: Str) { self.name = name; }
+      fn __init__(name: Str) { self.name = move name; }
     }
     class D : K {
       view fn vtable() -> int { return 20; }
@@ -751,7 +753,7 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
     impl D {
       fn __init__() { __super__("d"); }
     }
-    fn K_destroy(k: K) -> Str { return "user " + k.name; }
+    fn K_destroy(k: view K) -> Str { return "user " + k.name; }
     fn K_vtable() -> int { return 30; }
     fn D_vtable() -> int { return 40; }
     fn main() -> int {

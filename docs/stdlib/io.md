@@ -60,7 +60,7 @@ import ::error as err;
 fn main() -> int {
   match io::open("notes.txt", "w") {
     w: Ok {
-      let f = w.value;
+      let f = move w.value;          // the file, which f now owns
       f.write("first line\n");
       f.write("second line\n");
     }
@@ -91,12 +91,13 @@ source file.
 `Ok` when it wrote. The example ignores it; `if !f.write(s).isOk() { ... }` checks it.
 
 There is no `close`: a file is closed automatically when the last reference to it goes
-away. Above, the result `match` took apart holds the only one, so `notes.txt` is closed when
-that `match` ends. Everything written is on disk once the file is closed, so a later `open`
-reads it back (the next example writes the file in a function of its own, which closes it
-when it returns). A file passed to a function where its variable is last used is handed on
-to it ([Ownership transfers](../language/16-memory.md#ownership-transfers)): it is closed when
-that function returns, unless the function keeps it.
+away. A file is move-only, as every unique object is: above, `move w.value` takes it out of
+the result the `match` took apart, and `f` holds the only reference, so `notes.txt` is
+closed when the arm ends. Everything written is on disk once the file is closed, so a later
+`open` reads it back (the next example writes the file in a function of its own, which
+closes it when it returns). A file moved into a function (`save(move f)`) is handed on to it
+([When an object is destroyed](../language/16-memory.md#when-an-object-is-destroyed)): it is
+closed when that function returns, unless the function keeps it.
 
 ## Reading
 
@@ -131,7 +132,7 @@ fn main() -> int {
 
   match io::open("shopping.txt", "r") {
     r: Ok {
-      let f = r.value;
+      let f = move r.value;
       n = 0;
       while True {
         match f.readln() {
@@ -174,7 +175,7 @@ fn main() -> int {
   while True {
     match io::stdin().readln() {
       read: Ok {
-        let line = read.value;
+        let line = move read.value;
         // drop the trailing newline before parsing
         digits = "";
         i = 0;
@@ -273,7 +274,7 @@ and loads it back. Each task is one line, `<done>|<priority>|<title>`:
 the command changed it. The modules `task`, `text` and `list` are the ones from
 [Modules](../language/15-modules.md#project-tasks-as-a-multi-file-program), with one
 addition to `TaskList`: `addTask`, for adding an existing `Task` while loading, which stores
-it with `move`, as the slot is the list's to change
+it with `move`, as a move-only value goes into a slot only by `move`
 ([Generics](../language/13-generics.md#project-undo-with-a-generic-stack)).
 
 <details markdown="block">
@@ -291,7 +292,7 @@ fn priorityName(p: Priority) -> Str {
   }
 }
 
-fn parsePriority(word: Str) -> Priority {
+fn parsePriority(word: view Str) -> Priority {
   match word {
     "low"  { return Priority::Low; }
     "high" { return Priority::High; }
@@ -313,7 +314,7 @@ class Task {
 
 impl Task {
   fn __init__(title: Str, priority: Priority) {
-    self.title = title;
+    self.title = move title;
     self.done = False;
     self.priority = priority;
   }
@@ -326,7 +327,7 @@ fn isSpace(c: char) -> bool {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-fn slice(s: Str, from: int, to: int) -> Str {
+fn slice(s: view Str, from: int, to: int) -> Str {
   out = "";
   i = from;
   while i < to {
@@ -336,7 +337,7 @@ fn slice(s: Str, from: int, to: int) -> Str {
   return out;
 }
 
-fn trim(s: Str) -> Str {
+fn trim(s: view Str) -> Str {
   start = 0;
   end = s.len();
   while start < end && isSpace(s[start]) { start = start + 1; }
@@ -345,10 +346,10 @@ fn trim(s: Str) -> Str {
 }
 
 // Splits at the first `sep`: (s, "") when there is none.
-fn splitOnce(s: Str, sep: char) -> (Str, Str) {
+fn splitOnce(s: view Str, sep: char) -> (Str, Str) {
   i = 0;
   while i < s.len() && s[i] != sep { i = i + 1; }
-  if i == s.len() { return (s, ""); }
+  if i == s.len() { return (s.clone(), ""); }
   return (slice(s, 0, i), slice(s, i + 1, s.len()));
 }
 ```
@@ -365,7 +366,7 @@ class TaskList {
   // Adds a task; False if the list is full.
   fn add(title: Str, priority: task::Priority) -> bool {
     if self.count == self.tasks.len() { return False; }
-    self.tasks[self.count] = task::Task(title, priority);
+    self.tasks[self.count] = task::Task(move title, priority);
     self.count = self.count + 1;
     return True;
   }
@@ -405,7 +406,10 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    self.tasks = [task::Task("", task::Priority::Normal); 8];
+    let blank = task::Priority::Normal;
+    self.tasks = [task::Task("", blank), task::Task("", blank), task::Task("", blank),
+                  task::Task("", blank), task::Task("", blank), task::Task("", blank),
+                  task::Task("", blank), task::Task("", blank)];
     self.count = 0;
   }
 }
@@ -421,8 +425,8 @@ line it cannot read is reported on standard error and skipped:
 import ::io;
 import tasks::{task, text, list};
 
-fn load(path: Str) -> list::TaskList {
-  let tasks: mut = list::TaskList();
+fn load(path: view Str) -> list::TaskList {
+  tasks: mut = list::TaskList();
   match io::open(path, "r") {
     r: Ok {
       while True {
@@ -437,25 +441,25 @@ fn load(path: Str) -> list::TaskList {
   return tasks;
 }
 
-fn addLine(tasks: mut list::TaskList, line: Str) {
+fn addLine(tasks: inout list::TaskList, line: view Str) {
   done, rest = text::splitOnce(line, '|');
   priority, title = text::splitOnce(rest, '|');
   if title == "" || (done != "0" && done != "1") {
     io::printerrln("skipping bad line: " + line);
     return;
   }
-  let t: mut = task::Task(title, task::parsePriority(priority));
+  let t: mut = task::Task(move title, task::parsePriority(priority));
   t.done = done == "1";
-  if !tasks.addTask(t) { io::printerrln("the list is full, skipping: " + line); }
+  if !tasks.addTask(move t) { io::printerrln("the list is full, skipping: " + line); }
 }
 
-fn save(tasks: list::TaskList, path: Str) -> bool {
+fn save(tasks: view list::TaskList, path: view Str) -> bool {
   match io::open(path, "w") {
     w: Ok {
-      let f = w.value;
+      let f = move w.value;
       i = 0;
       while i < tasks.count {
-        let t = tasks.tasks[i];
+        t: view = tasks.tasks[i];
         f.write((if t.done then "1" else "0") + "|"
                 + task::priorityName(t.priority) + "|" + t.title + "\n");
         i = i + 1;
@@ -503,7 +507,7 @@ fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
     title = title + (if i > from then " " else "") + args[i];
     i = i + 1;
   }
-  return (title, priority);
+  return (move title, priority);
 }
 
 fn main(args: view Str[]) -> int {
@@ -515,7 +519,7 @@ fn main(args: view Str[]) -> int {
     "add" {
       if args.len() < 3 { return usage(); }
       title, priority = titleFrom(args, 2);
-      if !tasks.add(title, priority) {
+      if !tasks.add(move title, priority) {
         io::printerrln("the list is full");
         return 1;
       }
@@ -670,9 +674,10 @@ class File { ... }
 
 An open file, made by `open` or `stdin`. A program does not construct one: its initializer
 is `___init__`, private to `::io` (`io::File(...)` is `'io::File' cannot be constructed
-here: its initializer '___init__' is private to module '::io'`). A `File` is an object, so
-assigning one shares it, and the file is closed when the last reference to it goes; there
-is no `close`. Its `toString()` is `File@0x...`, and two `File`s are `==` when they are the
+here: its initializer '___init__' is private to module '::io'`). A `File` is an object
+with one owner: assigning one moves it (`let f = move w.value;`), a `shared File` is held
+by several names, and the file is closed when the last reference to it goes; there is no
+`close`. Its `toString()` is `File@0x...`, and two `File`s are `==` when they are the
 same object (`io::stdin() == io::stdin()` is `False`: each call makes a new `File`). Every
 method is a `view fn`, so it can be called through a `view` parameter, and each reports
 failure with an [`::error`](error.md) `Error`: a write's alone, a read's in its `Result`.

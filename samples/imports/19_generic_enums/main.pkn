@@ -23,8 +23,8 @@ fn main() -> int {
 
   let none: options::Maybe<Str> = options::Maybe::Nothing;
   io::println(options::wrap("hi").toString() + " "
-      + options::firstOf(none, options::Maybe::Just("two")).toString() + " "
-      + options::orElse(options::Maybe<Str>::Nothing, "one"));
+      + options::firstOf(move none, options::Maybe::Just("two")).toString()
+      + " " + options::orElse(options::Maybe<Str>::Nothing, "one"));
 
   let p = options::wrap(Point(1, 2));
   match p {

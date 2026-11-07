@@ -18,7 +18,7 @@ class K {
 }
 
 impl K {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = move name; }
 }
 
 class D : K {
@@ -32,7 +32,7 @@ impl D {
 fn K_w() -> int {
   return 2;
 }
-fn K_destroy(k: K) -> Str {
+fn K_destroy(k: view K) -> Str {
   return "user " + k.name;
 }
 fn K_vtable() -> int {

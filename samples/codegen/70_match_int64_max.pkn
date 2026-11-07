@@ -110,7 +110,7 @@ fn loop(xs: int[6]) -> int {
 }
 
 fn row(name: Str, f: (int) -> int, xs: int[6]) {
-  out = name;
+  out = move name;
   for i in 0..6 { out = out + " " + Str(f(xs[i])); }
   io::println(out);
 }

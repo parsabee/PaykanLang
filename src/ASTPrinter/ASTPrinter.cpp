@@ -657,6 +657,8 @@ void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
 
 void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
+  if (node->isShared())
+    OS << " shared"; // `shared fn`, as written
   if (node->isView())
     OS << " view"; // `view fn`, as written
   if (node->isStatic())
@@ -696,6 +698,8 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
     OS << " private";
   if (node->isView())
     OS << " view";
+  if (node->isShared())
+    OS << " shared";
   if (node->isImpl())
     OS << " impl";
   if (node->isPure())
@@ -749,6 +753,9 @@ void ASTPrinter::visitImplDecl(ImplDecl *node) {
     OS << " '" << typeName(node->getTrait()) << "' for";
   OS << " '" << node->getTypeName() << "'";
   printTypeParams(OS, node->getTypeParams());
+  for (size_t i = 0; i < node->getTypeParamBounds().size(); ++i)
+    for (Type *b : node->getTypeParamBounds()[i])
+      OS << " " << *node->getTypeParams()[i] << ": '" << typeName(b) << "'";
   OS << "\n";
   const auto &methods = node->getMethods();
   for (size_t i = 0; i < methods.size(); ++i) {

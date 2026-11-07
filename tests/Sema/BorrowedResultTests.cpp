@@ -172,8 +172,8 @@ fn main() -> view int { return 0; }
 
 // In a `view fn`, part of `self` that shares what it holds is a `view`, so
 // it is returned as one, `-> view T`; a value type is copied.  Another
-// method returns part of `self` for its caller to change, so it is not one
-// that never changes `self`.
+// method returns part of `self` for its caller to change (`-> inout T`), so
+// it is not one that never changes `self`.
 TEST(BorrowedResult, ViewFnReturnsAView) {
   auto r = semaCheck(R"(class Counter { n: int; }
 impl Counter { fn __init__() { self.n = 0; } }
@@ -183,7 +183,7 @@ class Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 class Named {
   name: Str; c: Counter; n: int;
@@ -194,7 +194,7 @@ class Named {
   view fn peek() -> view Counter { return self.c; }
   view fn num() -> int { return self.n; }
   view fn label() -> Str { return self.name + "!"; }
-  fn grab() -> Counter { return self.c; }
+  fn grab() -> inout Counter { return self.c; }
 }
 
 impl Named {
@@ -225,7 +225,7 @@ fn main() -> int {
 impl Counter { fn __init__() { self.n = 0; } }
 class Box {
   c: Counter; n: int;
-  fn grab() -> Counter { return self.c; }
+  fn grab() -> inout Counter { return self.c; }
   fn num() -> int { return self.n; }
 }
 
@@ -325,8 +325,9 @@ fn main() -> int {
 }
 
 // An `inout` result names the storage of part of `self` or of an `inout`
-// parameter, as an `inout` argument would (not `self` itself, an element
-// yet, a `view` or a copy), of exactly the result's type.  A `view fn`
+// parameter, as an `inout` argument would (not `self` itself, a `view` or a
+// copy; an element of a fixed-size array is one), of exactly the result's
+// type.  A `view fn`
 // returns none.  The caller's receiver must outlive the call, and while a
 // borrow of the result is live, what it borrowed cannot be used.
 TEST(BorrowedResult, InoutResults) {
@@ -367,7 +368,6 @@ fn main() -> int {
        "longer know its object",
        ":8:39: error: an 'inout' result has type 'Animal', but what it "
        "returns has type 'Dog'",
-       ":9:35: error: an array element cannot be returned 'inout' yet",
        ":17:25: error: 'view fn look' cannot return 'inout': it does not "
        "change 'self'",
        ":19:51: error: 'v' is a 'view' parameter; it cannot be returned "
@@ -380,7 +380,8 @@ fn main() -> int {
        "used",
        ":28:18: error: 'b' is passed to two 'inout' parameters ('a' and "
        "'b')"});
-  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(":9:"), std::string::npos) << r.Diagnostics;
 }
 
 // A tuple is immutable, so no `inout` result names an element of one: in

@@ -74,16 +74,18 @@ class B {
 }
 
 class A {
-  b: B;
+  b: shared mut B;
 }
 
-// The next `toString()` of `h.c` replaces `h.c`, which holds it alone.
-fn arm(h: mut H, n: int) {
+// The next `toString()` of `h.c` replaces `h.c`, which holds it alone.  The
+// closure reaches `h` through `v`, a second reference to it, so `h` (and `b`
+// below) is `shared`.
+fn arm(h: shared mut H, n: int) {
   let v = h;
   h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
 }
 
-fn armB(b: mut B, n: int) {
+fn armB(b: shared mut B, n: int) {
   let v = b;
   b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
 }
@@ -118,7 +120,7 @@ fn main() -> int {
   io::println(pair.0 + " " + kept + " " + bx.text);
 
   // An object its own toString() lets go of.
-  let h: mut = H(C("one" + Str(1), fn() {}));
+  let h: shared mut = H(C("one" + Str(1), fn() {}));
   arm(h, 1);
   let first = Str(h.c);
   arm(h, 2);
@@ -135,7 +137,7 @@ fn main() -> int {
   arm(h, 7);
   let held = (Str(h.c), 1);
   arm(h, 8);
-  let c: C? = h.c;
+  c: view C? = h.c;
   io::println(held.0 + " " + Str(c));
   return 0;
 }

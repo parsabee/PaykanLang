@@ -46,7 +46,10 @@ fn constant<T>(v: T) -> () -> T {
 
 class Counter {
   n: int;
-  fn adder() -> (int) -> int { return fn(k: int) => k + self.n; }
+  fn adder() -> (int) -> int {
+    let n = self.n; // a closure captures a copy, and `self` is borrowed
+    return fn(k: int) => k + n;
+  }
 }
 
 fn main() -> int {

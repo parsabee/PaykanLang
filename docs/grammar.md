@@ -190,7 +190,7 @@ name; for the list form the whole path is the base path.
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
 classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
-              | "view"? "fn" IDENT "(" paramList? ")"
+              | "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
@@ -202,7 +202,7 @@ variant     ::= IDENT ( "(" varDecl ( "," varDecl )* ")" )?   -- its fields
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
                 "{" traitMember* "}"
-traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
+traitMember ::= "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
@@ -212,7 +212,7 @@ implMember  ::= funcDecl                          -- funcDecl without typeParams
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 
-funcDecl    ::= ( "async" | "view" )? "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= ( "async" | "shared"? "view"? ) "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
@@ -231,6 +231,10 @@ without parentheses: 'B'`; `a variant's field is a value: write 'x: T'` for
 a mode); a variant is made with a call of its qualified name, `E::B(1, s)`,
 and bound by a `match` arm, `b: B { ... }`
 ([language/07-enums.md](language/07-enums.md#variants-with-fields)).
+`view fn` and `shared fn` (`shared view fn` both) mark a method: one that
+does not change `self`, and one whose `self` is a shared reference
+([language/05-classes.md](language/05-classes.md#methods-that-hand-on-self-shared-fn));
+on a free function either parses and is a semantic error.
 A struct body holds fields only, at least one: a method goes in an `impl`
 block, and a struct has no superclass
 ([language/11-structs.md](language/11-structs.md)); both are syntax errors
@@ -718,13 +722,15 @@ return, a field), `T` is the slot's element type, and into a slice it is a
 their nearest common ancestor. `[]` parses, but Sema rejects it (`an empty
 array literal has no type: an array has at least one element`).
 
-`[v; n]` is `n` copies of `v`. `n` is an `INT` of at least 1: `[0; 0]` is a
+`[v; n]` is `n` elements of value `v`. `n` is an `INT` of at least 1: `[0; 0]` is a
 syntax error (`an array has at least one element: the count must be 1 or
 more`), and so is any other token after the `;` (`[0; n]`: `expected the
 number of copies, an integer literal`). It types as the literal `[v, ...,
 v]` of `n` elements would, so `[0; 4]` flowing into a `float[4]` is four
-`0.0`s and `[[0; 3]; 2]` is an `int[2][3]`. `v` is evaluated once and every
-element is a copy of its value: `[Node(); 3]` holds one object three times.
+`0.0`s and `[[0; 3]; 2]` is an `int[2][3]`. A Copyable `v` is evaluated once
+and every element is a copy of its value; any other is evaluated for each
+element, first to last, so `[Node(); 3]` holds three objects
+([language/09-arrays.md](language/09-arrays.md#repeated-values)).
 
 ### Generic call versus comparison
 

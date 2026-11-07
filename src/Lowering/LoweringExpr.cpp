@@ -59,6 +59,11 @@ ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
       return L.getExprStructType(recv) ? L.memValueVisitsFirst(recv) : recv;
     if (ast::isa<ast::SliceType>(ty))
       return nullptr;
+    // A builtin `clone()` of a value held in memory (a function value, an
+    // optional tuple) reads it in place (emitBuiltinClone).
+    if (ast::isMemType(ty) && !ast::isa<ast::FixedArrayType>(ty) &&
+        L.isBuiltinClone(m))
+      return L.memValueVisitsFirst(recv);
     if (ast::isa<ast::FixedArrayType>(ty))
       return ast::isa<ast::Identifier>(recv) ? nullptr
                                              : L.memValueVisitsFirst(recv);
@@ -365,7 +370,10 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     // `move x.f` (the prototype): the field's reference leaves its slot,
     // which becomes null; `x` has ended (Sema), so its teardown finds the
     // slot empty.
-    if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand())) {
+    // A value field (a number, a value held in memory) is read: `x` has
+    // ended, and its teardown drops the references the read retained.
+    if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand());
+        ma && ast::isRefType(ast::stripOptional(ma->getResolvedType()))) {
       Val addr = L.emitPlaceAddress(ma);
       if (!addr)
         return Val();
@@ -855,7 +863,12 @@ bool ModuleLowering::isStrConversion(const std::string &callee) {
 }
 
 ast::MethodCallExpr *ModuleLowering::showCallOf(ast::CallExpr *ce) {
-  if (!isStrConversion(ce->getCalleeName()) ||
+  // `Str(s)` of a `Str` is a new string, as `s.clone()` is (#369): the
+  // same object would be a second owner of a unique one.
+  const bool strOfStr =
+      ce->getCalleeName() == kString && ce->getNumArguments() == 1 &&
+      ce->getArguments()[0]->getResolvedType() == ASTCtx.getStrTy();
+  if ((!isStrConversion(ce->getCalleeName()) && !strOfStr) ||
       FunctionTable.count(ce->getCalleeName()) || ce->getNumArguments() != 1)
     return nullptr;
   auto [it, added] = ShowCalls.try_emplace(ce, nullptr);
@@ -1208,6 +1221,10 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // `x.exchange(v)` / `x.compareExchange(e, d)` on an `atomic` place.
   if (auto *at = ast::dyn_cast<ast::AtomicType>(recvResolved))
     return emitAtomicMethodCall(node, at);
+  // `x.clone()` of a value with no `clone` of its own: the builtin
+  // Cloneable (LoweringClone.cpp, #369); a fixed-size array's too.
+  if (L.isBuiltinClone(node))
+    return emitBuiltinClone(node);
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
   if (ast::dyn_cast<ast::SliceType>(recvResolved))

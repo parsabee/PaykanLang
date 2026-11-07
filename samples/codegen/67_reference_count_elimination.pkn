@@ -15,6 +15,10 @@
 //            a return from inside a match.  The `weak` references show when
 //            each object dies: where it does without the pass, when what
 //            last held it lets it go.
+// The nodes, the list and the bag are `shared` (`shared mut` where a function
+// changes them): a unique reference has one holder, which nothing else can
+// clear while a match reads it, so the hazards are those of shared ones (the
+// bag's own elements are unique, in a shared bag).
 // expect-stdout: no call: 3 | a's next alive
 // expect-stdout: cleared: a0 | a gone, c gone
 // expect-stdout: unlinked: y | list: xz | y gone
@@ -29,11 +33,11 @@ import ::io;
 class Node {
   name: Str;
   v: int;
-  next: Node?;
+  next: shared Node?;
 }
 
 class List {
-  head: Node?;
+  head: shared Node?;
 }
 
 class Watch {
@@ -50,7 +54,7 @@ fn state(w: view Watch) -> Str {
 
 /// The values of the first two nodes: nothing in the arms can let go of a
 /// reference, so the field keeps what the matches read.
-fn firstTwo(n: Node) -> int {
+fn firstTwo(n: shared Node) -> int {
   match n.next {
     m: Node { return n.v + m.v; }
     None { return n.v; }
@@ -58,14 +62,14 @@ fn firstTwo(n: Node) -> int {
 }
 
 /// Lets the whole list go: what the caller's match read loses its holder.
-fn clear(l: mut List) -> int {
+fn clear(l: shared mut List) -> int {
   l.head = None;
   return 0;
 }
 
 /// A match on l.head whose arm clears l: the node lives on in the match,
 /// which alone holds it until the match ends.
-fn cleared(l: mut List) -> Str {
+fn cleared(l: shared mut List) -> Str {
   match l.head {
     n: Node {
       let k = clear(l);
@@ -77,21 +81,21 @@ fn cleared(l: mut List) -> Str {
 
 /// x.next = x.next.next while a match holds x.next: the node unlinked
 /// lives on in the match.
-fn unlink(x: mut Node) -> Str {
+fn unlink(x: shared mut Node) -> Str {
   match x.next {
     n: Node {
       x.next = n.next;
-      return n.name;
+      return n.name.clone();
     }
     None { return "none"; }
   }
 }
 
 /// The names along a list.
-fn names(x: Node) -> Str {
+fn names(x: view Node) -> Str {
   match x.next {
     n: Node { return x.name + names(n); }
-    None { return x.name; }
+    None { return x.name.clone(); }
   }
 }
 
@@ -100,14 +104,14 @@ class Bag {
 }
 
 /// Replaces the bag's first element.
-fn swapIn(b: mut Bag) -> int {
+fn swapIn(b: shared mut Bag) -> int {
   b.items[0] = Node("new", 7, None);
   return 0;
 }
 
 /// A match on an element whose arm replaces it: the old one lives on in
 /// the match.
-fn element(b: mut Bag) -> Str {
+fn element(b: shared mut Bag) -> Str {
   match b.items[0] {
     n: Node {
       let k = swapIn(b);
@@ -118,15 +122,15 @@ fn element(b: mut Bag) -> Str {
 }
 
 /// The name of the bag's first element.
-fn firstName(b: Bag) -> Str {
+fn firstName(b: shared mut Bag) -> Str {
   match b.items[0] {
-    n: Node { return n.name; }
+    n: Node { return n.name.clone(); }
     None { return "none"; }
   }
 }
 
 /// Empties the bag: each element loses its holder.
-fn empty(b: mut Bag) -> int {
+fn empty(b: shared mut Bag) -> int {
   b.items[0] = None;
   b.items[1] = None;
   return 10;
@@ -135,7 +139,7 @@ fn empty(b: mut Bag) -> int {
 /// Iterates over the bag while `empty` empties it: the node the match read
 /// lives on in the match (no weak reference keeps its memory: it is freed
 /// when it dies).
-fn iterate(b: mut Bag) -> int {
+fn iterate(b: shared mut Bag) -> int {
   total = 0;
   for i in 0..2 {
     match b.items[i] {
@@ -156,7 +160,7 @@ fn weakName(w: view Watch) -> Str {
 }
 
 /// Sums the values along a list until one is 3, skipping the 2s.
-fn walk(a: Node) -> Str {
+fn walk(a: shared Node) -> Str {
   s = 0;
   terms = "";
   cur = a;
@@ -178,7 +182,7 @@ fn walk(a: Node) -> Str {
 }
 
 /// The second node's value when it is positive, else 0.
-fn early(a: Node) -> int {
+fn early(a: shared Node) -> int {
   match a.next {
     n: Node {
       if n.v > 0 { return n.v; }
@@ -189,46 +193,47 @@ fn early(a: Node) -> int {
 }
 
 fn main() -> int {
-  let b = Node("b", 2, None);
+  let b: shared = Node("b", 2, None);
   let wb = Watch(b);
-  let a = Node("a", 1, b);
+  let a: shared = Node("a", 1, b);
   io::println("no call: " + Str(firstTwo(a)) + " | " + a.name + "'s next "
       + state(wb));
 
-  let c = Node("c", 3, None);
+  let c: shared = Node("c", 3, None);
   let wc = Watch(c);
-  let a1 = Node("a", 1, Node("b", 2, c));
+  let a1: shared = Node("a", 1, Node("b", 2, c));
   let wa = Watch(a1);
   io::println("cleared: " + cleared(List(a1)) + " | a " + state(wa) + ", c "
       + state(wc));
 
-  let y = Node("y", 2, Node("z", 3, None));
+  let y: shared = Node("y", 2, Node("z", 3, None));
   let wy = Watch(y);
-  let x: mut = Node("x", 1, y);
+  let x: shared mut = Node("x", 1, y);
   io::println("unlinked: " + unlink(x) + " | list: " + names(x) + " | y "
       + state(wy));
 
+  // A bag's elements are unique: the node moves in.
   let old = Node("old", 0, None);
   let wo = Watch(old);
-  let bag: mut = Bag([old, None]);
+  let bag: shared mut = Bag([move old, None]);
   io::println("element: " + element(bag) + " | old " + state(wo) + ", "
       + firstName(bag));
 
   io::println("iterated: "
       + Str(iterate(Bag([Node("p", 7, None), Node("q", 9, None)]))));
 
-  n = Node("w", 1, None);
+  n: shared Node = Node("w", 1, None);
   let wn = Watch(n);
   io::print("weak: " + weakName(wn) + " of " + n.name);
   n = Node("other", 0, None);
   io::println(" | gone: " + weakName(wn) + ", " + n.name);
 
-  let list = Node("h", 0, Node("i", 1,
+  let list: shared = Node("h", 0, Node("i", 1,
       Node("j", 2, Node("k", 4, Node("l", 3, Node("m", 5, None))))));
   io::println("walk: " + walk(list));
 
-  let e = Node("e", 0, Node("f", 2, None));
-  let g = Node("g", 0, Node("h", -1, None));
+  let e: shared = Node("e", 0, Node("f", 2, None));
+  let g: shared = Node("g", 0, Node("h", -1, None));
   let we = Watch(e);
   io::println("early: " + Str(early(e)) + " | " + Str(early(g)) + " | " + e.name
       + " " + state(we));

@@ -37,7 +37,7 @@ TEST(StrOfValue, IsTheTextToStringGives) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShapes) + R"(
     import ::io;
-    fn same<T>(x: T) -> Str {
+    fn same<T>(x: view T) -> Str {
       return Str(Str(x) == x.toString());
     }
     fn main() -> int {
@@ -139,7 +139,7 @@ TEST(StrOfValue, AStrIsItself) {
       s = "a" + Str(1);
       t = Str<Str>(s);
       u = Str<Str>("b" + Str(2));
-      o: Str? = s;
+      o: Str? = s.clone();
       io::println(t + " " + u + " " + Str(t == s) + " " + Str(o) + " "
           + Str<Str?>(o));
       return 0;
@@ -155,11 +155,13 @@ TEST(StrOfValue, AStrIsItself) {
 // through a closure it calls: `Str(h.c)`, `Str(a.b.c)` and `Str(self.c)`
 // hold it until the call returns, as `h.c.toString()` does.  Without the
 // hold its `self.name` is read after the object is freed (the C path under
-// AddressSanitizer reports it).
+// AddressSanitizer reports it).  The optional local owns the object the
+// field gave up (`mem::replace`).
 TEST(StrOfValue, AnObjectItsToStringLetsGoOfStaysAlive) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     import ::io;
+    import ::memory as mem;
     class C {
       name: Str;
       fire: () -> void;
@@ -203,7 +205,7 @@ TEST(StrOfValue, AnObjectItsToStringLetsGoOfStaysAlive) {
       arm(h, 7);
       io::println("in a callee: " + shown(h) + " " + h.c.toString());
       arm(h, 8);
-      o: C? = h.c;
+      o: C? = mem::replace(h.c, C("zero", fn() {}));
       io::println("optional: " + Str(o));
       return 0;
     }

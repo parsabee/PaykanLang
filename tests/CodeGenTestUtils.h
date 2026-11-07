@@ -127,6 +127,10 @@ inline Analysed analyseFile(const std::string &filePath,
 inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> llvmCtx,
                               const std::vector<std::string> *args) {
+  // Flush harness output still buffered in stdout (gtest_main's banner when
+  // stdout is not a terminal), so it is not captured as the program's.
+  fflush(stdout);
+  fflush(stderr);
   auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
   auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
   auto resultOrErr =

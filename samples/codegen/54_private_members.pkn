@@ -18,9 +18,15 @@ class Counter {
   fn tick()              { self.__bump(self.step); }
   view fn value() -> int { return self.__count; }
   fn __bump(by: int)     { self.__count = self.__count + by; }
+  // A closure reaches the private field through a `weak` local of `self`
+  // (a method borrows its receiver, so the closure cannot keep a copy).
   fn adder() -> (int) -> int {
+    weak me = self;
     return fn(d: int) -> int {
-      return self.__count + d;
+      match me {
+        c: Counter { return c.__count + d; }
+        None { return d; }
+      }
     };
   }
 }
@@ -74,12 +80,13 @@ fn _sum(n: view _Node) -> int {
 
 class Box<T> {
   __v: T;
-  fn get() -> T { return self.__v; }
-  fn set(v: T)  { self.__v = v; }
+  view fn get() -> view T { return self.__v; }
+  fn set(v: T)            { self.__v = move v; }
 }
 impl Box<T> {
-  fn __init__(v: T)  { self.__v = v; }
-  fn take(o: Box<T>) { self.__v = o.__v; }  // another instance's private field
+  fn __init__(v: T)  { self.__v = move v; }
+  // Another instance's private field.
+  fn take(o: Box<T>) { self.__v = move o.__v; }
 }
 
 fn main() -> int {
@@ -101,7 +108,7 @@ fn main() -> int {
   let b: mut = Box("s");
   b.set("t");
   let o = Box("u");
-  b.take(o);
+  b.take(move o);
   io::println(Str(_sum(chain)) + " " + b.get() + " " + Str(chain._len()));
   return 0;
 }

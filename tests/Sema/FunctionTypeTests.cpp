@@ -58,17 +58,17 @@ fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(
 class Button { label: Str; onClick: (Str) -> void; }
 struct Op { name: Str; run: (int, int) -> int; }
 class Box<T> { v: T; view fn get() -> view T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 impl Op { static fn plus() -> (int, int) -> int { return fn(a: int, b: int) -> int { return a + b; }; } }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   n = 10;
-  s = "s";
+  s: shared = "s";                       // a capture is a copy
   add = fn(x: int) -> int { return x + n; };
   g = square;
-  h = twice(add);
+  h = twice(add);                        // a function value is Copyable
   k: (int) -> int = fn(x: int) -> int { return x; };
-  fs: ((int) -> int)[2] = [square, add];
+  fs: ((int) -> int)[2] = [square, fn(x: int) -> int { return x + n; }];
   b = Button("ok", fn(l: Str) { io::println(l + s); });
   b.onClick("clicked ");
   o = Op("add", fn(a: int, b: int) -> int { return a + b; });
@@ -76,12 +76,12 @@ fn main() -> int {
   v = fn(x: view Str, c: inout int) -> bool { c = c + x.len(); return c > 3; };
   m = 0;
   ok = v("abc", m);
-  t: ((int) -> int, Str) = (g, "t");
-  bx = Box(add);
+  t: ((int) -> int, Str) = (square, "t");
+  bx = Box(fn(x: int) -> int { return x + n; });
   w = bx.get()(1);                       // a view of a function value is called
   nested = fn() -> () -> int { return fn() -> int { return n; }; };
   return apply(g, 3) + h(1) + fs[1](2) + o.run(1, 2) + t.0(4) + p.run(1, 1) +
-         (if ok then m else 0) + w + nested()() + add(1) + k(2);
+         (if ok then m else 0) + w + nested()() + k(2);
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -93,13 +93,13 @@ TEST(FunctionType, StructuralAndCanonical) {
 fn id(x: int) -> int { return x; }
 fn main() -> int {
   a: (int) -> int = id;
-  b: (int) -> int = a;         // the same type, whoever spells it
+  b: (int) -> int = move a;    // the same type, whoever spells it
   c: (view Str) -> int = fn(s: view Str) -> int { return s.len(); };
   d: (Str) -> int = c;         // a mode is part of the type
-  e: (float) -> int = a;       // no promotion
+  e: (float) -> int = id;      // no promotion
   f: () -> void = fn() -> int { return 1; };
   g: (int) -> int = fn(x: int, y: int) -> int { return x; };
-  return a(1) + b(2);
+  return b(2);
 }
 )");
   EXPECT_FALSE(r.Ok);
@@ -226,12 +226,12 @@ TEST(FunctionType, CapturesAreReadOnlyCopies) {
   auto r = semaCheck(R"(
 struct P { x: int; }
 class Node { n: int; }
-struct W { node: Node; x: int; }
+struct W { node: shared mut Node; x: int; }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   n = 1;
   p = P(1);
-  node = Node(1);
+  node: shared mut = Node(1);
   xs: int[2] = [1, 2];
   w = fn() { n = 2; };
   u = fn() { bump(n); };
@@ -240,7 +240,7 @@ fn main() -> int {
   w = W(Node(1), 0);
   ok = fn() -> int {
     node.n = 2;
-    w.node.n = w.node.n + 7;           // the object the copy holds: shared
+    w.node.n = w.node.n + 7;           // the object the copy holds: shared mut
     return n + p.x + xs[1] + node.n + w.node.n;
   };
   return ok();
@@ -290,8 +290,16 @@ fn main() -> int { return 0; }
                 "capture a borrow",
                 "'xs' is a 'view' parameter; a function cannot capture a "
                 "borrow",
-                "'loc' is a 'view' local; a function cannot capture a borrow"});
-  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+                "'loc' is a 'view' local; a function cannot capture a borrow",
+                // A method borrows its receiver, so a class's other methods
+                // cannot hand it to a function that keeps a copy either
+                // (#369): `good` and `change` (a `weak` local of `self` is
+                // the way).
+                "6:56: error: cannot capture 'self': a method borrows its "
+                "receiver, and a function captures by copy",
+                "7:45: error: cannot capture 'self': a method borrows its "
+                "receiver, and a function captures by copy"});
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   // A method whose `self` a closure captures may change it: no `view fn`
   // suggestion for `good`.
   EXPECT_EQ(r.Diagnostics.find("never changes 'self'"), std::string::npos)
@@ -352,7 +360,7 @@ TEST(FunctionType, NestedLambdasCaptureThroughTheOuterOne) {
   auto r = semaCheck(R"(
 fn main() -> int {
   n = 1;
-  s = "s";
+  s: shared = "s";
   outer = fn(k: int) -> () -> int {
     inner = fn() -> int { return n + k + s.len(); };
     return inner;
@@ -417,14 +425,14 @@ fn mapAll<T, U>(xs: view T[], f: (view T) -> U) -> U {
   return f(xs[0]);
 }
 class Handler<T> { on: (T) -> T; }
-impl Handler<T> { fn __init__(on: (T) -> T) { self.on = on; } view fn run(x: T) -> T { return self.on(x); } }
+impl Handler<T> { fn __init__(on: (T) -> T) { self.on = move on; } view fn run(x: T) -> T { return self.on(move x); } }
 class Box<T> { v: T; view fn same(o: view T) -> bool { return self.v == o; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn main() -> int {
   n = mapAll([1, 2], fn(x: view int) -> int { return x + 1; });
   h = Handler(fn(s: Str) -> Str { return s + "!"; });
   k = fn(x: int) -> int { return x; };
-  b = Box(k);
+  b = Box(fn(x: int) -> int { return x; });
   return n + h.run("a").len() + k(1) + (if b.same(k) then 1 else 0);
 }
 )");
@@ -439,7 +447,7 @@ TEST(FunctionType, AcrossModules) {
   writeProjectFile(dir, "lib/ops.pkn", R"(
 fn square(x: int) -> int { return x * x; }
 fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
-class Button { label: Str; onClick: (Str) -> Str; fn click() -> Str { return self.onClick(self.label); } }
+class Button { label: Str; onClick: (Str) -> Str; view fn click() -> Str { return self.onClick(self.label.clone()); } }
 struct Op { name: Str; run: (int, int) -> int; }
 fn makeCounter(start: int) -> () -> int { return fn() -> int { return start + 1; }; }
 )");
@@ -448,7 +456,7 @@ import lib::ops;
 fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
   sq = ops::square;
-  t = ops::twice(sq);
+  t = ops::twice(move sq);
   b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
@@ -501,4 +509,50 @@ fn main() -> int {
                 "type 'int'",
                 "'s' is a 'view' parameter; it cannot be returned"});
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+}
+
+// A function value is Copyable (#369): its copies share its closure, so it is
+// copied, captured, stored and cloned as a number is, and meets a
+// `T: Copyable` bound, alone or in a struct, a tuple or an array.  A
+// function type takes no qualifier.
+TEST(FunctionType, ValuesAreCopyable) {
+  auto ok = semaCheck(R"(
+struct Op { name: int; f: (int) -> int; }
+fn square(x: int) -> int { return x * x; }
+fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
+fn both<T: Copyable>(x: T) -> (T, T) { return (x, x); }
+fn main() -> int {
+  n = 2;
+  let add = fn(x: int) -> int { return x + n; };
+  let a = add;
+  let b = add.clone();
+  let t = twice(add);
+  let o = Op(1, add);
+  let o2 = o;
+  let fs = [add, square];
+  let gs = fs;
+  let p = both(add);
+  let q = both(Op(2, square));
+  let r = [fn(x: int) -> int => x; 3];
+  return a(1) + b(1) + t(1) + o2.f(1) + gs[1](2) + p.1(0) + q.0.f(3) + r[2](4) +
+         (if b == add then 1 else 0);
+}
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto bad = semaCheck(R"(
+fn main() -> int {
+  let s: shared (int) -> int = fn(x: int) -> int => x;
+  let m: mut = fn(x: int) -> int => x;
+  return 0;
+}
+)");
+  EXPECT_FALSE(bad.Ok);
+  for (const char *d :
+       {":3:3: error: a function value takes no qualifier ('shared (int) -> "
+        "int'): it is Copyable, and its copies share its closure",
+        ":4:3: error: a function value takes no qualifier ('mut (int) -> "
+        "int')"})
+    EXPECT_NE(bad.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                          << bad.Diagnostics;
+  EXPECT_EQ(bad.ErrorCount, 2u) << bad.Diagnostics;
 }

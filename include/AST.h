@@ -39,6 +39,7 @@ public:
   size_t getLineEnd() const { return LineEnd; }
   size_t getColumnEnd() const { return ColumnEnd; }
   bool isValid() const { return LineStart > 0; }
+  bool operator==(const SourceLocation &) const = default;
 };
 
 // Forward declaration — Type is defined later in this header.
@@ -508,9 +509,13 @@ private:
   bool View = false;   // `view fn`: a method that does not change `self`
   bool Static = false; // `static fn`: an `impl` block's function, no `self`
   bool Async = false;  // `async fn`: a task (docs/design/concurrency.md)
+  bool Shared = false; // `shared fn`: a method whose `self` is shared
   // Written `___init__` (Names.h): the initializer, private to its module.
   bool ModulePrivateInit = false;
-  bool InferredResult = false;             // `fn double(x: int) => x * 2;`
+  bool InferredResult = false; // `fn double(x: int) => x * 2;`
+  // The `clone` Sema derives for an empty `impl Cloneable for` block
+  // (#369): no Body; the lowering emits it from the class's fields.
+  bool DerivedClone = false;
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
   Qualifier ResultQual;                    // `-> shared T` (set by Sema)
 
@@ -565,6 +570,13 @@ public:
   bool isView() const { return View; }
   void setView(bool view) { View = view; }
 
+  /// Declared `shared fn` (or `shared view fn`): a method whose `self` is
+  /// `shared mut T` (`shared T`), a Copyable reference it may return, pass
+  /// or store; called only on a receiver held that way
+  /// (docs/language/05-classes.md, "Methods that hand on self").
+  bool isShared() const { return Shared; }
+  void setShared(bool shared) { Shared = shared; }
+
   /// Declared `static fn` in an `impl` block: called as `Type::name()`.
   bool isStatic() const { return Static; }
   void setStatic(bool isStatic) { Static = isStatic; }
@@ -590,6 +602,8 @@ public:
   /// type from it.
   bool hasInferredResult() const { return InferredResult; }
   void setInferredResult(bool v) { InferredResult = v; }
+  bool isDerivedClone() const { return DerivedClone; }
+  void setDerivedClone(bool v) { DerivedClone = v; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
@@ -1410,8 +1424,9 @@ public:
   enum Flags : uint8_t {
     None = 0,
     Private = 1 << 0,
-    View = 1 << 1, // `view fn`: does not change `self`
-    Impl = 1 << 2, // in an `impl` block: called directly, never overridden
+    View = 1 << 1,   // `view fn`: does not change `self`
+    Impl = 1 << 2,   // in an `impl` block: called directly, never overridden
+    Shared = 1 << 3, // `shared fn`: `self` is a shared reference
     // Declared without a body in a class body (pure virtual): a vtable
     // slot with no definition.  The value of the `.pkm` design's PURE bit
     // (docs/design/pkm.md §3.5).
@@ -1468,6 +1483,8 @@ public:
   bool isVirtual() const { return !isPrivate() && !isImpl(); }
   /// Only reads its object, so it can be called through a `view`.
   bool isView() const { return MethodFlags & View; }
+  /// `shared fn`: its `self` is shared, so only a shared receiver calls it.
+  bool isShared() const { return MethodFlags & Shared; }
   /// Declared in an `impl` block: it has no vtable slot.
   bool isImpl() const { return MethodFlags & Impl; }
   /// Pure virtual: a vtable slot without a definition, which a subclass
@@ -2217,6 +2234,9 @@ class ImplDecl : public Decl {
   std::vector<FuncDecl *> Methods;
   Type *Trait;
   std::vector<const std::string *> TypeParams; // `impl Box<T>`
+  // `impl List<T: Cloneable>`: the block is part of an instance only when
+  // its type arguments meet these bounds (#369); empty when none.
+  TypeParamBounds Bounds;
 
 public:
   ImplDecl(SourceLocation loc, const std::string &internedTypeName,
@@ -2233,6 +2253,8 @@ public:
   const std::vector<const std::string *> &getTypeParams() const {
     return TypeParams;
   }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
 };
@@ -2265,12 +2287,15 @@ public:
 // value (`n` an integer literal).
 //
 // Sema types it as a `T[n]` (Sema rejects `[]`, which parses): the length is
-// the number of elements, or the repeat count.  The repeated value is
-// evaluated once, so `[Node(); 3]` holds one object three times.
+// the number of elements, or the repeat count.  A Copyable repeated value is
+// evaluated once and copied into each element; any other is evaluated for
+// each element, first to last (isEachElement), so `[Node(); 3]` holds three
+// objects.
 class ArrayLiteralExpr : public Expr {
   std::vector<Expr *> Elements;
   // The `n` of `[v; n]` (its single element is `v`), or 0 for a list.
   int64_t RepeatCount;
+  bool EachElement = false; // set by Sema
 
 public:
   ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems,
@@ -2283,6 +2308,9 @@ public:
   bool isEmpty() const { return Elements.empty(); }
   bool isRepeat() const { return RepeatCount != 0; }
   int64_t getRepeatCount() const { return RepeatCount; }
+  /// `[v; n]` whose `v` is not Copyable: evaluated for each element.
+  bool isEachElement() const { return EachElement; }
+  void setEachElement(bool each) { EachElement = each; }
   // The array's length: the number of elements, or the repeat count.
   int64_t getLength() const {
     return isRepeat() ? RepeatCount : static_cast<int64_t>(Elements.size());

@@ -1,12 +1,13 @@
 // Isolates: memory::Buffer slots never set, of the types whose zero bytes
 // are no value: a tagged union whose first variant holds a Str, a function
 // value, a struct with a function field, a tagged union whose first variant
-// holds such a tagged union, and a generic one.  copy() of such a slot is
-// NotFound, and swap() with one is NotFound and leaves both slots as they
-// were; once set, each slot reads back.  A slot of a type whose zero bytes
-// are a value (an int, an optional function value, a tagged union whose
-// first variant holds an int and an optional, Maybe<int>) reads as that
-// value.
+// holds such a tagged union, and a generic one.  swap() of such a slot,
+// with itself or another, is NotFound and leaves both slots as they were;
+// once set, each slot reads back.  A slot of a type whose zero bytes are a
+// value (an int, an optional function value, a tagged union whose first
+// variant holds an int and an optional, Maybe<int>) reads as that value.
+// None of these types but int and Maybe<int> is Cloneable, so the buffers
+// have no copy(): swap() is the checked read.
 //
 // Runtime sites: PaykanType_isUnset (Type.c) through PaykanBuffer_isSet,
 // PaykanBuffer_copy and PaykanBuffer_set (Buffer.c), and the Strs and the
@@ -46,78 +47,74 @@ struct Handler {
   run: () -> int;
 }
 
-// What copy() of slot `i` gives: "set", or the error's name.
-fn copied<T>(b: memory::Buffer<T>, i: int) -> Str {
-  match b.copy(unsigned(i)) {
-    v: Ok { return "set"; }
-    e: Err { return err::name(e.error.code); }
-  }
+// What swapping slot `i` with itself gives: "set", or the error's name.
+// swap() is not a `view fn`, so the buffer is passed `inout`.
+fn probe<T>(b: inout memory::Buffer<T>, i: int) -> Str {
+  let e = b.swap(unsigned(i), unsigned(i));
+  return if e.code == err::ErrorCode::Ok then "set" else err::name(e.code);
 }
 
 fn main() -> int {
   shapes = memory::Buffer<Shape>();
   shapes.grow(3);
   shapes.set(1, Shape::Empty);
-  io::println("Shape: " + copied(shapes, 0) + " " + copied(shapes, 1) + " "
+  io::println("Shape: " + probe(shapes, 0) + " " + probe(shapes, 1) + " "
       + err::name(shapes.swap(0, 1).code));
-  io::println("Shape: " + copied(shapes, 0) + " " + copied(shapes, 1));
+  io::println("Shape: " + probe(shapes, 0) + " " + probe(shapes, 1));
   shapes.set(0, Shape::Named("n"));
   io::println("Shape: " + err::name(shapes.swap(0, 1).code) + " "
       + shapes.at(0).toString() + " " + shapes.at(1).toString());
 
-  let s = "abc";
+  let s: shared = "abc";
   fns = memory::Buffer<() -> int>();
   fns.grow(2);
   fns.set(1, fn() => s.len());
-  let f = fns.get(1);
-  io::println("fn: " + copied(fns, 0) + " " + copied(fns, 1) + " "
-      + err::name(fns.swap(0, 1).code) + " " + Str(f()));
+  io::println("fn: " + probe(fns, 0) + " " + probe(fns, 1) + " "
+      + err::name(fns.swap(0, 1).code) + " " + Str(fns.at(1)()));
   fns.set(0, fn() => 4);
-  io::println("fn: " + err::name(fns.swap(1, 0).code) + " " + Str(fns.get(0)())
-      + " " + Str(fns.get(1)()));
+  io::println("fn: " + err::name(fns.swap(1, 0).code) + " " + Str(fns.at(0)())
+      + " " + Str(fns.at(1)()));
 
   handlers = memory::Buffer<Handler>();
   handlers.grow(1);
-  let first = copied(handlers, 0);
+  let first = probe(handlers, 0);
   handlers.set(0, Handler(4, fn() => 12));
-  let h = handlers.get(0);
-  io::println("Handler: " + first + " " + copied(handlers, 0) + " "
-      + Str(h.run()));
+  io::println("Handler: " + first + " " + probe(handlers, 0) + " "
+      + Str(handlers.at(0).run()));
 
   outers = memory::Buffer<Outer>();
   outers.grow(3);
   outers.set(1, Outer::Wrap(Inner::Nothing));
   outers.set(2, Outer::Bare);
-  io::println("Outer: " + copied(outers, 0) + " " + copied(outers, 1) + " "
-      + copied(outers, 2) + " " + outers.at(1).toString() + " "
+  io::println("Outer: " + probe(outers, 0) + " " + probe(outers, 1) + " "
+      + probe(outers, 2) + " " + outers.at(1).toString() + " "
       + outers.at(2).toString());
   outers.set(0, Outer::Wrap(Inner::Text("t")));
-  io::println("Outer: " + outers.get(0).toString());
+  io::println("Outer: " + outers.at(0).toString());
 
   maybes = memory::Buffer<Maybe<Str>>();
   maybes.grow(2);
   maybes.set(1, Maybe<Str>::Nada);
-  io::println("Maybe<Str>: " + copied(maybes, 0) + " " + copied(maybes, 1) + " "
+  io::println("Maybe<Str>: " + probe(maybes, 0) + " " + probe(maybes, 1) + " "
       + maybes.at(1).toString());
 
   ints = memory::Buffer<int>();
   ints.grow(1);
-  io::println("int: " + copied(ints, 0) + " " + Str(ints.at(0)));
+  io::println("int: " + probe(ints, 0) + " " + Str(ints.at(0)));
 
   options = memory::Buffer<(() -> int)?>();
   options.grow(1);
-  match options.get(0) {
-    o: () -> int { io::println("fn?: " + copied(options, 0) + " " + Str(o())); }
-    None { io::println("fn?: " + copied(options, 0) + " None"); }
+  match options.at(0) {
+    o: () -> int { io::println("fn?: " + probe(options, 0) + " " + Str(o())); }
+    None { io::println("fn?: " + probe(options, 0) + " None"); }
   }
 
   counted = memory::Buffer<Counted>();
   counted.grow(1);
-  io::println("Counted: " + copied(counted, 0) + " "
-      + counted.at(0).toString());
+  io::println("Counted: " + probe(counted, 0) + " " + counted.at(0).toString());
 
   justs = memory::Buffer<Maybe<int>>();
   justs.grow(1);
-  io::println("Maybe<int>: " + copied(justs, 0) + " " + justs.at(0).toString());
+  io::println("Maybe<int>: " + probe(justs, 0) + " " + justs.at(0).toString());
   return 0;
 }

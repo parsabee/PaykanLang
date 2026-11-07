@@ -22,6 +22,9 @@
 //            `inout` argument or a method that may change them, in a later
 //            argument, is an error (docs/language/03-functions.md,
 //            "Exclusivity").
+// The objects a later argument writes through are `shared mut`: the call
+// gets a reference of its own to the object the earlier argument was read
+// from, which a unique reference, moved into the call, could not be.
 // expect-stdout: field: 1 1
 // expect-stdout: inout: 1 1 1 A(n: 1)
 // expect-stdout: equality: False True False
@@ -43,7 +46,7 @@ struct P {
 }
 
 struct Named {
-  name: Str;
+  name: shared Str;
   n: int;
 }
 
@@ -114,7 +117,7 @@ class Derived : Base {
 }
 
 impl Derived {
-  fn __init__(h: mut Holder) { __super__(h.p, reset(h)); self.y = 0; }
+  fn __init__(h: shared mut Holder) { __super__(h.p, reset(h)); self.y = 0; }
 }
 
 class Calls {
@@ -138,15 +141,17 @@ class Arrays {
 fn sum(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2];
 fn ends(ss: view Str[], x: int) -> Str => ss[0] + ss[2];
 
-fn resetArrays(a: mut Arrays) -> int {
+fn resetArrays(a: shared mut Arrays) -> int {
   a.xs = [9, 9, 9];
   a.ss = ["z" + Str(1), "z" + Str(2), "z" + Str(3)];
   return 0;
 }
 
-fn sumOn(xs: view int[], a: mut Arrays) -> int => sum(xs, resetArrays(a));
-fn endsOn(ss: view Str[], a: mut Arrays) -> Str => ends(ss, resetArrays(a));
-fn firstOn(ss: view Str[], a: mut Arrays) -> Str {
+fn sumOn(xs: view int[], a: shared mut Arrays)
+         -> int => sum(xs, resetArrays(a));
+fn endsOn(ss: view Str[], a: shared mut Arrays)
+          -> Str => ends(ss, resetArrays(a));
+fn firstOn(ss: view Str[], a: shared mut Arrays) -> Str {
   let f = fn(ts: view Str[], x: int) -> Str => ts[0] + "";
   return f(ss, resetArrays(a));
 }
@@ -164,10 +169,11 @@ impl Kept {
   fn __init__(ss: view Str[], x: int) { self.s = ss[1] + ""; }
 }
 
-fn pickOn(ss: view Str[], a: mut Arrays) -> Str {
+fn pickOn(ss: view Str[], a: shared mut Arrays) -> Str {
   return Picker(0).pick(ss, resetArrays(a));
 }
-fn keptOn(ss: view Str[], a: mut Arrays) -> Str => Kept(ss, resetArrays(a)).s;
+fn keptOn(ss: view Str[], a: shared mut Arrays)
+          -> Str => Kept(ss, resetArrays(a)).s;
 
 fn arrays() -> Arrays => Arrays([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
 
@@ -203,9 +209,9 @@ impl Ticker {
 }
 
 fn boxed() -> Boxed => Boxed(P(1), E::A(1), Wrap(P(1), 1));
-fn lookOn(p: view P, b: mut Boxed) -> int => look(p, b.resetW());
+fn lookOn(p: view P, b: shared mut Boxed) -> int => look(p, b.resetW());
 
-fn reset(h: mut Holder) -> int {
+fn reset(h: shared mut Holder) -> int {
   h.p = P(9);
   h.named = Named("z" + Str(9), 9);
   return 0;
@@ -236,7 +242,7 @@ fn bumpN(n: inout int) -> int {
   return 0;
 }
 
-fn recount(c: mut Counted) -> int {
+fn recount(c: shared mut Counted) -> int {
   c.counter = Counter(9);
   return 0;
 }
@@ -245,7 +251,7 @@ fn fresh() -> Holder => Holder(P(1), Named("a" + Str(1), 1), 1);
 
 fn main() -> int {
   // Read through an object that a later call, given the object, writes.
-  h: mut = fresh();
+  h: shared mut = fresh();
   let a = first(h.p, reset(h));
   h = fresh();
   let c = first(h.p, first(h.p, reset(h)));
@@ -275,7 +281,7 @@ fn main() -> int {
   let r = Reader(0);
   h = fresh();
   let m1 = r.first(h.p, reset(h));
-  let counted: mut = Counted(Counter(1));
+  let counted: shared mut = Counted(Counter(1));
   let m2 = counted.counter.get(recount(counted));
   pair = Pair(P(1), P(2));
   let m3 = first(pair.q, pair.bumpQ()) - 1;
@@ -302,7 +308,7 @@ fn main() -> int {
   // A `view` parameter and a slice see the value read too.
   h = fresh();
   let v1 = look(h.p, reset(h));
-  arrs: mut = arrays();
+  arrs: shared mut = arrays();
   let v2 = total(arrs.xs, resetArrays(arrs));
   io::println("view: " + Str(v1) + " " + Str(v2));
 
@@ -353,7 +359,7 @@ fn main() -> int {
   // A method that writes a field through an `inout` local or a `match`
   // arm's binding, one that writes the field holding a `view` parameter's
   // value, and one that writes another object's field (no copy).
-  b: mut = boxed();
+  b: shared mut = boxed();
   let y1 = first(b.p, b.viaLocal());
   b = boxed();
   let y2 = tag(b.e, b.viaArm());

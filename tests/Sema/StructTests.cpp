@@ -579,7 +579,7 @@ fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   a = mk();
   bump(a.x);
-  h: mut = H(a);
+  h: mut = H(a.clone());
   bump(h.a.x);
   m: inout = h.a.s;
   m = "b";
@@ -596,10 +596,8 @@ fn main() -> int {
                 "to 'inout' parameter 'n'",
                 "a field of a struct that is not a variable or a field (a "
                 "temporary, which dies with the statement) cannot be named by "
-                "'inout' local 'k'",
-                "an array element cannot be passed to 'inout' parameter 'n' "
-                "yet"});
-  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+                "'inout' local 'k'"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
 // A conditional's struct is a temporary too, so its field is no `inout`
@@ -652,9 +650,9 @@ fn main() -> int {
   io::println(a);
   io::print(a);
   s: Str = a.toString();
-  t = (a, 1);
+  t = (a.clone(), 1);
   io::println(t);
-  return if a == b && !(a != b) && t == (b, 1) then 0 else 1;
+  return if a == b && !(a != b) && t == (b.clone(), 1) then 0 else 1;
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

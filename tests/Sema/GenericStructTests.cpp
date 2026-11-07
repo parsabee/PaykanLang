@@ -23,12 +23,12 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
                                                         << r.Diagnostics;
 }
 
-const char *kPair = R"(
+const char *kPair = R"(import ::memory as mem;
 struct Pair<A, B> { a: A; b: B; }
 impl Pair<A, B> {
   view fn first() -> view A { return self.a; }
-  fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
-  fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+  fn swapWith(other: inout Pair<A, B>) { mem::swap(self.a, other.a); }
+  view fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b.clone(), self.a.clone()); }
 }
 )";
 
@@ -101,15 +101,15 @@ TEST(GenericStruct, InstantiatedByTypeAndByCall) {
   auto r = semaCheck(std::string(kPair) + R"(
 struct Box<T> { v: T; }
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
-  fn set(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
+  fn set(v: T) { self.v = move v; }
   view fn get() -> view T { return self.v; }
 }
 class Holder<T> { p: Pair<T, Str>; }
-impl Holder<T> { fn __init__(x: T) { self.p = Pair<T, Str>(x, "h"); } }
+impl Holder<T> { fn __init__(x: T) { self.p = Pair<T, Str>(move x, "h"); } }
 fn sumInts(p: view Pair<int, int>) -> int { return p.a + p.b; }
 fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }
-fn mkBox<T>(v: T) -> Box<T> { return Box(v); }
+fn mkBox<T>(v: T) -> Box<T> { return Box(move v); }
 fn main() -> int {
   p = Pair(1, "one");                     // inferred from the fields
   q: Pair<int, Str> = Pair<int, Str>(2, "two");
@@ -133,10 +133,10 @@ fn main() -> int {
 
 TEST(GenericStruct, SameInstantiationIsOneType) {
   auto r = semaCheck(std::string(kPair) + R"(
-fn take(p: Pair<int, Str>) -> int { return p.a; }
+fn take(p: view Pair<int, Str>) -> int { return p.a; }
 fn main() -> int {
   a = Pair(1, "a");
-  b: Pair<int, Str> = a;
+  b: Pair<int, Str> = a.clone();
   c = Pair<int, Str>(2, "c");
   a.swapWith(c);
   return take(a) + take(b) + (if a == c then 1 else 0);
@@ -197,7 +197,7 @@ TEST(GenericStruct, Inference) {
 struct E<T> { x: int; }
 struct Same<T> { a: T; b: T; }
 struct Init<T> { v: T; n: int; }
-impl Init<T> { fn __init__(v: T) { self.v = v; self.n = 0; } }
+impl Init<T> { fn __init__(v: T) { self.v = move v; self.n = 0; } }
 struct Nested<T> { inner: Same<T>; }
 fn main() -> int {
   e = E(1);
@@ -403,12 +403,12 @@ const char *kGenLib = R"(
 struct Pair<A, B> { a: A; b: B; }
 impl Pair<A, B> {
   view fn first() -> view A { return self.a; }
-  fn bump(d: int) { self.a = self.a; }
+  fn bump(d: A) { self.a = move d; }
 }
 struct Box<T> { v: T; }
-impl Box<T> { fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } view fn get() -> view T { return self.v; } }
 fn mk() -> Pair<int, Str> { return Pair<int, Str>(41, "x"); }
-fn boxed<T>(v: T) -> Box<T> { return Box<T>(v); }
+fn boxed<T>(v: T) -> Box<T> { return Box<T>(move v); }
 )";
 } // namespace
 
@@ -423,23 +423,25 @@ TEST(GenericStruct, ImportedTemplates) {
              "p.a = 1; return p.a + p.first(); }"},
       // Constructor call, explicit and inferred; the module's own
       // instantiation and a new one.
-      {"t2", "import lib::gen;\n"
-             "fn main() -> int { q = gen::Pair<int, Str>(1, \"q\"); "
-             "r = gen::Pair(\"s\", 2.5); b: gen::Box<Str> = gen::boxed(\"b\"); "
-             "c = gen::Box(r); return q.a + (if q == gen::mk() then 1 else "
-             "0); }"},
+      {"t2",
+       "import lib::gen;\n"
+       "fn main() -> int { q = gen::Pair<int, Str>(1, \"q\"); "
+       "r = gen::Pair(\"s\", 2.5); b: gen::Box<Str> = gen::boxed(\"b\"); "
+       "c = gen::Box(move r); return q.a + (if q == gen::mk() then 1 else "
+       "0); }"},
       // Aliased import and the full module path.
       {"t3", "import lib::gen as g;\n"
              "fn main() -> int { b: lib::gen::Box<int> = g::Box<int>(1); "
              "return b.get(); }"},
       // Inside this module's own templates.
-      {"t4", "import lib::gen;\n"
-             "struct W<T> { b: gen::Box<T>; }\n"
-             "impl W<T> { fn __init__(x: T) { self.b = gen::Box<T>(x); } }\n"
-             "fn wrap<T>(x: T) -> gen::Pair<T, T> { return gen::Pair<T, T>(x, "
-             "x); }\n"
-             "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
-             "return wrap(2).b + w.b.get(); }"},
+      {"t4",
+       "import lib::gen;\n"
+       "struct W<T> { b: gen::Box<T>; }\n"
+       "impl W<T> { fn __init__(x: T) { self.b = gen::Box<T>(move x); } }\n"
+       "fn wrap<T>(x: T) -> gen::Pair<T, T> { return gen::Pair<T, T>(x, "
+       "x); }\n"
+       "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
+       "return wrap(2).b + w.b.get(); }"},
   };
   for (const auto &[name, src] : cases) {
     auto r = semaCheckFile(writeProjectFile(dir, name + ".pkn", src));
@@ -464,12 +466,12 @@ TEST(GenericStruct, StaticFnOfAnInstantiation) {
   auto r = semaCheck(R"(
 struct Pair<A, B> { a: A; b: B; }
 impl Pair<A, B> {
-  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
-  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b, p.a); }
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(move a, move b); }
+  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b.clone(), p.a.clone()); }
 }
 fn main() -> int {
   p = Pair<int, Str>::make(1, "a");
-  q: Pair<Str, int> = Pair<Str, int>::swapped(p);
+  q: Pair<Str, int> = Pair<Str, int>::swapped(p.clone());
   return p.a + q.b;
 }
 )");

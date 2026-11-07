@@ -192,7 +192,7 @@ private:
     open("impl", &d);
     str(d.getTypeName());
     if (!d.getTypeParams().empty())
-      typeParams(d.getTypeParams());
+      typeParams(d.getTypeParams(), d.getTypeParamBounds());
     if (d.getTrait()) {
       open("for");
       type(d.getTrait());
@@ -262,6 +262,10 @@ private:
     }
     if (d.isAsync()) { // the concurrency prototype
       open("async");
+      close();
+    }
+    if (d.isShared()) { // `shared fn`: its `self` is shared
+      open("shared");
       close();
     }
     if (d.hasInferredResult()) {

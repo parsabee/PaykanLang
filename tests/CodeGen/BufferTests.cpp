@@ -92,6 +92,7 @@ TEST(Buffer, HoldsReferences) {
     impl P {
       fn __init__(x: int) { self.x = x; }
     }
+    impl Cloneable for P {}
     fn main() -> int {
       s: mut = Buffer<Str>();
       s.set(0, "a");
@@ -102,8 +103,8 @@ TEST(Buffer, HoldsReferences) {
       s.shrink(2);
       ps: mut = Buffer<P>();
       p = P(42);
-      ps.set(1, p);
-      ps.set(2, p);
+      ps.set(1, p.clone());
+      ps.set(2, move p);
       io::println(Str<int>(ps.get(1).x + ps.get(2).x));
       return 0;
     }
@@ -186,8 +187,9 @@ TEST(Buffer, HoldsBoolsAndCopiesOut) {
 }
 
 // A tuple is held in place: its references (here a Str and a Node) are
-// retained by the buffer, its `int?` is inline, and a copy outlives the value
-// it was taken from.  A tuple of plain values is copied out of a `get`.
+// owned by the buffer (a tuple's elements hold no `shared` reference), its
+// `int?` is inline, and a copy outlives the value it was taken from.  A tuple
+// of plain values is copied out of a `get`.
 TEST(Buffer, HoldsTuples) {
   expectRuns(R"(import ::io;
     class Node {
@@ -200,10 +202,9 @@ TEST(Buffer, HoldsTuples) {
     }
     fn main() -> int {
       b: mut = Buffer<(Str, Node, int?)>();
-      n: mut = Node(1);
-      b.set(0, ("a", n, 1));
+      b.set(0, ("a", Node(1), 1));
       b.set(1, ("b" + "b", Node(2), None));
-      b.set(2, ("c", n, 3));
+      b.set(2, ("c", Node(1), 3));
       io::println(b.get(0));
       io::println(b.get(1));
       io::println(b.get(1).0 + " " + opt(b.get(1).2) + " " + opt(b.get(2).2));
@@ -212,10 +213,9 @@ TEST(Buffer, HoldsTuples) {
       io::println(t);
       io::println(b.get(2));
       b.grow(2);
-      b.set(4, t);
+      b.set(4, move t);
       io::println(Str<int>(b.len()) + " " + b.get(4).0);
       b.shrink(3);
-      n.v = 9;
       io::println(b.get(0));
       ps: mut = Buffer<(int, float)>();
       ps.set(1, (2, 0.5));
@@ -226,5 +226,5 @@ TEST(Buffer, HoldsTuples) {
     }
   )",
              "(a, N1, 1)\n(bb, N2, None)\nbb - 3\n(c, N1, 3)\n(d, N4, 4)\n5 c\n"
-             "(a, N9, 1)\n(2, 0.5)\n(0, 0)\n");
+             "(a, N1, 1)\n(2, 0.5)\n(0, 0)\n");
 }

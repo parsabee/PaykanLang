@@ -32,7 +32,7 @@ class Rect {
   view fn area() -> int { return util::twice(self.w * self.h) / 2; }
 }
 impl Rect { fn __init__(w: int, h: int) { self.w = w; self.h = h; } }
-fn describe(r: Rect) -> Str { return "rect " + Str(r.area()); }
+fn describe(r: view Rect) -> Str { return "rect " + Str(r.area()); }
 """
 MAIN = """import ::io;
 import lib::util;

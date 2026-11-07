@@ -44,7 +44,7 @@ TEST(Func, FunctionVoid) {
 TEST(Func, StringPassToFunction) {
   auto r =
       compileAndRun(withFns("import ::io; fn show(s: Str) { io::println(s); }",
-                            "a: Str = \"hi\";\n  show(a);"));
+                            "a: Str = \"hi\";\n  show(move a);"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hi\n");
 }
@@ -169,7 +169,7 @@ TEST(Func, MethodCallConcatInPlace) {
   auto r = compileAndRun(wrapMain(R"(
     a: mut Str = "hello";
     b: Str = " world";
-    a.concat(b);
+    a.concat(move b);
     io::println(a);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;

@@ -108,12 +108,13 @@ TEST(Module, TransitiveClassFlowsThroughSignature) {
   writeTempFile(tmpDir.string(), "leaf.pkn", R"(
 class Thing { v: int; view fn twice() -> int { return self.v + self.v; } }
 impl Thing { fn __init__(v: int) { self.v = v; } }
+impl Cloneable for Thing {}
 )");
   writeTempFile(tmpDir.string(), "mid.pkn", R"(
 import leaf;
 class Wrap {
   t: leaf::Thing;
-  fn get() -> leaf::Thing { return self.t; }
+  fn get() -> leaf::Thing { return self.t.clone(); }
 }
 
 impl Wrap {

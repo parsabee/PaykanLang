@@ -18,6 +18,11 @@
 //            a lambda's captured struct): its copy's retain of a class
 //            reference makes no test either, but in an optional's or a
 //            union's, whose other variants are zeros.
+// The objects are `shared mut`, since only a copyable reference is copied
+// (retained): the copies that were taken from an `inout` parameter are taken
+// from a `shared mut` one, and an `inout` result, which cannot be copied, is
+// written through.  The array parameter holds unique references and is moved.
+// A tuple's element takes no qualifier, so the tuple holds an `S`.
 // expect-stdout: field: 8
 // expect-stdout: capture: 8 8
 // expect-stdout: loop: 2
@@ -40,12 +45,12 @@ class C {
 }
 
 class H {
-  c: C;
-  o: C?;
+  c: shared mut C;
+  o: shared mut C?;
 }
 
-fn set(h: mut H) {
-  let d: mut = h.c;
+fn set(h: shared mut H) {
+  let d: shared mut = h.c;
   d.p = P(7, 8, 9);
 }
 
@@ -59,7 +64,7 @@ fn setEach(hs: H[3]) -> int {
   return n - 1;
 }
 
-fn setOptional(h: mut H) -> Str {
+fn setOptional(h: shared mut H) -> Str {
   match h.o {
     e: inout C {
       e.p = P(4, 5, 6);
@@ -69,18 +74,18 @@ fn setOptional(h: mut H) -> Str {
   }
 }
 
-fn viaInout(c: inout C) {
+fn viaInout(c: shared mut C) {
   let d = c;
   d.p = P(7, 2, 9);
 }
 
-fn viaBinding(c: inout C) {
+fn viaBinding(c: shared mut C) {
   let e = c;
   e.xs = [4, 4, 4];
 }
 
-fn viaRebind(c: inout C, d: mut C) {
-  e: mut = d;
+fn viaRebind(c: shared mut C, d: shared mut C) {
+  e: shared mut = d;
   e = c;
   e.p = P(7, 3, 9);
 }
@@ -90,14 +95,17 @@ fn held(h: inout H) -> inout C {
 }
 
 struct S {
-  c: C;
+  c: shared mut C;
   n: int;
 }
 
-enum U { A(c: C, k: int), B(n: int), }
+enum U {
+  A(c: shared mut C, k: int),
+  B(n: int),
+}
 
 fn viaStructCopy(s: S) -> int {
-  s2 = s;
+  let s2 = s;
   s2.c.p = P(7, 8, 9);
   s2.c.xs = [4, 4, 4];
   return s2.c.p.b;
@@ -129,14 +137,14 @@ fn viaUnionInout(u: inout U) -> int {
   }
 }
 
-fn viaTuple(t: (C, int)) -> int {
-  t2 = t;
-  t2.0.p = P(3, 3, 3);
-  return t2.0.p.a;
+fn viaTuple(t: (S, int)) -> int {
+  let t2 = t;
+  t2.0.c.p = P(3, 3, 3);
+  return t2.0.c.p.a;
 }
 
 fn viaArray(arr: C[2]) -> int {
-  b = arr;
+  b = move arr;
   b[0].p = P(2, 2, 2);
   b[1].xs = [2, 2, 2];
   return b[0].p.a + b[1].xs[0];
@@ -162,7 +170,7 @@ fn viaClosure(s: S) -> int {
 
 fn viaLocalStruct() -> int {
   let s = S(C(P(1, 1, 1), [1, 1, 1]), 1);
-  t = s;
+  let t = s;
   t.c.p = P(9, 9, 9);
   return t.c.p.a + s.c.p.a;
 }
@@ -179,22 +187,22 @@ class F {
 fn opened(path: Str) -> F? {
   errno = 0;
   match _open(path, "r", errno) {
-    handle: Obj { return F(handle); }
+    handle: Obj { return F(move handle); }
     None { return None; }
   }
 }
 
 fn main() -> int {
-  h: mut = H(C(P(1, 2, 3), [1, 2, 3]), C(P(1, 2, 3), [1, 2, 3]));
+  h: shared mut = H(C(P(1, 2, 3), [1, 2, 3]), C(P(1, 2, 3), [1, 2, 3]));
   set(h);
   io::println("field: " + Str(h.c.p.b));
-  c: mut = h.c;
+  c: shared mut = h.c;
   let k = fn() { c.p = P(7, 8, 9); c.xs = [7, 8, 9]; };
   k();
   io::println("capture: " + Str(c.p.b) + " " + Str(c.xs[1]));
-  let hs = [h, H(C(P(0, 0, 0), [0, 0, 0]), None), h];
-  io::println("loop: " + Str(setEach(hs)));
-  let none: mut = H(C(P(0, 0, 0), [0, 0, 0]), None);
+  let hs = [H(h.c, None), H(C(P(0, 0, 0), [0, 0, 0]), None), H(h.c, None)];
+  io::println("loop: " + Str(setEach(move hs)));
+  let none: shared mut = H(C(P(0, 0, 0), [0, 0, 0]), None);
   io::println("optional: " + setOptional(h) + " " + setOptional(none));
   c = C(P(1, 1, 1), [1, 1, 1]);
   viaInout(c);
@@ -208,8 +216,7 @@ fn main() -> int {
   let l = c.p.b;
   h = H(c, None);
   at: inout = held(h);
-  let q = at;
-  q.p = P(7, 6, 9);
+  at.p = P(7, 6, 9);
   io::println("inout: " + Str(b) + " " + Str(x) + " " + Str(r) + " " + Str(l)
       + " " + Str(c.p.b));
   io::println("native: " + Str(opened("") == None));
@@ -217,8 +224,8 @@ fn main() -> int {
   u = U::A(fresh(), 1);
   io::println("held: " + Str(viaStructCopy(s)) + " " + Str(viaParam(s)) + " "
       + Str(viaUnion(u)) + " " + Str(viaUnionInout(u)) + " "
-      + Str(viaTuple((fresh(), 1))) + " " + Str(viaArray([fresh(), fresh()]))
-      + " " + Str(viaOptStruct(s)) + " " + Str(viaOptStruct(None)) + " "
-      + Str(viaClosure(s)) + " " + Str(viaLocalStruct()));
+      + Str(viaTuple((S(fresh(), 0), 1))) + " " + Str(viaArray([fresh(),
+      fresh()])) + " " + Str(viaOptStruct(s)) + " " + Str(viaOptStruct(None))
+      + " " + Str(viaClosure(s)) + " " + Str(viaLocalStruct()));
   return 0;
 }

@@ -246,7 +246,7 @@ TEST(Module, ClassTypeRemapOk) {
   auto mainPath = (tmp / "main.pkn").string();
   std::ofstream(mainPath) << R"(
 import strmod;
-fn main() -> int { s: Str = "hi"; return strmod::wrap(s); }
+fn main() -> int { s: Str = "hi"; return strmod::wrap(move s); }
 )";
   auto r = semaCheckFile(mainPath, tmp.string());
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -259,11 +259,12 @@ TEST(Module, ClassTypeIdentityOk) {
   auto tmp = paykan::test::tempDir() / "pkn_ms_classid";
   std::filesystem::remove_all(tmp);
   std::filesystem::create_directories(tmp);
-  std::ofstream(tmp / "strutil.pkn") << "fn id(s: Str) -> int { return 0; }\n";
-  std::ofstream(tmp / "modA.pkn")
-      << "import strutil;\nfn useA(s: Str) -> int { return strutil::id(s); }\n";
-  std::ofstream(tmp / "modB.pkn")
-      << "import strutil;\nfn useB(s: Str) -> int { return strutil::id(s); }\n";
+  std::ofstream(tmp / "strutil.pkn")
+      << "fn id(s: view Str) -> int { return 0; }\n";
+  std::ofstream(tmp / "modA.pkn") << "import strutil;\nfn useA(s: view Str) -> "
+                                     "int { return strutil::id(s); }\n";
+  std::ofstream(tmp / "modB.pkn") << "import strutil;\nfn useB(s: view Str) -> "
+                                     "int { return strutil::id(s); }\n";
   auto mainPath = (tmp / "main.pkn").string();
   std::ofstream(mainPath) << R"(
 import modA;
@@ -377,7 +378,7 @@ TEST(Module, QualifiedTypeParamOk) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import geometry::point;
 fn show(p: point::Point) -> int { return p.getX(); }
-fn main() -> int { p = point::Point(3, 4); return show(p); }
+fn main() -> int { p = point::Point(3, 4); return show(move p); }
 )");
   auto r = semaCheckFile(main, tmp);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -440,7 +441,7 @@ TEST(Module, QualifiedTypeArrayOk) {
 import geometry::point;
 fn first(ps: point::Point[1]) -> int { return ps[0].getX(); }
 fn count(ps: view point::Point[]) -> int { return ps.len(); }
-fn main() -> int { ps: point::Point[1] = [point::Point(7, 8)]; return first(ps) + count(ps); }
+fn main() -> int { ps: point::Point[1] = [point::Point(7, 8)]; return count(ps) + first(move ps); }
 )");
   auto r = semaCheckFile(main, tmp);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

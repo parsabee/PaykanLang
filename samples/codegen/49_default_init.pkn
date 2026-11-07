@@ -67,7 +67,7 @@ class Box<T> {
   v: T;
 }
 
-fn chain(n: Node) -> Str {
+fn chain(n: view Node) -> Str {
   match n.next {
     m: Node {
       return n.name + " -> " + chain(m);

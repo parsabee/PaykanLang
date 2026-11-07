@@ -142,8 +142,40 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
         return false;
       }
     }
+    // A capture is a copy (the copy rule, #369): a move-only value is
+    // captured through a `weak` local of it, or from a `shared` form.
+    if (kind != VarKind::Weak && kind != VarKind::CapturedWeak &&
+        kind != VarKind::Captured && name != names::kSelf &&
+        !isCopyablePart(ty, qualifierOfVar(name))) {
+      const ast::Qualifier q = qualifierOfVar(name);
+      error(
+          loc,
+          "cannot capture '" + name + "' (a unique '" + qualifiedName(q, ty) +
+              "'): a function captures by copy" +
+              (ast::isRefType(ast::stripOptional(ty))
+                   ? "; declare it '" +
+                         qualifiedName(
+                             ast::Qualifier{ast::QualForm::Shared, q.Mut}, ty) +
+                         "', or capture a 'weak' local of it"
+                   : std::string()));
+      return false;
+    }
+    // An `atomic` cell's handle is not captured yet.
+    if (ast::isa<ast::AtomicType>(ty) && kind != VarKind::Captured) {
+      error(loc, "cannot capture '" + name + "' (an '" + typeName(ty) +
+                     "' cell) yet: pass it to the function as an argument");
+      return false;
+    }
     if (name == names::kSelf) {
       const ClassContext *outer = lc.Outer;
+      // A method borrows its receiver, and a capture is a copy: the
+      // function would be a second owner of a unique object (#369).
+      // Reported, the capture goes on: the method's other checks (what
+      // `__init__` has assigned yet) still run.
+      if (outer && !outer->Struct && !outer->ViewMethod && !outer->SharedMethod)
+        error(loc, "cannot capture 'self': a method borrows its receiver, "
+                   "and a function captures by copy; capture a 'weak' local "
+                   "of it ('weak me = self;')");
       if (outer && outer->Struct) {
         error(loc, "'self' is the receiver's storage in a method of struct '" +
                        outer->Struct->getName() +
@@ -151,7 +183,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
                        "variable first)");
         return false;
       }
-      if (outer && outer->ViewMethod) {
+      if (outer && outer->ViewMethod && !outer->SharedMethod) {
         error(loc, "'self' is read-only in 'view fn " + outer->MethodName +
                        "'; a function cannot capture it (its copy could "
                        "change the object)");
@@ -210,7 +242,16 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "the lambda's result");
-    (void)takeQualifier(); // a lambda's result carries none (the prototype)
+    // A lambda's result carries no qualifier: a function type has none, so
+    // a caller would take a `shared` result for a unique one.
+    if (ast::Qualifier q = takeQualifier(); retTy && !q.isUnique()) {
+      error(node->getLocation(), "a lambda's result takes no qualifier yet ('" +
+                                     qualifiedName(q, retTy) +
+                                     "'): a function type carries none, "
+                                     "so its callers would hold a '" +
+                                     typeName(retTy) + "'");
+      return nullptr;
+    }
     if (!retTy)
       return nullptr;
     node->setReturnType(retTy);
@@ -352,6 +393,13 @@ ast::Type *Sema::checkFunctionValueCall(ast::FunctionType *fnt,
     return nullptr;
   checkInoutArgs(call, modes, fnt->getParamTypes(), args, what);
   checkViewArgs(modes, fnt->getParamTypes(), args, what);
+  // A by-value parameter owns what it is given: the copy rule (#369).
+  for (size_t i = 0; i < args.size(); ++i)
+    if (modes.mode(i) == ast::ParamMode::Value &&
+        !checkCopyRule(args[i], args[i]->getLocation()))
+      ok = false;
+  if (!ok)
+    return nullptr;
   return fnt->getReturnType();
 }
 

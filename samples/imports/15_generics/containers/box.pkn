@@ -7,12 +7,12 @@ import containers::util;
 class Box<T> {
   v: T;
   view fn get() -> view T { return self.v; }
-  fn set(v: T)            { self.v = v; }
+  fn set(v: T)            { self.v = move v; }
   view fn tag() -> Str    { return util::bracket(Str(_serial())); }
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
 class Pair<A, B> {
@@ -21,7 +21,7 @@ class Pair<A, B> {
 }
 
 impl Pair<A, B> {
-  fn __init__(a: A, b: B) { self.a = a; self.b = b; }
+  fn __init__(a: A, b: B) { self.a = move a; self.b = move b; }
 }
 
 fn _serial() -> int {
@@ -29,11 +29,12 @@ fn _serial() -> int {
 }
 
 fn pairOf<A, B>(a: A, b: B) -> Pair<A, B> {
-  return Pair(a, b);
+  return Pair(move a, move b);
 }
 
+// Moves `p.a` out of `p` and copies `p.b`, which needs a Copyable `B`.
 fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
-  return Pair(p.b, p.a);
+  return Pair(p.b, move p.a);
 }
 
 // The module's own Box<int>: importers that instantiate Box<int> get this

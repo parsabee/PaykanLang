@@ -65,7 +65,7 @@ class GBox<T> {
 }
 
 impl GBox<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
 impl Hashable for GBox<T> {

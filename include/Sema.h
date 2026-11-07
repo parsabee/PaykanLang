@@ -291,9 +291,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   }
   /// The result qualifier of the function being checked.
   ast::Qualifier CurrentResultQual;
-  /// --strict-ownership: a unique reference read from a place is moved into
-  /// an owning slot, never copied.
-  bool StrictOwnership = false;
   /// Set while a `lock` statement's operand is checked, where a `locked`
   /// place may be named.
   bool LockOperand = false;
@@ -313,9 +310,28 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// A reference @p src stored into an owning slot of qualifier @p dst (a
   /// variable, field, element, by-value parameter or result): the
   /// conversion rules, what a unique value becomes there (Materialize),
-  /// and the copy rule under --strict-ownership.
+  /// and the copy rule (a move-only value moves only by `move`).
+  /// @p implicitMove: @p src,
+  /// an owned local or by-value parameter, leaves as by `move` (a `return`,
+  /// always its last use).
   bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
-                          const std::string &what, ast::SourceLocation loc);
+                          const std::string &what, ast::SourceLocation loc,
+                          bool implicitMove = false, bool materialize = true);
+  /// The copy rule alone, for @p src flowing into an owning slot that takes
+  /// any form (a literal's element, a destructuring's value): a move-only
+  /// value read from a place moves only by `move`.
+  bool checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
+                     bool implicitMove = false);
+  /// What a unique @p src becomes in a slot of form @p dst: a cell or a
+  /// frozen object, after the send check of what it holds.
+  bool materializeFlow(ast::Qualifier dst, ast::Expr *src,
+                       ast::SourceLocation loc);
+  /// Whether @p e names storage the copy rule guards: a variable (not a
+  /// named function), or a part of one (not of a temporary).
+  bool isCopyPlace(const ast::Expr *e);
+  /// Whether @p e names an owned local or by-value parameter of this
+  /// function, the binders `move` takes whole.
+  bool isOwnedBinder(const ast::Expr *e);
   /// Why the place @p e cannot change through an immutable reference or field
   /// on its way; "" when it can.
   std::string constPlace(const ast::Expr *e);
@@ -333,6 +349,20 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// or a handle copies, a unique one (`mut` or not) does not.
   bool isCopyablePart(ast::Type *ty, ast::Qualifier q,
                       std::string *why = nullptr);
+  /// Whether a value of @p ty has a `clone()` (the built-in `Cloneable`,
+  /// #369): every Copyable type, `Str`, a class with an `impl Cloneable
+  /// for` block (its own or a superclass's), a struct with one, and a
+  /// struct, tuple, fixed array or optional of Cloneable parts.  An enum
+  /// whose payloads are not Copyable is not yet.  When not, @p why (if
+  /// given) names the part that is not.
+  bool isCloneable(ast::Type *ty, std::string *why = nullptr);
+  /// isCloneable of a part held with qualifier @p q: a `shared` reference
+  /// or a handle is the same object in the clone.
+  bool isCloneablePart(ast::Type *ty, ast::Qualifier q,
+                       std::string *why = nullptr);
+  /// Whether an `impl` block of @p ty, or of a superclass of a class @p ty,
+  /// implements the built-in trait named @p trait.
+  bool hasBuiltinTraitImpl(const ast::Type *ty, const char *trait);
   /// Why a value of @p ty, held with qualifier @p q, cannot cross to
   /// another thread (the design's send check): a `shared` or `weak` part, a
   /// function value, an `Obj`; "" when it can.  @p path names the part
@@ -542,8 +572,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct ClassContext {
     ast::ClassType *ClassType = nullptr; // the class being checked, or
     ast::StructType *Struct = nullptr;   // the struct (one of the two)
-    std::string MethodName;  // method currently being checked (empty = none)
-    bool ViewMethod = false; // it is a `view fn`: `self` is read-only
+    std::string MethodName;    // method currently being checked (empty = none)
+    bool ViewMethod = false;   // it is a `view fn`: `self` is read-only
+    bool SharedMethod = false; // a `shared fn`: `self` is a shared reference
     bool SuperInitRequired = false; // __init__ must call __super__
     /// The `__super__(...)` that is `__init__`'s first statement: the one
     /// call it may make (null when it does not begin with one).
@@ -585,6 +616,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// user-declared name never contains the module qualifier, a builtin entry
     /// found under a plain declared name is always a compiler builtin.
     bool IsBuiltin = false;
+    /// An entry an import injected (IsBuiltin too): a function of Paykan
+    /// code, whose by-value parameters own what they are given, as this
+    /// module's do, unless it is Native.
+    bool Imported = false;
     /// The parameters' modes: a user function's, or a constructor's
     /// `__init__`'s.
     ast::ParamModes Modes;
@@ -803,6 +838,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const TypeContext &context);
+  /// resolveType of a part of a type (a tuple's element, a type argument,
+  /// an array's element, a function type's parameter or result), where no
+  /// qualifier is kept yet (#368): NestedTypeDepth counts them.
+  ast::Type *resolvePart(ast::Type *ty, ast::SourceLocation loc,
+                         const TypeContext &context) {
+    ++NestedTypeDepth;
+    ast::Type *t = resolveType(ty, loc, context);
+    --NestedTypeDepth;
+    return t;
+  }
+  unsigned NestedTypeDepth = 0;
   // resolveType for what holds a value (a variable, a parameter, a field):
   // `void` has none, so it is reported (`<context> cannot have type
   // 'void'`) and nullptr returned.
@@ -935,6 +981,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// False (after reporting it) when @p index is a constant out of
   /// @p fixed's bounds.
   bool checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index);
+  /// `[v; n]` (n > 1) of elements of type @p elemTy: a Copyable `v` is
+  /// evaluated once and copied, and any other is evaluated for each element
+  /// (marked on @p node), so it is no place to copy from and moves nothing:
+  /// a variable it moved is one in MovedVars that @p before did not have.
+  bool checkRepeatValue(ast::ArrayLiteralExpr *node, ast::Type *elemTy,
+                        const MovedMap &before);
+  /// Whether `[v; n]` @p node is one whose `v`, a place, checkRepeatValue
+  /// reports rather than the copy rule (it is copied into no element).
+  bool repeatsAPlace(const ast::ArrayLiteralExpr *node, ast::Type *elemTy);
 
   // -- Poisoned binders (#89)
   //
@@ -1590,6 +1645,12 @@ private:
   /// @p what ends the diagnostic ("cannot assign to its field 'n'").
   bool checkChangeable(const ast::Expr *e, const std::string &what,
                        ast::SourceLocation loc);
+  /// A call of @p method, a `shared fn`, on the receiver of @p call: the
+  /// method hands its `self` on, so the receiver is held in that shared
+  /// form (`shared mut T`, `shared T` for a `shared view fn`), or is a
+  /// temporary nothing else holds.  True for any other method.
+  bool checkSharedReceiver(const ast::MethodCallExpr *call,
+                           const ast::MethodDecl *method);
   /// A call of @p method on the receiver of @p call: unless it is a `view
   /// fn`, the receiver must be changeable.
   bool checkMethodReceiver(const ast::MethodCallExpr *call,
@@ -2181,6 +2242,11 @@ private:
   /// The type whose implementation of @p tr @p ty has (itself or, for a
   /// class, a superclass); nullptr if it does not implement it.
   const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
+  /// Whether the type arguments @p args of an instance meet the bounds of
+  /// its template's `impl` block @p im (`impl List<T: Cloneable>`), which
+  /// is part of the instance only then.
+  bool implBoundsHold(const ast::ImplDecl *im,
+                      const std::vector<ast::Type *> &args);
   /// Whether @p ty has a text: implements the builtin `Show`, whose
   /// `toString()` the print functions call.  A number, bool, char and
   /// object have one; a tuple, struct, enum or optional has one when every
@@ -2755,8 +2821,6 @@ public:
     Required,   ///< ... and the program must declare one
   };
   void setEntryPointCheck(EntryPoint check) { EntryPointCheck = check; }
-  /// --strict-ownership (the concurrency prototype's copy rule).
-  void setStrictOwnership(bool strict) { StrictOwnership = strict; }
 
 private:
   EntryPoint EntryPointCheck = EntryPoint::None;

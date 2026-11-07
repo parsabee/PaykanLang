@@ -9,25 +9,27 @@
 //            refers to forms no cycle), and the `None` a weak reference
 //            reads as once its object is gone.
 // Every object is freed with its last strong reference: the tree, the
-// buttons and the closures all go, so the program leaks nothing.
+// buttons and the closures all go, so the program leaks nothing.  The tree's
+// nodes are `shared mut`, since a parent and a local of `main` both hold a
+// child, and the strong copy taken from a weak reference holds one too.
 
 import ::io;
 
 class Node {
   name: Str;
   weak parent: Node?;
-  first: Node?;
-  next: Node?;
+  first: shared mut Node?;
+  next: shared mut Node?;
 }
 
 impl Node {
   fn __init__(name: Str) {
-    self.name = name;
+    self.name = move name;
     self.parent = None;
     self.first = None;
     self.next = None;
   }
-  fn add(child: mut Node) {
+  fn add(child: shared mut Node) {
     child.parent = self;
     child.next = self.first;
     self.first = child;
@@ -49,7 +51,7 @@ class Button {
 
 impl Button {
   fn __init__(label: Str) {
-    self.label = label;
+    self.label = move label;
     self.onClick = fn() -> Str {
       return "unwired";
     };
@@ -68,18 +70,18 @@ impl Button {
   view fn click() -> Str { return self.onClick(); }
 }
 
-fn show(w: Node?) -> Str {
+fn show(w: view Node?) -> Str {
   match w {
-    n: Node { return n.name; }
+    n: Node { return n.name.clone(); }
     None { return "gone"; }
   }
 }
 
 fn main() -> int {
   // A tree whose children point back at their parent weakly.
-  root: mut = Node("root");
-  a: mut = Node("a");
-  let b: mut = Node("b");
+  root: shared mut = Node("root");
+  a: shared mut = Node("a");
+  let b: shared mut = Node("b");
   root.add(a);
   a.add(b);
   io::println(b.path());
@@ -96,18 +98,19 @@ fn main() -> int {
   io::println(b.path() + " " + show(w) + " " + Str(w == None));
 
   // A strong copy taken from a weak reference keeps the object.
-  keep: Node? = u;
+  keep: shared mut Node? = u;
   a = Node("c");
   io::println(show(u) + " " + show(keep));
   keep = None;
   io::println(show(u));
 
-  // A closure stored in the object it refers to, through a weak capture.
+  // A closure stored in the object it refers to, through a weak capture; it
+  // is moved out of the button, which then dies.
   btn: mut = Button("ok");
   io::println(btn.click());
   btn.wire();
   io::println(btn.click());
-  let f = btn.onClick;
+  let f = move btn.onClick;
   btn = Button("another");
   io::println(f());
   return 0;

@@ -433,7 +433,7 @@ TEST(Func, UntypedParameters) {
   auto r = semaCheck(R"(
 fn double(x) => x * 2;
 fn add(a, b) => a + b;
-fn pair(a, b) => (a, b);
+fn pair(a, b) => (move a, move b);
 fn useEarly(x) => later(x) + 1;
 fn later(x) => double(x);
 fn larger<T>(a: T, b: T, tag) -> T => if a > b then a else b;

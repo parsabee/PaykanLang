@@ -21,7 +21,7 @@ class Triangle : shapes::Polygon {
 
 impl Triangle {
   fn __init__(name: Str, b: float, h: float) {
-    __super__(name, 3);
+    __super__(move name, 3);
     self.b = b;
     self.h = h;
   }

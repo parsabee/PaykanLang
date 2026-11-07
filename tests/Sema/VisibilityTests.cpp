@@ -33,7 +33,7 @@ impl Counter {
   static fn make(n: int) -> Counter { c: mut = Counter(0, n); c.__count = 1; c.__bump(1); return c; }
   fn reset() { self.__count = 0; }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
-  fn later() -> (int) -> int { return fn(d: int) -> int { return self.__count + d; }; }
+  fn later() -> (int) -> int { weak me = self; return fn(d: int) -> int { match me { m: Counter { return m.__count + d; } None { return d; } } }; }
 }
 trait Named { view fn name() -> Str; }
 impl Named for Counter { view fn name() -> Str { return "C" + Str(self.__count); } }
@@ -80,7 +80,7 @@ class Sub : Counter {
 class Other { c: Counter; fn look() -> int { return self.c.__count; } }
 struct P { __x: int; }
 fn main() -> int {
-  c = Counter(0);
+  c: shared = Counter(0);
   c.__count = 5;
   n = c.__count;
   m = c.__secret();
@@ -181,8 +181,8 @@ TEST(Visibility, AnInstantiationsMethodsAreTheTemplates) {
   auto r = semaCheck(R"(
 class Box<T> { __v: T; }
 impl Box<T> {
-  fn __init__(v: T) { self.__v = v; }
-  fn get() -> T { return self.__v; }
+  fn __init__(v: T) { self.__v = move v; }
+  fn get() -> T { return self.__v.clone(); }
   view fn sameAs(o: view Box<int>) -> bool { return o.__v == 1; }
 }
 fn main() -> int {
@@ -238,8 +238,8 @@ impl P {
   static fn origin() -> P { return P(0); }
 }
 class Box<T> { v: T; }
-impl Box<T> { fn ___init__(v: T) { self.v = v; } }
-fn boxOf(v: Str) -> Box<Str> { return Box<Str>(v); }
+impl Box<T> { fn ___init__(v: T) { self.v = move v; } }
+fn boxOf(v: Str) -> Box<Str> { return Box<Str>(move v); }
 fn mk() -> Conn { return Conn(3); }
 fn main() -> int {
   a = Conn(4);

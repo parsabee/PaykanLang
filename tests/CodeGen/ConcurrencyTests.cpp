@@ -525,8 +525,8 @@ TEST(Concurrency, MovesReleaseTheObjectOnce) {
     class Job { name: Str; }
     class Holder { job: Job; tag: Str; }
     struct Pair { left: Job; n: int; }
-    fn show(w: Job?) -> Str {
-      match w { j: Job { return j.name; } None { return "gone"; } }
+    fn show(w: view Job?) -> Str {
+      match w { j: Job { return j.name.clone(); } None { return "gone"; } }
     }
     fn keep(j: Job) -> int { return j.name.len(); }
     fn take(p: Pair) -> int { return p.left.name.len() + p.n; }
@@ -582,7 +582,7 @@ TEST(Concurrency, QualifiersAtRunTime) {
       let c: Node = move a;
       v: view Node = c;
       io::println(describe(c) + " " + v.label() + " " + c.label());
-      let d: shared Node = c;
+      let d: shared Node = move c;
       io::println(describe(d));
       return 0;
     }

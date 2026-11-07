@@ -119,7 +119,7 @@ class Person {
 }
 
 impl Person {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = move name; }
 }
 
 fn main() -> int {
@@ -141,21 +141,23 @@ Ada <ada@example.org>
 ## Linked structures
 
 Optionals make linked structures easy to express, because "no next node" is just `None`.
-Here is a minimal linked list with a search that returns `Node?`:
+Here is a minimal linked list with a search that returns the node it finds. The list and
+the search's result hold the same node, so the nodes are `shared` (a unique node has one
+owner, the node before it), and `cur` walks the list by copying `shared` references:
 
 ```pkn
 import ::io;
 
 class Node {
   value: int;
-  next: Node?;
+  next: shared Node?;
 }
 
 impl Node {
-  fn __init__(v: int, next: Node?) { self.value = v; self.next = next; }
+  fn __init__(v: int, next: shared Node?) { self.value = v; self.next = next; }
 }
 
-fn find(head: Node?, wanted: int) -> Node? {
+fn find(head: shared Node?, wanted: int) -> shared Node? {
   cur = head;
   while cur != None {
     match cur {
@@ -170,7 +172,7 @@ fn find(head: Node?, wanted: int) -> Node? {
 }
 
 fn main() -> int {
-  let list = Node(1, Node(2, Node(3, None)));
+  let list: shared Node = Node(1, Node(2, Node(3, None)));
   match find(list, 2) {
     n: Node { io::println("found " + Str(n.value)); }
     None    { io::println("not found"); }
@@ -207,9 +209,9 @@ True
 
 Two changes to `tasks`. A deadline becomes an optional field instead of a subclass, so any
 task can get one later. And `TaskList.find` looks a task up by its title, returning `None`
-when there is none, which lets the caller decide what to do. It returns a `mut Task?`, so
-the caller may change the task it finds: `setDue` keeps the result in a `mut` variable and
-matches that with an `inout` arm, a borrow of the task that writes it with no copy:
+when there is none, which lets the caller decide what to do. The list owns its tasks, so
+`find` returns where the task is, an `int?`, rather than the task: `setDue` matches the
+index and changes the task in place, through the `inout` list it is given:
 
 ```pkn
 import ::io;
@@ -230,7 +232,7 @@ class Task {
 
 impl Task {
   fn __init__(title: Str) {
-    self.title = title;
+    self.title = move title;
     self.done = False;
   }
 }
@@ -241,15 +243,16 @@ class TaskList {
 
   fn add(title: Str) -> bool {
     if self.count == self.tasks.len() { return False; }
-    self.tasks[self.count] = Task(title);
+    self.tasks[self.count] = Task(move title);
     self.count = self.count + 1;
     return True;
   }
 
-  fn find(title: Str) -> mut Task? {
+  // The index of the task called `title`, or None.
+  view fn find(title: view Str) -> int? {
     i = 0;
     while i < self.count {
-      if self.tasks[i].title == title { return self.tasks[i]; }
+      if self.tasks[i].title == title { return i; }
       i = i + 1;
     }
     return None;
@@ -258,21 +261,21 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    self.tasks = [Task(""); 8];
+    self.tasks = [Task(""), Task(""), Task(""), Task(""),
+                  Task(""), Task(""), Task(""), Task("")];
     self.count = 0;
   }
 }
 
-fn setDue(list: mut TaskList, title: Str, due: Str) {
-  found: mut = list.find(title);
-  match found {
-    t: inout Task { t.due = due; io::println(t); }
-    None          { io::println("no task called '" + title + "'"); }
+fn setDue(list: inout TaskList, title: view Str, due: Str) {
+  match list.find(title) {
+    i: int { list.tasks[i].due = move due; io::println(list.tasks[i]); }
+    None   { io::println("no task called '" + title + "'"); }
   }
 }
 
 fn main() -> int {
-  let list: mut = TaskList();
+  list: mut = TaskList();
   list.add("file taxes");
   list.add("buy milk");
   setDue(list, "file taxes", "April 15");
@@ -321,10 +324,10 @@ no task called 'walk the dog'
 a: Node? = None;          // absent
 b: Node? = Node(1);       // Node widens to Node?
 n: Node = Node(2);
-c: Node? = n;             // a plain Node is fine
-a = b;                    // shares the same object
+c: Node? = move n;        // a plain Node is fine
+a = move b;               // a takes b's object; b is gone
 a = None;                 // back to absent
-r = find(b, 1);           // inferred Node?
+r = c.clone();            // inferred Node?, when Node is Cloneable
 ```
 
 A `Leaf?` converts to `Node?` when `Leaf` is a subclass of `Node`. An `Obj` (other than the
@@ -475,8 +478,9 @@ An enum, a tuple or a struct has an optional too, and like an optional primitive
 value, held in place with no heap allocation of its own. A `Suit?` is the enum's ordinal
 and a presence flag. A `(int, Str)?` or a `Point?` is a presence flag followed by the
 value, laid out like the tuple `(bool, T)`; `None` is all zeros. Copying one copies the
-value, retaining the references it holds, except at a variable's last use, where an
-assignment, a store or a `return` moves them ([Memory](16-memory.md#ownership-transfers)).
+value, retaining the references it holds; one holding a move-only value moves instead, as
+the value would, and a `return` of a variable moves it too
+([Memory](16-memory.md#ownership-transfers)).
 The value is at most 64 bytes: an optional of a
 bigger tuple or struct is rejected (`'Big?': an optional holds a value of up to 64 bytes in
 place, and 'Big' is 72 bytes; use 'Box<Big>?' (memory::Box) instead`), and the value goes in

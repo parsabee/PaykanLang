@@ -164,7 +164,7 @@ TEST(FixedArray, Fields) {
     fn main() -> int {
       g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
       g.cells[0] = [7, 8, 9];
-      g.tags = [g.tags[1], "c"];
+      g.tags = [g.tags[1].clone(), "c"];
       b = Box<int>([1, 2]);
       return total(g.cells[1]) + g.at(0) + b.xs[1] + g.tags[0].len();
     }
@@ -260,9 +260,9 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
       ps[1].x = ps[0].x;
       let fixed: P[1] = [P(3)];
       ps[0].x = fixed[0].x;
-      os: Str?[2] = [None, ss[0]];
+      os: Str?[2] = [None, ss[0].clone()];
       ts: (int, Str)[1] = [(1, "one")];
-      grid: Str[2][2] = [[ss[0], ss[1]], names()];
+      grid: Str[2][2] = [[ss[0].clone(), ss[1].clone()], names()];
       return ss[2].len() + grid[1][0].len() + ts[0].0;
     }
   )");
@@ -279,9 +279,83 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
   expectError("fn f(ss: view Str[2]) -> Str { return ss[0]; }\n"
               "fn main() -> int { return 0; }",
               "'ss' is a 'view' parameter; it cannot be returned");
-  expectBodyError("  xs: int[2] = [1, 2];\n  r: inout = xs[1];",
-                  "an array element cannot be named by 'inout' local 'r' "
-                  "yet");
+  expectBodyError("  let xs: int[2] = [1, 2];\n  r: inout = xs[1];",
+                  "'xs' is declared with 'let' and cannot be named by "
+                  "'inout' local 'r'");
+  expectError("fn f(xs: inout int[]) { r: inout = xs[0]; }\n"
+              "fn main() -> int { return 0; }",
+              "an element of a slice cannot be named by 'inout' local 'r' "
+              "yet");
+}
+
+// A fixed-size array's element is in the array's bytes, as a struct's field
+// is in the struct's: an `inout` place where the array is one (a variable,
+// a field, another element, an `inout` result), and so is a field of it.
+// Elements at different literal indexes are different places; at any other
+// index, an element may be any of them.  A slice's elements are another
+// array's, and a temporary's die with the statement.
+TEST(FixedArray, AnElementIsAnInoutPlace) {
+  auto ok = semaCheck(R"(import ::memory as mem;
+struct P { s: Str; n: int; }
+class Bag { items: Str[2]; fn at(i: int) -> inout Str { return self.items[i]; } }
+impl Bag { fn __init__() { self.items = ["a", "b"]; } }
+fn bump(n: inout int) { n = n + 1; }
+fn main() -> int {
+  xs: Node?[2] = [None, None];
+  let a = mem::take(xs[1]);
+  ns: int[2][2] = [[1, 2], [3, 4]];
+  bump(ns[1][0]);
+  ps: P[2] = [P("x", 1), P("y", 2)];
+  bump(ps[0].n);
+  mem::swap(ps[0].s, ps[1].s);
+  ss: Str[2] = ["p", "q"];
+  mem::swap(ss[0], ss[1]);
+  e: inout Str = ss[1];
+  e = "r";
+  b: mut = Bag();
+  mem::swap(b.items[0], b.items[1]);
+  r: inout = b.at(0);
+  r = "c";
+  match xs[0] { n: inout Node { n = Node(1); } None { } }
+  return ns[1][0];
+}
+class Node { v: int; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto bad = semaCheck(R"(import ::memory as mem;
+struct P { s: Str; n: int; }
+fn bump(n: inout int) { n = n + 1; }
+fn arr() -> int[2] { return [1, 2]; }
+fn whole(a: inout int[2], b: inout int) {}
+fn main() -> int {
+  ss: Str[2] = ["a", "b"];
+  i = 0; j = 1;
+  mem::swap(ss[0], ss[0]);
+  mem::swap(ss[i], ss[j]);
+  ns: int[2] = [1, 2];
+  whole(ns, ns[1]);
+  ps: P[2] = [P("x", 1), P("y", 2)];
+  mem::swap(ps[i].s, ps[1].s);
+  bump(arr()[0]);
+  return 0;
+}
+)");
+  EXPECT_FALSE(bad.Ok);
+  for (const char *d :
+       {":9:20: error: 'ss[0]' is passed to two 'inout' parameters ('a' and "
+        "'b')",
+        ":10:20: error: 'ss' is passed to two 'inout' parameters ('a' and "
+        "'b')",
+        ":12:13: error: 'ns[1]' is part of 'ns', passed to 'inout' parameter "
+        "'a'; it cannot also be passed to 'inout' parameter 'b'",
+        ":14:22: error: 'ps[1].s' is part of 'ps', passed to 'inout' "
+        "parameter 'a'; it cannot also be passed to 'inout' parameter 'b'",
+        ":15:8: error: an element of an array that is not a variable or a "
+        "field (a temporary, which dies with the statement) cannot be passed "
+        "to 'inout' parameter 'n'"})
+    EXPECT_NE(bad.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                          << bad.Diagnostics;
+  EXPECT_EQ(bad.ErrorCount, 5u) << bad.Diagnostics;
 }
 
 // An optional value takes a presence flag padded to its value's alignment
@@ -429,7 +503,8 @@ TEST(FixedArray, InferredLengths) {
 // `[v; n]` is typed like a list literal of n elements: each copy takes the
 // slot's element type (an `int` into a `float[n]`, `None` into an optional),
 // a `_` length is n, `[[0; 3]; 2]` is an `int[2][3]`, and into a slice it is
-// an array of n elements of the slice's element type.
+// an array of n elements of the slice's element type.  The value is copied,
+// so it is Copyable: a `Str`, a tuple holding one and an object are refused.
 TEST(FixedArray, RepeatLiterals) {
   auto r = semaCheck(R"(
     class Node { v: int; }
@@ -455,17 +530,40 @@ TEST(FixedArray, RepeatLiterals) {
       b: int[3] = a;
       c = [2.5; 2];
       d: float[2] = c;
-      e: Str[2] = ["s"; 2];
-      m: (int, Str)[3] = [(1, "a"); 3];
-      n: Node[3] = [Node(1); 3];
       z: int[_] = fill<int>(3);
       return sum([1; 4]) + sum(x) + int(first([1; 2])) + count([None; 2]) +
              rows([[0; 3]; 2]) + rows(g) + int(zeros()[7]) + y[4] + h[1][2] +
-             k[2][2] + b[2] + int(d[1]) + e[1].len() + m[2].0 + n[2].v + z[3] +
-             int(fs[3]) + ns.len() + os.len() + ps.len();
+             k[2][2] + b[2] + int(d[1]) + z[3] + int(fs[3]) + ns.len() +
+             os.len() + ps.len();
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // A value that is not Copyable is evaluated for each element: a new
+  // string, tuple or object in each, never a place copied into them, and
+  // never a `move`, which would move its variable once per element.
+  expectOk("  e: Str[2] = [\"s\"; 2];");
+  expectOk("  m: (int, Str)[3] = [(1, \"a\"); 3];");
+  auto each = semaCheck("class Node { v: int; }\n"
+                        "fn main() -> int { n: Node[3] = [Node(1); 3]; "
+                        "s = \"x\"; t = [s.clone(); 2]; return 0; }");
+  EXPECT_TRUE(each.Ok) << each.Diagnostics;
+  expectBodyError("  s = \"x\";\n  e = [s; 2];",
+                  "'[v; n]' evaluates its value for each of its 2 elements, "
+                  "and 's' (a 'Str') is not Copyable: write a value made for "
+                  "each, such as '[s.clone(); 2]'");
+  // A `shared` variable copies, but an element keeps no qualifier.
+  expectError("class Node { v: int; }\n"
+              "fn main() -> int { k: shared mut = Node(2); ks = [k; 3]; "
+              "return 0; }",
+              "cannot store a 'shared mut Node' in an element of the array, a "
+              "'Node'");
+  expectBodyError("  s = \"x\";\n  e = [move s; 3];",
+                  "'[v; n]' evaluates its value for each of its 3 elements, "
+                  "so it cannot move 's' (that would move it 3 times)");
+  expectError("fn keep(s: Str) -> Str { return s; }\n"
+              "fn main() -> int { s = \"x\"; e = [keep(move s); 2]; "
+              "return 0; }",
+              "so it cannot move 's' (that would move it 2 times)");
   expectBodyError("  x: int[3] = [0; 4];",
                   "array literal has 4 element(s), but 'int[3]' has 3");
   expectBodyError("  g: int[2][3] = [[0; 2]; 2];",
