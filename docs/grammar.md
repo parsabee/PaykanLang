@@ -446,7 +446,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   and a `match` binding's included; which places take which is Sema's (a
   borrow takes none, §4; a part of a type takes some forms only,
   [language/19-concurrency.md](language/19-concurrency.md#qualifiers-in-a-type);
-  the prototype does not act on a `match` binding's).
+  a `match` binding's is its subject's form,
+  [language/08-match.md](language/08-match.md#a-qualified-subject)).
 - `atomic T` is a cell holding a number, which the variable or field of
   that type names; a copy of it is another handle to the same cell.  It is
   an `AtomicType` node over `T`, which at parse time is any annotation

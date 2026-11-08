@@ -241,11 +241,14 @@ Error:
 the object's own form and keeps its writes through any root, and a `shared`
 field is never written through its object: `field 'cache' is immutable (a 'shared Cache';
 write 'shared mut Cache' to change it); cannot assign to its field 'hits'`. A unique field is
-never written `mut`, since it follows its root. A `match` binding takes no qualifier: on a
-variable or a field, a binding of a move-only part is a borrow of it, a `view`; `match move
-x` binds owned parts in the subject's form, which write under a `mut` subject and read under
-a bare one; and an `inout` binding on a `mut` place writes what it names in place
-([Bindings](08-match.md#bindings)).
+never written `mut`, since it follows its root. A `match` binding is in its subject's form,
+and a qualifier written on its arm must be that form
+([A qualified subject](08-match.md#a-qualified-subject)):
+- On a variable or a field, a binding of a unique move-only part is a borrow of it, a
+  `view`, and a binding of a `shared` part is a copy of the reference.
+- `match move x` binds owned parts in the subject's form, which write under a `mut`
+  subject and read under a bare one.
+- An `inout` binding on a `mut` or `shared mut` place writes what it names in place.
 
 ## Values take no qualifier: `mem::Box`
 
@@ -1003,8 +1006,9 @@ readers.pkn:8:3: warning: 'locked Counts' locks an object nothing writes; 'atomi
 
 A `lock` block holds the mutex for its whole length, so nothing in it may wait for anything
 else: no `await`, no nested `lock`, no `parallel for`, and no `return`, `break` or `continue`
-leaves it. The cell's contents cannot be reached outside a block, a `view` binding is
-read-only, and an `inout` block needs a `locked mut` cell:
+leaves it. The cell's contents cannot be reached outside a block (a field write and a
+`match` arm's class test included), a `view` binding is read-only, and an `inout` block
+needs a `locked mut` cell:
 
 ```pkn
 class Counts {
@@ -1702,9 +1706,7 @@ one.
   struct, and `compareExchange` does not write the value found back into `expected`.
 - `locked` holds an object, not a value: wrap a value in a class.
 - `break` and `continue` cannot be used in a `parallel for` body.
-- A `match` binding takes no qualifier (on a place, a borrow of a move-only part; with
-  `match move`, owned parts in the subject's form; an `inout` binding on a `mut` place
-  writes in place), and a move out of borrowed storage is not checked at run time.
+- A move out of borrowed storage is not checked at run time.
 - An object held in a struct, a tuple or an array is reached through the value, which takes
   no `mut`: the variable's `let` fixes the value's own storage and the objects it holds
   (`'p' is declared with 'let', and so are the objects it holds; drop 'let' to change

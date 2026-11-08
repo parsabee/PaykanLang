@@ -493,18 +493,28 @@ Exclusivity becomes exact for owned paths: two owned paths to one object
 (docs/language/03-functions.md:445-447) need a `shared` alias.  Borrowed
 paths stay syntactic and held, and `parallel` loops check them at run time.
 
-A plain `match` binding of a unique place is `cannot bind 'n' by copy: 'x' is
-a unique 'Node'; bind 'n: view Node' or 'n: inout Node', or match 'move x'`;
-a temporary subject is owned by its binding.  A downcast binding keeps its
-subject's qualifier: on a `shared Obj`, `p: Node` binds a `shared Node`, and
-a written qualifier must match: `'p' binds part of a 'shared Obj': its type
-is 'shared Node', not 'atomic shared Node'` (proposed; owner may change).
+A plain `match` binding of a move-only part of storage (a place, a call's
+`inout` result, a conditional with a branch that is one) is a borrow of it,
+a `view`: `'n' is a 'match' binding, a borrow of 'x' ('match move x' binds
+what it owns)`; a temporary subject is owned by its binding.  A downcast
+binding keeps its subject's qualifier: on a `shared Obj`, `p: Node` binds a
+`shared Node`, and a written qualifier must match, on an arm with no
+binding too: `'p' binds part of a 'shared Obj': its type is 'shared Node',
+not 'atomic shared Node'`.  A conditional's branches each have that form,
+a `None` or a new object becoming `shared` aside.  An `inout` arm of a
+`shared mut` subject names `shared mut` storage, and a `view` or `inout`
+arm takes no written qualifier (#368).
 
-A type arm over `self`, a `view` or `inout` parameter or local, or a cell's
-contents binds a borrow and emits no `box`, the acquire that today counts
-any subject (src/Lowering/LoweringMatch.cpp:242; a probe's PIR: `box
-%self`).  Over a `shared` or owned subject the binding is counted by its
-type, atomically for a handle (proposed; owner may change).  The borrow
+A type arm's `view` of a subject that is a borrow itself, `self` or a
+`view` parameter, local or binding (a `lock` block's `as v: view` binding
+among them), is another name for the subject's variable (#368).  It emits
+no `box`, and it is lent on wherever the subject is.  A binding that is a
+copy is counted: a `shared` part, a `shared fn`'s `self` among them, may be
+assigned, moved or passed `inout`.  So is a binding over an `inout`
+parameter or local, or an `inout` block's binding, whose subject the arm
+may assign while it is live.  Over a `shared` or owned subject the binding
+is counted by its type, atomically for a handle (proposed; owner may
+change).  The borrow
 rule is also what keeps `atomic shared` sound: a `view Obj` may borrow an
 `atomic shared` object, and a `box` there would count it plainly
 ([Counting](#counting)).
@@ -2322,8 +2332,9 @@ Errors unless marked.  `12:9` stands for a source position.
 | borrow qualifier | `parameter 'n' is 'inout const': a borrow carries no qualifier; ... write 'inout T'` (the mut model: `'inout mut'` the same) |
 | read, later `inout` | `'s' is read by the left operand of '+'; a later operand cannot pass it to 'inout' parameter 'x' of 'shout'` |
 | read, later `move` | `'j' is read by the left operand of '+'; a later operand cannot move it` |
-| binding a unique place | `cannot bind 'n' by copy: 'x' is a unique 'Node'; bind 'n: view Node' or 'n: inout Node', or match 'move x'` |
+| binding a unique place | `'n' is a 'match' binding, a borrow of 'x' ('match move x' binds what it owns); it cannot be stored, only read or passed to a 'view' parameter` |
 | binding qualifier | `'p' binds part of a 'shared Obj': its type is 'shared Node', not 'atomic shared Node'` |
+| binding a conditional of two forms | `'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one` |
 | shared contents | `cannot make 'Settings' 'atomic shared': field 'cache' is shared` (also `'locked'`; paths dotted); `'Obj' cannot be 'atomic shared': it may be any class`; `a 'const' value cannot hold 'task::Task<err::Error>' (field 'worker'): it could never be decided; use 'locked'` (the mut model: an immutable value; the prototype's `cannot make 'Node(...)' (a 'Node') 'atomic shared': field 'next' is 'shared mut Node': a 'shared' reference is aliased on its own thread`, also `'locked mut'`) |
 | cell type | `'atomic' holds a number, 'bool', 'char' or a fixed array of them; 'Node' is a reference: use 'locked Node' or 'atomic shared Node'`; `'atomic shared' shares an object; 'int' is a value: copy it` (the prototype: `'atomic' holds a number, a 'bool' or a 'char', not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked Node'`, 2026-11-03; the mut model: `'locked mut Node'`) |
 | atomic operations | `'hits' is 'atomic': 'hits = hits + 1' reads and writes it separately; write 'hits += 1'` (otherwise `use 'compareExchange' in a loop`); `'*=' is not an atomic operation on 'hits': use '+=', '-=', 'exchange' or 'compareExchange'`; `'seen' is an 'atomic bool[64]': it is read by element`; bitwise operators on an `atomic int` get today's `the bitwise operators take unsigned operands` |

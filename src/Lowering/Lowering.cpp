@@ -134,6 +134,24 @@ void ModuleLowering::Scope::declareUnowned(const std::string &name,
     ASTTypeMap[name] = astTy;
 }
 
+void ModuleLowering::Scope::declareAlias(const std::string &name,
+                                         const std::string &of,
+                                         ast::Type *astTy) {
+  const pir::LocalId local = lookup(of);
+  const bool owned = isOwned(of), stable = isStable(of);
+  // A `lock` block's `view` binding is the address of the cell's contents.
+  const pir::Type pointee = inoutType(of);
+  Locals[name] = local;
+  if (astTy)
+    ASTTypeMap[name] = astTy;
+  if (owned)
+    SharedVars.insert(name); // never in DeclOrder: `of`'s scope releases it
+  if (stable)
+    StableVars.insert(name);
+  if (pointee != pir::Type::Void)
+    InoutVars[name] = pointee;
+}
+
 bool ModuleLowering::Scope::isStable(const std::string &name) const {
   if (Locals.count(name))
     return StableVars.count(name) > 0;

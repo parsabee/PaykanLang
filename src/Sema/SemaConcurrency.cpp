@@ -1991,6 +1991,11 @@ ast::Qualifier Sema::elementQualifier(const ast::Expr *e) {
 bool Sema::checkNotLocked(const ast::Expr *place, ast::SourceLocation loc) {
   if (LockOperand || !place)
     return true;
+  // A conditional reaches each branch's contents (#368): qualifierOf holds
+  // it in its true branch's form, which a `locked` false branch is not.
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(place))
+    return checkNotLocked(te->getTrueExpr(), loc) &&
+           checkNotLocked(te->getFalseExpr(), loc);
   if (qualifierOf(place).Form != ast::QualForm::Locked)
     return true;
   const std::string text = placeText(place);

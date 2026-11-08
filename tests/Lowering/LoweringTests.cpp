@@ -5243,3 +5243,59 @@ fn main() -> int {
   EXPECT_EQ(m.find("%held"), std::string::npos) << m;
   EXPECT_EQ(m.find("retain"), std::string::npos) << m;
 }
+
+// A type arm over a subject that is a borrow itself, `self` or a `view`
+// parameter (#368), binds another name for the subject's variable: no
+// `box` acquires it, nothing releases it, and a `view` parameter's arm
+// lends it on as the parameter is lent.  An arm over an owned subject
+// still holds a reference of its own, and so does one over a `shared fn`'s
+// `self`, whose binding is a copy the arm may assign or move.
+TEST(Lowering, AnArmOverABorrowBindsWithoutCounting) {
+  Lowered l = lower(R"(class Base { v: int; }
+class Node : Base { w: int; }
+class Holder {
+  o: Base;
+  view fn kind() -> int {
+    match self { h: Holder { return 1; } _ { return 0; } }
+  }
+}
+fn show(n: view Node) -> int { return n.w; }
+fn peek(o: view Base) -> int {
+  t = 0;
+  match o { n: Node { for i in 0..3 { t += show(n); } } _ { } }
+  return t;
+}
+fn own() -> int {
+  b: Base = Node(1, 2);
+  match b { n: Node { return n.w; } _ { return 0; } }
+}
+impl Base {
+  shared fn m() -> int { match self { n: Node { return n.w; } _ { return 0; } } }
+}
+fn main() -> int {
+  s: shared mut Base = Node(6, 7);
+  return peek(Node(3, 4)) + own() + Holder(Base(5)).kind() + s.m();
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  auto body = [&](const std::string &fn) {
+    const size_t at = l.Text.find("fn @" + fn + "(");
+    const size_t end = l.Text.find("\n}\n", at);
+    return at == std::string::npos ? std::string()
+                                   : l.Text.substr(at, end - at);
+  };
+  for (const char *fn : {"peek", "Holder.kind"}) {
+    const std::string b = body(fn);
+    ASSERT_FALSE(b.empty()) << fn << "\n" << l.Text;
+    EXPECT_EQ(b.find("= box "), std::string::npos) << fn << "\n" << b;
+  }
+  // The call's argument is the parameter's own copy to lend (`retain lend`,
+  // which the lending pass drops), not a `box` of a raw object per call.
+  EXPECT_NE(body("peek").find("retain lend"), std::string::npos)
+      << body("peek");
+  for (const char *fn : {"own", "Base.m"}) {
+    const std::string b = body(fn);
+    ASSERT_FALSE(b.empty()) << fn << "\n" << l.Text;
+    EXPECT_NE(b.find("= box "), std::string::npos) << fn << "\n" << b;
+  }
+}

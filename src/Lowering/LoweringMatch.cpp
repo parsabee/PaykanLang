@@ -223,6 +223,18 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
                     : B.unwrap(subjRaw, name);
         local = B.addLocal(name, v.Ty);
         B.store(local, v);
+      } else if (ta.Arm->bindsUncounted()) {
+        // A `view` of a subject that is a borrow itself (`self`, a `view`
+        // parameter, local or binding, #368): the binding is another name
+        // for the subject's variable, narrowed to the arm's class, so it
+        // counts nothing of its own and is lent wherever the subject is.
+        // Sema keeps it, and the subject, from being assigned or moved
+        // while the arm runs; a copy of it is counted.
+        CurrentScope->declareAlias(
+            name, ast::cast<ast::Identifier>(node->getSubject())->getName(),
+            ta.BindTy);
+        emitArmBody(ta.Arm);
+        return;
       } else {
         // The binding is an ordinary owned variable holding its own +1
         // reference to the subject's box, released when the arm's scope
