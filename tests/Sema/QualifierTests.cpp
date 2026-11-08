@@ -557,7 +557,9 @@ fn main() -> int {
 // a result.  `mut` on a value is what `let` already decides (its storage
 // is rewritten by assignment); `shared`, `shared mut` and `atomic shared`
 // qualify a reference; the prototype's `locked` holds an object.  A value
-// that holds a reference gets the hint to box it.  A `Str`, an optional
+// that holds a reference gets the hint to box it.  (`shared Node[2]` is an
+// array of two shared references, #368: `shared` binds to the elements;
+// `atomic shared` covers the whole type.)  A `Str`, an optional
 // reference and a `mem::Box` are references and take every form; a
 // `mem::Box` is written through `get()` under `mut`, read by `value()`.
 TEST(Qualifier, ValuesTakeNoQualifier) {
@@ -584,13 +586,12 @@ fn main() -> int {
   let lp: locked mut P = P(1);
   let lt: locked (int, int) = (1, 2);
   let bp: atomic shared Pair = Pair(Node(4), 1);
-  let na: shared Node[2] = [Node(1), Node(2)];
   let ct: mut (int, Node) = (1, Node(2));
   let sm: shared mut P = P(1);
-  let smn: shared mut Node[2] = [Node(1), Node(2)];
+  let san: atomic shared Node[2] = [Node(1), Node(2)];
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 24u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 23u) << r.Diagnostics;
   const std::string kMut = "error: 'mut' applies to objects; '";
   const std::string kLet =
       "' is a value: its storage is rewritten by assignment, which 'let' "
@@ -627,13 +628,9 @@ fn main() -> int {
            "Pair' is a value: box it ('mem::Box<Pair>') to share what it "
            "holds")
               .c_str(),
-          (":24:3: " + kShared +
-           "Node[2]' is a value: box it ('mem::Box<Node[2]>') to share what "
-           "it holds")
-              .c_str(),
-          (":25:3: " + kMut + "(int, Node)" + kLet).c_str(),
-          (":26:3: " + kSharedMut + "P' is a value").c_str(),
-          (":27:3: " + kSharedMut +
+          (":24:3: " + kMut + "(int, Node)" + kLet).c_str(),
+          (":25:3: " + kSharedMut + "P' is a value").c_str(),
+          (":26:3: " + kAtomic +
            "Node[2]' is a value: box it ('mem::Box<Node[2]>') to share what "
            "it holds")
               .c_str()});

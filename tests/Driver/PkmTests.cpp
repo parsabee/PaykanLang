@@ -880,8 +880,8 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
 // code, and the run that reuses the entry makes none of them again, with
 // the same result and nothing leaked.  The references are `shared`, whose
 // copies the moves at last use turn into transfers (a unique one moves by
-// `move`), so `pass` is not generic: a qualifier is not part of a type
-// argument.
+// `move`).  `pass` is not generic: a template's instance is compiled in its
+// importer (pkm.md §4.8), and the moves counted are the entry's own code's.
 TEST(Pkm, ACacheEntryIsMovedCode) {
   REQUIRE_BACKEND();
   Project p("moves");
@@ -2395,9 +2395,10 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
 // field, and its native function's body are lent arguments, and the
 // compiled callees, whose lending ran when their `.pkm` was made, release
 // nothing they were lent and retain what they keep.  The program frees
-// everything and prints what it did.  (A standard library container is lent
-// nothing the program keeps: its element type takes no `shared` (#368), and
-// a unique value the program keeps is a clone or a move, not a copy.)
+// everything and prints what it did.  (The test keeps to lib's own
+// functions: when it was written a standard library container held no
+// `shared` element, as a `List<shared Node>` does since #368, and a unique
+// value the program keeps is a clone or a move, not a copy.)
 TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
   REQUIRE_BACKEND();
   fs::path dir =

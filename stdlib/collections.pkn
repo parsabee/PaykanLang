@@ -47,7 +47,7 @@
 // through it (a `weak` reference only reads its object), and each end is
 // O(1).  Its elements are still the list's alone, held in its private
 // nodes.  The hash table chains its entries the same way, each bucket's
-// chain from the bucket, which holds its first entry.
+// chain from the bucket, a `shared mut` reference to its first entry.
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Table`, `_Heap`, `_panic`, `_fail`,
@@ -600,21 +600,16 @@ class _Entry<K, V> {
   next: shared mut _Entry<K, V>?;
 }
 
-// A bucket: the first entry of its chain, or None.  (A buffer's element
-// type takes no qualifier yet, #368, so the link is a struct's field.)
-struct _Bucket<K, V> {
-  head: shared mut _Entry<K, V>?;
-}
-
-// The table of a HashMap or a HashSet: its buckets and its number of keys.
+// The table of a HashMap or a HashSet: its buckets, each the first entry of
+// its chain or None, and its number of keys.
 class _Table<K: Hashable, V> {
-  __buckets: mem::Buffer<_Bucket<K, V>>;
+  __buckets: mem::Buffer<shared mut _Entry<K, V>?>;
   __size: unsigned;
 }
 
 impl _Table<K, V> {
   fn __init__() {
-    self.__buckets = _buffer<_Bucket<K, V>>(8);
+    self.__buckets = _buffer<shared mut _Entry<K, V>?>(8);
     self.__size = 0;
   }
 
@@ -639,9 +634,8 @@ impl _Table<K, V> {
       self.__rehash(self.__buckets.len() * 2);
     }
     let b = _bucket(h, self.__buckets.len());
-    let e: shared mut = _Entry<K,
-        V>(move k, move v, h, self.__buckets.get(b).head);
-    _check(self.__buckets.set(b, _Bucket<K, V>(e)));
+    let e: shared mut = _Entry<K, V>(move k, move v, h, self.__buckets.get(b));
+    _check(self.__buckets.set(b, e));
     self.__size = self.__size + 1;
     return True;
   }
@@ -649,7 +643,7 @@ impl _Table<K, V> {
   // The value of `k`, which must be a key, as a `view`.
   view fn at(k: view K) -> view V {
     let h = k.hash();
-    match self.__buckets.at(_bucket(h, self.__buckets.len())).head {
+    match self.__buckets.at(_bucket(h, self.__buckets.len())) {
       e: _Entry<K, V> { return self.__valueIn(e, k, h); }
       None {
         _panic("HashMap.at of a key it does not have");
@@ -661,7 +655,7 @@ impl _Table<K, V> {
   // The value of `k`, or `otherwise` if it is not a key, as a `view`.
   view fn atOr(k: view K, otherwise: view V) -> view V {
     let h = k.hash();
-    match self.__buckets.at(_bucket(h, self.__buckets.len())).head {
+    match self.__buckets.at(_bucket(h, self.__buckets.len())) {
       e: _Entry<K, V> { return self.__valueOr(e, k, h, otherwise); }
       None { return otherwise; }
     }
@@ -670,7 +664,7 @@ impl _Table<K, V> {
   // True when `k` is a key.
   view fn containsKey(k: view K) -> bool {
     let h = k.hash();
-    cur: weak mut = self.__buckets.at(_bucket(h, self.__buckets.len())).head;
+    cur: weak mut = self.__buckets.at(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -690,14 +684,14 @@ impl _Table<K, V> {
     let h = k.hash();
     let b = _bucket(h, self.__buckets.len());
     prev: shared mut _Entry<K, V>? = None; // the entry linking to `cur`
-    cur = self.__buckets.get(b).head;
+    cur = self.__buckets.get(b);
     while True {
       match cur {
         e: _Entry<K, V> {
           if e.hash == h && e.key == k {
             match prev {
               p: _Entry<K, V> { p.next = e.next; }
-              None { _check(self.__buckets.set(b, _Bucket<K, V>(e.next))); }
+              None { _check(self.__buckets.set(b, e.next)); }
             }
             e.next = None;
             self.__size = self.__size - 1;
@@ -714,13 +708,13 @@ impl _Table<K, V> {
 
   // Remove every key.
   fn clear() {
-    self.__buckets = _buffer<_Bucket<K, V>>(8);
+    self.__buckets = _buffer<shared mut _Entry<K, V>?>(8);
     self.__size = 0;
   }
 
   // The entry of key `k`, whose hash is `h`, or None.
   view fn __find(k: view K, h: int) -> shared mut _Entry<K, V>? {
-    cur = self.__buckets.get(_bucket(h, self.__buckets.len())).head;
+    cur = self.__buckets.get(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -763,18 +757,18 @@ impl _Table<K, V> {
 
   // Chain every entry into `n` new buckets; no key or value moves.
   fn __rehash(n: unsigned) {
-    fresh = _buffer<_Bucket<K, V>>(n);
+    fresh = _buffer<shared mut _Entry<K, V>?>(n);
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur = self.__buckets.get(i).head;
+      cur = self.__buckets.get(i);
       done = False;
       while !done {
         match cur {
           e: _Entry<K, V> {
             let next = e.next;
             let b = _bucket(e.hash, n);
-            e.next = fresh.get(b).head;
-            _check(fresh.set(b, _Bucket<K, V>(e)));
+            e.next = fresh.get(b);
+            _check(fresh.set(b, e));
             cur = next;
           }
           None { done = True; }
@@ -792,7 +786,7 @@ impl _Table<K: Cloneable, V> {
     out = List<K>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur: weak mut = self.__buckets.at(i).head;
+      cur: weak mut = self.__buckets.at(i);
       done = False;
       while !done {
         match cur {
@@ -831,7 +825,7 @@ impl _Table<K, V: Cloneable> {
     out = List<V>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur: weak mut = self.__buckets.at(i).head;
+      cur: weak mut = self.__buckets.at(i);
       done = False;
       while !done {
         match cur {
@@ -855,7 +849,7 @@ impl Cloneable for _Table<K: Cloneable, V: Cloneable> {
     let out: mut = _Table<K, V>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur: weak mut = self.__buckets.at(i).head;
+      cur: weak mut = self.__buckets.at(i);
       done = False;
       while !done {
         match cur {

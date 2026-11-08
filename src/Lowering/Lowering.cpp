@@ -220,6 +220,12 @@ bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
 ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
   if (!ty)
     return ty;
+  // A template's qualified type argument (#368): a native instance's, whose
+  // descriptor is its type's (the runtime copies, drops and freezes a
+  // reference whatever its form); every other declaration's type Sema
+  // resolved, its qualifier on the declaration.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return canonicalizeDeclType(qt->getInnerType());
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     if (auto *et = ASTCtx.lookupEnumType(ct->getName()))
       return et;
@@ -240,7 +246,7 @@ ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
     elems.reserve(tt->getArity());
     for (ast::Type *e : tt->getElementTypes())
       elems.push_back(canonicalizeDeclType(e));
-    return ASTCtx.getTupleType(std::move(elems));
+    return ASTCtx.getTupleType(std::move(elems), tt->getElemQuals());
   }
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
     return ASTCtx.getOptionalType(canonicalizeDeclType(ot->getInnerType()));
@@ -1103,6 +1109,17 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
                   : B.localAddr(local, name + ".addr");
     emitMemAssign(dst, node->getValue());
     return Val();
+  }
+  // A new value assigned to a `locked` or `atomic shared` variable becomes
+  // a cell, or is frozen, at this use (Sema's mark), as it does stored in a
+  // field: emitAsShared makes it so.
+  if (node->getValue()->getMaterialize() != ast::QualForm::Unique &&
+      CurrentScope->findOwner(node->getVarName()) &&
+      holdsBox(node->getVarName())) {
+    Val box = emitAsShared(node->getValue());
+    if (box)
+      storeVarBox(node->getVarName(), box);
+    return box;
   }
   // `x = y` declaring x, y a variable holding a box: x shares y's box, which
   // is all that is read (emitImplicitVarDecl), as `let x = y` reads it
@@ -2328,7 +2345,21 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
   // cell holding it (the cell takes the +1 box).
   if (expr->getMaterialize() == ast::QualForm::Locked) {
     Val box = emitAsSharedRaw(expr, /*lend=*/false);
-    return box ? callRuntime(names::kPaykanLockedNew, {box}, "cell") : box;
+    if (!box || !ast::isa<ast::OptionalType>(expr->getResolvedType()))
+      return box ? callRuntime(names::kPaykanLockedNew, {box}, "cell") : box;
+    // An optional's None stays None: no cell around nothing (a conditional's
+    // None arm, a `T?` result).
+    pir::LocalId out = B.addLocal("cell", Type::Box);
+    pir::If *s =
+        B.openIf(B.cmp(pir::CmpPred::Eq, box, Val::null(Type::Box), "isnone"),
+                 /*withElse=*/true);
+    B.enter(*s->Then);
+    B.store(out, Val::null(Type::Box));
+    B.leave();
+    B.enter(*s->Else);
+    B.store(out, callRuntime(names::kPaykanLockedNew, {box}, "cell"));
+    B.leave();
+    return B.load(out, "cell");
   }
   // A unique value flowing into an `atomic shared` slot: the object and
   // everything it holds are frozen at this use (immortal, counted nowhere;

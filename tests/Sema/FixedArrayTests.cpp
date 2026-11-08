@@ -551,12 +551,15 @@ TEST(FixedArray, RepeatLiterals) {
                   "'[v; n]' evaluates its value for each of its 2 elements, "
                   "and 's' (a 'Str') is not Copyable: write a value made for "
                   "each, such as '[s.clone(); 2]'");
-  // A `shared` variable copies, but an element keeps no qualifier.
-  expectError("class Node { v: int; }\n"
-              "fn main() -> int { k: shared mut = Node(2); ks = [k; 3]; "
-              "return 0; }",
-              "cannot store a 'shared mut Node' in an element of the array, a "
-              "'Node'");
+  // A `shared` variable copies, and the array holds its form (#368): `[k;
+  // 3]` is a `shared mut Node[3]`, evaluated once and copied, so it copies
+  // in turn; a unique element would need `move`.
+  auto shared = semaCheck("class Node { v: int; }\n"
+                          "fn main() -> int { k: shared mut = Node(2); "
+                          "ks = [k; 3]; c = ks; c[1].v = 3; "
+                          "u: Node[2] = [Node(1); 2]; d = move u; "
+                          "return ks[0].v; }");
+  EXPECT_TRUE(shared.Ok) << shared.Diagnostics;
   expectBodyError("  s = \"x\";\n  e = [move s; 3];",
                   "'[v; n]' evaluates its value for each of its 3 elements, "
                   "so it cannot move 's' (that would move it 3 times)");

@@ -123,7 +123,7 @@ is otherwise a name too.
 | `(fn-type LOC (params (param TYPE QUAL?)...) TYPE)` | a function type ([`../language/14-function-types.md`](../language/14-function-types.md)): `(int, view Str) -> bool` is `(fn-type (params (param (named-type "int")) (param (named-type "Str") (qual view))) (named-type "bool"))`; the result type is never `_` (`void` is `(named-type "void")`) |
 | `(generic-type LOC NAME TYPE TYPE...)` | `Box<int>`, `Pair<Str, int>`, `m::Box<int>` |
 | `(atomic-type LOC TYPE)` | `atomic T` (the concurrency prototype, [`../design/concurrency.md`](../design/concurrency.md)), the type of a place that is an atomic cell: `let hits: atomic int = 0;` has `(atomic-type (named-type "int"))`, and a class's field `n: atomic float;` the same with no initialiser. Sema checks that `T` is a number type, `bool` or `char` |
-| `(qualified-type LOC STR TYPE?)` | a qualifier on a place's type (the concurrency prototype): `STR` is the qualifier as spelled, `"mut"`, `"shared"`, `"shared mut"`, `"atomic shared"`, `"locked"` or `"locked mut"` (the bare type, immutable and unique, is unwritten, and `atomic T` is an `atomic-type`; any other spelling is refused: `unknown qualifier "mutable" (mut, shared, shared mut, atomic shared, locked, locked mut)`), then the type it qualifies, which is absent when the declaration infers it: `p: shared mut Node` is `(param "p" (qualified-type "shared mut" (named-type "Node")))`, and `x: mut = e;` has `(qualified-type "mut")` |
+| `(qualified-type LOC STR TYPE?)` | a qualifier on a place's type, or on a part of a type (a type argument, a tuple's element, an array's element, a function type's parameter or result: [`../language/19-concurrency.md`](../language/19-concurrency.md#qualifiers-in-a-type)) (the concurrency prototype): `STR` is the qualifier as spelled, `"mut"`, `"shared"`, `"shared mut"`, `"atomic shared"`, `"locked"` or `"locked mut"` (the bare type, immutable and unique, is unwritten, and `atomic T` is an `atomic-type`; any other spelling is refused: `unknown qualifier "mutable" (mut, shared, shared mut, atomic shared, locked, locked mut)`), then the type it qualifies, which is absent when the declaration infers it: `p: shared mut Node` is `(param "p" (qualified-type "shared mut" (named-type "Node")))`, and `x: mut = e;` has `(qualified-type "mut")` |
 | `(task-type LOC TYPE)` | the type of a task, an `async fn`'s result before `await`. No source spells it (a task is what a call of an `async fn` is), so the writer never meets one; the reader accepts it so that a tree holding one reads back |
 
 A `named-type` is resolved the way the recursive-descent frontend resolves a
@@ -223,7 +223,8 @@ initialiser that is not `weak`, a `value-arm` whose pattern is not a
 literal, an `enum` without a variant, a `match` without an arm, a binding on
 a `value-arm` or a `wildcard-arm`, a `lock` whose binding is not a `view`
 or `inout` without an initialiser, a `qualified-type` whose qualifier is
-not one of its six spellings, and a `NAME` the grammar does not write
+not one of its six spellings or whose type is a `qualified-type` (`a type
+takes one qualifier`), and a `NAME` the grammar does not write
 where it stands: `"a b"`, a keyword, or a qualified `"io::x"` as a
 variable's name). A module's templates in a `.pkm` (its TMPL section,
 [`../design/pkm.md`](../design/pkm.md)) are read with the compiler's own

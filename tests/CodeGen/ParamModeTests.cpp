@@ -1161,7 +1161,7 @@ TEST(BorrowedResult, InoutTupleResultsWriteThrough) {
     fn show(v: view (int, Str)) -> Str { return Str(v.0) + v.1; }
     fn main() -> int {
       h: mut = H((1, "one"), ((2, "two"), "x"));
-      copy = h.get();
+      copy = h.get().clone(); // a copy of what it names is another owner
       io::println(h.get().1 + " " + h.nested().0.1 + h.nested().1);
       set(h.get());
       io::println(show(copy) + " " + show(h.t));

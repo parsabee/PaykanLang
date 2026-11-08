@@ -252,7 +252,8 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
     if (ta->getArity() != tb->getArity())
       return false;
     for (size_t i = 0; i < ta->getArity(); ++i)
-      if (!typesEqual(ta->getElementType(i), tb->getElementType(i)))
+      if (!typesEqual(ta->getElementType(i), tb->getElementType(i)) ||
+          !(ta->getElemQual(i) == tb->getElemQual(i)))
         return false;
     return true;
   }
@@ -276,7 +277,18 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   // length (and another slice, the same type).
   if (auto *dstST = ast::dyn_cast<ast::SliceType>(dst)) {
     auto *srcFT = ast::dyn_cast<ast::FixedArrayType>(src);
-    return srcFT && srcFT->getElementType() == dstST->getElementType();
+    // Its elements' form as they are, or a unique one into a `shared` one
+    // (#368: a fresh array only, checkAssignable).
+    const ast::Qualifier dq = dstST->getElemQual();
+    const ast::Qualifier sq = srcFT ? srcFT->getElemQual() : ast::Qualifier{};
+    if (!srcFT ||
+        !(sq == dq || (sq.isUnique() && dq.Form == ast::QualForm::Shared)))
+      return false;
+    ast::Type *d = dstST->getElementType();
+    ast::Type *s = srcFT->getElementType();
+    return d == s ||
+           (ast::isa<ast::TupleType>(d) && ast::isa<ast::TupleType>(s) &&
+            !ast::isa<ast::StructType>(d) && isAssignable(d, s));
   }
 
   // int -> float promotion.
@@ -325,6 +337,13 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
     for (size_t i = 0; i < dstTT->getArity(); ++i) {
       ast::Type *d = dstTT->getElementType(i);
       ast::Type *s = srcTT->getElementType(i);
+      // An element's form (#368): a unique reference converts into a
+      // `shared` one, as a whole one does (a place's moves, under the copy
+      // rule); nothing converts back.
+      const ast::Qualifier dq = dstTT->getElemQual(i);
+      const ast::Qualifier sq = srcTT->getElemQual(i);
+      if (!(dq == sq) && !(sq.isUnique() && dq.Form == ast::QualForm::Shared))
+        return false;
       if (d == s)
         continue;
       const bool sameShape =
@@ -335,6 +354,24 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
     }
     return true;
   }
+
+  // A fixed-size array's elements convert as a tuple's do (#368): a unique
+  // reference into a `shared` one, of the same type, nothing back.
+  if (auto *srcFT = ast::dyn_cast<ast::FixedArrayType>(src))
+    if (auto *dstFT = ast::dyn_cast<ast::FixedArrayType>(dst);
+        dstFT && dstFT->getLength() == srcFT->getLength()) {
+      const ast::Qualifier dq = dstFT->getElemQual();
+      const ast::Qualifier sq = srcFT->getElemQual();
+      if (!(dq == sq) && !(sq.isUnique() && dq.Form == ast::QualForm::Shared))
+        return false;
+      ast::Type *d = dstFT->getElementType();
+      ast::Type *s = srcFT->getElementType();
+      return d == s ||
+             (((ast::isa<ast::FixedArrayType>(d) &&
+                ast::isa<ast::FixedArrayType>(s)) ||
+               (ast::isa<ast::TupleType>(d) && ast::isa<ast::TupleType>(s))) &&
+              isAssignable(d, s));
+    }
 
   // ClassType subtyping: src <: dst.
   if (auto *dstCT = ast::dyn_cast<ast::ClassType>(dst))
@@ -371,11 +408,69 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
       return false;
     ++SuppressedFollowOns;
   }
+  // A tuple's or an array's unique element converts into a `shared` one
+  // (#368) only out of a fresh value (a literal, a result by value, `move
+  // x`): a place's value, borrowed by a `view` or reached through a
+  // conditional, would still own the object the `shared` copy names.
+  if (src && !isFreshValue(src) && !sameElementForms(dst, srcTy))
+    return false;
   // `int` -> `int?` (and `int` -> `float?`): the lowering makes the value
   // the optional's present value.  A fixed-size array into a slice is
   // passed as its address and length.
   if (ast::wrapsInOptional(dst, srcTy) || ast::dyn_cast<ast::SliceType>(dst))
     src->setCoercedType(dst);
+  return true;
+}
+
+bool Sema::sameShapeOfParts(const ast::Type *a, const ast::Type *b) {
+  if (a == b)
+    return true;
+  if (!a || !b || a->getKind() != b->getKind() || ast::isa<ast::StructType>(a))
+    return false;
+  if (const auto *oa = ast::dyn_cast<ast::OptionalType>(a))
+    return sameShapeOfParts(oa->getInnerType(),
+                            ast::cast<ast::OptionalType>(b)->getInnerType());
+  if (const auto *fa = ast::dyn_cast<ast::FixedArrayType>(a)) {
+    const auto *fb = ast::cast<ast::FixedArrayType>(b);
+    return fa->getLength() == fb->getLength() &&
+           sameShapeOfParts(fa->getElementType(), fb->getElementType());
+  }
+  if (const auto *ta = ast::dyn_cast<ast::TupleType>(a)) {
+    const auto *tb = ast::cast<ast::TupleType>(b);
+    if (ta->getArity() != tb->getArity())
+      return false;
+    for (size_t i = 0; i < ta->getArity(); ++i)
+      if (!sameShapeOfParts(ta->getElementType(i), tb->getElementType(i)))
+        return false;
+    return true;
+  }
+  return false;
+}
+
+bool Sema::sameElementForms(const ast::Type *dst, const ast::Type *src) {
+  // Through an optional on either side (`T` flows into `T?`).
+  if (const auto *d = ast::dyn_cast<ast::OptionalType>(dst))
+    return sameElementForms(d->getInnerType(),
+                            ast::stripOptional(const_cast<ast::Type *>(src)));
+  if (const auto *o = ast::dyn_cast<ast::OptionalType>(src))
+    return sameElementForms(dst, o->getInnerType());
+  if (const auto *da = ast::dyn_cast<ast::FixedArrayType>(dst))
+    if (const auto *sa = ast::dyn_cast<ast::FixedArrayType>(src))
+      return da->getElemQual() == sa->getElemQual() &&
+             sameElementForms(da->getElementType(), sa->getElementType());
+  if (const auto *ds = ast::dyn_cast<ast::SliceType>(dst))
+    if (const auto *sa = ast::dyn_cast<ast::FixedArrayType>(src))
+      return ds->getElemQual() == sa->getElemQual() &&
+             sameElementForms(ds->getElementType(), sa->getElementType());
+  const auto *d = ast::dyn_cast<ast::TupleType>(dst);
+  const auto *t = ast::dyn_cast<ast::TupleType>(src);
+  if (!d || !t || ast::isa<ast::StructType>(d) ||
+      d->getArity() != t->getArity())
+    return true;
+  for (size_t i = 0; i < d->getArity(); ++i)
+    if (!(d->getElemQual(i) == t->getElemQual(i)) ||
+        !sameElementForms(d->getElementType(i), t->getElementType(i)))
+      return false;
   return true;
 }
 
@@ -454,7 +549,7 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
     }
     if (!changed)
       return srcTy;
-    auto *retyped = Ctx.getTupleType(std::move(elems));
+    auto *retyped = Ctx.getTupleType(std::move(elems), litTT->getElemQuals());
     lit->setResolvedType(retyped);
     return retyped;
   }
@@ -634,8 +729,9 @@ ast::Type *Sema::fillLengths(ast::Type *ty, ast::Type *from) {
   ast::Type *elem = fillLengths(ft->getElementType(), fromFT->getElementType());
   if (!elem)
     return nullptr;
-  return Ctx.getFixedArrayType(elem, ft->isInferred() ? fromFT->getLength()
-                                                      : ft->getLength());
+  return Ctx.getFixedArrayType(
+      elem, ft->isInferred() ? fromFT->getLength() : ft->getLength(),
+      ft->getElemQual());
 }
 
 void Sema::errorNoLengths(ast::SourceLocation loc, ast::Type *ty,
@@ -740,82 +836,31 @@ std::string Sema::TypeContext::str() const {
 
 ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                              const TypeContext &context) {
-  const bool allowFixed = std::exchange(FixedArrayAllowed, false);
-  const bool allowInferred = std::exchange(InferredLengthAllowed, false);
-  const bool allowSlice = std::exchange(SliceAllowed, false);
-  const char *noArray = std::exchange(NoArrayHolder, nullptr);
+  // Each kind of annotation in a function of its own, so that a type
+  // nested to the limit (docs/grammar.md section 9) recurses through small
+  // frames.
+  const TypeFlags flags{std::exchange(FixedArrayAllowed, false),
+                        std::exchange(InferredLengthAllowed, false),
+                        std::exchange(SliceAllowed, false),
+                        std::exchange(NoArrayHolder, nullptr),
+                        DeferredOptionalChecks.size()};
+  // Where this annotation's qualifier goes: a whole place's to its
+  // declaration (takeQualifier), a part's to the composite holding it
+  // (resolvePart).  Cleared first, so a qualifier no declaration took (an
+  // error's, a cast's) is gone by the next annotation.
+  typeSlot() = {};
   // Made here before, and checked then (ResolvedTypes).
   if (ResolvedTypes.count(ty))
     return ty;
-  // The canonical tuple, optional or function type made of what this
-  // resolved, remembered as checked unless a check of a part waits for the
-  // structs (it is made again then).
-  const size_t deferredChecks = DeferredOptionalChecks.size();
-  auto checked = [&](ast::Type *canonical) {
-    if (DeferredOptionalChecks.size() == deferredChecks)
-      ResolvedTypes.insert(canonical);
-    return canonical;
-  };
-  // A qualified type (the concurrency prototype): the inner type, its
-  // qualifier left for the declaration to take (takeQualifier).
-  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
-    // A part of a type (a tuple's element, a type argument, an array's
-    // element, a function type's parameter or result) keeps no qualifier
-    // yet: it would be dropped, and a `shared` reference would come back
-    // out as a unique one (#368).
-    if (NestedTypeDepth > 0) {
-      error(loc, std::string("'") + qt->getQualifier().spelling() +
-                     "' cannot qualify a part of a type yet (a tuple's "
-                     "element, a type argument, an array's element or a "
-                     "function type's parameter or result): only a whole "
-                     "variable, field, parameter or result takes one; hold "
-                     "the reference in a struct field to qualify it");
-      return nullptr;
-    }
-    if (!qt->getInnerType()) {
-      error(loc, std::string("'") + qt->getQualifier().spelling() +
-                     "' needs a type here ('" + qt->getQualifier().spelling() +
-                     " T'); only a variable declaration infers it");
-      return nullptr;
-    }
-    FixedArrayAllowed = allowFixed;
-    InferredLengthAllowed = allowInferred;
-    SliceAllowed = allowSlice;
-    NoArrayHolder = noArray;
-    ast::Type *inner = resolveType(qt->getInnerType(), loc, context);
-    if (!inner || !checkQualifierApplies(qt->getQualifier(), inner, loc))
-      return nullptr;
-    LastQualifier = qt->getQualifier();
-    return inner;
-  }
+  // A qualified type: the inner type, its qualifier left in the slot.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return resolveQualifiedAnnotation(qt, loc, context, flags);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
   // `atomic T` (the concurrency prototype): T is a number, `bool` or
   // `char` (the design's fixed arrays of them are not in the prototype).
-  if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
-    ast::Type *inner = resolveType(at->getInnerType(), loc, context);
-    if (!inner)
-      return nullptr;
-    auto *bt = ast::dyn_cast<ast::BuiltinType>(inner);
-    if (!bt || bt->getTypeKind() == ast::BuiltinType::Void) {
-      std::string msg = "'atomic' holds a number, a 'bool' or a 'char', not '";
-      msg += typeName(inner);
-      msg += "'";
-      if (ast::isRefType(inner)) {
-        // An object crosses threads frozen or behind a lock.
-        msg += ": an object crosses threads as 'atomic shared ";
-        msg += typeName(inner);
-        msg += "' (frozen) or 'locked mut ";
-        msg += typeName(inner);
-        msg += "'";
-      } else {
-        msg += " (the prototype has no atomic arrays)";
-      }
-      error(loc, msg);
-      return nullptr;
-    }
-    return Ctx.getAtomicType(inner);
-  }
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(ty))
+    return resolveAtomicAnnotation(at, loc, context, flags);
   if (ast::isa<ast::TaskType>(ty))
     return ty; // canonical already: never written by a program
   // A parameter's slice, resolved already.
@@ -825,277 +870,481 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
     return Ctx.lookupEnumType(et->getName());
 
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    // `Self` in a method is its class or struct (in a trait, the
-    // implementing type).
-    if (ct->getName() == names::kSelfType) {
-      ast::Type *self = SelfType;
-      if (!self && CurrentClassCtx)
-        self = CurrentClassCtx->ClassType
-                   ? static_cast<ast::Type *>(CurrentClassCtx->ClassType)
-                   : CurrentClassCtx->Struct;
-      if (self)
-        return self;
-    }
-    if (isImportClashUse(ct->getName()))
-      return nullptr;
-    // A private type of an imported module, spelled bare: it is that
-    // module's own (a qualified spelling is reported below).
-    if (names::isModulePrivateName(ct->getName()) &&
-        ct->getName().find(names::kQualSep) == std::string::npos &&
-        ct->getName().find('<') == std::string::npos) // not an instantiation
-      if (auto o = ImportedTypeOrigins.find(ct->getName());
-          o != ImportedTypeOrigins.end()) {
-        error(loc, "'" + ct->getName() + "' is private to module '" +
-                       o->second + "'");
-        return nullptr;
-      }
-    // The parser emits a ClassType stub for any unknown type name; it may in
-    // fact be an enum or a struct, which are resolved here before falling
-    // back to classes.
-    if (auto *enumTy = Ctx.lookupEnumType(ct->getName()))
-      return enumTy;
-    if (auto *structTy = Ctx.lookupStructType(ct->getName()))
-      return structTy;
-    if (auto *canonical = Ctx.lookupClassType(ct->getName()))
-      return canonical;
-    if (ClassTemplates.count(ct->getName()) ||
-        StructTemplates.count(ct->getName()) ||
-        EnumTemplates.count(ct->getName())) {
-      error(loc, context.str() + " names generic " +
-                     (ClassTemplates.count(ct->getName())    ? "class '"
-                      : StructTemplates.count(ct->getName()) ? "struct '"
-                                                             : "enum '") +
-                     ct->getName() + "' without type arguments (write '" +
-                     ct->getName() + "<...>')");
-      return nullptr;
-    }
-    if (Traits.count(ct->getName())) {
-      error(loc, context.str() + " names trait '" + ct->getName() +
-                     "', which is not a type (use a type parameter bounded "
-                     "by it: '<T: " +
-                     ct->getName() + ">')");
-      return nullptr;
-    }
-    if (reportPrivateImport(ct->getName(), loc))
-      return nullptr;
-    if (!isFailedImportUse(ct->getName()))
-      error(loc,
-            context.str() + " has unknown class type '" + ct->getName() + "'");
-    return nullptr;
-  }
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+    return resolveClassNameAnnotation(ct, loc, context, flags);
 
   // `T[]` is a slice, the type of a `view` or `inout` parameter only.
-  if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
-    if (!allowSlice) {
-      std::string msg = context.str() + " has type '" + typeName(at) +
-                        "': a slice can only be a 'view' or 'inout' parameter";
-      if (noArray) {
-        msg += ", and ";
-        msg += noArray;
-        msg += " cannot be an array yet";
-      } else if (allowFixed) {
-        // Here a fixed-size array would do.
-        const std::string elem = typeName(at->getElementType());
-        msg += ", and an array has a length ('" +
-               (ast::isa<ast::FunctionType>(at->getElementType())
-                    ? "(" + elem + ")"
-                    : elem) +
-               "[3]')";
-      }
-      error(loc, msg);
-      return nullptr;
-    }
-    FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
-    const TypeContext element(context, {" element"});
-    auto *elemTy = resolvePart(at->getElementType(), loc, element);
-    if (!elemTy)
-      return nullptr;
-    if (elemTy == Ctx.getVoidTy()) { // it has no value (resolveValueType)
-      error(loc, context.str() + " has type 'void[]': an array element "
-                                 "cannot have type 'void'");
-      return nullptr;
-    }
-    if (fixedElementBytes(elemTy) < 0) {
-      error(loc, context.str() + " has type '" + typeName(elemTy) +
-                     "[]': a slice of '" + typeName(elemTy) +
-                     "' is not supported yet");
-      return nullptr;
-    }
-    return Ctx.getSliceType(elemTy);
-  }
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(ty))
+    return resolveSliceAnnotation(at, loc, context, flags);
 
-  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
-    // An array of arrays is one type, checked as a whole.
-    std::vector<int64_t> lengths;
-    ast::Type *elem = ft;
-    while (auto *f = ast::dyn_cast<ast::FixedArrayType>(elem)) {
-      lengths.push_back(f->getLength());
-      elem = f->getElementType();
-    }
-    const TypeContext element(context, {" element"});
-    auto *base = resolvePart(elem, loc, element);
-    if (!base)
-      return nullptr;
-    ast::Type *fixed = base;
-    for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
-      fixed = Ctx.getFixedArrayType(fixed, *it);
-    if (base == Ctx.getVoidTy()) { // it has no value (resolveValueType)
-      error(loc, context.str() + " has type '" + typeName(fixed) +
-                     "': an array element cannot have type 'void'");
-      return nullptr;
-    }
-    if (!allowFixed) {
-      errorFixedArrayHere(loc, fixed, context.str());
-      return nullptr;
-    }
-    if (fixedElementBytes(base) < 0) {
-      error(loc, context.str() + " has type '" + typeName(fixed) +
-                     "': a fixed-size array of '" + typeName(base) +
-                     "' is not supported yet");
-      return nullptr;
-    }
-    // Its size is checked once its lengths are inferred (visitVarDecl).
-    if (hasInferredLength(fixed)) {
-      if (allowInferred)
-        return fixed;
-      error(loc, context.str() + " has type '" + typeName(fixed) +
-                     "': a length can be '_' only in a variable declaration "
-                     "with an initializer, which gives it");
-      return nullptr;
-    }
-    if (fixedElementBytes(fixed) < 0) {
-      error(loc, context.str() + " has type '" + typeName(fixed) +
-                     "', which is too big: a fixed-size array holds at most " +
-                     std::to_string(kMaxFixedArrayElements) + " elements");
-      return nullptr;
-    }
-    return fixed;
-  }
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return resolveFixedArrayAnnotation(ft, loc, context, flags);
 
-  if (auto *gt = ast::dyn_cast<ast::GenericType>(ty)) {
-    // Generic type application `Box<int>`: resolve the arguments to canonical
-    // types, then instantiate (or fetch the cached instantiation of) the class
-    // template.  The result is an ordinary ClassType.
-    std::vector<ast::Type *> args;
-    for (size_t i = 0; i < gt->getNumArgs(); ++i) {
-      const std::string n = std::to_string(i + 1);
-      const TypeContext argument(
-          context, {" type argument ", n, " of '", gt->getName(), "'"});
-      auto *arg = resolvePart(gt->getArgs()[i], loc, argument);
-      if (!arg)
-        return nullptr;
-      args.push_back(arg);
-    }
-    // The template's own declarations are no part of this type: their
-    // qualifiers stand (`fn put(o: mut Obj)` of a `Tag<int>` in a tuple).
-    const unsigned savedDepth = std::exchange(NestedTypeDepth, 0u);
-    ast::Type *inst = nullptr;
-    if (StructTemplates.count(gt->getName()))
-      inst = instantiateStruct(gt->getName(), args, loc, gt);
-    else if (EnumTemplates.count(gt->getName()))
-      inst = instantiateEnum(gt->getName(), args, loc, gt);
-    else
-      inst = instantiateClass(gt->getName(), args, loc, gt);
-    NestedTypeDepth = savedDepth;
-    return inst;
-  }
+  if (auto *gt = ast::dyn_cast<ast::GenericType>(ty))
+    return resolveGenericAnnotation(gt, loc, context, flags);
 
-  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
-    auto *inner = resolveType(ot->getInnerType(), loc, context);
-    if (!inner)
-      return nullptr;
-    // A `T?` of a reference type is T's own PaykanShared* box with NULL
-    // meaning None; a primitive's (`int?`, `float?`, `bool?`, `char?`) or an
-    // enum's is a value, the payload and a presence flag (#96); a tuple's or
-    // a struct's is held in place, a presence flag and the value.  `void` has
-    // no value (the parser rejects the spelled `void?`; a type argument can
-    // still produce it).  Nested optionals are rejected because a `T??` would
-    // need a second None to distinguish `None` from `Some(None)` (a
-    // template's `T?` of an optional T is that optional: ASTCloner).
-    if (inner == Ctx.getVoidTy()) {
-      error(loc, context.str() + " has type 'void?': optional type 'void?' "
-                                 "is not supported");
-      return nullptr;
-    }
-    if (ast::isa<ast::OptionalType>(inner)) {
-      error(loc, context.str() + " has nested optional type '" +
-                     typeName(inner) + "?', which is not supported");
-      return nullptr;
-    }
-    // An optional of a tuple or a struct is held in place, the presence flag
-    // and the value: a value of more than kOptionalValueLimit bytes goes in
-    // a `memory::Box`, and that is made optional.  A struct's size is known
-    // once populateStructs ran: a class's fields and signatures, resolved
-    // before, are checked then.
-    if (ast::isMemType(inner) && !ast::isFunctionValue(inner)) {
-      if (!StructsPopulated)
-        DeferredOptionalChecks.push_back(
-            {inner, loc, context.str(), CurrentOrigin, InstantiationStack});
-      else if (!checkOptionalValueSize(inner, loc, context))
-        return nullptr;
-    }
-    // Resolve to the context's canonical (interned) instance, as for arrays.
-    return checked(Ctx.getOptionalType(inner));
-  }
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return resolveOptionalAnnotation(ot, loc, context, flags);
 
   // A struct type is canonical already (a resolved annotation, or a type
   // argument put into a template); before the tuple case, which it is too.
   if (ast::isa<ast::StructType>(ty))
     return ty;
 
-  if (auto *fnt = ast::dyn_cast<ast::FunctionType>(ty)) {
-    // `(int, view Str) -> bool`: the parameters as a function's (a slice
-    // for a `view` or `inout` one, a fixed-size array for any), the result
-    // any type but a fixed-size array; then the canonical instance.
-    std::vector<ast::Type *> params;
-    std::vector<ast::ParamMode> modes;
-    for (size_t i = 0; i < fnt->getNumParams(); ++i) {
-      const std::string n = std::to_string(i + 1);
-      const TypeContext what(context, {" parameter ", n});
-      FixedArrayAllowed = true;
-      SliceAllowed = fnt->getMode(i) != ast::ParamMode::Value;
-      auto *pty = resolvePart(fnt->getParamType(i), loc, what);
-      if (!pty)
-        return nullptr;
-      if (pty == Ctx.getVoidTy()) {
-        error(loc, what.str() + " cannot have type 'void'");
-        return nullptr;
-      }
-      params.push_back(pty);
-      modes.push_back(fnt->getMode(i));
-    }
-    FixedArrayAllowed = true; // a result may be a fixed-size array
-    const TypeContext result(context, {" result"});
-    auto *ret = resolvePart(fnt->getReturnType(), loc, result);
-    if (!ret)
-      return nullptr;
-    return checked(
-        Ctx.getFunctionType(std::move(params), std::move(modes), ret));
-  }
+  if (auto *fnt = ast::dyn_cast<ast::FunctionType>(ty))
+    return resolveFunctionAnnotation(fnt, loc, context, flags);
 
-  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
-    std::vector<ast::Type *> elems;
-    elems.reserve(tt->getArity());
-    for (size_t i = 0; i < tt->getArity(); ++i) {
-      NoArrayHolder = "a tuple element";
-      const std::string n = std::to_string(i);
-      const TypeContext element(context, {" element ", n});
-      auto *elemTy = resolvePart(tt->getElementType(i), loc, element);
-      if (!elemTy)
-        return nullptr;
-      if (elemTy == Ctx.getVoidTy()) {
-        error(loc, element.str() + " cannot have type 'void'");
-        return nullptr;
-      }
-      elems.push_back(elemTy);
-    }
-    // Same canonicalisation as arrays: the interned per-element-list node.
-    return checked(Ctx.getTupleType(std::move(elems)));
-  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty))
+    return resolveTupleAnnotation(tt, loc, context, flags);
 
   error(loc, context.str() + " has unknown type");
   return nullptr;
+}
+
+ast::Type *Sema::checkedType(const TypeFlags &flags, ast::Type *canonical) {
+  // The canonical tuple, optional or function type made of what an
+  // annotation resolved, remembered as checked unless a check of a part
+  // waits for the structs (it is made again then).
+  if (DeferredOptionalChecks.size() == flags.DeferredChecks)
+    ResolvedTypes.insert(canonical);
+  return canonical;
+}
+
+// A qualified type: the inner type, its qualifier left in the slot.
+ast::Type *Sema::resolveQualifiedAnnotation(ast::QualifiedType *qt,
+                                            ast::SourceLocation loc,
+                                            const TypeContext &context,
+                                            const TypeFlags &flags) {
+  ast::Qualifier &slot = typeSlot();
+  const ast::Qualifier written = qt->getQualifier();
+  if (!qt->getInnerType()) {
+    error(loc, std::string("'") + written.spelling() +
+                   "' needs a type here ('" + written.spelling() +
+                   " T'); only a variable declaration infers it");
+    return nullptr;
+  }
+  FixedArrayAllowed = flags.Fixed;
+  InferredLengthAllowed = flags.Inferred;
+  SliceAllowed = flags.Slice;
+  NoArrayHolder = flags.NoArray;
+  ast::Type *inner = resolveType(qt->getInnerType(), loc, context);
+  if (!inner)
+    return nullptr;
+  // `shared Node[4]` is four shared references: `shared` and `shared mut`
+  // bind to the primary type (docs/design/concurrency.md, "Syntax"), so
+  // on an array of references they qualify its elements.
+  if (written.Form == ast::QualForm::Shared) {
+    bool failed = false;
+    if (ast::Type *each = qualifyElements(written, inner, loc, failed))
+      return each;
+    if (failed)
+      return nullptr;
+  }
+  // What the inner annotation held: a template's type argument (`mut T`
+  // with T = `shared mut Node`, `mut T?` with T = `shared Node`).  A
+  // qualifier written on T joins it (#368).
+  const ast::Qualifier held = std::exchange(slot, ast::Qualifier{});
+  // Marked as a type argument's when the argument gave the form: `mut T`
+  // with T = `shared mut Node` is, `shared mut T` with T = `mut Node` is the
+  // template's own.
+  bool substituted = qt->isCanonical() || held.FromArgument;
+  ast::Qualifier q = written;
+  if (!joinQualifiers(written, held, q)) {
+    // `weak T` with T = `shared mut Node`: the declaration's form.
+    if (ResolvingWeakDecl) {
+      error(loc, std::string("a '") + (written.Mut ? "weak mut" : "weak") +
+                     "' reference names a '" + written.spelling() +
+                     "' object, and the type argument is '" +
+                     qualifiedName(held, inner) + "'" +
+                     (held == ast::Qualifier{ast::QualForm::Shared, true}
+                          ? ": write 'weak mut'"
+                          : ""));
+      return nullptr;
+    }
+    const bool unwritable =
+        written == ast::Qualifier{ast::QualForm::Unique, true};
+    error(loc,
+          std::string("'") + written.spelling() +
+              "' cannot qualify the type argument '" +
+              qualifiedName(held, inner) + "': " +
+              (unwritable ? std::string(held.Form == ast::QualForm::AtomicShared
+                                            ? "an '"
+                                            : "a '") +
+                                held.spelling() +
+                                "' reference is never written through"
+                          : std::string("a type takes one qualifier, "
+                                        "and '") +
+                                written.spelling() + "' and '" +
+                                held.spelling() + "' are two"));
+    return nullptr;
+  }
+  if (!qt->isCanonical() && !(q == held))
+    substituted = false; // the written qualifier gave the form
+  if (!checkQualifierApplies(q, inner, loc))
+    return nullptr;
+  if (inTypePart()) {
+    // A template's `mut` on an element (`(T, int)` with T = `mut Node`)
+    // is the element's own: an element is written as its variable is.
+    if (substituted && PartFrames.back().Kind == PartKind::Element &&
+        q == ast::Qualifier{ast::QualForm::Unique, true})
+      q = {};
+    if (!checkPartQualifier(q, PartFrames.back().Kind, loc))
+      return nullptr;
+  }
+  q.FromArgument = substituted;
+  slot = q;
+  return inner;
+}
+
+// `atomic T` (the concurrency prototype): T is a number, `bool` or
+// `char` (the design's fixed arrays of them are not in the prototype).
+ast::Type *Sema::resolveAtomicAnnotation(ast::AtomicType *at,
+                                         ast::SourceLocation loc,
+                                         const TypeContext &context,
+                                         const TypeFlags & /*flags*/) {
+  ast::Type *inner = resolveType(at->getInnerType(), loc, context);
+  if (!inner)
+    return nullptr;
+  auto *bt = ast::dyn_cast<ast::BuiltinType>(inner);
+  if (!bt || bt->getTypeKind() == ast::BuiltinType::Void) {
+    std::string msg = "'atomic' holds a number, a 'bool' or a 'char', not '";
+    msg += typeName(inner);
+    msg += "'";
+    if (ast::isRefType(inner)) {
+      // An object crosses threads frozen or behind a lock.
+      msg += ": an object crosses threads as 'atomic shared ";
+      msg += typeName(inner);
+      msg += "' (frozen) or 'locked mut ";
+      msg += typeName(inner);
+      msg += "'";
+    } else {
+      msg += " (the prototype has no atomic arrays)";
+    }
+    error(loc, msg);
+    return nullptr;
+  }
+  return Ctx.getAtomicType(inner);
+}
+
+ast::Type *Sema::resolveClassNameAnnotation(ast::ClassType *ct,
+                                            ast::SourceLocation loc,
+                                            const TypeContext &context,
+                                            const TypeFlags & /*flags*/) {
+  // `Self` in a method is its class or struct (in a trait, the
+  // implementing type).
+  if (ct->getName() == names::kSelfType) {
+    ast::Type *self = SelfType;
+    if (!self && CurrentClassCtx)
+      self = CurrentClassCtx->ClassType
+                 ? static_cast<ast::Type *>(CurrentClassCtx->ClassType)
+                 : CurrentClassCtx->Struct;
+    if (self)
+      return self;
+  }
+  if (isImportClashUse(ct->getName()))
+    return nullptr;
+  // A private type of an imported module, spelled bare: it is that
+  // module's own (a qualified spelling is reported below).
+  if (names::isModulePrivateName(ct->getName()) &&
+      ct->getName().find(names::kQualSep) == std::string::npos &&
+      ct->getName().find('<') == std::string::npos) // not an instantiation
+    if (auto o = ImportedTypeOrigins.find(ct->getName());
+        o != ImportedTypeOrigins.end()) {
+      error(loc,
+            "'" + ct->getName() + "' is private to module '" + o->second + "'");
+      return nullptr;
+    }
+  // The parser emits a ClassType stub for any unknown type name; it may in
+  // fact be an enum or a struct, which are resolved here before falling
+  // back to classes.
+  if (auto *enumTy = Ctx.lookupEnumType(ct->getName()))
+    return enumTy;
+  if (auto *structTy = Ctx.lookupStructType(ct->getName()))
+    return structTy;
+  if (auto *canonical = Ctx.lookupClassType(ct->getName()))
+    return canonical;
+  if (ClassTemplates.count(ct->getName()) ||
+      StructTemplates.count(ct->getName()) ||
+      EnumTemplates.count(ct->getName())) {
+    error(loc, context.str() + " names generic " +
+                   (ClassTemplates.count(ct->getName())    ? "class '"
+                    : StructTemplates.count(ct->getName()) ? "struct '"
+                                                           : "enum '") +
+                   ct->getName() + "' without type arguments (write '" +
+                   ct->getName() + "<...>')");
+    return nullptr;
+  }
+  if (Traits.count(ct->getName())) {
+    error(loc, context.str() + " names trait '" + ct->getName() +
+                   "', which is not a type (use a type parameter bounded "
+                   "by it: '<T: " +
+                   ct->getName() + ">')");
+    return nullptr;
+  }
+  if (reportPrivateImport(ct->getName(), loc))
+    return nullptr;
+  if (!isFailedImportUse(ct->getName()))
+    error(loc,
+          context.str() + " has unknown class type '" + ct->getName() + "'");
+  return nullptr;
+}
+
+// `T[]` is a slice, the type of a `view` or `inout` parameter only.
+ast::Type *Sema::resolveSliceAnnotation(ast::ArrayType *at,
+                                        ast::SourceLocation loc,
+                                        const TypeContext &context,
+                                        const TypeFlags &flags) {
+  if (!flags.Slice) {
+    std::string msg = context.str() + " has type '" + typeName(at) +
+                      "': a slice can only be a 'view' or 'inout' parameter";
+    if (flags.NoArray) {
+      msg += ", and ";
+      msg += flags.NoArray;
+      msg += " cannot be an array yet";
+    } else if (flags.Fixed) {
+      // Here a fixed-size array would do.
+      const std::string elem = typeName(at->getElementType());
+      msg +=
+          ", and an array has a length ('" +
+          (ast::isa<ast::FunctionType>(at->getElementType()) ? "(" + elem + ")"
+                                                             : elem) +
+          "[3]')";
+    }
+    error(loc, msg);
+    return nullptr;
+  }
+  FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
+  const TypeContext element(context, {" element"});
+  ast::Qualifier elemQual;
+  auto *elemTy = resolvePart(at->getElementType(), loc, element,
+                             PartKind::Element, elemQual);
+  if (!elemTy)
+    return nullptr;
+  if (elemTy == Ctx.getVoidTy()) { // it has no value (resolveValueType)
+    error(loc, context.str() + " has type 'void[]': an array element "
+                               "cannot have type 'void'");
+    return nullptr;
+  }
+  if (fixedElementBytes(elemTy) < 0) {
+    error(loc, context.str() + " has type '" + typeName(elemTy) +
+                   "[]': a slice of '" + typeName(elemTy) +
+                   "' is not supported yet");
+    return nullptr;
+  }
+  return Ctx.getSliceType(elemTy, elemQual);
+}
+
+ast::Type *Sema::resolveFixedArrayAnnotation(ast::FixedArrayType *ft,
+                                             ast::SourceLocation loc,
+                                             const TypeContext &context,
+                                             const TypeFlags &flags) {
+  // An array of arrays is one type, checked as a whole; the innermost
+  // array holds its elements' qualifier (a resolved one's is kept).
+  std::vector<int64_t> lengths;
+  ast::Type *elem = ft;
+  ast::Qualifier held;
+  while (auto *f = ast::dyn_cast<ast::FixedArrayType>(elem)) {
+    lengths.push_back(f->getLength());
+    held = f->getElemQual();
+    elem = f->getElementType();
+  }
+  elem = Ctx.getQualifiedType(held, elem);
+  const TypeContext element(context, {" element"});
+  ast::Qualifier elemQual;
+  auto *base = resolvePart(elem, loc, element, PartKind::Element, elemQual);
+  if (!base)
+    return nullptr;
+  ast::Type *fixed = base;
+  for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
+    fixed = Ctx.getFixedArrayType(
+        fixed, *it, it == lengths.rbegin() ? elemQual : ast::Qualifier{});
+  if (base == Ctx.getVoidTy()) { // it has no value (resolveValueType)
+    error(loc, context.str() + " has type '" + typeName(fixed) +
+                   "': an array element cannot have type 'void'");
+    return nullptr;
+  }
+  if (!flags.Fixed) {
+    errorFixedArrayHere(loc, fixed, context.str());
+    return nullptr;
+  }
+  if (fixedElementBytes(base) < 0) {
+    error(loc, context.str() + " has type '" + typeName(fixed) +
+                   "': a fixed-size array of '" + typeName(base) +
+                   "' is not supported yet");
+    return nullptr;
+  }
+  // Its size is checked once its lengths are inferred (visitVarDecl).
+  if (hasInferredLength(fixed)) {
+    if (flags.Inferred)
+      return fixed;
+    error(loc, context.str() + " has type '" + typeName(fixed) +
+                   "': a length can be '_' only in a variable declaration "
+                   "with an initializer, which gives it");
+    return nullptr;
+  }
+  if (fixedElementBytes(fixed) < 0) {
+    error(loc, context.str() + " has type '" + typeName(fixed) +
+                   "', which is too big: a fixed-size array holds at most " +
+                   std::to_string(kMaxFixedArrayElements) + " elements");
+    return nullptr;
+  }
+  return fixed;
+}
+
+ast::Type *Sema::resolveGenericAnnotation(ast::GenericType *gt,
+                                          ast::SourceLocation loc,
+                                          const TypeContext &context,
+                                          const TypeFlags & /*flags*/) {
+  // Generic type application `Box<int>`: resolve the arguments to canonical
+  // types, then instantiate (or fetch the cached instantiation of) the class
+  // template.  The result is an ordinary ClassType.
+  std::vector<ast::Type *> args;
+  for (size_t i = 0; i < gt->getNumArgs(); ++i) {
+    const std::string n = std::to_string(i + 1);
+    const TypeContext argument(
+        context, {" type argument ", n, " of '", gt->getName(), "'"});
+    // A qualified argument is part of the instance (#368):
+    // `List<shared Node>` is not `List<Node>`.
+    auto *arg = resolveTypeArgument(gt->getArgs()[i], loc, argument);
+    if (!arg)
+      return nullptr;
+    args.push_back(arg);
+  }
+  // The template's own declarations are no part of this type: their
+  // qualifiers stand (`fn put(o: mut Obj)` of a `Tag<int>` in a tuple),
+  // and are theirs, not this annotation's.
+  const size_t savedBase = std::exchange(PartBase, PartFrames.size());
+  const ast::Qualifier savedQual = LastQualifier;
+  ast::Type *inst = nullptr;
+  if (StructTemplates.count(gt->getName()))
+    inst = instantiateStruct(gt->getName(), args, loc, gt);
+  else if (EnumTemplates.count(gt->getName()))
+    inst = instantiateEnum(gt->getName(), args, loc, gt);
+  else
+    inst = instantiateClass(gt->getName(), args, loc, gt);
+  PartBase = savedBase;
+  LastQualifier = savedQual;
+  return inst;
+}
+
+ast::Type *Sema::resolveOptionalAnnotation(ast::OptionalType *ot,
+                                           ast::SourceLocation loc,
+                                           const TypeContext &context,
+                                           const TypeFlags &flags) {
+  auto *inner = resolveType(ot->getInnerType(), loc, context);
+  if (!inner)
+    return nullptr;
+  // A `T?` of a reference type is T's own PaykanShared* box with NULL
+  // meaning None; a primitive's (`int?`, `float?`, `bool?`, `char?`) or an
+  // enum's is a value, the payload and a presence flag (#96); a tuple's or
+  // a struct's is held in place, a presence flag and the value.  `void` has
+  // no value (the parser rejects the spelled `void?`; a type argument can
+  // still produce it).  Nested optionals are rejected because a `T??` would
+  // need a second None to distinguish `None` from `Some(None)` (a
+  // template's `T?` of an optional T is that optional: ASTCloner).
+  if (inner == Ctx.getVoidTy()) {
+    error(loc, context.str() + " has type 'void?': optional type 'void?' "
+                               "is not supported");
+    return nullptr;
+  }
+  if (ast::isa<ast::OptionalType>(inner)) {
+    error(loc, context.str() + " has nested optional type '" + typeName(inner) +
+                   "?', which is not supported");
+    return nullptr;
+  }
+  // An optional of a tuple or a struct is held in place, the presence flag
+  // and the value: a value of more than kOptionalValueLimit bytes goes in
+  // a `memory::Box`, and that is made optional.  A struct's size is known
+  // once populateStructs ran: a class's fields and signatures, resolved
+  // before, are checked then.
+  if (ast::isMemType(inner) && !ast::isFunctionValue(inner)) {
+    if (!StructsPopulated)
+      DeferredOptionalChecks.push_back(
+          {inner, loc, context.str(), CurrentOrigin, InstantiationStack});
+    else if (!checkOptionalValueSize(inner, loc, context))
+      return nullptr;
+  }
+  // Resolve to the context's canonical (interned) instance, as for arrays.
+  return checkedType(flags, Ctx.getOptionalType(inner));
+}
+
+ast::Type *Sema::resolveFunctionAnnotation(ast::FunctionType *fnt,
+                                           ast::SourceLocation loc,
+                                           const TypeContext &context,
+                                           const TypeFlags &flags) {
+  // `(int, view Str) -> bool`: the parameters as a function's (a slice
+  // for a `view` or `inout` one, a fixed-size array for any), the result
+  // any type but a fixed-size array; then the canonical instance.
+  // Each part's qualifier is part of the type (#368): a resolved one's
+  // are kept.
+  std::vector<ast::Type *> params;
+  std::vector<ast::ParamMode> modes;
+  std::vector<ast::Qualifier> paramQuals;
+  for (size_t i = 0; i < fnt->getNumParams(); ++i) {
+    const std::string n = std::to_string(i + 1);
+    const TypeContext what(context, {" parameter ", n});
+    FixedArrayAllowed = true;
+    SliceAllowed = fnt->getMode(i) != ast::ParamMode::Value;
+    ast::Qualifier q;
+    auto *pty = resolvePart(
+        Ctx.getQualifiedType(fnt->getParamQual(i), fnt->getParamType(i)), loc,
+        what, PartKind::FunctionPart, q);
+    if (!pty)
+      return nullptr;
+    if (pty == Ctx.getVoidTy()) {
+      error(loc, what.str() + " cannot have type 'void'");
+      return nullptr;
+    }
+    // A borrow is written with no qualifier, as a function's parameter
+    // is; a template's `view T` keeps T's.
+    if (!checkBorrowQualifier(q, fnt->getMode(i), what.str(), loc))
+      return nullptr;
+    params.push_back(pty);
+    modes.push_back(fnt->getMode(i));
+    paramQuals.push_back(q);
+  }
+  FixedArrayAllowed = true; // a result may be a fixed-size array
+  const TypeContext result(context, {" result"});
+  ast::Qualifier resultQual;
+  auto *ret = resolvePart(
+      Ctx.getQualifiedType(fnt->getResultQual(), fnt->getReturnType()), loc,
+      result, PartKind::FunctionPart, resultQual);
+  if (!ret)
+    return nullptr;
+  return checkedType(
+      flags, Ctx.getFunctionType(std::move(params), std::move(modes), ret,
+                                 std::move(paramQuals), resultQual));
+}
+
+ast::Type *Sema::resolveTupleAnnotation(ast::TupleType *tt,
+                                        ast::SourceLocation loc,
+                                        const TypeContext &context,
+                                        const TypeFlags &flags) {
+  std::vector<ast::Type *> elems;
+  std::vector<ast::Qualifier> quals;
+  elems.reserve(tt->getArity());
+  quals.reserve(tt->getArity());
+  for (size_t i = 0; i < tt->getArity(); ++i) {
+    NoArrayHolder = "a tuple element";
+    const std::string n = std::to_string(i);
+    const TypeContext element(context, {" element ", n});
+    ast::Qualifier q;
+    auto *elemTy = resolvePart(
+        Ctx.getQualifiedType(tt->getElemQual(i), tt->getElementType(i)), loc,
+        element, PartKind::Element, q);
+    if (!elemTy)
+      return nullptr;
+    if (elemTy == Ctx.getVoidTy()) {
+      error(loc, element.str() + " cannot have type 'void'");
+      return nullptr;
+    }
+    elems.push_back(elemTy);
+    quals.push_back(q);
+  }
+  // Same canonicalisation as arrays: the interned per-element-list node,
+  // its elements' qualifiers part of it (#368).
+  return checkedType(flags,
+                     Ctx.getTupleType(std::move(elems), std::move(quals)));
 }
 
 bool Sema::checkNotVoidValue(ast::Type *ty, const std::string &name,
@@ -1894,9 +2143,9 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
   if (!typeArgAnns.empty()) {
     std::vector<ast::Type *> typeArgs;
     for (size_t i = 0; i < typeArgAnns.size(); ++i) {
-      auto *t = S.resolvePart(typeArgAnns[i], loc,
-                              "type argument " + std::to_string(i + 1) +
-                                  " of '" + spelled + "'");
+      auto *t = S.resolveTypeArgument(typeArgAnns[i], loc,
+                                      "type argument " + std::to_string(i + 1) +
+                                          " of '" + spelled + "'");
       if (!t)
         return nullptr;
       typeArgs.push_back(t);
@@ -1967,9 +2216,11 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
                   .cloneType(f->getType())
             : f->getType());
   std::vector<ast::Type *> typeArgs;
-  if (!S.inferTypeArgs(tmplName, tmpl->getTypeParams(), paramTypes, tys, loc,
-                       typeArgs,
-                       shown + "<...>" + names::kQualSep + variant + "(...)"))
+  if (!S.inferTypeArgs(
+          tmplName, tmpl->getTypeParams(), paramTypes, tys, loc, typeArgs,
+          shown + "<...>" + names::kQualSep + variant + "(...)", nullptr,
+          nullptr,
+          S.inferenceForms(args, [](size_t) { return ast::ParamMode::Value; })))
     return nullptr;
   return S.instantiateEnum(tmplName, typeArgs, loc);
 }
@@ -2244,6 +2495,10 @@ Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
   if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
     return std::min(needsOtherSide(t->getTrueExpr()),
                     needsOtherSide(t->getFalseExpr()));
+  // A literal takes the other side's element types and forms (#368: `if c
+  // then (1, Node(3)) else (2, s)` holds a `shared` element).
+  if (ast::isa<ast::TupleLiteralExpr>(e) || ast::isa<ast::ArrayLiteralExpr>(e))
+    return OtherSide::Helps;
   if (const auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e))
     return S.EnumTemplates.count(ev->getEnumName()) && !ev->hasTypeArgs()
                ? OtherSide::Needed
@@ -2343,7 +2598,7 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     if (lhsOpt && rhsOpt) {
       ast::Type *li = lhsOpt->getInnerType();
       ast::Type *ri = rhsOpt->getInnerType();
-      bool compatible = typesEqual(li, ri);
+      bool compatible = typesEqual(li, ri) || sameShapeOfParts(li, ri);
       if (!compatible) {
         auto *lc = ast::dyn_cast<ast::ClassType>(li);
         auto *rc = ast::dyn_cast<ast::ClassType>(ri);
@@ -2416,7 +2671,10 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   const bool comparison =
       op == ast::BinaryOpcode::Lt || op == ast::BinaryOpcode::Gt ||
       op == ast::BinaryOpcode::Le || op == ast::BinaryOpcode::Ge || equality;
-  if (comparison && !typesEqual(lhsTy, rhsTy) && !promoted) {
+  // Values whose parts differ only in their forms compare as their parts
+  // do (#368: `(1, s) == (1, Node(1))`): a comparison only reads them.
+  if (comparison && !typesEqual(lhsTy, rhsTy) && !promoted &&
+      !sameShapeOfParts(lhsTy, rhsTy)) {
     auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
     auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
     if (!equality || !lhsCT || !rhsCT ||
@@ -2935,6 +3193,21 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
         !S.checkParallelBufferCall(node, rid->getName()))
       return nullptr;
 
+  // `x.clone()` in a template's code of a reference whose form a type
+  // argument gave, `shared`, `atomic shared` or `locked` (#368: a `T` with
+  // T = `shared Node`, an element of a `T[]`): T is Copyable, and a
+  // Copyable type's clone is its copy, the same object.  A form the
+  // template or the program writes (`s: shared Node`) is cloned by its
+  // class, into a new unique object.
+  if (const ast::Qualifier q = S.qualifierOf(node->getReceiver());
+      node->getMethodName() == names::kMethodClone &&
+      node->getNumArguments() == 0 && S.inInstanceCode() && q.FromArgument &&
+      ast::isRefType(recvTy) && S.isCopyablePart(recvTy, q)) {
+    node->setCloneIsCopy(true);
+    node->setResolvedType(recvTy);
+    return recvTy;
+  }
+
   // A method cannot be called on an optional receiver (it may be None),
   // but for the builtin `Show`'s `toString()` of an optional whose value
   // has a text: "None", or the value's text.
@@ -3304,7 +3577,8 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   // Into a slice: a fixed-size array of the literal's own length.
   if (auto *slice = ast::dyn_cast<ast::SliceType>(expected))
     return checkFixedArrayLiteral(
-        node, S.Ctx.getFixedArrayType(slice->getElementType(), n));
+        node, S.Ctx.getFixedArrayType(slice->getElementType(), n,
+                                      slice->getElemQual()));
 
   // Anywhere else, an array of its own length of its elements' common type.
   std::vector<ast::Type *> elemTys;
@@ -3342,6 +3616,13 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
             continue;
           }
         }
+        // Values whose parts differ only in their forms join to the
+        // stronger (#368): `[(1, s), (2, Node(2))]` holds `shared` parts,
+        // which each element then converts into (checkAssignable).
+        if (ast::Type *joined = S.joinPartForms(elemTy, ty)) {
+          elemTy = joined;
+          continue;
+        }
         S.error(node->getElements()[i]->getLocation(),
                 "array literal has inconsistent element types: '" +
                     typeName(elemTy) + "' and '" + typeName(ty) + "'");
@@ -3358,7 +3639,24 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
             "an array of '" + typeName(elemTy) + "' is not supported yet");
     return nullptr;
   }
-  auto *fixed = S.Ctx.getFixedArrayType(elemTy, n);
+  // The elements' form (#368): `[s, t]` of `shared` references is an
+  // array of them, which a unique temporary joins as a variable would.
+  ast::Qualifier elemQual;
+  if (ast::isRefType(elemTy))
+    for (ast::Expr *e : node->getElements()) {
+      const ast::Qualifier q = S.qualifierOf(e);
+      if (q.Form != ast::QualForm::Shared || q == elemQual)
+        continue;
+      if (!elemQual.isUnique()) {
+        S.error(e->getLocation(), "array literal has elements of two forms: '" +
+                                      S.qualifiedName(elemQual, elemTy) +
+                                      "' and '" + S.qualifiedName(q, elemTy) +
+                                      "'");
+        return nullptr;
+      }
+      elemQual = q;
+    }
+  auto *fixed = S.Ctx.getFixedArrayType(elemTy, n, elemQual);
   if (fixedElementBytes(fixed) < 0) {
     S.error(node->getLocation(),
             "array literal of type '" + typeName(fixed) +
@@ -3371,12 +3669,11 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   for (size_t i = 0; i < elemTys.size(); ++i) {
     S.checkAssignable(elemTy, elemTys[i], node->getElements()[i]);
     S.checkViewNotStored(node->getElements()[i], elemTys[i]);
-    // The array owns its elements: a move-only one moves in, and an
-    // element's type keeps no qualifier, so a `shared` reference, a frozen
-    // object or a cell cannot be one (#369).  A `[v; n]` of a place that is
-    // not Copyable is checkRepeatValue's.
+    // The array owns its elements: a move-only one moves in (#369), and
+    // each converts into the elements' form (#368).  A `[v; n]` of a place
+    // that is not Copyable is checkRepeatValue's.
     if (!S.repeatsAPlace(node, elemTy))
-      S.checkQualifiedFlow(ast::Qualifier{}, node->getElements()[i],
+      S.checkQualifiedFlow(elemQual, node->getElements()[i],
                            "an element of the array",
                            node->getElements()[i]->getLocation());
   }
@@ -3398,9 +3695,11 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                   "' no length: a fixed-size array has at least one element");
       return nullptr;
     }
-    fixed = S.Ctx.getFixedArrayType(fixed->getElementType(), node->getLength());
+    fixed = S.Ctx.getFixedArrayType(fixed->getElementType(), node->getLength(),
+                                    fixed->getElemQual());
   }
   ast::Type *elemTy = fixed->getElementType();
+  const ast::Qualifier elemQual = fixed->getElemQual();
   if (node->getLength() != fixed->getLength()) {
     S.error(node->getLocation(),
             "array literal has " + std::to_string(node->getLength()) +
@@ -3417,11 +3716,11 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
       ok = false;
       continue;
     }
-    // The array owns its elements: a move-only one moves in, and no
-    // qualified reference is one (#369).  A `[v; n]` of a place that is not
-    // Copyable is checkRepeatValue's.
+    // The array owns its elements: a move-only one moves in (#369), and
+    // each converts into the elements' form (#368).  A `[v; n]` of a place
+    // that is not Copyable is checkRepeatValue's.
     if (!S.repeatsAPlace(node, elemTy) &&
-        !S.checkQualifiedFlow(ast::Qualifier{}, elem, "an element of the array",
+        !S.checkQualifiedFlow(elemQual, elem, "an element of the array",
                               elem->getLocation()))
       ok = false;
     if (hasInferredLength(elemTy)) {
@@ -3431,7 +3730,7 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
         return nullptr;
       }
       elemTy = filled;
-      fixed = S.Ctx.getFixedArrayType(elemTy, fixed->getLength());
+      fixed = S.Ctx.getFixedArrayType(elemTy, fixed->getLength(), elemQual);
     }
     if (!S.checkAssignable(elemTy, ty, elem)) {
       S.error(elem->getLocation(),
@@ -3527,9 +3826,14 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   // Maybe::Just(1)`, `if c then none() else Maybe::Just(1)`).
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
   auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
-    if (want &&
-        (ast::isa<ast::EnumValueExpr>(arm) || ast::isa<ast::CallExpr>(arm) ||
-         ast::isa<ast::TernaryExpr>(arm)))
+    // A literal arm's elements take the slot's (or the other arm's) types
+    // and forms (#368), as a literal does where it flows.
+    if (want && (ast::isa<ast::ArrayLiteralExpr>(arm) ||
+                 ast::isa<ast::TupleLiteralExpr>(arm)))
+      S.LiteralExpectation = want;
+    else if (want &&
+             (ast::isa<ast::EnumValueExpr>(arm) ||
+              ast::isa<ast::CallExpr>(arm) || ast::isa<ast::TernaryExpr>(arm)))
       S.VariantExpectation = want;
     return visit(arm);
   };
@@ -3616,6 +3920,16 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     }
   }
 
+  // Values whose parts differ only in their forms join to the stronger
+  // (#368), when the arm that converts into it is a fresh value: a place's
+  // unique parts stay its own.
+  if (ast::Type *joined = S.joinPartForms(trueTy, falseTy);
+      joined && (joined == trueTy || S.isFreshValue(node->getTrueExpr())) &&
+      (joined == falseTy || S.isFreshValue(node->getFalseExpr()))) {
+    node->setResolvedType(joined);
+    return joined;
+  }
+
   // For class types, find the lowest common ancestor in the hierarchy.
   auto *trueCT = ast::dyn_cast<ast::ClassType>(trueTy);
   auto *falseCT = ast::dyn_cast<ast::ClassType>(falseTy);
@@ -3652,7 +3966,9 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
                      expectedTT->getArity() != node->getNumElements()))
     expectedTT = nullptr;
   std::vector<ast::Type *> elemTys;
+  std::vector<ast::Qualifier> elemQuals;
   elemTys.reserve(node->getNumElements());
+  elemQuals.reserve(node->getNumElements());
   bool ok = true;
   for (size_t i = 0; i < node->getNumElements(); ++i) {
     ast::Expr *elem = node->getElements()[i];
@@ -3669,10 +3985,16 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       ok = false;
       continue;
     }
-    // The tuple owns its elements: a move-only one moves in, and an
-    // element's type keeps no qualifier, so no qualified reference is one
-    // (#369).
-    if (!S.checkQualifiedFlow(ast::Qualifier{}, elem, "an element of the tuple",
+    // The tuple owns its elements: a move-only one moves in (#369), and
+    // each converts into its element's form (#368), the slot's or, with
+    // none, its own `shared` one (`(1, s)` is an `(int, shared Node)`).
+    ast::Qualifier q;
+    if (expectedTT)
+      q = expectedTT->getElemQual(i);
+    else if (const ast::Qualifier own = S.qualifierOf(elem);
+             own.Form == ast::QualForm::Shared && ast::isRefType(ty))
+      q = own;
+    if (!S.checkQualifiedFlow(q, elem, "an element of the tuple",
                               elem->getLocation()))
       ok = false;
     if (holdsFixedArray(ty)) {
@@ -3685,10 +4007,11 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
     if (!S.checkViewNotStored(elem, ty))
       ok = false;
     elemTys.push_back(ty);
+    elemQuals.push_back(q);
   }
   if (!ok)
     return nullptr;
-  auto *tt = S.Ctx.getTupleType(std::move(elemTys));
+  auto *tt = S.Ctx.getTupleType(std::move(elemTys), std::move(elemQuals));
   node->setResolvedType(tt);
   return tt;
 }
@@ -3772,10 +4095,13 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
           continue; // a redeclaration: the existing binding stands
         // An annotation that does not resolve is a separate error of its own.
         if (auto *declTy = resolveType(target.DeclType, target.Loc,
-                                       "destructuring target '" + name + "'"))
+                                       "destructuring target '" + name + "'")) {
           CurrentScope->declare(name, declTy);
-        else
+          if (const ast::Qualifier q = takeQualifier(); !q.isUnique())
+            CurrentScope->Quals[name] = q;
+        } else {
           declarePoisoned(CurrentScope, name);
+        }
         continue;
       }
       if (!CurrentScope->findOwner(name))
@@ -3817,6 +4143,27 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
     ok = checkViewNotStored(node->getValue(), tt->getElementType(i));
   if (ok && !checkCopyRule(node->getValue(), node->getValue()->getLocation()))
     return bindTargetsAfterError();
+  // Element @p i's form (#368) into a target held as @p want: as it is,
+  // or a unique reference into a `shared` one (the tuple is a temporary or
+  // moved, under the copy rule); else the error, and false.
+  auto elementFlows = [&](size_t i, ast::Qualifier want,
+                          const std::string &name, ast::SourceLocation loc) {
+    const ast::Qualifier have = tt->getElemQual(i);
+    ast::Type *elemTy = tt->getElementType(i);
+    if (have == want || !ast::isRefType(elemTy) ||
+        (have.isUnique() && (want.Form == ast::QualForm::Unique ||
+                             want.Form == ast::QualForm::Shared)))
+      return true;
+    error(loc,
+          "cannot store element " + std::to_string(i) + " of the tuple (a '" +
+              qualifiedName(have, elemTy) + "') in variable '" + name +
+              "', a '" + qualifiedName(want, elemTy) + "': " +
+              (have.isUnique() ? std::string("a destructuring makes no cell or "
+                                             "frozen object")
+                               : std::string("a '") + have.spelling() +
+                                     "' reference converts only as it is"));
+    return false;
+  };
   StringSet seen;
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
@@ -3851,6 +4198,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       }
       auto *declTy = resolveType(target.DeclType, target.Loc,
                                  "destructuring target '" + name + "'");
+      const ast::Qualifier declQual = takeQualifier();
       if (!declTy) {
         declarePoisoned(CurrentScope, name);
         ok = false;
@@ -3870,13 +4218,22 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
         continue;
       }
       CurrentScope->declare(name, declTy);
+      if (!declQual.isUnique())
+        CurrentScope->Quals[name] = declQual;
+      if (!elementFlows(i, declQual, name, target.Loc))
+        ok = false;
       continue;
     }
 
     // Bare name: re-assignment if visible, implicit declaration otherwise.
+    // A new one is held as its element is (#368).
     auto *owner = CurrentScope->findOwner(name);
     if (!owner) {
       CurrentScope->set(name, elemTy);
+      if (ast::Qualifier q = tt->getElemQual(i); !q.isUnique()) {
+        q.FromArgument = isArgumentForm(q, elemTy); // a type argument's
+        CurrentScope->Quals[name] = q;
+      }
       continue;
     }
     if (!checkReassignable(name, target.Loc)) {
@@ -3897,28 +4254,31 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
-    // A weak variable names a `shared` (`shared mut`) object, which a
-    // tuple's element never holds (it keeps no qualifier): only a literal's
-    // None is one it takes.
+    // A weak variable names a `shared` (`shared mut`) object: an element
+    // held so (#368), or a literal's None.
+    const ast::Qualifier want = qualifierOfVar(name);
     if (const VarKind k = varKind(name);
         k == VarKind::Weak || k == VarKind::WeakView) {
       const auto *lit = ast::dyn_cast<ast::TupleLiteralExpr>(node->getValue());
       const ast::Expr *elem = lit && i < lit->getElements().size()
                                   ? lit->getElements()[i]
                                   : nullptr;
-      if (!elem || !ast::isa<ast::NoneLiteral>(elem)) {
-        const ast::Qualifier want = qualifierOfVar(name);
+      if ((!elem || !ast::isa<ast::NoneLiteral>(elem)) &&
+          !(tt->getElemQual(i) == want)) {
         const char *form = want.Mut ? "weak mut" : "weak";
         error(target.Loc, "cannot store element " + std::to_string(i) +
-                              " of the tuple (a '" + typeName(elemTy) +
+                              " of the tuple (a '" +
+                              qualifiedName(tt->getElemQual(i), elemTy) +
                               "') in variable '" + name + "', a '" + form +
                               " " + typeName(varTy) + "': a '" + form +
                               "' reference names a '" +
-                              qualifiedName(want, nullptr) +
-                              "' object, which a tuple's element never is");
+                              qualifiedName(want, nullptr) + "' object");
         ok = false;
         continue;
       }
+    } else if (!elementFlows(i, want, name, target.Loc)) {
+      ok = false;
+      continue;
     }
     MovedVars.erase(varKey(owner, name)); // assigned again after a move
   }
@@ -4854,8 +5214,17 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
             "value): make it a statement, then 'return;'");
       return false;
     }
-    if (CurrentReturnType &&
-        !checkAssignable(CurrentReturnType, valTy, node->getReturnValue())) {
+    // A returned local or by-value parameter leaves as by `move`, so its
+    // value is fresh: its unique parts convert (#368).
+    const ast::Expr *savedImplicit = std::exchange(
+        ImplicitMoveSource, CurrentResult.Mode == ast::ParamMode::Value
+                                ? node->getReturnValue()
+                                : nullptr);
+    const bool assignable =
+        !CurrentReturnType ||
+        checkAssignable(CurrentReturnType, valTy, node->getReturnValue());
+    ImplicitMoveSource = savedImplicit;
+    if (!assignable) {
       if (!diagnoseOptionalNarrowing(node->getLocation(), CurrentReturnType,
                                      valTy))
         error(node->getLocation(),
@@ -4864,6 +5233,12 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
+    // An inferred result (`=> x`) is held as its value is, as an inferred
+    // variable is (#368): `fn(n: shared Node) => n` gives a `shared Node`.
+    if (!CurrentReturnType && CurrentResult.Mode == ast::ParamMode::Value)
+      if (const ast::Qualifier q = qualifierOf(node->getReturnValue());
+          q.isSharedForm() || q.Form == ast::QualForm::Locked)
+        CurrentResultQual = q; // a type argument's mark too
     // The result is an owning slot of the caller's (the prototype).  A
     // returned local or by-value parameter leaves as by `move`: a `return`
     // is always its last use.
@@ -4881,6 +5256,21 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
           !typesEqual(valTy, CurrentReturnType))
         why = "an 'inout' result has type '" + typeName(CurrentReturnType) +
               "', but what it returns has type '" + typeName(valTy) + "'";
+      // Nor in form (#368), as an `inout` parameter takes it: a plain
+      // `-> inout C` names a unique or a `shared mut` slot (an `inout`
+      // takes either), and a type argument's form names exactly its own
+      // (`-> inout T` with T = `shared mut Node`).
+      if (const ast::Qualifier have = qualifierOf(node->getReturnValue());
+          why.empty() && CurrentResult.Mode == ast::ParamMode::Inout &&
+          ast::isRefType(valTy) &&
+          !(CurrentResultQual.Form == ast::QualForm::Unique &&
+            (have.Form == ast::QualForm::Unique ||
+             have == ast::Qualifier{ast::QualForm::Shared, true})) &&
+          !(have == CurrentResultQual))
+        why = "an 'inout' result is held as '" +
+              qualifiedName(CurrentResultQual, CurrentReturnType) +
+              "', but what it returns is held as '" +
+              qualifiedName(have, valTy) + "'";
       // The caller keeps alive the storage it named, not an object reached
       // through a field of another one.
       if (why.empty() && CurrentResult.Mode == ast::ParamMode::Inout)
@@ -5653,7 +6043,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       const ast::Param &p = node->getParams()[i];
       CurrentScope->declare(p.getName(), paramTypes[i]);
       ast::Qualifier q = p.Qual;
-      if (p.Mode == ast::ParamMode::Inout)
+      // (a shared form, a template argument\'s, is its own: #368)
+      if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
         q.Mut = true; // the borrow's writes
       CurrentScope->Quals[p.getName()] = q;
     }
@@ -5688,7 +6079,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     LoopMoveStack = std::move(savedLoopMoves);
     FlowEnded = savedFlowEnded;
     InAsyncFn = savedAsync;
-    CurrentResultQual = savedResultQual;
+    const ast::Qualifier bodyResultQual =
+        std::exchange(CurrentResultQual, savedResultQual);
     CurrentReturnType = savedRetTy;
     CurrentResult = savedResult;
     if (!ok)
@@ -5697,6 +6089,11 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       retTy = inferredResultOf(node);
       if (!retTy)
         return false;
+      // The form its `return` gave it (visitReturnStmt).
+      if (!bodyResultQual.isUnique()) {
+        node->setResultQual(bodyResultQual);
+        FunctionTable[node->getName()].ResultQual = bodyResultQual;
+      }
     }
     // Non-void functions must always return a value on every path.
     if (retTy != Ctx.getVoidTy() &&
@@ -5816,11 +6213,13 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
         std::exchange(InstantiatingTemplates, p->Templates);
     {
       OriginSource inOrigin(*this, p->Origin);
+      InstanceCode instance(*this, &p->Args);
       ok = visitFuncDecl(fn.Decl);
     }
     InstantiatingTemplates = std::move(savedTemplates);
     InstantiationStack.pop_back();
   } else {
+    InstanceCode program(*this, nullptr); // the program's own function
     ok = visitFuncDecl(fn.Decl);
   }
   CurrentInstantiationDepth = savedDepth;
@@ -6118,8 +6517,19 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
                           "variable '" + node->getName() + "'",
                           node->getLocation()))
     viewOk = false;
-  // An `inout` local is the borrow's writes.
-  if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy))
+  // A local borrow of a type argument's form (`v: view T` with T = `shared
+  // Node`, #368) takes that form, as a parameter of it does.
+  if (node->getInitExpr() && node->getMode() != ast::ParamMode::Value &&
+      qual.FromArgument && ast::isRefType(declTy) &&
+      ((node->getMode() == ast::ParamMode::Inout && !qual.isUnique()) ||
+       qual.isSharedForm() || qual.Form == ast::QualForm::Locked) &&
+      !checkBorrowForm(node->getInitExpr(), qual, node->getMode(),
+                       "local '" + node->getName() + "'"))
+    viewOk = false;
+  // An `inout` local is the borrow's writes (a unique one's: a shared
+  // form is its own, #368).
+  if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy) &&
+      qual.Form == ast::QualForm::Unique)
     qual.Mut = true;
   node->setQualifier(qual);
 
@@ -6425,9 +6835,11 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(elemTy) + "'");
     return false;
   }
-  // An element is a bare reference (an array of references takes no
-  // qualifier); the array's writability is checked above.
-  if (!checkQualifiedFlow(ast::Qualifier{}, node->getValue(),
+  // The value converts into the elements' form (#368); the array's
+  // writability is checked above.
+  const ast::Qualifier elemQual =
+      fixed ? fixed->getElemQual() : slice->getElemQual();
+  if (!checkQualifiedFlow(elemQual, node->getValue(),
                           "an element of '" + placeText(node->getArray()) + "'",
                           node->getLocation()))
     return false;

@@ -349,7 +349,17 @@ the type's name, as a declaration writes it: `mut Cell`, `shared mut
 Node?`, `atomic shared Config` (the bare form spells none).  An importer
 reads it back as the declaration's qualifier (`Sema::injectModule`), so a
 call of `fn make() -> mut Cell` writes through its result there as in the
-module.
+module.  A part of a type takes a qualifier too (#368), which the string
+spells before the part as `ast::typeName` does: a tuple's element `(int,
+shared Node)`, a type argument `List<shared mut Node>`, a function type's
+parameter and result `(shared Node) -> mut Node`, and an array's
+elements, whose `shared` or `shared mut` is written before the type
+(`shared Node[4]`, four shared references), as the source grammar reads
+it.  A declaration's qualifier that a template's type argument gave a
+member of an instance (the `T` result of `get` in `List<shared mut
+Node>`) is written with a leading `@`, `@shared mut Node`, and the
+importer reads it back as such (`ast::Qualifier::FromArgument`: a borrow
+keeps it, and the clone of the value is its copy).
 
 Parameter modes (`view`, `inout`) are appended to the string-typed records
 written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
@@ -627,7 +637,9 @@ module-qualified, nested applications likewise:
 `::collections::List<geometry::shapes::Box<int>?>`. One nominal type
 program-wide (`match`, `equals`, assignment all agree); `Sema::instantiationName`
 produces it once `typeName` spells imported classes canonically. Today's
-spelling has a space after commas (`Pair<Str, int>`); **open question 3.**
+spelling has a space after commas (`Pair<Str, int>`), and a qualified
+argument is part of the name with its spaces (`List<shared mut Node>`, a
+separate instance from `List<Node>`, #368); **open question 3.**
 
 ### 4.5 Hybrid erasure and the `INST` part (#160)
 

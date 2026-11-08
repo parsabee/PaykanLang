@@ -18,6 +18,7 @@
 #include <cassert>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -285,12 +286,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The qualifier of the annotation resolveType last resolved (a
   /// QualifiedType's; unique for any other), taken by the declaration that
   /// records it on its place.
+  /// The qualifier of the annotation resolveType resolved last, for its
+  /// declaration to take; one a template's type argument gave is marked so
+  /// (ast::Qualifier::FromArgument, #368).
   ast::Qualifier LastQualifier;
   ast::Qualifier takeQualifier() {
     return std::exchange(LastQualifier, ast::Qualifier{});
   }
   /// The result qualifier of the function being checked.
   ast::Qualifier CurrentResultQual;
+  /// The result's qualifier of each call through a function value whose
+  /// type gives one (#368): qualifierOf's, as a FunctionSig's ResultQual is
+  /// for a call of a named function.
+  std::unordered_map<const ast::Expr *, ast::Qualifier> ValueCallResultQuals;
   /// Set while a `lock` statement's operand is checked, where a `locked`
   /// place may be named.
   bool LockOperand = false;
@@ -379,6 +387,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkWeakStore(const ast::Expr *src, ast::Qualifier want,
                       ast::Type *slotTy, const std::string &what,
                       ast::SourceLocation loc);
+  /// Whether @p e is a value nothing else holds: a literal, a call's
+  /// result by value (not a borrowed or an `inout` one), `move x`, or a
+  /// conditional of those (#368).
+  bool isFreshValue(const ast::Expr *e);
+  /// The value a `return` is checking, which leaves its local or by-value
+  /// parameter as by `move` (a `return` is its last use): fresh.
+  const ast::Expr *ImplicitMoveSource = nullptr;
+  /// That @p arg may be borrowed by a @p mode parameter of the form @p want
+  /// a type argument gave (#368): exactly that form, through each branch of
+  /// a conditional, or for a `view` a fresh unique value, which becomes it;
+  /// else the error, at @p what (`parameter 'x' of 'f'`).
+  bool checkBorrowForm(ast::Expr *arg, ast::Qualifier want, ast::ParamMode mode,
+                       const std::string &what);
   bool checkBorrowQualifiers(const ast::ParamModes &modes,
                              const std::vector<ast::Qualifier> &quals,
                              const std::vector<ast::Expr *> &args,
@@ -386,12 +407,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// A qualifier written on a borrow (a `view` or `inout` parameter,
   /// result or local) is an error: a borrow takes the object whatever its
   /// qualifier, a `view` is read-only already, and an `inout` of an immutable
-  /// object could not change it (owner, 2026-11-02).
+  /// object could not change it (owner, 2026-11-02).  One a template's type
+  /// argument gave (`view T` with T = `shared Node`, Qualifier::FromArgument)
+  /// is the borrowed object's form, and stands (#368).
   bool checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                             const std::string &what, ast::SourceLocation loc);
   /// Error (and false) when @p place is `locked`: its contents are reached
   /// only in a `lock` block.
   bool checkNotLocked(const ast::Expr *place, ast::SourceLocation loc);
+  /// The qualifier the type of @p e's array or tuple declares its element
+  /// with (#368), for an element access; the bare form for anything else.
+  ast::Qualifier elementQualifier(const ast::Expr *e);
   /// The spelling of a slot: "shared Node", "Node".
   static std::string qualifiedName(ast::Qualifier q, ast::Type *ty);
   /// The source text of a place, for diagnostics: `x`, `x.f`, `xs[i]`.
@@ -776,6 +802,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // superclass was reported, and the mismatch counts as a suppressed
   // follow-on (lostSuperclassMismatch, SW-32).
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
+  /// Whether the tuples in @p dst and @p src (through optionals and nested
+  /// tuples) hold their elements in the same forms (#368), the conversion
+  /// isAssignable allows aside.
+  static bool sameElementForms(const ast::Type *dst, const ast::Type *src);
+  /// Whether @p a and @p b are the same type but for their parts' forms
+  /// (#368): `(int, shared Node)` and `(int, Node)`, for a comparison.
+  static bool sameShapeOfParts(const ast::Type *a, const ast::Type *b);
   /// Whether @p srcTy, which is not assignable to @p dst, might be had each
   /// class on its class's superclass chain kept its superclass (one lost
   /// it, SuperclassLost): @p dst is a class that can have subclasses, or an
@@ -850,17 +883,113 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const TypeContext &context);
+  /// The kinds of part of a type a qualifier may be written on (#368).
+  enum class PartKind {
+    TypeArgument, // `List<shared Node>`
+    Element,      // `(int, shared Node)`, `shared Node[4]`, `shared Node[]`
+    FunctionPart, // `(shared Node) -> shared mut Node`
+  };
+  /// One part being resolved: its kind, and the qualifier written (or
+  /// substituted) on it.
+  struct PartFrame {
+    PartKind Kind;
+    ast::Qualifier Qual;
+  };
   /// resolveType of a part of a type (a tuple's element, a type argument,
-  /// an array's element, a function type's parameter or result), where no
-  /// qualifier is kept yet (#368): NestedTypeDepth counts them.
+  /// an array's element, a function type's parameter or result).  Its
+  /// qualifier (#368) goes into @p qual, never to the declaration: the
+  /// composite holds it (TupleType::ElemQuals and the like), or a type
+  /// argument's canonical QualifiedType does.
   ast::Type *resolvePart(ast::Type *ty, ast::SourceLocation loc,
-                         const TypeContext &context) {
-    ++NestedTypeDepth;
+                         const TypeContext &context, PartKind kind,
+                         ast::Qualifier &qual) {
+    PartFrames.push_back({kind, {}});
     ast::Type *t = resolveType(ty, loc, context);
-    --NestedTypeDepth;
+    qual = PartFrames.back().Qual;
+    PartFrames.pop_back();
     return t;
   }
-  unsigned NestedTypeDepth = 0;
+  /// What resolveType was allowed for the annotation it resolves (the
+  /// one-shot flags FixedArrayAllowed and the like), and the deferred checks
+  /// it started with.
+  struct TypeFlags {
+    bool Fixed;
+    bool Inferred;
+    bool Slice;
+    const char *NoArray;
+    size_t DeferredChecks;
+  };
+  /// Where the annotation being resolved leaves its qualifier: the part's
+  /// frame, or LastQualifier for a whole place's.
+  ast::Qualifier &typeSlot() {
+    return inTypePart() ? PartFrames.back().Qual : LastQualifier;
+  }
+  ast::Type *checkedType(const TypeFlags &flags, ast::Type *canonical);
+  ast::Type *resolveQualifiedAnnotation(ast::QualifiedType *qt,
+                                        ast::SourceLocation loc,
+                                        const TypeContext &context,
+                                        const TypeFlags &flags);
+  ast::Type *resolveAtomicAnnotation(ast::AtomicType *at,
+                                     ast::SourceLocation loc,
+                                     const TypeContext &context,
+                                     const TypeFlags &flags);
+  ast::Type *resolveClassNameAnnotation(ast::ClassType *ct,
+                                        ast::SourceLocation loc,
+                                        const TypeContext &context,
+                                        const TypeFlags &flags);
+  ast::Type *resolveSliceAnnotation(ast::ArrayType *at, ast::SourceLocation loc,
+                                    const TypeContext &context,
+                                    const TypeFlags &flags);
+  ast::Type *resolveFixedArrayAnnotation(ast::FixedArrayType *ft,
+                                         ast::SourceLocation loc,
+                                         const TypeContext &context,
+                                         const TypeFlags &flags);
+  ast::Type *resolveGenericAnnotation(ast::GenericType *gt,
+                                      ast::SourceLocation loc,
+                                      const TypeContext &context,
+                                      const TypeFlags &flags);
+  ast::Type *resolveOptionalAnnotation(ast::OptionalType *ot,
+                                       ast::SourceLocation loc,
+                                       const TypeContext &context,
+                                       const TypeFlags &flags);
+  ast::Type *resolveFunctionAnnotation(ast::FunctionType *fnt,
+                                       ast::SourceLocation loc,
+                                       const TypeContext &context,
+                                       const TypeFlags &flags);
+  ast::Type *resolveTupleAnnotation(ast::TupleType *tt, ast::SourceLocation loc,
+                                    const TypeContext &context,
+                                    const TypeFlags &flags);
+  /// A type argument, resolved: its qualifier (#368) on it, as the
+  /// canonical QualifiedType a template's substitution holds.
+  ast::Type *resolveTypeArgument(ast::Type *ty, ast::SourceLocation loc,
+                                 const TypeContext &context) {
+    ast::Qualifier q;
+    ast::Type *t = resolvePart(ty, loc, context, PartKind::TypeArgument, q);
+    return t ? Ctx.getQualifiedType(q, t) : nullptr;
+  }
+  /// The parts being resolved, innermost last.  Those below PartBase are an
+  /// annotation's that a template's instantiation interrupted: at PartBase,
+  /// an annotation is a whole place's, whose qualifier is the place's
+  /// (LastQualifier).  A deque: resolveType holds a reference to the
+  /// innermost frame while it resolves parts of its own.
+  std::deque<PartFrame> PartFrames;
+  size_t PartBase = 0;
+  bool inTypePart() const { return PartFrames.size() > PartBase; }
+  /// `shared X[n]` (or `shared X[]`, through optionals) as the array of
+  /// `shared X` it is (#368): resolved @p ty with @p q on its innermost
+  /// elements, or nullptr when it is no array of references, or (@p failed
+  /// set, and reported) when the elements' own qualifier does not join.
+  ast::Type *qualifyElements(ast::Qualifier q, ast::Type *ty,
+                             ast::SourceLocation loc, bool &failed);
+  /// Whether qualifier @p q may be written on a part of @p kind; else
+  /// reports why at @p loc.
+  bool checkPartQualifier(ast::Qualifier q, PartKind kind,
+                          ast::SourceLocation loc);
+  /// The qualifier a template's written @p outer (on `T`) and @p inner (T's
+  /// argument's) join to (#368, docs/design/concurrency.md "Generics and
+  /// Copyable"), into @p out; false when they join to none.
+  static bool joinQualifiers(ast::Qualifier outer, ast::Qualifier inner,
+                             ast::Qualifier &out);
   // resolveType for what holds a value (a variable, a parameter, a field):
   // `void` has none, so it is reported (`<context> cannot have type
   // 'void'`) and nullptr returned.
@@ -2385,6 +2514,7 @@ private:
     std::string Name;               // canonical instantiation name
     ast::SourceLocation RequestLoc; // where the instantiation was requested
     StringSet TypeParams;           // the template's type parameter names
+    std::vector<ast::Type *> Args;  // its type arguments (#368)
     /// The module of a template of another module (null for this one's):
     /// its body's locations are in that module's file.
     const ModuleTemplates *Origin = nullptr;
@@ -2567,6 +2697,32 @@ private:
   /// parameter used as a value, or as the name of a field, a parameter or a
   /// local (isTypeNameForVariable).
   const StringSet *CurrentTypeParams = nullptr;
+  /// The type arguments of the template instance whose code is being
+  /// checked (#368), or nullptr in the program's own code.  In a template's
+  /// code a reference whose Copyable form a type argument gave (a `T` with
+  /// T = `shared Node`, Qualifier::FromArgument; an element of a `T[]`) is
+  /// cloned and moved as its copy, the same object, and a `view` passes the
+  /// form on to the template it calls; in the program's own code `s.clone()`
+  /// of a `shared` variable is its class's clone.
+  const std::vector<ast::Type *> *CurrentInstanceArgs = nullptr;
+  bool inInstanceCode() const { return CurrentInstanceArgs != nullptr; }
+  /// While alive, the code checked is the instance's with @p args, or the
+  /// program's own when @p args is nullptr.
+  class InstanceCode {
+    Sema &S;
+    const std::vector<ast::Type *> *Saved;
+
+  public:
+    InstanceCode(Sema &s, const std::vector<ast::Type *> *args)
+        : S(s), Saved(std::exchange(s.CurrentInstanceArgs, args)) {}
+    ~InstanceCode() { S.CurrentInstanceArgs = Saved; }
+    InstanceCode(const InstanceCode &) = delete;
+    InstanceCode &operator=(const InstanceCode &) = delete;
+  };
+  /// Whether @p q on a part of type @p ty, in a template's code, is a type
+  /// argument's own Copyable form (the instance has `q ty` as an argument):
+  /// a part's qualifier carries no FromArgument mark of its own.
+  bool isArgumentForm(ast::Qualifier q, ast::Type *ty) const;
   /// While alive, CurrentTypeParams is @p params: a template's declarations
   /// (its fields, its parameters, its methods' and `static fn`s') are
   /// checked with its own type parameters, not those of the generic body
@@ -2748,6 +2904,11 @@ private:
   /// leave open are taken from @p expected, the type the call's value flows
   /// into, matched against the template's result type @p resultPattern
   /// (`r: Result<int, Error> = ok(1)` gives `ok`'s `E`).
+  /// @p a and @p b, types that differ in their parts' forms only (#368), as
+  /// the one whose parts are the stronger of each pair (a unique part and a
+  /// `shared` one join to the `shared` one); nullptr when they differ
+  /// otherwise.
+  ast::Type *joinPartForms(ast::Type *a, ast::Type *b);
   bool inferTypeArgs(const std::string &templateName,
                      const std::vector<const std::string *> &typeParams,
                      const std::vector<ast::Type *> &paramTypes,
@@ -2755,7 +2916,15 @@ private:
                      ast::SourceLocation loc, std::vector<ast::Type *> &out,
                      const std::string &spelling = "",
                      ast::Type *resultPattern = nullptr,
-                     ast::Type *expected = nullptr);
+                     ast::Type *expected = nullptr,
+                     const std::vector<ast::Qualifier> &argForms = {});
+  /// The forms inference binds (#368): each argument's `shared` or `atomic
+  /// shared` one, its parameter's mode given by @p modeOf (a by-value or
+  /// `inout` `T` binds `shared Node` for a `shared Node` argument; a `view`
+  /// the plain type, but in a template's code a type argument's form).
+  std::vector<ast::Qualifier>
+  inferenceForms(const std::vector<ast::Expr *> &args,
+                 const std::function<ast::ParamMode(size_t)> &modeOf);
 
   /// Resolve a call whose callee is a template (or carries explicit type
   /// arguments): instantiate and rewrite the callee name.  A generic

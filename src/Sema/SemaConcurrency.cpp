@@ -20,11 +20,30 @@ std::string at(ast::SourceLocation loc) {
          std::to_string(loc.getColumnStart());
 }
 
-/// A value of plain parts: a number, bool, char or enum.
+/// A value of plain parts: a number, bool, char, or an enum whose
+/// variants' fields are plain (a payload's reference would be counted from
+/// every iteration's thread, `E<shared mut Node>`).
 bool isPlainValue(ast::Type *ty) {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return bt->getTypeKind() != ast::BuiltinType::Void;
-  return ast::isa<ast::EnumType>(ty);
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return isPlainValue(ot->getInnerType());
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return isPlainValue(ft->getElementType());
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) { // a struct too
+    for (ast::Type *e : tt->getElementTypes())
+      if (!isPlainValue(e))
+        return false;
+    return true;
+  }
+  auto *et = ast::dyn_cast<ast::EnumType>(ty);
+  if (!et)
+    return false;
+  for (size_t i = 0; i < et->getNumVariants(); ++i)
+    if (ast::StructType *p = et->getPayload(i))
+      if (!isPlainValue(p))
+        return false;
+  return true;
 }
 
 } // namespace
@@ -354,12 +373,15 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
   if (!ty || ast::isa<ast::PoisonType>(ty) || ast::isa<ast::BuiltinType>(ty) ||
       ast::isa<ast::AtomicType>(ty))
     return true;
+  // A qualified type argument (#368): `T` with T = `shared Node` copies.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return isCopyablePart(qt->getInnerType(), qt->getQualifier(), why);
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return isCopyable(ot->getInnerType(), why);
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
-    if (isCopyable(ft->getElementType(), why))
+    if (isCopyablePart(ft->getElementType(), ft->getElemQual(), why))
       return true;
-    part("elements", ft->getElementType(), {});
+    part("elements", ft->getElementType(), ft->getElemQual());
     return false;
   }
   // A container's storage, a `mem::Buffer<T>`: named as that, not by the
@@ -369,8 +391,8 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
       *why = "storage ('" + typeName(ty) + "' of '" + typeName(elem) + "')";
     return false;
   }
-  // A struct's fields carry qualifiers (a `shared` one copies); a tuple's
-  // elements do not.  Before the tuple case, which a struct is too.
+  // A struct's fields carry qualifiers (a `shared` one copies), as a
+  // tuple's elements do.  Before the tuple case, which a struct is too.
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     const auto &types = st->getElementTypes();
     for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
@@ -385,8 +407,9 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     const auto &types = tt->getElementTypes();
     for (size_t i = 0; i < types.size(); ++i)
-      if (!isCopyable(types[i], why)) {
-        part("element '." + std::to_string(i) + "'", types[i], {});
+      if (!isCopyablePart(types[i], tt->getElemQual(i), why)) {
+        part("element '." + std::to_string(i) + "'", types[i],
+             tt->getElemQual(i));
         return false;
       }
     return true;
@@ -451,6 +474,8 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
   // Every Copyable type is Cloneable: its clone is the copy.
   if (isCopyable(ty) || ty == Ctx.getStrTy())
     return true;
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return isCloneablePart(qt->getInnerType(), qt->getQualifier(), why);
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return isCloneable(ot->getInnerType(), why);
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
@@ -462,9 +487,9 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
     return false;
   }
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
-    if (isCloneable(ft->getElementType()))
+    if (isCloneablePart(ft->getElementType(), ft->getElemQual()))
       return true;
-    part("elements", ft->getElementType(), {});
+    part("elements", ft->getElementType(), ft->getElemQual());
     return false;
   }
   // A struct with an `impl Cloneable for` block clones as it says; else a
@@ -485,8 +510,9 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     const auto &types = tt->getElementTypes();
     for (size_t i = 0; i < types.size(); ++i)
-      if (!isCloneable(types[i])) {
-        part("element '." + std::to_string(i) + "'", types[i], {});
+      if (!isCloneablePart(types[i], tt->getElemQual(i))) {
+        part("element '." + std::to_string(i) + "'", types[i],
+             tt->getElemQual(i));
         return false;
       }
     return true;
@@ -516,9 +542,11 @@ ast::Type *Sema::bufferElementType(ast::Type *ty) const {
   if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
       st->getElementTypes()[0] != Ctx.getObjTy())
     return nullptr;
-  // `view fn at(i: unsigned) -> view T`: its result is `T`.
+  // `view fn at(i: unsigned) -> view T`: its result is `T`, qualified as
+  // T's argument is (#368).
   const ast::MethodDecl *at = st->findMethod("at");
-  return at ? at->getReturnType() : nullptr;
+  return at ? Ctx.getQualifiedType(at->getResultQual(), at->getReturnType())
+            : nullptr;
 }
 
 bool Sema::checkParallelBufferCall(const ast::MethodCallExpr *node,
@@ -565,12 +593,18 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
     return "";
   if (ast::isa<ast::FunctionType>(ty))
     return at("is a function value, whose captures are not known");
+  // A qualified type argument (#368): `mem::Buffer<shared Node>`'s elements
+  // are `shared`.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return uncrossable(qt->getInnerType(), qt->getQualifier(), path);
   if (auto *tt = ast::dyn_cast<ast::TaskType>(ty))
     return uncrossable(tt->getInnerType(), {}, path);
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return uncrossable(ot->getInnerType(), q, path);
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
-    return uncrossable(ft->getElementType(), q, path);
+    return uncrossable(ft->getElementType(),
+                       ft->getElemQual().isUnique() ? q : ft->getElemQual(),
+                       path);
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     // `mem::Buffer<T>` crosses when `T` does (the design's table): its one
     // field is the runtime's buffer object, whose walk freezes the
@@ -595,7 +629,7 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
     const auto &types = tt->getElementTypes();
     for (size_t i = 0; i < types.size(); ++i) {
       const std::string e = "." + std::to_string(i);
-      std::string why = uncrossable(types[i], {}, path + e);
+      std::string why = uncrossable(types[i], tt->getElemQual(i), path + e);
       if (!why.empty())
         return why;
     }
@@ -739,7 +773,7 @@ bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
 bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
                                 const std::string &what,
                                 ast::SourceLocation loc) {
-  if (mode == ast::ParamMode::Value || q.isUnique())
+  if (mode == ast::ParamMode::Value || q.isUnique() || q.FromArgument)
     return true;
   // A borrow is written with no qualifier: it borrows the object whatever
   // its qualifier and counts nothing.  A `view` is read-only already, and
@@ -804,6 +838,25 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     const ast::Qualifier q = qualifierOf(args[i]);
     const std::string text = placeText(args[i]);
     const char *mode = ast::paramModeName(modes.mode(i));
+    // A borrow whose form a template's type argument gave (`view T`,
+    // `inout T` with T = `shared Node`, #368) reads as that form, and the
+    // callee may keep a copy of it (its clone is the copy) or trade it for
+    // another (`mem::replace`): it takes a reference of exactly that form.
+    // A `view` also takes a fresh unique value, which nothing else holds and
+    // which becomes that form (frozen, for `atomic shared`).  An `inout` of
+    // a `mut` T takes a unique one, a `view` of one any form.
+    const ast::Qualifier want = i < quals.size() ? quals[i] : ast::Qualifier{};
+    const bool copied =
+        want.isSharedForm() || want.Form == ast::QualForm::Locked;
+    if (want.FromArgument &&
+        ((modes.mode(i) == ast::ParamMode::Inout && !want.isUnique()) ||
+         (modes.mode(i) == ast::ParamMode::View && copied))) {
+      if (!checkBorrowForm(args[i], want, modes.mode(i),
+                           "parameter '" + modes.name(i) + "' of '" + callee +
+                               "'"))
+        ok = false;
+      continue;
+    }
     // A `view shared` parameter is a weak field's in a generated `__init__`
     // (a program writes none): a `weak` field names a `shared` object, a
     // `weak mut` one a `shared mut` object.
@@ -836,6 +889,65 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     }
   }
   return ok;
+}
+
+bool Sema::isFreshValue(const ast::Expr *e) {
+  if (!e)
+    return false;
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    // A returned conditional hands on the locals its branches name.
+    const ast::Expr *returning = ImplicitMoveSource;
+    if (e == returning)
+      ImplicitMoveSource = te->getTrueExpr();
+    const bool t = isFreshValue(te->getTrueExpr());
+    if (e == returning)
+      ImplicitMoveSource = te->getFalseExpr();
+    const bool f = isFreshValue(te->getFalseExpr());
+    ImplicitMoveSource = returning;
+    return t && f;
+  }
+  if (ast::isa<ast::TupleLiteralExpr>(e) ||
+      ast::isa<ast::ArrayLiteralExpr>(e) || ast::isa<ast::NoneLiteral>(e))
+    return true;
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
+    return u->getOpcode() == ast::UnaryOpcode::Move;
+  // A local or a by-value parameter a `return` hands on (its last use).
+  if (e == ImplicitMoveSource && isOwnedBinder(e))
+    return true;
+  // A call's result by value is the caller's own; a borrowed one is not.
+  if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e) ||
+      ast::isa<ast::CallValueExpr>(e))
+    return !borrowResultOf(e) && !e->isInoutResult();
+  return false;
+}
+
+bool Sema::checkBorrowForm(ast::Expr *arg, ast::Qualifier want,
+                           ast::ParamMode mode, const std::string &what) {
+  if (!arg || ast::isa<ast::NoneLiteral>(arg))
+    return true;
+  // Each branch of a conditional is a reference the borrow may name.
+  if (auto *te = ast::dyn_cast<ast::TernaryExpr>(arg)) {
+    const bool t = checkBorrowForm(te->getTrueExpr(), want, mode, what);
+    return checkBorrowForm(te->getFalseExpr(), want, mode, what) && t;
+  }
+  const ast::Qualifier have = qualifierOf(arg);
+  if (have == want)
+    return true;
+  // A fresh unique value (`Node(1)`, a unique result, `move u`) becomes
+  // the form, as it would flowing into a slot of it.
+  if (mode == ast::ParamMode::View && have.Form == ast::QualForm::Unique &&
+      isFreshValue(arg))
+    return checkQualifiedFlow(want, arg, what, arg->getLocation(),
+                              /*implicitMove=*/false, /*materialize=*/true);
+  ast::Type *ty = arg->getResolvedType();
+  error(arg->getLocation(),
+        "cannot pass '" + placeText(arg) + "' (a '" + qualifiedName(have, ty) +
+            "') to " + what + ", " +
+            (mode == ast::ParamMode::Inout ? "an '" : "a '") +
+            ast::paramModeName(mode) + " " + qualifiedName(want, ty) +
+            "': a borrow of a type argument's form takes that form, which the "
+            "callee may keep a copy of");
+  return false;
 }
 
 // -- Moves (docs/design/concurrency.md, "Use after move")
@@ -1005,6 +1117,15 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
                      "': it is a 'weak' field, which owns nothing");
       return nullptr;
     }
+    // In a template's code, the part moved holding a type argument's
+    // Copyable form (`value: T` with T = `shared Node`, #368) moves as its
+    // copy, as a Copyable value does, and stays: `move n.value` of a node of
+    // a `LinkedList<shared Node>`.  The links on the way are unique.
+    if (q.Form != ast::QualForm::Unique && x == ma && inInstanceCode() &&
+        q.FromArgument && isCopyablePart(link->getResolvedType(), q)) {
+      node->setMoveIsCopy(true);
+      continue;
+    }
     if (q.Form != ast::QualForm::Unique) {
       error(loc, "cannot move '" + placeText(link) + "': it is '" +
                      qualifiedName(q, link->getResolvedType()) +
@@ -1065,9 +1186,26 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
                 "': an element leaves by 'mem::replace' or 'mem::take'");
       return nullptr;
     }
+    // A conditional moves a branch: write `move` in each (#368: as a whole
+    // it moves neither).
+    if (ast::isa<ast::TernaryExpr>(operand)) {
+      error(node->getLocation(),
+            "cannot move a conditional: write 'move' in each branch that "
+            "names a variable");
+      return nullptr;
+    }
     // `move` before a temporary (a call, a constructor, a literal): it is
-    // owned already, and nothing happens.
-    return resolveExprType(operand);
+    // owned already, and nothing happens.  A borrowed result names storage
+    // another owner holds, which a move would not take from it.
+    ast::Type *ty = resolveExprType(operand);
+    if (ty && (borrowResultOf(operand) || operand->isInoutResult())) {
+      error(node->getLocation(),
+            "cannot move '" + placeText(operand) +
+                "': it is a borrow of storage its owner keeps; write "
+                "'mem::replace' or 'mem::take' to take it from there");
+      return nullptr;
+    }
+    return ty;
   }
   const std::string &name = id->getName();
   if (name == names::kSelf) {
@@ -1158,8 +1296,21 @@ ast::Qualifier Sema::qualifierOfVar(std::string_view name) const {
 ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
   if (!e)
     return {};
-  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
-    return qualifierOf(te->getTrueExpr());
+  // A conditional is held as both its branches are: a unique one joins a
+  // `shared` one's form (it converts into it); two writable unique ones
+  // are writable.  Branches of two other forms are each checked as they
+  // flow (checkQualifiedFlow).
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    ast::Qualifier t = qualifierOf(te->getTrueExpr());
+    const ast::Qualifier f = qualifierOf(te->getFalseExpr());
+    if (t.Form == ast::QualForm::Unique && f.Form == ast::QualForm::Unique) {
+      t.Mut = t.Mut && f.Mut;
+      return t;
+    }
+    if (t.Form == ast::QualForm::Unique)
+      return f;
+    return t;
+  }
   if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
     return u->getOpcode() == ast::UnaryOpcode::Move
                ? qualifierOf(u->getOperand())
@@ -1190,6 +1341,23 @@ ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
     return q;
   }
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    // An element declared `shared` (#368) is that object's form through
+    // any root, as a `shared` field is.
+    const ast::Type *arr = se->getArray()->getResolvedType();
+    ast::Qualifier part;
+    if (const auto *ft =
+            arr ? ast::dyn_cast<ast::FixedArrayType>(arr) : nullptr)
+      part = ft->getElemQual();
+    else if (const auto *st =
+                 arr ? ast::dyn_cast<ast::SliceType>(arr) : nullptr)
+      part = st->getElemQual();
+    if (!part.isUnique()) {
+      // A type argument's form, in a template's code (an element of a
+      // `T[]` with T = `shared Node`).
+      part.FromArgument = isArgumentForm(
+          part, const_cast<ast::SubscriptExpr *>(se)->getResolvedType());
+      return part;
+    }
     // An element of a fixed-size array (a value) follows the variable that
     // holds the array; a slice's its array's writability (`inout T[]`).
     ast::Qualifier q = qualifierOf(se->getArray());
@@ -1198,21 +1366,42 @@ ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
     return q;
   }
   if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+    const ast::Type *tup = ti->getTuple()->getResolvedType();
+    if (const auto *tt = tup ? ast::dyn_cast<ast::TupleType>(tup) : nullptr;
+        tt && !tt->getElemQual(ti->getIndex()).isUnique()) {
+      ast::Qualifier part = tt->getElemQual(ti->getIndex());
+      part.FromArgument =
+          isArgumentForm(part, tt->getElementType(ti->getIndex()));
+      return part;
+    }
     ast::Qualifier q = qualifierOf(ti->getTuple());
     if (q.Form == ast::QualForm::Unique)
       q.Mut = valueRootWritable(ti->getTuple());
     return q;
   }
+  // A call through a function value: its type's result (#368).
+  if (auto it = ValueCallResultQuals.find(e); it != ValueCallResultQuals.end())
+    return it->second;
   if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    if (ce->calleeIsValue())
+      return {};
     if (const FunctionSig *sig = lookupFunction(ce->getCalleeName()))
       return sig->ResultQual;
     return {};
   }
   if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    // A Copyable reference's clone is the copy: the same object, held as
+    // the receiver is.
+    if (mc->cloneIsCopy())
+      return qualifierOf(mc->getReceiver());
     ast::Type *rt = ast::stripOptional(
         const_cast<ast::Expr *>(mc->getReceiver())->getResolvedType());
     if (const auto *ct = ast::dyn_cast<ast::ClassType>(rt))
       if (const ast::MethodDecl *m = ct->findMethod(mc->getMethodName()))
+        return m->getResultQual();
+    // A struct's method too (`mem::Buffer<shared Node>`'s `pop`).
+    if (const auto *st = ast::dyn_cast<ast::StructType>(rt))
+      if (const ast::MethodDecl *m = st->findMethod(mc->getMethodName()))
         return m->getResultQual();
     return {};
   }
@@ -1293,6 +1482,130 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
   return true;
 }
 
+bool Sema::isArgumentForm(ast::Qualifier q, ast::Type *ty) const {
+  if (!CurrentInstanceArgs || !ty || q.isUnique() ||
+      !(q.isSharedForm() || q.Form == ast::QualForm::Locked))
+    return false;
+  for (const ast::Type *a : *CurrentInstanceArgs)
+    if (const auto *qt = ast::dyn_cast<ast::QualifiedType>(a);
+        qt && qt->getQualifier() == q && qt->getInnerType() == ty)
+      return true;
+  return false;
+}
+
+bool Sema::joinQualifiers(ast::Qualifier outer, ast::Qualifier inner,
+                          ast::Qualifier &out) {
+  // docs/design/concurrency.md, "Generics and Copyable": a qualifier
+  // written on `T` joins T's own, as `T?` joins T's None.
+  const ast::Qualifier mut{ast::QualForm::Unique, true};
+  if (outer.isUnique() || outer == inner) {
+    out = inner;
+    return true;
+  }
+  if (inner.isUnique() || inner == mut) { // a unique argument takes it
+    out = outer;
+    return true;
+  }
+  // `mut T` with T = `shared mut Node` writes through what is written
+  // through already.
+  if (outer == mut && inner == ast::Qualifier{ast::QualForm::Shared, true}) {
+    out = inner;
+    return true;
+  }
+  return false;
+}
+
+bool Sema::checkPartQualifier(ast::Qualifier q, PartKind kind,
+                              ast::SourceLocation loc) {
+  if (q.isUnique())
+    return true;
+  const std::string spelled = std::string("'") + q.spelling() + "'";
+  switch (kind) {
+  case PartKind::TypeArgument:
+    // A template's code reaches its `T` as it is: a cell's contents are
+    // reached in a `lock` block, which it does not know.
+    if (q.Form == ast::QualForm::Locked) {
+      error(loc, spelled +
+                     " cannot qualify a type argument yet: a cell's contents "
+                     "are reached in a 'lock' block, which a template's code "
+                     "does not write");
+      return false;
+    }
+    return true;
+  case PartKind::Element:
+    if (q.Form == ast::QualForm::Unique) { // `mut`
+      error(loc, "an element takes no 'mut': it is written as its variable "
+                 "is (a 'let' variable's never), as a unique field is as its "
+                 "object is");
+      return false;
+    }
+    if (q.Form != ast::QualForm::Shared) {
+      error(loc, spelled +
+                     " cannot qualify an element yet: a tuple's or an array's "
+                     "element is 'shared' or 'shared mut' (a frozen object "
+                     "or a cell goes in a struct's field)");
+      return false;
+    }
+    return true;
+  case PartKind::FunctionPart:
+    if (q.Form == ast::QualForm::AtomicShared ||
+        q.Form == ast::QualForm::Locked) {
+      error(loc, spelled +
+                     " cannot qualify a function type's parameter or result "
+                     "yet: it takes 'mut', 'shared' or 'shared mut'");
+      return false;
+    }
+    return true;
+  }
+  return true;
+}
+
+ast::Type *Sema::qualifyElements(ast::Qualifier q, ast::Type *ty,
+                                 ast::SourceLocation loc, bool &failed) {
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
+    ast::Type *inner = qualifyElements(q, ot->getInnerType(), loc, failed);
+    return inner ? Ctx.getOptionalType(inner) : nullptr;
+  }
+  // The innermost array's elements, joined with their own qualifier (a
+  // template's `shared T[4]` with T = `shared Node`).
+  auto element = [&](ast::Type *elem, ast::Qualifier held,
+                     ast::Qualifier &out) {
+    if (!ast::isRefType(elem))
+      return false;
+    if (joinQualifiers(q, held, out) &&
+        checkPartQualifier(out, PartKind::Element, loc))
+      return true;
+    if (!failed)
+      error(loc, std::string("'") + q.spelling() +
+                     "' cannot qualify elements held '" + held.spelling() +
+                     "': a type takes one qualifier");
+    failed = true;
+    return false;
+  };
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    if (ast::isa<ast::FixedArrayType>(ft->getElementType())) {
+      ast::Type *inner = qualifyElements(q, ft->getElementType(), loc, failed);
+      return inner ? Ctx.getFixedArrayType(inner, ft->getLength()) : nullptr;
+    }
+    ast::Qualifier out;
+    return element(ft->getElementType(), ft->getElemQual(), out)
+               ? Ctx.getFixedArrayType(ft->getElementType(), ft->getLength(),
+                                       out)
+               : nullptr;
+  }
+  if (auto *st = ast::dyn_cast<ast::SliceType>(ty)) {
+    if (ast::isa<ast::FixedArrayType>(st->getElementType())) {
+      ast::Type *inner = qualifyElements(q, st->getElementType(), loc, failed);
+      return inner ? Ctx.getSliceType(inner) : nullptr;
+    }
+    ast::Qualifier out;
+    return element(st->getElementType(), st->getElemQual(), out)
+               ? Ctx.getSliceType(st->getElementType(), out)
+               : nullptr;
+  }
+  return nullptr;
+}
+
 bool Sema::isOwnedBinder(const ast::Expr *e) {
   const auto *id = e ? ast::dyn_cast<ast::Identifier>(e) : nullptr;
   if (!id || id->isFunctionRef() || id->getName() == names::kSelf ||
@@ -1313,6 +1626,31 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
     ok = checkQualifiedFlow(dst, te->getFalseExpr(), what, loc, implicitMove,
                             /*materialize=*/false) &&
          ok;
+    // Made a cell or frozen as a whole, so its branches are both new values
+    // or both of the form: a cell beside a new object would be one, or two.
+    // Every branch, through nested conditionals; a None is neither.
+    bool anyNew = false, anyForm = false;
+    std::function<void(const ast::Expr *)> branches = [&](const ast::Expr *b) {
+      if (const auto *nt = ast::dyn_cast<ast::TernaryExpr>(b)) {
+        branches(nt->getTrueExpr());
+        branches(nt->getFalseExpr());
+      } else if (!ast::isa<ast::NoneLiteral>(b)) {
+        (qualifierOf(b).Form == ast::QualForm::Unique ? anyNew : anyForm) =
+            true;
+      }
+    };
+    branches(te);
+    if (ok && materialize &&
+        (dst.Form == ast::QualForm::Locked ||
+         dst.Form == ast::QualForm::AtomicShared) &&
+        anyNew && anyForm) {
+      error(loc, "a conditional flowing into " + what + " (" +
+                     qualifiedName(dst, src->getResolvedType()) +
+                     ") has a branch of that form and a new value: make the "
+                     "new value '" +
+                     dst.spelling() + "' first, so both branches are");
+      return false;
+    }
     if (ok && materialize)
       materializeFlow(dst, src, loc);
     return ok;
@@ -1395,6 +1733,10 @@ bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
 }
 
 bool Sema::isCopyPlace(const ast::Expr *e) {
+  // An `inout` result names the storage it borrows (#368): what it holds
+  // stays there, so a copy of it is another owner.
+  if (e && e->isInoutResult())
+    return true;
   // A named function is no place: naming it makes a new function value.
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
     return !id->isFunctionRef();
@@ -1602,6 +1944,20 @@ std::string Sema::constPlace(const ast::Expr *e) {
         if (!declared.Mut)
           return immutableText("field '" + ma->getFieldName() + "'", q,
                                typeName(ty));
+      } else if (q.Form != ast::QualForm::Unique &&
+                 (ast::isa<ast::SubscriptExpr>(p) ||
+                  ast::isa<ast::TupleIndexExpr>(p))) {
+        // An element declared `shared` (#368) is immutable by its own
+        // declaration, as a field is; a unique one follows its root.
+        if (const ast::Qualifier declared = elementQualifier(p);
+            !declared.isUnique() && !declared.Mut)
+          return immutableText("element '" + placeText(p) + "'", q,
+                               typeName(ty));
+      } else if (q.Form != ast::QualForm::Unique &&
+                 !ast::isa<ast::Identifier>(p) && !ma) {
+        // What a call gives held `shared` or frozen (a template's `T`'s
+        // form, #368): its own form, through no root.
+        return immutableText("'" + placeText(p) + "'", q, typeName(ty));
       }
     }
     if (ma)
@@ -1613,6 +1969,23 @@ std::string Sema::constPlace(const ast::Expr *e) {
     else
       return "";
   }
+}
+
+ast::Qualifier Sema::elementQualifier(const ast::Expr *e) {
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    const ast::Type *arr = se->getArray()->getResolvedType();
+    if (const auto *ft =
+            arr ? ast::dyn_cast<ast::FixedArrayType>(arr) : nullptr)
+      return ft->getElemQual();
+    if (const auto *st = arr ? ast::dyn_cast<ast::SliceType>(arr) : nullptr)
+      return st->getElemQual();
+  }
+  if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+    const ast::Type *tup = ti->getTuple()->getResolvedType();
+    if (const auto *tt = tup ? ast::dyn_cast<ast::TupleType>(tup) : nullptr)
+      return tt->getElemQual(ti->getIndex());
+  }
+  return {};
 }
 
 bool Sema::checkNotLocked(const ast::Expr *place, ast::SourceLocation loc) {

@@ -314,9 +314,10 @@ fn main() -> int {
 // `Copyable` is structural: numbers, `bool`, `char`, an `atomic` handle's
 // value, a function value (its copies share its closure), and an enum,
 // tuple or struct of Copyable parts (a struct's `shared` field counts) meet
-// a `T: Copyable` bound.  A unique class, a `Str`, and a struct holding a
-// unique reference do not, with the reason; and `impl Copyable for X` is an
-// error.
+// a `T: Copyable` bound, and so does a `shared` reference, which binds `T`
+// to its form (#368, tests/Sema/QualifiedPartTests.cpp).  A unique class, a
+// `Str`, and a struct holding a unique reference do not, with the reason;
+// and `impl Copyable for X` is an error.
 TEST(Concurrency, CopyableIsAStructuralBound) {
   auto ok = semaCheck(R"(class Node { id: int; }
 struct Point { x: int; y: int; }

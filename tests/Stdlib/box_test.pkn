@@ -64,7 +64,7 @@ fn main() -> int {
   p: inout (int, Str) = pairAlias.get();
   p = (2, "two");
   io::println(Str(pair.get().0) + pair.get().1);
-  kept = pair.get();
+  kept = pair.get().clone(); // its value, the box's own: a copy of its own
   q: inout (int, Str) = pair.get();
   q = (3, "three");
   io::println(Str(kept.0) + kept.1 + " " + Str(pair.get().0) + pair.get().1);

@@ -49,6 +49,12 @@ std::string Sema::placeText(const ast::Expr *e) {
   if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e))
     return Sema::displayName(ce->getCalleeName()) +
            (ce->getArguments().empty() ? "()" : "(...)");
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && (u->getOpcode() == ast::UnaryOpcode::Move ||
+            u->getOpcode() == ast::UnaryOpcode::Await))
+    return std::string(u->getOpcode() == ast::UnaryOpcode::Move ? "move "
+                                                                : "await ") +
+           placeText(u->getOperand());
   return "...";
 }
 

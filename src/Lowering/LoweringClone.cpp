@@ -145,16 +145,21 @@ void ModuleLowering::cloneMemParts(const Val &addr, ast::Type *ty) {
         continue;
       const int64_t off = tupleElementOffset(tt, i);
       clonePart(off == 0 ? addr : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
-                part, {});
+                part, tt->getElemQual(i));
     }
     return;
   }
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     ast::Type *elem = ft->getElementType();
+    const ast::Qualifier q = ft->getElemQual();
     forEachSlot(addr, 0, ft->getLength(), memLayout(elem).Size,
-                [&](const Val &at) { clonePart(at, elem, {}); });
+                [&](const Val &at) { clonePart(at, elem, q); });
     return;
   }
+  // A tagged union is Cloneable only when Copyable: every reference in it
+  // is held in a Copyable form, which the copy retained.
+  if (ast::isPayloadEnum(ty))
+    return;
   reportInternalError("a clone of a '" + ast::typeName(ty) +
                       "' held in memory");
 }
@@ -222,6 +227,8 @@ void ModuleLowering::emitDerivedClone(pir::Function *fn, ast::ClassType *ct) {
 bool ModuleLowering::isBuiltinClone(const ast::MethodCallExpr *node) const {
   if (node->getMethodName() != kMethodClone || node->getNumArguments() != 0)
     return false;
+  if (node->cloneIsCopy()) // a `shared` reference's: the copy
+    return true;
   ast::Type *ty = node->getReceiver()->getResolvedType();
   if (!ty)
     return false;
@@ -240,6 +247,10 @@ bool ModuleLowering::isBuiltinClone(const ast::MethodCallExpr *node) const {
 Val ModuleLowering::ExprEmitter::emitBuiltinClone(ast::MethodCallExpr *node) {
   ast::Expr *recv = node->getReceiver();
   ast::Type *ty = recv->getResolvedType();
+  // A reference held `shared`, `atomic shared` or `locked` (#368): the
+  // same object, a reference of the call's own.
+  if (node->cloneIsCopy())
+    return L.emitAsShared(recv);
   // Held in memory: a copy of its bytes, its unique references cloned, in
   // the temporary that is the call's result.
   if (ast::isMemType(ty)) {

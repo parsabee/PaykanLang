@@ -610,10 +610,11 @@ TEST(FixedArray, RepeatLiteralsOfScalars) {
 
 // A Copyable v is evaluated once and copied: a call returning an `int` runs
 // once, and a struct holding a `shared` Node puts that one Node in every
-// slot.  Any other v is evaluated for each slot: `[Node(1); 3]` makes three
-// Nodes, `[Str(7); 2]` two strings, a nested array a row each, and a call
-// returning a `Str` runs once per slot.  A variable or an element that is
-// not Copyable is cloned for each (`[s.clone(); 3]`); repeated as it is, it
+// slot (as `[k; 3]` of the `shared` k itself does since #368; the test
+// keeps the struct).  Any other v is evaluated for each slot: `[Node(1); 3]`
+// makes three Nodes, `[Str(7); 2]` two strings, a nested array a row each, and
+// a call returning a `Str` runs once per slot.  A variable or an element that
+// is not Copyable is cloned for each (`[s.clone(); 3]`); repeated as it is, it
 // is an error.
 TEST(FixedArray, RepeatLiteralsOfReferences) {
   LeakGuard g;

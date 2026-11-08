@@ -616,6 +616,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Args = args;
   pending.Templates = InstantiatingTemplates;
   pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
@@ -839,7 +840,8 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
         const ast::Param &p = method->getParams()[i];
         CurrentScope->declare(p.getName(), paramTys[i]);
         ast::Qualifier q = p.Qual;
-        if (p.Mode == ast::ParamMode::Inout)
+        // (a shared form, a template argument\'s, is its own: #368)
+        if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
           q.Mut = true; // the borrow's writes
         CurrentScope->Quals[p.getName()] = q;
       }

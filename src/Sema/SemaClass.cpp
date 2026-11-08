@@ -961,7 +961,44 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                       baseParams.size() == paramTys.size();
     for (size_t i = 0; sigMatches && i < paramTys.size(); ++i)
       sigMatches = typesEqual(baseParams[i], paramTys[i]);
-    if (!sigMatches) {
+    // And in the forms a caller sees (#368), as a function type's: a call
+    // through the base gives and takes what the override does, so an
+    // override's `-> shared mut Node` of a base's `-> Node` would be a
+    // shared object handed out as a new unique one.
+    // A borrow's form is a type argument's (a written one is refused): it
+    // is what the override takes, exactly.
+    auto seen = [](ast::Qualifier q, ast::ParamMode mode) {
+      if (mode != ast::ParamMode::Value)
+        return q.form();
+      return q.Form != ast::QualForm::Unique ? q.form() : ast::Qualifier{};
+    };
+    std::string forms; // the forms that differ, when the types do not
+    if (sigMatches && !(seen(overridden->getResultQual(),
+                             overridden->getParamModes().Result) ==
+                        seen(method->getResultQual(), method->getResultMode())))
+      forms = "its result is '" +
+              qualifiedName(method->getResultQual(), retTy) + "', not '" +
+              qualifiedName(overridden->getResultQual(),
+                            overridden->getReturnType()) +
+              "'";
+    for (size_t i = 0; sigMatches && forms.empty() && i < paramTys.size(); ++i)
+      if (!(seen(overridden->getParamQual(i),
+                 overridden->getParamModes().mode(i)) ==
+            seen(method->getParams()[i].Qual, method->getParams()[i].Mode)))
+        forms = "its parameter '" + method->getParams()[i].getName() +
+                "' is '" +
+                qualifiedName(method->getParams()[i].Qual, paramTys[i]) +
+                "', not '" +
+                qualifiedName(overridden->getParamQual(i), baseParams[i]) + "'";
+    if (!forms.empty()) {
+      error(method->getLocation(),
+            "override of '" +
+                signatureString(ct->getSuperClass(), overridden->getName(),
+                                overridden->getReturnType(),
+                                overridden->getParamTypes()) +
+                "' takes and gives the forms it does: " + forms);
+      ok = false;
+    } else if (!sigMatches) {
       error(method->getLocation(),
             "override of '" +
                 signatureString(ct->getSuperClass(), overridden->getName(),
@@ -1420,7 +1457,8 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         const ast::Param &p = method->getParams()[i];
         CurrentScope->declare(p.getName(), paramTys[i]);
         ast::Qualifier q = p.Qual;
-        if (p.Mode == ast::ParamMode::Inout)
+        // (a shared form, a template argument\'s, is its own: #368)
+        if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
           q.Mut = true;
         CurrentScope->Quals[p.getName()] = q;
       }
@@ -2317,6 +2355,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Args = args;
   pending.Templates = InstantiatingTemplates;
   pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
@@ -2506,6 +2545,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Args = args;
   pending.Templates = InstantiatingTemplates;
   pending.Templates.push_back(self);
   queueInstantiation(std::move(pending));
@@ -2532,9 +2572,16 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
     return true;
   // `mut T`, `shared T` & co. (the prototype): the form is the slot's, the
   // type parameter is the plain type.
-  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(pattern))
+  // Against a part of the same form (`(shared T) -> int` against a
+  // `(shared Node) -> int`, #368), T is the plain type, as the form is the
+  // pattern's.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(pattern)) {
+    if (auto *aq = ast::dyn_cast<ast::QualifiedType>(actual);
+        aq && aq->getQualifier() == qt->getQualifier())
+      actual = aq->getInnerType();
     return unifyTypes(qt->getInnerType(), actual, typeParams, bindings,
                       conflict);
+  }
 
   if (auto *ct = ast::dyn_cast<ast::ClassType>(pattern)) {
     // A type parameter binds to the argument type; a second occurrence must
@@ -2549,19 +2596,59 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
     }
     if (typesEqual(it->second, actual))
       return true;
+    // A unique argument joins a `shared` one's form (#368): it converts
+    // into it (`pick(s, Node(2))` is `pick<shared Node>`).
+    auto bare = [](ast::Type *t) {
+      auto *q = ast::dyn_cast<ast::QualifiedType>(t);
+      return q && q->getQualifier().isSharedForm() ? q->getInnerType()
+                                                   : nullptr;
+    };
+    if (bare(it->second) && typesEqual(bare(it->second), actual))
+      return true;
+    if (bare(actual) && typesEqual(bare(actual), it->second)) {
+      it->second = actual;
+      return true;
+    }
+    // A value whose unique parts another argument holds `shared` joins its
+    // parts' forms (`replace(t, (0, Node(7)))` with t: `(int, shared mut
+    // Node)`): its unique references convert into them.
+    if (ast::Type *joined = joinPartForms(it->second, actual)) {
+      it->second = joined;
+      return true;
+    }
     conflict = {ct->getName(), it->second, actual};
     return false;
+  }
+  // A qualified argument (#368) against anything but a type parameter: a
+  // `T?` binds T to the value, qualified as the optional is; any other
+  // pattern is unified with the type itself.
+  if (auto *aq = ast::dyn_cast<ast::QualifiedType>(actual)) {
+    ast::Type *inner = aq->getInnerType();
+    if (auto *ot = ast::dyn_cast<ast::OptionalType>(pattern)) {
+      if (auto *aot = ast::dyn_cast<ast::OptionalType>(inner))
+        inner = aot->getInnerType();
+      return unifyTypes(ot->getInnerType(),
+                        Ctx.getQualifiedType(aq->getQualifier(), inner),
+                        typeParams, bindings, conflict);
+    }
+    return unifyTypes(pattern, inner, typeParams, bindings, conflict);
   }
 
   if (auto *at = ast::dyn_cast<ast::ArrayType>(pattern)) {
     // A fixed-size array or a slice passed for a slice (`view T[]`) gives
     // its element type.
+    // Its elements' form is the element's (#368): `view T[]` against a
+    // `shared Node[2]` binds T to `shared Node`.
     if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(actual))
-      return unifyTypes(at->getElementType(), ft->getElementType(), typeParams,
-                        bindings, conflict);
+      return unifyTypes(
+          at->getElementType(),
+          Ctx.getQualifiedType(ft->getElemQual(), ft->getElementType()),
+          typeParams, bindings, conflict);
     if (auto *st = ast::dyn_cast<ast::SliceType>(actual))
-      return unifyTypes(at->getElementType(), st->getElementType(), typeParams,
-                        bindings, conflict);
+      return unifyTypes(
+          at->getElementType(),
+          Ctx.getQualifiedType(st->getElemQual(), st->getElementType()),
+          typeParams, bindings, conflict);
     return true;
   }
 
@@ -2572,8 +2659,10 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
     if (!att || att->getArity() != tt->getArity())
       return true;
     for (size_t i = 0; i < tt->getArity(); ++i)
-      if (!unifyTypes(tt->getElementType(i), att->getElementType(i), typeParams,
-                      bindings, conflict))
+      if (!unifyTypes(
+              tt->getElementType(i),
+              Ctx.getQualifiedType(att->getElemQual(i), att->getElementType(i)),
+              typeParams, bindings, conflict))
         return false;
     return true;
   }
@@ -2602,12 +2691,16 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
     for (size_t i = 0; i < ft->getNumParams(); ++i) {
       if (aft->getMode(i) != ft->getMode(i))
         return true;
-      if (!unifyTypes(ft->getParamType(i), aft->getParamType(i), typeParams,
-                      bindings, conflict))
+      if (!unifyTypes(
+              ft->getParamType(i),
+              Ctx.getQualifiedType(aft->getParamQual(i), aft->getParamType(i)),
+              typeParams, bindings, conflict))
         return false;
     }
-    return unifyTypes(ft->getReturnType(), aft->getReturnType(), typeParams,
-                      bindings, conflict);
+    return unifyTypes(
+        ft->getReturnType(),
+        Ctx.getQualifiedType(aft->getResultQual(), aft->getReturnType()),
+        typeParams, bindings, conflict);
   }
 
   if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern)) {
@@ -2667,13 +2760,61 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
   return true; // builtin / enum: nothing to bind
 }
 
+ast::Type *Sema::joinPartForms(ast::Type *a, ast::Type *b) {
+  if (a == b)
+    return a;
+  // The stronger of two parts' forms: one, or a unique one and a `shared`
+  // one; any other pair joins to none.
+  auto join = [](ast::Qualifier x, ast::Qualifier y, ast::Qualifier &out) {
+    if (x == y || y.isUnique())
+      out = x;
+    else if (x.isUnique() && y.Form == ast::QualForm::Shared)
+      out = y;
+    else
+      return false;
+    return true;
+  };
+  if (auto *oa = ast::dyn_cast<ast::OptionalType>(a))
+    if (auto *ob = ast::dyn_cast<ast::OptionalType>(b)) {
+      ast::Type *inner = joinPartForms(oa->getInnerType(), ob->getInnerType());
+      return inner ? Ctx.getOptionalType(inner) : nullptr;
+    }
+  if (auto *fa = ast::dyn_cast<ast::FixedArrayType>(a))
+    if (auto *fb = ast::dyn_cast<ast::FixedArrayType>(b);
+        fb && fa->getLength() == fb->getLength()) {
+      ast::Type *elem =
+          joinPartForms(fa->getElementType(), fb->getElementType());
+      ast::Qualifier q;
+      if (!elem || !join(fa->getElemQual(), fb->getElemQual(), q))
+        return nullptr;
+      return Ctx.getFixedArrayType(elem, fa->getLength(), q);
+    }
+  auto *ta = ast::dyn_cast<ast::TupleType>(a);
+  auto *tb = ast::dyn_cast<ast::TupleType>(b);
+  if (!ta || !tb || ast::isa<ast::StructType>(ta) ||
+      ast::isa<ast::StructType>(tb) || ta->getArity() != tb->getArity())
+    return nullptr;
+  std::vector<ast::Type *> elems;
+  std::vector<ast::Qualifier> quals;
+  for (size_t i = 0; i < ta->getArity(); ++i) {
+    ast::Type *e = joinPartForms(ta->getElementType(i), tb->getElementType(i));
+    ast::Qualifier q;
+    if (!e || !join(ta->getElemQual(i), tb->getElemQual(i), q))
+      return nullptr;
+    elems.push_back(e);
+    quals.push_back(q);
+  }
+  return Ctx.getTupleType(std::move(elems), std::move(quals));
+}
+
 bool Sema::inferTypeArgs(const std::string &templateName,
                          const std::vector<const std::string *> &typeParams,
                          const std::vector<ast::Type *> &paramTypes,
                          const std::vector<ast::Type *> &argTypes,
                          ast::SourceLocation loc, std::vector<ast::Type *> &out,
                          const std::string &spelling, ast::Type *resultPattern,
-                         ast::Type *expected) {
+                         ast::Type *expected,
+                         const std::vector<ast::Qualifier> &argForms) {
   // Named as the program spells it, not by another module's hidden
   // qualifier (the name of a call in its template).
   const std::string shown = displayName(templateName);
@@ -2693,7 +2834,27 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   StringMap<ast::Type *> bindings;
   InferenceConflict conflict;
   for (size_t i = 0; i < paramTypes.size(); ++i) {
-    if (!unifyTypes(paramTypes[i], argTypes[i], params, bindings, conflict)) {
+    // A by-value or `inout` `T` (or `T?`) parameter given a `shared`
+    // reference binds T to its form (#368): `twice(s)` with `s: shared Node`
+    // is `twice<shared Node>`, and `mem::replace(m, n)` with `m: shared mut
+    // Node` gives back a `shared mut Node`, never the object as a unique
+    // one.  A `view` binds the plain type.
+    ast::Type *actual = argTypes[i];
+    if (i < argForms.size() && !argForms[i].isUnique() && actual) {
+      // Through a written qualifier too (`x: mut T` given a `shared mut
+      // Node` binds T to it, which `mut` joins); one of the argument's own
+      // form takes the plain type (unifyTypes).
+      ast::Type *p = paramTypes[i];
+      if (auto *qt = p ? ast::dyn_cast<ast::QualifiedType>(p) : nullptr;
+          qt && qt->getInnerType())
+        p = qt->getInnerType();
+      if (auto *ot = p ? ast::dyn_cast<ast::OptionalType>(p) : nullptr)
+        p = ot->getInnerType();
+      if (const auto *ct = p ? ast::dyn_cast<ast::ClassType>(p) : nullptr;
+          ct && params.count(ct->getName()))
+        actual = Ctx.getQualifiedType(argForms[i], actual);
+    }
+    if (!unifyTypes(paramTypes[i], actual, params, bindings, conflict)) {
       error(loc, "cannot infer type parameter '" + conflict.Param + "' of '" +
                      shown + "': deduced as both '" + typeName(conflict.First) +
                      "' and '" + typeName(conflict.Second) + "'");
@@ -2707,8 +2868,20 @@ bool Sema::inferTypeArgs(const std::string &templateName,
     StringMap<ast::Type *> fromResult;
     InferenceConflict ignored;
     if (unifyTypes(resultPattern, expected, params, fromResult, ignored))
-      for (auto &[name, ty] : fromResult)
-        bindings.try_emplace(name, ty);
+      for (auto &[name, ty] : fromResult) {
+        auto [it, fresh] = bindings.try_emplace(name, ty);
+        // An argument's plain type takes the form the slot gives it
+        // (#368): `res::ok(n)` into a `Result<mut Node>`, `Box(Node(1))`
+        // into a `Box<shared Node>`; the argument flows into that form.
+        if (fresh)
+          continue;
+        if (const auto *q = ast::dyn_cast<ast::QualifiedType>(ty);
+            q && q->getInnerType() == it->second)
+          it->second = ty;
+        else if (ast::Type *joined = joinPartForms(it->second, ty);
+                 joined == ty)
+          it->second = ty;
+      }
   }
   out.clear();
   for (auto *p : typeParams) {
@@ -2724,6 +2897,24 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   return true;
 }
 
+std::vector<ast::Qualifier>
+Sema::inferenceForms(const std::vector<ast::Expr *> &args,
+                     const std::function<ast::ParamMode(size_t)> &modeOf) {
+  std::vector<ast::Qualifier> forms(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    const ast::Qualifier q = qualifierOf(args[i]);
+    if (!q.isSharedForm())
+      continue;
+    // A `view` binds the plain type, but in a template's code a type
+    // argument's form, which the template passes on as its `T`.
+    if (modeOf(i) == ast::ParamMode::View &&
+        !(inInstanceCode() && q.FromArgument))
+      continue;
+    forms[i] = q.form();
+  }
+  return forms;
+}
+
 bool Sema::resolveGenericCall(ast::CallExpr *node,
                               const std::vector<ast::Type *> &argTypes,
                               ast::Type *expected) {
@@ -2734,9 +2925,9 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   const ast::ASTNode *written = node->hasTypeArgs() ? node : nullptr;
   std::vector<ast::Type *> typeArgs;
   for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
-    auto *t = resolvePart(node->getTypeArgs()[i], loc,
-                          "type argument " + std::to_string(i + 1) + " of '" +
-                              displayName(callee) + "'");
+    auto *t = resolveTypeArgument(node->getTypeArgs()[i], loc,
+                                  "type argument " + std::to_string(i + 1) +
+                                      " of '" + displayName(callee) + "'");
     if (!t)
       return false;
     typeArgs.push_back(t);
@@ -2770,9 +2961,12 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
               params = &im->getTypeParams();
             }
       std::vector<ast::Type *> paramTypes;
+      std::vector<ast::ParamMode> modes;
       if (init) {
-        for (auto &p : init->getParams())
+        for (auto &p : init->getParams()) {
           paramTypes.push_back(here(tmpl, p.ParamType));
+          modes.push_back(p.Mode);
+        }
       } else {
         // The default __init__: the superclass constructor's parameters (a
         // generic class's superclass is not generic), then the fields.
@@ -2784,7 +2978,18 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
         for (auto *f : tmpl->getFields())
           paramTypes.push_back(here(tmpl, f->getType()));
       }
-      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
+      const auto forms = inferenceForms(node->getArguments(), [&](size_t i) {
+        return i < modes.size() ? modes[i] : ast::ParamMode::Value;
+      });
+      // The slot's type gives what the arguments leave open, and the forms
+      // they take (`h: H<shared Node> = H(Node(2))`, #368).
+      std::vector<ast::Type *> named;
+      for (const std::string *p : *params)
+        named.push_back(Ctx.make<ast::ClassType>(loc, *p));
+      ast::Type *pattern =
+          Ctx.make<ast::GenericType>(loc, Ctx.intern(callee), std::move(named));
+      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs,
+                         "", pattern, expected, forms))
         return false;
     }
     auto *ct = instantiateClass(callee, typeArgs, loc, written);
@@ -2811,13 +3016,27 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
               params = &im->getTypeParams();
             }
       std::vector<ast::Type *> paramTypes;
+      std::vector<ast::ParamMode> modes;
       if (init)
-        for (auto &p : init->getParams())
+        for (auto &p : init->getParams()) {
           paramTypes.push_back(here(tmpl, p.ParamType));
+          modes.push_back(p.Mode);
+        }
       else
         for (auto *f : tmpl->getFields())
           paramTypes.push_back(here(tmpl, f->getType()));
-      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
+      const auto forms = inferenceForms(node->getArguments(), [&](size_t i) {
+        return i < modes.size() ? modes[i] : ast::ParamMode::Value;
+      });
+      // The slot's type gives what the arguments leave open, and the forms
+      // they take (`h: H<shared Node> = H(Node(2))`, #368).
+      std::vector<ast::Type *> named;
+      for (const std::string *p : *params)
+        named.push_back(Ctx.make<ast::ClassType>(loc, *p));
+      ast::Type *pattern =
+          Ctx.make<ast::GenericType>(loc, Ctx.intern(callee), std::move(named));
+      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs,
+                         "", pattern, expected, forms))
         return false;
     }
     auto *st = instantiateStruct(callee, typeArgs, loc, written);
@@ -2834,9 +3053,14 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       for (auto &p : tmpl->getParams())
         paramTypes.push_back(here(tmpl, p.ParamType));
       ast::Type *result = tmpl->getReturnType();
+      const auto forms = inferenceForms(node->getArguments(), [&](size_t i) {
+        return i < tmpl->getParams().size() ? tmpl->getParams()[i].Mode
+                                            : ast::ParamMode::Value;
+      });
       if (!inferTypeArgs(callee, tmpl->getTypeParams(), paramTypes, argTypes,
                          loc, typeArgs, "",
-                         result ? here(tmpl, result) : nullptr, expected))
+                         result ? here(tmpl, result) : nullptr, expected,
+                         forms))
         return false;
     }
     std::string inst = instantiateFunction(callee, typeArgs, loc, written);
@@ -2977,6 +3201,7 @@ bool Sema::checkPendingInstantiationBodies(
     }
     {
       OriginSource inOrigin(*this, p.Origin);
+      InstanceCode instance(*this, &p.Args);
       r = p.Class    ? visitClassDecl(p.Class)
           : p.Struct ? visitStructDecl(p.Struct)
                      : visitFuncDecl(p.Func);

@@ -39,7 +39,9 @@ namespace sema {
 /// Parse one serialised type starting at @p pos in @p text, advancing @p pos
 /// past it.  Grammar (the output language of ast::typeName):
 ///
-///   type  := base suffix*
+///   type  := qual? base suffix*
+///   qual  := 'mut ' | 'shared ' | 'shared mut ' | 'atomic shared '
+///          | 'locked ' | 'locked mut '       -- a part's form (#368)
 ///   base  := '(' type (', ' type)+ ')'        -- tuple (arity >= 2)
 ///          | name                             -- builtin / class / enum
 ///   suffix := '[]'                            -- slice of the type so far
@@ -55,8 +57,51 @@ namespace sema {
 /// the name, which is registered under exactly that spelling.  Returns nullptr
 /// (leaving @p pos wherever it stopped) if the text is malformed or a base
 /// name is unknown in @p ctx.
+/// The qualifier spelled at @p pos in @p text (`shared mut `, ...), moving
+/// @p pos past it; the bare form, and @p pos unmoved, when none is.
+static ast::Qualifier readExportedQualifier(const std::string &text,
+                                            size_t &pos) {
+  // `@shared Node`: the qualifier a template's type argument gave a member
+  // of an instance (ast::Qualifier::FromArgument, #368).
+  const bool fromArgument = pos < text.size() && text[pos] == '@';
+  if (fromArgument)
+    ++pos;
+  struct Spelled {
+    const char *Prefix;
+    ast::Qualifier Q;
+  };
+  static const Spelled kQualifiers[] = {
+      {"atomic shared ", {ast::QualForm::AtomicShared, false}},
+      {"shared mut ", {ast::QualForm::Shared, true}},
+      {"locked mut ", {ast::QualForm::Locked, true}},
+      {"shared ", {ast::QualForm::Shared, false}},
+      {"locked ", {ast::QualForm::Locked, false}},
+      {"mut ", {ast::QualForm::Unique, true}},
+  };
+  for (const Spelled &sp : kQualifiers) {
+    const std::string_view prefix(sp.Prefix);
+    if (text.compare(pos, prefix.size(), prefix) == 0) {
+      pos += prefix.size();
+      ast::Qualifier q = sp.Q;
+      q.FromArgument = fromArgument;
+      return q;
+    }
+  }
+  if (fromArgument)
+    --pos; // no qualifier follows: not one
+  return {};
+}
+
+/// As above, a type spelled with the qualifier written before it (#368):
+/// the qualifier is the elements' of the first array suffix when it is
+/// `shared` or `shared mut` (`shared Node[4]`, four shared references, as
+/// the source grammar reads it), else it is left in @p qual for the slot
+/// the type fills (a tuple's element, a function type's parameter or
+/// result, a type argument, or the declaration itself).
 static ast::Type *parseExportedType(ast::ASTContext &ctx,
-                                    const std::string &text, size_t &pos) {
+                                    const std::string &text, size_t &pos,
+                                    ast::Qualifier &qual) {
+  qual = readExportedQualifier(text, pos);
   ast::Type *ty = nullptr;
   if (pos < text.size() && text[pos] == '(') {
     // `(T1, T2)`, a tuple type, or `(view T1, T2) -> R`, a function type
@@ -65,6 +110,7 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     ++pos;
     std::vector<ast::Type *> elems;
     std::vector<ast::ParamMode> modes;
+    std::vector<ast::Qualifier> quals;
     bool anyMode = false;
     if (pos < text.size() && text[pos] == ')') {
       ++pos;
@@ -79,11 +125,13 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
           pos += 6;
         }
         anyMode |= mode != ast::ParamMode::Value;
-        ast::Type *elem = parseExportedType(ctx, text, pos);
+        ast::Qualifier q;
+        ast::Type *elem = parseExportedType(ctx, text, pos, q);
         if (!elem)
           return nullptr;
         elems.push_back(elem);
         modes.push_back(mode);
+        quals.push_back(q);
         if (text.compare(pos, 2, ", ") == 0) {
           pos += 2;
           continue;
@@ -97,19 +145,23 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     }
     if (text.compare(pos, 4, " -> ") == 0) {
       pos += 4;
-      ast::Type *ret = parseExportedType(ctx, text, pos);
+      ast::Qualifier retQual;
+      ast::Type *ret = parseExportedType(ctx, text, pos, retQual);
       if (!ret)
         return nullptr;
-      return ctx.getFunctionType(std::move(elems), std::move(modes), ret);
+      ty = ctx.getFunctionType(std::move(elems), std::move(modes), ret,
+                               std::move(quals), retQual);
+      return ty; // a suffix needs the parentheses below
     }
     if (anyMode)
       return nullptr;
-    if (elems.size() == 1 && ast::isa<ast::FunctionType>(elems[0]))
+    if (elems.size() == 1 && ast::isa<ast::FunctionType>(elems[0]) &&
+        quals[0].isUnique())
       ty = elems[0];
     else if (elems.size() < 2)
       return nullptr;
     else
-      ty = ctx.getTupleType(std::move(elems));
+      ty = ctx.getTupleType(std::move(elems), std::move(quals));
   } else {
     size_t start = pos;
     while (pos < text.size() && text[pos] != ',' && text[pos] != ')' &&
@@ -140,10 +192,16 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     if (!ty)
       return nullptr;
   }
+  // The qualifier the first array suffix takes for its elements.
+  auto elements = [&]() {
+    if (qual.Form != ast::QualForm::Shared)
+      return ast::Qualifier{};
+    return std::exchange(qual, ast::Qualifier{});
+  };
   for (;;) {
     if (text.compare(pos, 2, "[]") == 0) {
       pos += 2;
-      ty = ctx.getSliceType(ty);
+      ty = ctx.getSliceType(ty, elements());
     } else if (pos + 1 < text.size() && text[pos] == '[' &&
                std::isdigit(static_cast<unsigned char>(text[pos + 1]))) {
       // A run of lengths, first index first, as typeName writes it: two
@@ -166,8 +224,10 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
         lengths.push_back(n);
         pos = close + 1;
       }
+      const ast::Qualifier elemQual = elements();
       for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
-        ty = ctx.getFixedArrayType(ty, *it);
+        ty = ctx.getFixedArrayType(
+            ty, *it, it == lengths.rbegin() ? elemQual : ast::Qualifier{});
     } else if (pos < text.size() && text[pos] == '?') {
       ++pos;
       ty = ctx.getOptionalType(ty);
@@ -182,11 +242,22 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
 /// wrapped in "[]" array / "?" optional markers and/or "(T1, T2)" tuple
 /// parentheses, nested arbitrarily — to the canonical Type* in @p ctx.
 /// Returns nullptr if any base name is unknown or the text is malformed.
+/// The qualifier written before it goes in @p qual, a declaration's; with
+/// none given, it is kept on the type as a template's type argument is (a
+/// canonical QualifiedType, #368).
 static ast::Type *resolveExportedType(ast::ASTContext &ctx,
-                                      const std::string &name) {
+                                      const std::string &name,
+                                      ast::Qualifier *qual = nullptr) {
   size_t pos = 0;
-  ast::Type *ty = parseExportedType(ctx, name, pos);
-  return (ty && pos == name.size()) ? ty : nullptr;
+  ast::Qualifier q;
+  ast::Type *ty = parseExportedType(ctx, name, pos, q);
+  if (!ty || pos != name.size())
+    return nullptr;
+  if (qual) {
+    *qual = q;
+    return ty;
+  }
+  return ctx.getQualifiedType(q, ty);
 }
 
 /// The name a declaration's type is exported under: its qualifier's
@@ -198,7 +269,9 @@ static std::string exportedTypeName(ast::Qualifier q, ast::Type *ty) {
   std::string name = ast::typeName(ty);
   if (q.isUnique())
     return name;
-  return std::string(q.spelling()) + " " + name;
+  // One a type argument gave is marked, so the importer's reads it as such
+  // (readExportedQualifier).
+  return std::string(q.FromArgument ? "@" : "") + q.spelling() + " " + name;
 }
 
 /// The qualifier an exported type name starts with (exportedTypeName), and
@@ -206,25 +279,10 @@ static std::string exportedTypeName(ast::Qualifier q, ast::Type *ty) {
 /// none.
 static ast::Qualifier splitExportedQualifier(const std::string &name,
                                              std::string &rest) {
-  struct Spelled {
-    const char *Prefix;
-    ast::Qualifier Q;
-  };
-  static const Spelled kQualifiers[] = {
-      {"atomic shared ", {ast::QualForm::AtomicShared, false}},
-      {"shared mut ", {ast::QualForm::Shared, true}},
-      {"locked mut ", {ast::QualForm::Locked, true}},
-      {"shared ", {ast::QualForm::Shared, false}},
-      {"locked ", {ast::QualForm::Locked, false}},
-      {"mut ", {ast::QualForm::Unique, true}},
-  };
-  for (const Spelled &s : kQualifiers)
-    if (name.starts_with(s.Prefix)) {
-      rest = name.substr(std::string_view(s.Prefix).size());
-      return s.Q;
-    }
-  rest = name;
-  return {};
+  size_t pos = 0;
+  const ast::Qualifier q = readExportedQualifier(name, pos);
+  rest = name.substr(pos);
+  return q;
 }
 
 /// True for the class names every ASTContext registers at construction (Obj,
@@ -1047,12 +1105,17 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   auto resolveOrReport = [&](const std::string &qualifiedName,
                              const std::string &what,
                              ast::Qualifier *qual = nullptr) -> ast::Type * {
+    // The type as named in the messages, its qualifier aside; the
+    // qualifier read with it, so `shared Node[4]` is an array of shared
+    // references (#368).
     std::string tyName;
-    const ast::Qualifier q = splitExportedQualifier(qualifiedName, tyName);
+    splitExportedQualifier(qualifiedName, tyName);
+    ast::Qualifier q;
+    ast::Type *resolved = resolveExportedType(Ctx, qualifiedName, &q);
     if (qual)
       *qual = q;
-    if (auto *ty = resolveExportedType(Ctx, tyName))
-      return ty;
+    if (resolved)
+      return resolved;
     if (tyName.rfind("Task<", 0) == 0)
       error(loc, diagPrefix + what + " is a task ('" + tyName +
                      "'): a module that declares an 'async fn' cannot be "
@@ -1907,6 +1970,7 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
+    InstanceCode instance(*this, &args);
     ok = copiedMethods(tmpl, args, type, methods);
   }
   InstantiatingTemplates.pop_back();
@@ -1931,6 +1995,7 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   pending.RequestLines = request.Lines;
   for (const std::string *p : params)
     pending.TypeParams.insert(*p);
+  pending.Args = args;
   pending.Templates = InstantiatingTemplates;
   pending.Templates.push_back(self);
   PendingInstantiations.push_back(std::move(pending));

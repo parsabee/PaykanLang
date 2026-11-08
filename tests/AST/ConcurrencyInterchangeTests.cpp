@@ -512,6 +512,16 @@ TEST(ConcurrencyInterchange, QualifiedTypes) {
         Case{"(qualified-type \"shared\" (named-type \"Node\") (named-type "
              "\"Node\"))",
              "unexpected field in (qualified-type ...)"},
+        // A type takes one qualifier, as the parser reads it (`shared
+        // shared Node`, `shared atomic int`).
+        Case{"(qualified-type \"shared\" (qualified-type \"mut\" "
+             "(named-type \"Node\")))",
+             "a type takes one qualifier: \"shared\" qualifies a qualified "
+             "type"},
+        Case{"(qualified-type \"shared\" (atomic-type (named-type "
+             "\"int\")))",
+             "a type takes one qualifier: \"shared\" qualifies an atomic "
+             "type"},
         // A qualifier is not a parameter's mode.
         Case{"(named-type \"Node\") (qual shared)",
              "expected (qual view) or (qual inout)"},

@@ -3360,10 +3360,11 @@ TEST(Lowering, RepeatLiteralsOfScalars) {
 
 // A v that is not Copyable is evaluated for each slot: a clone, a
 // conversion, a row of a nested array made for each row, nothing retained.
-// A Copyable v (a struct holding a `shared` reference) is evaluated once,
-// stored in slot 0 and copied into the others (`mem.copy`), the reference
-// retained for each copy.  A variable that is not Copyable, repeated as it
-// is, is an error.
+// A Copyable v (a struct holding a `shared` reference; a `shared` reference
+// itself is one too since #368, and the test keeps the struct) is evaluated
+// once, stored in slot 0 and copied into the others (`mem.copy`), the
+// reference retained for each copy.  A variable that is not Copyable, repeated
+// as it is, is an error.
 TEST(Lowering, RepeatLiteralsOfReferences) {
   auto l = lower(R"(
     class Node { v: int; }
@@ -4623,7 +4624,8 @@ TEST(LoweringMoves, AViewIsNeverHandedOn) {
 TEST(LoweringMoves, HeldValuesCopiedWholeAtTheirLastUseMove) {
   // A tuple, a struct, an enum with a reference and a function value: each
   // copy into a new variable or out of the function is a move.  The tuple's
-  // reference is in an `E` (a tuple's element holds no `shared` reference).
+  // reference is in an `E` (a tuple's element can hold the `shared`
+  // reference itself since #368; the test keeps the enum).
   auto l = lowerMoved(R"(
     struct P { node: shared Node; k: int; }
     enum E { A(node: shared Node), B }
