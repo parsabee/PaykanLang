@@ -154,7 +154,7 @@ class Job { name: Str; cache: shared Cache; }
 class Holder { job: Job; }
 class Fun { f: () -> int; }
 class Any { o: Obj; }
-class Weak { weak w: Cache?; }
+class Weak { w: weak Cache?; }
 class Node { id: int; }
 async fn consume(n: Node) -> int { return n.id; }
 async fn name(s: Str) -> int { return s.len(); }
@@ -181,7 +181,8 @@ fn main() -> int {
   let t7 = fun(move f);
   let an = Any(Node(4));
   let t8 = any(move an);
-  let w = Weak(Cache(2));
+  let c: shared = Cache(2);
+  let w = Weak(c);
   let t9 = wk(move w);
   let o = Node(5);
   let t10 = opt(o);
@@ -213,11 +214,11 @@ fn main() -> int {
        "value, whose captures are not known",
        ":32:16: error: cannot send 'an' (a 'Any'): field 'o' is an 'Obj', "
        "which may be any class",
-       ":34:15: error: cannot send 'w' (a 'Weak'): field 'w' is 'weak': a "
+       ":35:15: error: cannot send 'w' (a 'Weak'): field 'w' is 'weak': a "
        "weak load is a plain retain",
-       ":36:17: error: cannot copy 'o' (a unique 'Node') into a task: write "
+       ":37:17: error: cannot copy 'o' (a unique 'Node') into a task: write "
        "'move o' to transfer it",
-       ":37:36: error: a task cannot be started in a 'parallel for' body"});
+       ":38:36: error: a task cannot be started in a 'parallel for' body"});
 }
 
 // What crosses: a moved unique reference, a temporary (`move` before one

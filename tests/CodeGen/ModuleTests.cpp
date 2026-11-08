@@ -225,7 +225,8 @@ fn main() -> int { b = Box(); return b.total(); }
 // Another module's method may run the program's code: `sum()` compares the
 // Point's peer with itself, and the `Watcher`'s `equals`, through the
 // closure it calls (its argument is lent, a `view`), replaces the
-// `Box.origin` that `total()` runs `sum()` on.  The field is stored outside
+// `Box.origin` that `total()` runs `sum()` on, through a `weak mut`
+// reference to the `shared mut` Box.  The field is stored outside
 // construction, so its read keeps a reference of its own across the call
 // (docs/pir.md §7), and `sum()` reads the Point it was called on, which dies
 // when it returns.
@@ -264,7 +265,7 @@ class Watcher {
 }
 fn main() -> int {
   b: shared mut = Box(point::Point(15, 27, None));
-  weak box = b;
+  box: weak mut = b;
   b.origin.peer = Watcher(fn() {
     match box {
       x: Box { x.origin = point::Point(100, 200, None); }

@@ -66,13 +66,14 @@ What the modules have in common:
   'Result<Str, Error>' of 'Result' conflicts with an imported enum of the same name`, and
   so is a program's own `List<int>` next to `collections::List<int>`: give a generic type
   of your own a name of its own.
-- **Reserved private names.** `::collections` declares the private templates `_Table` (of
-  `HashMap` and `HashSet`) and `_Heap` (of the priority queues), and the private struct
-  `_Pieces`. A program that imports it cannot declare a `_Pieces`, and its own
-  `_Table<int, int>` conflicts with the one a `HashMap<int, int>` uses: `instantiation
-  '_Table<int, int>' of '_Table' conflicts with the instantiation '_Table<int, int>' of
-  '::collections::_Table'`, reported at the program's instantiation, with notes at the
-  library's declaration and where the library instantiates it. The library's function names are not reserved: a program may declare
+- **Reserved private names.** `::collections` declares the private templates `_Node`
+  (of `LinkedList`, `Stack` and `Queue`), `_Entry`, `_Bucket` and `_Table` (of `HashMap`
+  and `HashSet`) and `_Heap` (of the priority queues), and the private struct `_Pieces`. A
+  program that imports it cannot declare a `_Pieces`, and its own `_Node<int>` conflicts
+  with the one a `Stack<int>` uses: `instantiation '_Node<int>' of '_Node' conflicts with
+  the instantiation '_Node<int>' of '::collections::_Node'`, reported at the program's
+  instantiation, with notes at the library's declaration and where the library
+  instantiates it. The library's function names are not reserved: a program may declare
   its own `fn print`.
 - **Sized numeric types** ([`u8`, `i32`, `unsigned`, `f32`, ...](../language/02-basics.md#sized-numeric-types))
   are elements and keys like `int` and `float` (`List<u8>`, `HashMap<u32, Str>`,

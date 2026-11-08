@@ -219,7 +219,10 @@ function. Any of those would make a second owner of an object that has one (`can
 shared one)`). A method that hands its object on is declared `shared fn`: its `self` is a
 `shared mut` reference, which copies, so the method may return it (for chained calls),
 pass it, store it in a `shared mut` field or capture it. A `shared view fn` only reads its
-object, and its `self` is a `shared` reference.
+object, and its `self` is a `shared` reference. Storing `self` in a weak field or local,
+the back link of a child to its parent, takes one of them too: a `weak mut` reference
+names the `shared mut` `self` of a `shared fn`, a `weak` one the `shared` `self` of a
+`shared view fn` ([Weak references](16-memory.md#weak-references)).
 
 ```pkn
 import ::io;
@@ -712,9 +715,12 @@ The rest of this chapter gives the precise rules.
   `next: shared Node` or `next: shared mut Node` ([Concurrency](19-concurrency.md)); a
   `shared mut` field is the object's own form and keeps its writes through any object that
   holds it, a `shared` one is read-only by its declaration.
-- A field declared `weak` (`weak parent: Node?;`) refers to its object without keeping it
-  alive and reads as `None` once the object is gone; its type is `T?` for a class `T`. It is
-  the back link that breaks a reference cycle (see [Weak references](16-memory.md#weak-references)).
+- A field whose type is qualified `weak` is a `shared` reference that owns nothing: it
+  refers to its object without keeping it alive and reads as `None` once the object is
+  gone; its type is `T?` for a class `T`. `parent: weak Node?` names a `shared` object and
+  reads as a `shared Node?`, `parent: weak mut Node?` a `shared mut` one, read as a `shared
+  mut Node?`, and what is stored in it has exactly that form. It is the back link that
+  breaks a reference cycle (see [Weak references](16-memory.md#weak-references)).
 
 ```pkn
 class User {
@@ -1304,8 +1310,11 @@ created for that argument list. See [Generics](13-generics.md).
 | `__super__(…)` twice or not first | A `__super__(…)` call that is not the first statement of `__init__`: a second one, after the first or under an `if` or a loop, or one after another statement: `'__super__' may be called only once, as the first statement of '__init__'`, at the call |
 | `__super__(…)` outside `__init__` | `__super__(…)` called in any method other than `__init__` |
 | Direct call to `destroy` | User code calls `obj.destroy()` explicitly |
-| `weak` field of the wrong type | `weak f: Node;` (not optional) or `weak f: int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
+| `weak` field of the wrong type | `f: weak Node;` (not optional) or `f: weak int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
 | `weak` field passed `inout` | `f(obj.parent)` where `parent` is `weak` and the parameter is `inout`: a weak reference is not a place a strong reference could be written to |
+| Store of another form in a `weak` field | A `weak` field takes a `shared T` and a `weak mut` one a `shared mut T` (or `None`), assigned or passed to the generated `__init__`: `cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object; declare 'a' 'shared mut Node'`, `cannot pass 'b' (a 'shared Node') to parameter 'tail' of 'Node', a 'weak mut' field's: ...`; for `self` in a plain method, `...; a 'shared fn' has a 'shared mut' 'self'` |
+| `weak` before the field's name | `weak parent: Node?;`, the spelling of earlier releases: `'weak' goes after the colon, before the type: write 'parent: weak Node?' (a weak reference names a 'shared' object, 'weak mut' a 'shared mut' one)` |
+| A qualifier after `weak` but `mut` | `parent: weak shared Node?;`: `'weak' takes 'mut' or nothing: 'weak Node?' names a 'shared' object, 'weak mut Node?' a 'shared mut' one` |
 | Override of `destroy` | A class declares its own `fn destroy()` or `static fn destroy()`, in its body or an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in class 'A'` |
 | Declaration of `__walk` | A class declares a method or `static fn` named `__walk`, in its body or an `impl` block: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'` (the walk freezes what an `atomic shared` object holds, [Concurrency](19-concurrency.md#atomic-shared-frozen-objects)) |
 | Override signature mismatch | Override has a different parameter or return type than the base method |

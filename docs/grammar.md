@@ -189,7 +189,7 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
+classMember ::= fieldDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
               | "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
@@ -222,7 +222,21 @@ param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
               | IDENT                                   -- a free function's only
 
 varDecl     ::= IDENT ":" typeAnnotation
+fieldDecl   ::= varDecl | IDENT ":" weakType   -- a class's field
+weakType    ::= "weak" "mut"? typeAnnotation   -- a weak reference
 ```
+
+`weak` qualifies the type of a class field or a local (§6): `parent: weak
+Node?` is a weak reference to a `shared` object, `prev: weak mut Node?` to
+a `shared mut` one ([language/16-memory.md](language/16-memory.md#weak-references)).
+The parser gives the `VarDecl` its weak mark and its type the `shared`
+(`shared mut`) form, a `QualifiedType` around the written type.  Only `mut`
+follows `weak` (`'weak' takes 'mut' or nothing: ...`), and a struct's field
+is never weak (`a struct field cannot be 'weak': ...`).  The spelling
+before the qualifier, `weak parent: Node?;` (and `weak w = x;` for a
+local), is a syntax error that writes the declaration as it is spelled now
+(`'weak' goes after the colon, before the type: write 'parent: weak
+Node?'`).
 
 An enum needs at least one variant; a single trailing comma is permitted.
 A variant's fields, when it has any, are at least one `name: Type` in
@@ -478,7 +492,7 @@ statement ::= ";"
 assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
             | ">" ">="                   -- the two adjacent: ">>="
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
-weakDecl  ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
+weakDecl  ::= IDENT ":" "weak" "mut"? typeAnnotation? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
 ifStmt    ::= "if" expression block elseTail?
@@ -523,7 +537,8 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   subscript`, and `f(x >>= 1)` is `unexpected '>>='; expected ')' to close
   the argument list`.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
-  `x: int;` is not a statement.  Only a `weakDecl` may leave out its
+  `x: int;` is not a statement.  Only a `weakDecl` (`w: weak Node?;`) may
+  leave out its
   initializer, and Sema rejects a `DeclStmt` of any other `VarDecl` without
   one, whichever frontend built it (`variable 'x' needs an initial value
   ...`).
@@ -533,10 +548,13 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
   `let` without an initializer is a syntax error.
 - `weakDecl` declares one local holding a weak reference
-  (`VarDecl::isWeak`); its type, when not written, is its initializer's, and
-  without an initializer it starts as `None`.  It needs a type or an
-  initializer (`a 'weak' declaration needs a type or an initial value`), and
-  is neither a borrow (`weak x: view = e;`) nor a destructuring.
+  (`VarDecl::isWeak`, its type the `shared` or, with `mut`, the `shared mut`
+  form): `w: weak = x;`, `w: weak mut Node? = x;`.  Its type, when not
+  written, is its initializer's, and without an initializer it starts as
+  `None`.  It needs a type or an initializer (`a 'weak' declaration needs a
+  type or an initial value`), and is neither `let` (`a 'weak' local cannot
+  be 'let'`), a borrow, nor a destructuring (`'weak' declares one
+  variable`).
 - `borrowDecl` declares a local borrow (`VarDecl::getMode`); its type, when
   not written, is its initializer's.  It needs an initializer, is never
   `let` (`let x: view = e;`) and is not a destructuring target.  With the

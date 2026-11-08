@@ -90,8 +90,10 @@ TEST(Optional, ClassSomeAndNone) {
 
 // -- Linked list: optional field, insertion, traversal via match
 //
-// The list owns its nodes: `sum` walks it with a `weak` cursor, and `find`
-// returns a borrow of the node it finds.
+// The list owns its nodes: `sum` and `find` walk it by recursion over the
+// `view` of each node's `next` (a `weak` cursor names only a `shared` chain:
+// BreakContinueReturnInsideOptionalMatch), and `find` returns a borrow of
+// the node it finds.
 
 TEST(Optional, LinkedListInsertAndTraverse) {
   LeakGuard g;
@@ -102,15 +104,10 @@ TEST(Optional, LinkedListInsertAndTraverse) {
       return n;
     }
     fn sum(head: view Node?) -> int {
-      total: int = 0;
-      weak cur = head;
-      while (cur != None) {
-        match cur {
-          n: Node { total = total + n.v; cur = n.next; }
-          None    { }
-        }
+      match head {
+        n: Node { return n.v + sum(n.next); }
+        None    { return 0; }
       }
-      return total;
     }
     fn find(head: view Node?, key: int) -> view Node? {
       match head {
@@ -460,14 +457,21 @@ TEST(Optional, TernaryToOptional) {
   g.expectNoLeaks("TernaryToOptional");
 }
 
+// A `weak` cursor walks a chain of `shared` links (a weak reference names a
+// `shared` object), and `continue`, `return` and `break` leave the `match`
+// on it from inside its arms.
 TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
   LeakGuard g;
-  auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
-    fn firstOver(head: view Node?, limit: int) -> int {
-      weak cur = head;
+  auto r = compileAndRun(R"pkn(import ::io;
+    class Link {
+      v: int;
+      next: shared Link?;
+    }
+    fn firstOver(head: shared Link?, limit: int) -> int {
+      cur: weak = head;
       while (True) {
         match cur {
-          n: Node {
+          n: Link {
             cur = n.next;
             if (n.v <= limit) { continue; }
             return n.v;
@@ -478,11 +482,7 @@ TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
       return -1;
     }
     fn main() -> int {
-      a: mut Node = Node(1);
-      b: mut Node = Node(5);
-      c: Node = Node(9);
-      b.next = move c;
-      a.next = move b;
+      a: shared = Link(1, Link(5, Link(9, None)));
       io::println(Str<int>(firstOver(a, 4)));
       io::println(Str<int>(firstOver(a, 20)));
       io::println(Str<int>(firstOver(None, 0)));

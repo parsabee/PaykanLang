@@ -3897,6 +3897,29 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
+    // A weak variable names a `shared` (`shared mut`) object, which a
+    // tuple's element never holds (it keeps no qualifier): only a literal's
+    // None is one it takes.
+    if (const VarKind k = varKind(name);
+        k == VarKind::Weak || k == VarKind::WeakView) {
+      const auto *lit = ast::dyn_cast<ast::TupleLiteralExpr>(node->getValue());
+      const ast::Expr *elem = lit && i < lit->getElements().size()
+                                  ? lit->getElements()[i]
+                                  : nullptr;
+      if (!elem || !ast::isa<ast::NoneLiteral>(elem)) {
+        const ast::Qualifier want = qualifierOfVar(name);
+        const char *form = want.Mut ? "weak mut" : "weak";
+        error(target.Loc, "cannot store element " + std::to_string(i) +
+                              " of the tuple (a '" + typeName(elemTy) +
+                              "') in variable '" + name + "', a '" + form +
+                              " " + typeName(varTy) + "': a '" + form +
+                              "' reference names a '" +
+                              qualifiedName(want, nullptr) +
+                              "' object, which a tuple's element never is");
+        ok = false;
+        continue;
+      }
+    }
     MovedVars.erase(varKey(owner, name)); // assigned again after a move
   }
   return ok;
@@ -4788,8 +4811,14 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                                      "'");
     return false;
   }
-  // A `weak` variable owns nothing: assigning it copies no owner.
+  // A `weak` variable owns nothing: assigning it copies no owner.  It
+  // names a `shared` object (`weak mut`, a `shared mut` one).
   const VarKind kind = varKind(varName);
+  if ((kind == VarKind::Weak || kind == VarKind::WeakView) &&
+      !checkWeakStore(node->getValue(), qualifierOfVar(varName),
+                      CurrentScope->lookup(varName),
+                      "variable '" + varName + "'", node->getLocation()))
+    return false;
   if (kind != VarKind::Weak && kind != VarKind::WeakView &&
       !checkQualifiedFlow(qualifierOfVar(varName), node->getValue(),
                           "variable '" + varName + "'", node->getLocation()))
@@ -5897,8 +5926,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     FixedArrayAllowed = true; // a local may be a fixed-size array
     // and a length may be `_` where an initializer gives it
     InferredLengthAllowed = node->getInitExpr() != nullptr;
+    ResolvingWeakDecl = node->isWeak();
     declTy = resolveValueType(node->getType(), node->getLocation(),
                               "variable '" + node->getName() + "'");
+    ResolvingWeakDecl = false;
     if (!declTy) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
@@ -6019,15 +6050,15 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
 
   // A `weak` local holds a weak reference: its type is `T?` of a class `T`
-  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
+  // (`y: weak = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
   // class: inferred, it would be a weak reference to the None value itself,
   // which never reads None.
   if (node->isWeak()) {
     if (!node->getType() && node->getInitExpr() &&
         isNoneValue(node->getInitExpr())) {
-      error(node->getLocation(),
-            "cannot infer the class of weak local '" + node->getName() +
-                "' from None; write 'weak " + node->getName() + ": T? = None'");
+      error(node->getLocation(), "cannot infer the class of weak local '" +
+                                     node->getName() + "' from None; write '" +
+                                     node->getName() + ": weak T? = None'");
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
@@ -6047,12 +6078,22 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   // the initializer's (a copy of a `shared` reference is `shared`); a
   // qualified slot takes what converts into it.
   if (!sharesStorage(declTy) || node->isWeak()) {
-    // One written alone (`x: shared = 1;`, `weak w: shared = n;`) is
-    // checked as an annotation's is (resolveValueType).
-    if (!qual.isUnique() && node->isWeak()) {
+    // One written alone (`x: shared = 1;`, `w: weak mut = n;`) is
+    // checked as an annotation's is (resolveValueType).  A weak variable is
+    // `weak` (the `shared` form) or `weak mut` (`shared mut`): it names a
+    // `shared` object, or a `shared mut` one.
+    if (node->isWeak() && qual.Form != ast::QualForm::Shared) {
       error(node->getLocation(),
             "weak variable '" + node->getName() +
-                "' takes no qualifier: a weak reference counts nothing");
+                "' is 'weak' or 'weak mut': a weak reference names a 'shared' "
+                "object");
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    if (node->isWeak() && node->getInitExpr() &&
+        !checkWeakStore(node->getInitExpr(), qual, declTy,
+                        "variable '" + node->getName() + "'",
+                        node->getLocation())) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
@@ -6060,11 +6101,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
-    // A weak variable holds nothing: what it views is written as its
-    // owner's form allows (the prototype), so it takes the initializer's.
-    qual = node->isWeak() && node->getInitExpr()
-               ? qualifierOf(node->getInitExpr())
-               : ast::Qualifier{};
+    // A weak variable holds nothing: it reads as the `shared` (`shared
+    // mut`) reference it names, while its object lives.
+    if (!node->isWeak())
+      qual = ast::Qualifier{};
   } else if (!qualified && node->getInitExpr()) {
     qual = qualifierOf(node->getInitExpr());
   }
@@ -6293,10 +6333,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                 node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
     return false;
   }
-  // A `weak` field owns nothing: storing a reference there copies no owner,
-  // and a `view` may be stored there too.
+  // A `weak` field owns nothing: storing a reference there copies no owner.
+  // It names a `shared` object (`weak mut`, a `shared mut` one).
   if (weakField)
-    return true;
+    return checkWeakStore(node->getValue(), fieldQual, fieldTy,
+                          "field '" + node->getFieldName() + "'",
+                          node->getLocation());
   if (!checkQualifiedFlow(fieldQual, node->getValue(),
                           "field '" + node->getFieldName() + "'",
                           node->getLocation()))

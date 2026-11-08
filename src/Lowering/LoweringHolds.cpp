@@ -1442,6 +1442,41 @@ void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
   runs(L.calleeEffect(name, args));
 }
 
+namespace {
+
+/// Whether a builtin `clone()` of a @p ty held with qualifier @p q clones an
+/// object (calls a class's `clone`): a unique reference among its parts.
+bool clonesAnObject(ast::Type *ty, const ast::Type *strTy,
+                    ast::Qualifier q = {}) {
+  if (!ty || ast::isFunctionValue(ty))
+    return false;
+  // A `Str`'s clone is the runtime's copy; a shared reference is the same
+  // object in the clone.
+  if (ast::isRefType(ast::stripOptional(ty)))
+    return q.Form == ast::QualForm::Unique && ast::stripOptional(ty) != strTy;
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    for (size_t i = 0; i < st->getNumFields(); ++i)
+      if (clonesAnObject(st->getElementType(i), strTy,
+                         st->findFieldQualifier(st->getFieldName(i))))
+        return true;
+    return false;
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (ast::Type *e : tt->getElementTypes())
+      if (clonesAnObject(e, strTy))
+        return true;
+    return false;
+  }
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return clonesAnObject(ft->getElementType(), strTy);
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return clonesAnObject(ot->getInnerType(), strTy, q);
+  // A number, a bool, a char, an enum (Cloneable only when Copyable): a copy.
+  return false;
+}
+
+} // namespace
+
 void ModuleLowering::EffectScan::methodCall(ast::MethodCallExpr *mc) {
   ast::Expr *recv = mc->getReceiver();
   const std::string &name = mc->getMethodName();
@@ -1456,6 +1491,13 @@ void ModuleLowering::EffectScan::methodCall(ast::MethodCallExpr *mc) {
   if (mc->isFieldCall()) // a function value in a field
     return unknown();
   ast::Type *rt = typeOf(recv);
+  // The builtin `clone()` of a value that holds no unique object (numbers,
+  // `shared` references, function values, strings): a copy, retaining what
+  // it shares and letting go of nothing.  A unique object's clone is its
+  // class's, which may do anything.
+  if (name == names::kMethodClone && L.isBuiltinClone(mc) &&
+      !clonesAnObject(rt, L.ASTCtx.getStrTy()))
+    return;
   if (ast::dyn_cast<ast::SliceType>(rt) ||
       ast::dyn_cast<ast::FixedArrayType>(rt))
     return; // `len()`

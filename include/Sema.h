@@ -372,6 +372,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The borrowing parameters' arguments: a `view` takes every form of the
   /// object and an `inout` a unique or `shared` one, neither counting it,
   /// and no borrow reaches a `locked` cell.
+  /// A store of @p src into @p what, a weak reference of type @p slotTy in
+  /// form @p want: a `weak` one (`shared`) names a `shared` object and a
+  /// `weak mut` one (`shared mut`) a `shared mut` object, so @p src is held
+  /// in that form (or it is None).
+  bool checkWeakStore(const ast::Expr *src, ast::Qualifier want,
+                      ast::Type *slotTy, const std::string &what,
+                      ast::SourceLocation loc);
   bool checkBorrowQualifiers(const ast::ParamModes &modes,
                              const std::vector<ast::Qualifier> &quals,
                              const std::vector<ast::Expr *> &args,
@@ -582,6 +589,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   ClassContext *CurrentClassCtx = nullptr;
+
+  /// Set while a weak declaration's type resolves: its `shared` form is the
+  /// parser's (`weak T`), so a type that is not a class is the weak type
+  /// check's to report (checkWeakType), not the qualifier's.
+  bool ResolvingWeakDecl = false;
 
   /// What a method body does to `self`, for the warning on a method that
   /// never changes it but is not a `view fn` (SemaViewFn.cpp).

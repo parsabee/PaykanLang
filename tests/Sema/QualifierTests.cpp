@@ -149,11 +149,16 @@ fn main() -> int {
       EXPECT_EQ(r.ErrorCount, 1u) << decl << "\n" << r.Diagnostics;
       if (copied) {
         const std::string name = from.Expr;
-        expectErrors(r, {(":9:3: error: cannot copy '" + name +
-                          "' (a unique '" + typeOf(fromQ) + "'); write 'move " +
-                          name + "' to transfer it, or declare it '" +
-                          typeOf(fromQ.empty() ? "shared" : "shared mut") + "'")
-                             .c_str()});
+        std::string msg = ":9:3: error: cannot copy '";
+        msg += name;
+        msg += "' (a unique '";
+        msg += typeOf(fromQ);
+        msg += "'); write 'move ";
+        msg += name;
+        msg += "' to transfer it, or declare it '";
+        msg += typeOf(fromQ.empty() ? "shared" : "shared mut");
+        msg += "'";
+        expectErrors(r, {msg.c_str()});
         continue;
       }
       expectErrors(r, {(":9:3: " + cannotStore(typeOf(fromQ), "variable 'x'",

@@ -146,7 +146,8 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
   EXPECT_FALSE(e.CompileOk);
   for (const char *msg :
        {"cannot capture 'self': a method borrows its receiver, and a function "
-        "captures by copy; capture a 'weak' local of it ('weak me = self;')",
+        "captures by copy; a 'shared fn' may capture it, or a 'weak' local of "
+        "it ('me: weak mut = self;')",
         "cannot capture 't' (a unique '(Node, Str)'): a function captures by "
         "copy"})
     EXPECT_NE(e.StdErr.find(msg), std::string::npos) << msg << "\n" << e.StdErr;

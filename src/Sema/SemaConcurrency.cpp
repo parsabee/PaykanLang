@@ -754,6 +754,39 @@ bool Sema::checkBorrowQualifier(ast::Qualifier q, ast::ParamMode mode,
   return false;
 }
 
+bool Sema::checkWeakStore(const ast::Expr *src, ast::Qualifier want,
+                          ast::Type *slotTy, const std::string &what,
+                          ast::SourceLocation loc) {
+  if (!src || ast::isa<ast::NoneLiteral>(src))
+    return true;
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(src))
+    return checkWeakStore(te->getTrueExpr(), want, slotTy, what, loc) &&
+           checkWeakStore(te->getFalseExpr(), want, slotTy, what, loc);
+  const ast::Qualifier q = qualifierOf(src);
+  if (q == want)
+    return true;
+  ast::Type *ty = const_cast<ast::Expr *>(src)->getResolvedType();
+  const char *form = want.Mut ? "weak mut" : "weak";
+  const auto *id = ast::dyn_cast<ast::Identifier>(src);
+  std::string msg = "cannot store '" + placeText(src) + "' (a '" +
+                    qualifiedName(q, ty) + "') in " + what + ", a '" + form +
+                    " " + typeName(slotTy) + "': a '" + form +
+                    "' reference names a '" + qualifiedName(want, nullptr) +
+                    "' object";
+  if (id && id->getName() == names::kSelf && CurrentClassCtx &&
+      CurrentClassCtx->MethodName == names::kMethodInit)
+    msg += "; an initializer's 'self' is the new object, which its caller "
+           "holds as it declares";
+  else if (id && id->getName() == names::kSelf)
+    msg += std::string("; a '") + (want.Mut ? "shared fn" : "shared view fn") +
+           "' has a '" + qualifiedName(want, nullptr) + "' 'self'";
+  else if (id && q.Form == ast::QualForm::Unique)
+    msg +=
+        "; declare '" + id->getName() + "' '" + qualifiedName(want, ty) + "'";
+  error(loc, msg);
+  return false;
+}
+
 bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
                                  const std::vector<ast::Qualifier> &quals,
                                  const std::vector<ast::Expr *> &args,
@@ -769,9 +802,24 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     // does, with no retain or release; an immutable one is frozen
     // (inoutPlaceError) and a cell is reached in a `lock` block.
     const ast::Qualifier q = qualifierOf(args[i]);
-    (void)quals;
     const std::string text = placeText(args[i]);
     const char *mode = ast::paramModeName(modes.mode(i));
+    // A `view shared` parameter is a weak field's in a generated `__init__`
+    // (a program writes none): a `weak` field names a `shared` object, a
+    // `weak mut` one a `shared mut` object.
+    if (modes.mode(i) == ast::ParamMode::View && i < quals.size() &&
+        quals[i].Form == ast::QualForm::Shared &&
+        !ast::isa<ast::NoneLiteral>(args[i]) && !(q == quals[i])) {
+      const char *form = quals[i].Mut ? "weak mut" : "weak";
+      error(args[i]->getLocation(),
+            "cannot pass '" + text + "' (a '" + qualifiedName(q, ty) +
+                "') to parameter '" + modes.name(i) + "' of '" + callee +
+                "', a '" + form + "' field's: a '" + form +
+                "' reference names a '" + qualifiedName(quals[i], nullptr) +
+                "' object");
+      ok = false;
+      continue;
+    }
     if (q.Form == ast::QualForm::Locked) {
       std::string msg = "'";
       msg += text;
@@ -1187,6 +1235,10 @@ bool Sema::checkQualifierApplies(ast::Qualifier q, ast::Type *inner,
   // thread, goes in a `mem::Box<T>`, an object (`atomic shared
   // mem::Box<Buffer<float>>`).
   const bool ref = ast::isRefType(inner) || ast::isa<ast::AtomicType>(inner);
+  // A weak declaration's form is its parser's: what it may name is
+  // checkWeakType's to say.
+  if (ResolvingWeakDecl && q.Form == ast::QualForm::Shared && !ref)
+    return true;
   // A function value is one kind of value: its closure, when it has one,
   // is shared by its copies, and nothing changes it.
   if (ast::isFunctionValue(inner)) {

@@ -226,55 +226,26 @@ fn main() -> int {
                             "made as a shape, then a square; tile of 1\n");
 }
 
-// A superclass's `__init__` may give a `weak` reference to `self` away once
-// its own fields are assigned (it cannot hand `self` itself on: a strong
-// reference is an error).  Until the subclass's `__init__` has assigned
-// every field of its own (on every path: in both branches here), the object
-// stays one of the superclass, so a virtual call or a type test made
-// through that reference meanwhile sees the superclass, never a subclass's
-// field without a value.
-TEST(PureVirtual, AGivenAwaySelfIsTheSuperclassUntilTheSubclassFieldsAreSet) {
-  expectRunsOnEveryFrontend("GivenAway", R"(import ::io;
-class Panel { weak kid: Widget?; }
-impl Panel {
-  view fn show() {
-    match self.kid {
-      l: Label { io::println("label " + l.text + " " + Str(l.width())); }
-      w: Widget { io::println("widget " + Str(w.width())); }
-      None { }
-    }
-  }
-}
-class Widget {
-  id: int;
-  view fn width() -> int { return 0; }
-}
+// An `__init__` gives `self` away neither strongly (a method borrows its
+// receiver) nor weakly: a `weak` reference names a `shared` object, and the
+// object an `__init__` makes is unique (an `__init__` cannot be a `shared
+// fn`).  So nothing outside the object sees it while its subclass's
+// `__init__` has not yet assigned the fields of its own.
+TEST(PureVirtual, AnInitCannotGiveSelfAway) {
+  auto weak = compileAndRun(R"(
+class Panel { kid: weak Widget?; }
+class Widget { id: int; }
 impl Widget {
-  fn __init__(p: shared mut Panel) { self.id = 1; p.kid = self; p.show(); }
+  fn __init__(p: shared mut Panel) { self.id = 1; p.kid = self; }
 }
-class Label : Widget {
-  text: Str;
-  view fn width() -> int { return self.text.len(); }
-}
-impl Label {
-  fn __init__(p: shared mut Panel, t: Str) {
-    __super__(p);
-    p.show();
-    if t.len() > 3 { self.text = move t; } else { self.text = t + "!"; }
-    p.show();
-  }
-}
-fn main() -> int {
-  p: shared mut = Panel(None);
-  a = Label(p, "hi");
-  b = Label(p, "hello");
-  p.show();
-  return 0;
-}
-)",
-                            "widget 0\nwidget 0\nlabel hi! 3\n"
-                            "widget 0\nwidget 0\nlabel hello 5\n"
-                            "label hello 5\n");
+fn main() -> int { p: shared mut = Panel(None); w = Widget(p); return 0; }
+)");
+  EXPECT_FALSE(weak.CompileOk);
+  EXPECT_NE(weak.StdErr.find("cannot store 'self' (a 'mut Widget') in field "
+                             "'kid', a 'weak Widget?': a 'weak' reference "
+                             "names a 'shared' object"),
+            std::string::npos)
+      << weak.StdErr;
   auto r = compileAndRun(R"(
 class Panel { kid: Widget?; }
 impl Panel { fn add(w: Widget) { self.kid = move w; } }
@@ -296,9 +267,9 @@ fn main() -> int { p: shared mut = Panel(None); w = Widget(p); return 0; }
 // fields assigned, reaches the slot's trap: the object is one of the
 // abstract class while that runs, so the program stops with the runtime's
 // message (tests/Runtime/ObjectTests.cpp) instead of reading a field the
-// subclass has not assigned yet.  So does a call through a `weak` reference
-// that `__init__` gave away, made by the subclass's `__init__` before its
-// own field has a value: the object is still one of the abstract class.
+// subclass has not assigned yet.  (No reference to `self` leaves an
+// `__init__`, strong or `weak`, for a call to reach it another way:
+// AnInitCannotGiveSelfAway.)
 TEST(PureVirtual, AbstractInitCallingAPureMethodAborts) {
   for (const char *source : {R"(
 class Shape {
@@ -316,29 +287,6 @@ impl Square {
   fn __init__() { __super__(); self.label = "four"; }
 }
 fn main() -> int { s = Square(); return s.n; }
-)",
-                             R"(
-class Board { weak s: Shape?; }
-impl Board {
-  view fn count() -> int {
-    match self.s { s: Shape { return s.sides(); } None { return 0; } }
-  }
-}
-class Shape {
-  n: int;
-  view fn sides() -> int;
-}
-impl Shape {
-  fn __init__(b: shared mut Board) { self.n = 0; b.s = self; }
-}
-class Square : Shape {
-  label: Str;
-  view fn sides() -> int { return self.label.len(); }
-}
-impl Square {
-  fn __init__(b: shared mut Board) { __super__(b); self.n = b.count(); self.label = "four"; }
-}
-fn main() -> int { b: shared mut = Board(None); s = Square(b); return s.n; }
 )"}) {
     fflush(stdout);
     fflush(stderr);

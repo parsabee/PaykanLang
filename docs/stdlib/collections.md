@@ -228,8 +228,12 @@ linear in its length: a list of 400,000 ints takes a tenth of a second.
 
 ## `LinkedList<T>`
 
-A doubly linked list: both ends are O(1) to reach, add to and remove from (amortised, as a
-`List`'s end is). `contains` and `remove` walk the list.
+A doubly linked list: both ends are O(1) to reach, add to and remove from. `contains` and
+`remove` walk the list. Its nodes are objects of its own, each owning the next one and
+reaching the one before it by a `weak mut` reference, as the list reaches its last node; a
+node is `shared mut`, so it is changed through either link. So a `LinkedList` has `shared`
+and `weak` parts, and is not one of the values that cross to another task
+([Concurrency](../language/19-concurrency.md)).
 
 | Method | Does | When it fails |
 |--------|------|---------------|
@@ -250,20 +254,19 @@ A doubly linked list: both ends are O(1) to reach, add to and remove from (amort
 | `view fn toList() -> List<T>` | Clones of the elements from first to last, in a new `List<T>` (Cloneable `T` only) | |
 | `view fn clone() -> LinkedList<T>` | A new list of clones of the elements (Cloneable `T` only) | |
 
-The list keeps its nodes in buffers, linked by index, not as objects that refer to each
-other: node `i` is slot `i` of a buffer of elements and of two buffers of links, the node
-after it and the node before it. So every element is the list's alone, two neighbours form
-no reference cycle, and dropping the list drops every element. The nodes fill the slots
-from 0 to `len() - 1` in any order: the node in the last slot moves into the slot of one
-taken out, which keeps every operation at an end O(1). A list of node objects, each owning
-the next and reaching the previous one through a `weak` reference, could not do that:
-nothing is written through a `weak` reference, so its back could only be changed from the
-head.
+Every node and element is the list's alone: the list owns the first node and each node the
+next, and only `weak mut` references, which own nothing, lead back, so two neighbours form
+no reference cycle and dropping the list drops every node and element. A `weak mut`
+reference names a `shared mut` node and changes it ([Weak
+references](../language/16-memory.md#weak-references)), so the list adds and removes at its
+back through its link to the last node as it does at its front. Taking an element out, at
+an end or by `remove`, unlinks its node from both of its neighbours and moves the element
+out.
 
 ## `Stack<T>` and `Queue<T>`
 
 A `Stack` is last in, first out; a `Queue` first in, first out. Both are kept in a
-`LinkedList<T>`, and every operation is O(1) (amortised, as the list's ends are).
+`LinkedList<T>`, and every operation is O(1), as the list's ends are.
 
 | `Stack<T>` | `Queue<T>` | Does | When it fails |
 |------------|------------|------|---------------|
@@ -286,11 +289,13 @@ that are `==` must have the same `hash()`. A class key overrides `equals` and im
 table keeps at most three entries for every four buckets, and doubles when it would hold
 more. The order of `keys()` is the table's, not the insertion order.
 
-The table keeps its entries in buffers, as a `LinkedList` keeps its nodes: entry `i` is slot
-`i` of a buffer of keys, of values, of hashes and of links to the next entry of its bucket's
-chain, and each bucket links to the first entry of its chain. Every key and value is the
-table's alone. A removed entry's slot takes the one in the last slot, and a rehash links the
-entries into new buckets with no key or value moved.
+The table chains its entries: each bucket holds the first entry of its chain, and each
+entry its key, its value, its key's hash and the next entry. The entries are `shared mut`
+objects of the table's own, each owning the next as a `LinkedList`'s nodes do (with no link
+back), so a lookup changes the entry it reaches; every key and value is still the table's
+alone. A rehash links the
+entries into new buckets with no key or value moved. A `HashMap` or a `HashSet` has `shared`
+parts, so it is not one of the values that cross to another task.
 
 A map keeps each key's hash from when it was put, so an object key must not change in a
 way that changes its `hash()` or `equals` while it is in the map: it would no longer be

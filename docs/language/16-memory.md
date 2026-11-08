@@ -8,8 +8,8 @@ deterministically. The compiler inserts the counting for you. What it counts is 
 unless its reference is `shared`, and a value that holds one is handed on by `move`, copied
 by `clone()` or lent to a borrow, never copied behind the program's back. This chapter
 describes what the model guarantees, the ownership rule, how to check a program for leaks,
-the one kind of leak ARC cannot prevent and how `weak` references avoid it, and then the
-details.
+the one kind of leak ARC cannot prevent and how `weak` references, the `shared` references
+that own nothing, avoid it, and then the details.
 
 ## Value Types vs Reference Types
 
@@ -241,16 +241,18 @@ paykan heap stats:
 ```
 
 PaykanLang has no cycle collector. The fix is a **weak reference**: a field (or a local)
-declared with `weak` refers to an object without counting as a reference to it, so it never
-keeps the object alive. Its type is an optional, because it reads as `None` once the object
-is gone. Make the back link weak and the cycle is no cycle at all:
+whose type is qualified `weak` is a `shared` reference that owns nothing. It refers to a
+shared object without counting as a reference to it, so it never keeps the object alive.
+Its type is an optional, because it reads as `None` once the object is gone. Make the back
+link weak and the cycle is no cycle at all; the people are `shared mut`, so the link is
+`weak mut`, the form that names a `shared mut` object:
 
 ```pkn
 import ::io;
 
 class Person {
   name: Str;
-  weak friend: Person?;
+  friend: weak mut Person?;
 }
 
 impl Person {
@@ -293,21 +295,34 @@ children but not back, never form cycles and need no care.
 A closure is an object too, and its captures are its fields: a lambda that captures an object
 (a `shared` reference, since a capture is a copy) and is then stored in that object (`h.cb =
 fn() -> int { return h.n; };` with `h` a `shared mut Holder`) forms a cycle like any other,
-and leaks the same way unless the capture is a `weak` variable (`weak me = h; h.cb = fn() ->
-int { match me { ... } };`) or the field is overwritten before `h` goes out of scope.
+and leaks the same way unless the capture is a `weak` variable (`me: weak mut = h; h.cb =
+fn() -> int { match me { ... } };`) or the field is overwritten before `h` goes out of
+scope.
 
 ## Weak References
 
-A variable or a class field declared with `weak` refers to an object **without keeping it
-alive**. Its type is `T?` for a class `T` (a user class, `Str` or `Obj`),
-and it may be left off a local declaration that has an initializer:
+A **weak reference** is a `shared` reference that owns nothing: it refers to a shared
+object without being counted as one of its owners, so it never keeps the object alive, and
+it reads as `None` once the object is gone. `weak` qualifies the type of a local or a class
+field, after the colon, in the two forms a shared object has:
+
+- `x: weak T?` names a `shared` object, and reads as a `shared T?`: the object is read
+  through it;
+- `x: weak mut T?` names a `shared mut` object, and reads as a `shared mut T?`: the object
+  is changed through it too.
+
+Its type is `T?` for a class `T` (a user class, `Str` or `Obj`). It may be left off a local
+declaration that has an initializer (`u: weak mut = a;`), and a local with no initializer
+starts as `None` (`e: weak Node?;`). Here a tree's nodes are held `shared mut`, by `main`
+and by their parents, and each child's back link to its parent is `weak mut`, so the tree
+holds no cycle:
 
 ```pkn
 import ::io;
 
 class Node {
   name: Str;
-  weak parent: Node?;   // a back link that does not own the parent
+  parent: weak mut Node?;   // a back link that does not own the parent
   first: shared mut Node?;
   next: shared mut Node?;
 }
@@ -319,7 +334,7 @@ impl Node {
     self.first = None;
     self.next = None;
   }
-  fn add(child: shared mut Node) {
+  shared fn add(child: shared mut Node) {   // stores self: a 'shared fn'
     child.parent = self;
     child.next = self.first;
     self.first = child;
@@ -336,13 +351,13 @@ fn main() -> int {
   root: shared mut Node = Node("root");
   let a: shared mut Node = Node("a");   // held by main and by root
   root.add(a);
-  weak w: Node? = root;   // reads as root while something holds it
-  weak u = a;             // inferred Node?
+  w: weak mut Node? = root;   // reads as root while something holds it
+  u: weak mut = a;            // inferred Node?
   io::println(a.path() + " " + Str(w == None));
-  root = Node("other");   // the first root dies: it was held by nothing else
+  root = Node("other");       // the first root dies: it was held by nothing else
   io::println(a.path() + " " + Str(w == None));
   match u {
-    n: Node { io::println(n.name); }
+    n: Node { n.name = "b"; io::println(a.name); }   // n is a 'shared mut Node'
     None { io::println("gone"); }
   }
   return 0;
@@ -354,39 +369,98 @@ Output:
 ```
 root/a False
 a True
-a
+b
 ```
 
-Reading a `weak` variable or field gives a `T?`: the object while it is alive, `None` once it
-has been destroyed. The value read is an ordinary optional — matched with `match`, compared
-with `== None`, passed, returned, or stored in a strong variable or field, which then keeps the
-object alive. Assigning a `T` or a `T?` to a `weak` variable or field makes it refer to that
-object (or to nothing, for `None`) without retaining it. A `weak` local written without a type
-takes the class of its initializer (`weak u = a;` above is a `Node?`), and `None` has no class:
-`weak a = None;` is an error (`cannot infer the class of weak local 'a' from None; write 'weak
-a: T? = None'`), and `weak a: Node? = None;` starts it as nothing. An `Obj` that holds `None`
-is the `None` value, not nothing: `weak a = x;` after `x = None;` refers to it and never reads
-`None` ([Optionals](12-optionals.md#not-supported-yet)). A lambda that captures a
-`weak` variable captures it weakly, so a closure can refer to the object that stores it without
-forming a cycle (see [Captures](14-function-types.md#captures)). So does a lambda written
-inside that lambda, however deeply nested: a closure that an outer closure returns
-(`let outer = fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else
-"alive"; };`) holds the object weakly too, and reads `None` once it is gone. Inside the
-lambda the captured variable is read-only, as any capture is.
+Reading a weak variable or field gives the object while it is alive and `None` once it has
+been destroyed, as the optional of its form: a `weak` one reads as a `shared T?`, a `weak
+mut` one as a `shared mut T?`. The value read is an ordinary optional of that form,
+matched with `match`, compared with `== None`, passed (to a `view` parameter or one of that
+form), returned, or stored in a strong variable or field, which then keeps the object
+alive. The `T` a `match` arm binds from it has the same form: through a `weak mut`
+reference the object is changed (`n.name = "b"` above), and through a `weak` one it is only
+read (`'n' is immutable (a 'shared Node'; write 'shared mut Node' to change it); cannot
+assign to its field 'name'`).
 
-A weak reference is not a place a strong reference could be written to, so it cannot be passed
-to an `inout` parameter, named by an `inout` local, or bound by an `inout` match arm. It can be
-`view`ed, since a view only reads it. What it reads is immutable as well: a `weak` takes no
-qualifier (`weak variable 'w' takes no qualifier: a weak reference counts nothing`), and the
-`T` a `match` arm binds from it is a borrow, a `view` of the object, which is read or passed
-to a `view` parameter but never stored or written through (`'n' is bound to a 'view'; cannot
-assign to its field 'name'`); the object is changed through a reference that holds it. So
-`path` above is a `view fn`, which `p`, the `Node` its `match` binds, can call, and it
-returns a string of its own. Storing an object in a `weak` field or variable, or passing it
-to the parameter of a generated `__init__` that fills a `weak` field, takes nothing from its
-owner, so it is no copy of a unique reference: `weak u = a;` above, and `child.parent = self`
-in `add`, leave `a` and `self` as they were. For now `weak` applies to locals and class fields: not to
-struct fields, tuple or array elements, parameters or results.
+Storing makes a weak variable or field refer to an object without retaining it, and
+assigning `None` makes it refer to nothing. What is stored has exactly the weak reference's
+form: a `shared T` (or `shared T?`) in a `weak` one, a `shared mut T` in a `weak mut` one,
+and `None` in either. Anything else is an error, and so is passing it to the parameter of a
+generated `__init__` that fills a weak field:
+
+```pkn
+class Node {
+  name: Str;
+  next: shared mut Node?;
+  tail: weak mut Node?;
+}
+
+impl Node {
+  fn link(n: shared mut Node) { n.tail = self; }
+}
+
+fn main() -> int {
+  let a: mut = Node("a", None, None);
+  let b: shared = Node("b", None, None);
+  let c: shared mut = Node("c", None, None);
+  c.tail = a;
+  c.tail = b;
+  w: weak = c;
+  let d = Node("d", None, b);
+  return 0;
+}
+```
+
+Error:
+
+```
+cannot store 'self' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object; a 'shared fn' has a 'shared mut' 'self'
+cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object; declare 'a' 'shared mut Node'
+cannot store 'b' (a 'shared Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object
+cannot store 'c' (a 'shared mut Node') in variable 'w', a 'weak Node?': a 'weak' reference names a 'shared' object
+cannot pass 'b' (a 'shared Node') to parameter 'tail' of 'Node', a 'weak mut' field's: a 'weak mut' reference names a 'shared mut' object
+```
+
+So **a unique object is never weakly referenced**. It has one reference, its owner's, and
+unique references form a tree, which has no cycle to break; a weak reference to one would be
+a second name for an object its owner believes it alone holds. A weak reference names an
+object that already has several owners, and a back link needs its object shared: the
+nodes of a tree held `shared mut`, as above, and a method that stores `self` in a weak
+field declared with a shared `self`. A plain method borrows a unique receiver, so its
+`self` cannot be stored (`link` above); a `shared fn`, whose `self` is `shared mut`, stores
+it in a `weak mut` field or local (`add` above), and a `shared view fn`, whose `self` is
+`shared`, in a `weak` one. Each is called on a receiver held in exactly that form, or on a
+temporary ([Methods that hand on self](05-classes.md#methods-that-hand-on-self-shared-fn)).
+A store takes nothing from the object's owners: `u: weak mut = a;` above, and `child.parent
+= self` in `add`, leave `a` and `self` as they were.
+
+A `weak` local written without a type takes the class of its initializer (`u: weak mut =
+a;` above is a `Node?`) and the form written, `weak` or `weak mut`. `None` has no class:
+`a: weak = None;` is an error (`cannot infer the class of weak local 'a' from None; write
+'a: weak T? = None'`), and `a: weak Node? = None;` starts it as nothing. An `Obj` that holds
+`None` is the `None` value, not nothing: `a: weak = x;` with `x` a `shared Obj` after `x =
+None;` refers to it and never reads `None` ([Optionals](12-optionals.md#not-supported-yet)).
+
+A lambda that captures a `weak` variable captures it weakly, so a closure can refer to the
+object that stores it without forming a cycle (see
+[Captures](14-function-types.md#captures)). So does a lambda written inside that lambda,
+however deeply nested: a closure that an outer closure returns (`let outer = fn() -> () ->
+Str { return fn() -> Str => if me == None then "gone" else "alive"; };`) holds the object
+weakly too, and reads `None` once it is gone. Inside the lambda the captured variable is
+read-only, as any capture is; the object a `weak mut` capture reads is changed through it as
+through any `shared mut` reference.
+
+A weak reference is not a place a strong reference could be written to, so it cannot be
+passed to an `inout` parameter, named by an `inout` local, or bound by an `inout` match arm
+(`'w' is a 'weak' reference and cannot be passed to 'inout' parameter 'n'`). It can be
+`view`ed, since a view only reads it. `weak` takes `mut` and nothing else (`'weak' takes
+'mut' or nothing: 'weak Node?' names a 'shared' object, 'weak mut Node?' a 'shared mut'
+one`), and a weak local is never `let` (`a 'weak' local cannot be 'let': ...`): it is
+assigned as what it names changes. For now `weak` applies to locals and class fields: not
+to struct fields, tuple or array elements, parameters or results. The spelling of earlier
+releases, `weak parent: Node?;` and `weak w = x;`, is an error that writes the declaration
+with the qualifier (`'weak' goes after the colon, before the type: write 'parent: weak
+Node?' ...`).
 
 A `weak` local may name what a `view` names: a `view` parameter, or part of `self` in a
 `view fn`. It takes no reference of its own, so the view is not copied. What it reads is the
@@ -394,10 +468,13 @@ view's object, so its reads are `view`s too: a `match` arm's name for it is boun
 which is read, or passed on to a `view` parameter, but never changed, stored, returned (`'n'
 is bound to a 'view'; it cannot be returned`) or captured by a function (`'cur' is a 'weak'
 local of a 'view'; a function cannot capture a borrow`). It may be assigned another `view`.
-That is how a `view fn` walks a chain of objects reached from `self` without copying a
-reference out of the view (a plain local could not hold one): `weak cur = self.head;` then
-`match cur { n: Node { ...; cur = n.next; } None { } }`. A method that may change `self`
-walks one the same way and returns what it finds, since there `self` is not a `view`.
+That is how a `view fn` walks a chain of shared objects reached from `self` without copying
+a reference out of the view (a plain local could not hold one): with `head` and each node's
+`next` a `shared mut` field, `cur: weak mut = self.head;` then `match cur { n: Node { ...;
+cur = n.next; } None { } }`. A method that may change `self` walks one the same way and
+returns what it finds, since there `self` is not a `view`. The standard library's
+[`LinkedList`](../stdlib/collections.md#linkedlist) is such a chain: its nodes are `shared
+mut`, each owning the next and reaching the one before it by a `weak mut` reference.
 
 The object's memory is kept, empty, while `weak` references to it remain (its own references
 are released when it is destroyed), and freed with the last of them — so a program that drops
@@ -609,7 +686,9 @@ when its object is destroyed or the field is assigned again. What a move changes
 an object is destroyed: it lives as long as its last holder, which after a move is the
 destination, so it may be destroyed before the variable's scope would have ended. Two things
 can see that. A [`weak` reference](#weak-references) elsewhere reads `None` as soon as the
-destination lets go. And what destroying the object does happens then: an
+destination lets go: the object is a `shared` one then, the only kind a weak reference
+names, and `move` hands on a `shared` variable's reference as it does a unique one's. And
+what destroying the object does happens then: an
 [`io::File`](../stdlib/io.md) moved into a function is closed, and what was written to it is
 on disk, when that function returns (unless it keeps the file), so a later `open` of the
 same path in the caller reads it back.
@@ -622,11 +701,11 @@ class Node {
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak Node?;
 }
 
-fn consume(n: Node) -> Str {
-  return move n.name;
+fn consume(n: shared Node) -> Str {
+  return n.name.clone();
 }
 
 fn report(w: view Watcher) {
@@ -637,7 +716,7 @@ fn report(w: view Watcher) {
 }
 
 fn main() -> int {
-  let n = Node("first");
+  let n: shared = Node("first");
   let w = Watcher(n);
   report(w);
   io::println(consume(move n));   // the move: consume holds the only reference
@@ -673,7 +752,7 @@ of a reference (the one an assignment replaces, say) while it uses an object it 
 reference to: a field's value reached through another variable, or anything reached through
 `self`. Where one branch of an `if` or one arm of a `match` hands the variable on and
 another does not, the other releases it when its scope ends. A copy of the variable while a
-`weak` local made from it (`weak u = n;`) is in scope stays a copy, whether or not that local
+`weak` local made from it (`u: weak = n;`) is in scope stays a copy, whether or not that local
 is read again, so the local reads the object until the variable's scope ends. `self`, `inout`
 parameters and locals, fields, array elements and the members of a tuple or struct, and
 `view` parameters and variables, are never transferred, and a lambda's captures are always
@@ -761,7 +840,7 @@ class Node {
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watcher) -> Str {
@@ -785,8 +864,8 @@ fn keep(h: inout Holder, n: shared Node) {
   h.n = n;
 }
 
-// Owns its parameter: handed over, it dies when consume returns.
-fn consume(n: Node) {
+// Given its parameter by 'move': handed over, it dies when consume returns.
+fn consume(n: shared Node) {
   io::println(n.name);
 }
 
@@ -799,7 +878,7 @@ fn main() -> int {
   h.n = None;
   io::println("after the field let go: " + state(w));
   show(a);
-  let b = Node("b");
+  let b: shared = Node("b");
   let v = Watcher(b);
   consume(move b);            // handed over: b dies in consume
   io::println("after consume: " + state(v));

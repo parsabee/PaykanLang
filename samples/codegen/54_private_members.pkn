@@ -1,13 +1,13 @@
 // 54 — private members: the `__` and `_` prefixes
 // Exercises: `__` fields and methods of classes and structs read, assigned
 //            and called from the type's own methods, `impl` blocks, trait
-//            impls, `static fn`s and lambdas inside methods (and from the
-//            type's other instances); `_` fields and methods, the module's
-//            own, used from a free function; a `_` free function and a `_`
-//            class used anywhere in the module; a generic class with a private
-//            field, whose instantiations share the template's methods; the
-//            default `__init__` taking private fields; `toString` and `==`
-//            seeing every field.
+//            impls, `static fn`s and a lambda inside a `shared fn` (and
+//            from the type's other instances); `_` fields and methods, the
+//            module's own, used from a free function; a `_` free function
+//            and a `_` class used anywhere in the module; a generic class
+//            with a private field, whose instantiations share the
+//            template's methods; the default `__init__` taking private
+//            fields; `toString` and `==` seeing every field.
 // Nothing changes at run time: privacy is a compile-time check.
 
 import ::io;
@@ -18,10 +18,11 @@ class Counter {
   fn tick()              { self.__bump(self.step); }
   view fn value() -> int { return self.__count; }
   fn __bump(by: int)     { self.__count = self.__count + by; }
-  // A closure reaches the private field through a `weak` local of `self`
-  // (a method borrows its receiver, so the closure cannot keep a copy).
-  fn adder() -> (int) -> int {
-    weak me = self;
+  // A closure reaches the private field through a `weak mut` local of
+  // `self`: a `shared fn`'s `self` is a `shared mut` reference, which the
+  // weak one names without keeping the counter alive.
+  shared fn adder() -> (int) -> int {
+    me: weak mut = self;
     return fn(d: int) -> int {
       match me {
         c: Counter { return c.__count + d; }
@@ -90,7 +91,7 @@ impl Box<T> {
 }
 
 fn main() -> int {
-  let c: mut = Counter::make(3);
+  let c: shared mut = Counter::make(3);
   c.tick();
   let d: mut = Counter(0, 1);
   d.copyFrom(c);

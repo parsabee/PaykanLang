@@ -1201,7 +1201,7 @@ TEST(Class, FieldsOfAConditionalReceiver) {
       t: (int, Str);
       p: Point;
       next: shared mut Node?;
-      weak back: shared mut Node?;
+      back: weak mut Node?;
     }
     fn bump(x: inout int) { x = x + 1; }
     fn shout(s: inout Str) { s = s + "!"; }

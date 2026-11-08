@@ -41,15 +41,13 @@
 // broken precondition, such as `pop` on an empty container or an index out
 // of range, panics.
 //
-// No container links objects by references.  A LinkedList of node objects,
-// each owning the next and reaching the previous one and the tail by `weak`
-// references, could not add or remove at its back in O(1): nothing can be
-// written through a `weak` reference, so the only path to the tail that
-// can change it is the chain from the head.  So a LinkedList keeps its
-// nodes in buffers, linked by index, as the hash table keeps its entries,
-// whose chains put and remove change: every element is the container's
-// alone, and each operation keeps its cost (amortised where a buffer grows,
-// as List.push is).
+// A LinkedList links node objects: each owns the next, and the next one's
+// `prev` and the list's tail reach it by `weak mut` references.  The nodes
+// are `shared mut`, so a node reached through a `weak mut` link is changed
+// through it (a `weak` reference only reads its object), and each end is
+// O(1).  Its elements are still the list's alone, held in its private
+// nodes.  The hash table chains its entries the same way, each bucket's
+// chain from the bucket, which holds its first entry.
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Table`, `_Heap`, `_panic`, `_fail`,
@@ -63,6 +61,9 @@ import ::memory as mem;
 native fn _panic(message: view Str) = "Paykan_panic_message";
 // _panic for where a value is due: it never returns one.
 native fn _fail<T>(message: view Str) -> T = "Paykan_panic_value";
+// _panic for where a `view` is due: it never returns one.
+native fn _unreachableView<T>(owner: view Obj)
+                              -> view T = "Paykan_unreachable_view";
 
 // -- Buffers ------------------------------------------------------------------
 //
@@ -268,210 +269,229 @@ fn listToString<T: Show>(xs: view List<T>) -> Str {
 
 // -- LinkedList ---------------------------------------------------------------
 
-// A doubly linked list: both ends are O(1) to reach, add to and remove from
-// (amortised: its buffers grow as a List's does).  Node `i` is slot `i` of
-// each buffer: its element, the node after it and the node before it, a
-// link each, which names node `j` as j + 1 and no node as 0 (a new slot's
-// value).  `__head` and `__tail` link to the first node and the last.  The
-// nodes fill slots 0 to len() - 1 in any order: the node in the last slot
-// moves into the slot of one taken out.
+// A node: its element, which moves out when the node is taken (and the
+// node, out of the list, is dropped), the node after it and the node
+// before it.  The nodes are `shared mut`: the one before a node owns it,
+// and the next node's `prev` (and, for the last node, the list's
+// `__tail`) reaches it by a `weak mut` reference, so the chain holds no
+// cycle and a node is changed from either side.
+class _Node<T> {
+  value: T;
+  next: shared mut _Node<T>?;
+  prev: weak mut _Node<T>?;
+}
+
+// A doubly linked list: both ends are O(1) to reach, add to and remove
+// from.  `__head` owns the first node and each node the next; `__tail`
+// reaches the last one by a `weak mut` reference.
 class LinkedList<T> {
-  __values: mem::Buffer<T>;
-  __next: mem::Buffer<unsigned>;
-  __prev: mem::Buffer<unsigned>;
-  __head: unsigned;
-  __tail: unsigned;
+  __head: shared mut _Node<T>?;
+  __tail: weak mut _Node<T>?;
+  __len: unsigned;
 }
 
 impl LinkedList<T> {
   // An empty list.
   fn __init__() {
-    self.__values = mem::Buffer<T>();
-    self.__next = mem::Buffer<unsigned>();
-    self.__prev = mem::Buffer<unsigned>();
-    self.__head = 0;
-    self.__tail = 0;
+    self.__head = None;
+    self.__tail = None;
+    self.__len = 0;
   }
 
   // The number of elements.
-  view fn len() -> unsigned           { return self.__values.len(); }
+  view fn len() -> unsigned { return self.__len; }
 
   // True when the list has no elements.
-  view fn isEmpty() -> bool           { return self.__values.len() == 0; }
+  view fn isEmpty() -> bool { return self.__len == 0; }
 
   // Add `v`, which moves in, before the first element.
   fn pushFront(v: T) {
-    let n = self.__add(move v, 0, self.__head);
-    self.__setPrev(self.__head, n);
+    let n: shared mut = _Node<T>(move v, self.__head, None);
+    match self.__head {
+      h: _Node<T> { h.prev = n; }
+      None { self.__tail = n; }
+    }
     self.__head = n;
+    self.__len = self.__len + 1;
   }
 
   // Add `v`, which moves in, after the last element.
   fn pushBack(v: T) {
-    let n = self.__add(move v, self.__tail, 0);
-    self.__setNext(self.__tail, n);
-    self.__tail = n;
+    match self.__tail {
+      t: _Node<T> {
+        let n: shared mut = _Node<T>(move v, None, t);
+        t.next = n;
+        self.__tail = n;
+        self.__len = self.__len + 1;
+      }
+      None { self.pushFront(move v); }
+    }
   }
 
   // Remove the first element and return it: it moves out.
   fn popFront() -> T {
-    if self.__head == 0 {
-      return _fail<T>("popFront on an empty LinkedList");
+    match self.__head {
+      h: _Node<T> { return self.__take(h); }
+      None { return _fail<T>("popFront on an empty LinkedList"); }
     }
-    return self.__take(self.__head - 1);
   }
 
   // Remove the last element and return it: it moves out.
   fn popBack() -> T {
-    if self.__tail == 0 {
-      return _fail<T>("popBack on an empty LinkedList");
+    match self.__tail {
+      t: _Node<T> { return self.__take(t); }
+      None { return _fail<T>("popBack on an empty LinkedList"); }
     }
-    return self.__take(self.__tail - 1);
   }
 
   // The first element.
   view fn front() -> view T {
-    if self.__head == 0 {
-      _panic("front on an empty LinkedList");
+    match self.__head {
+      n: _Node<T> {
+        return n.value;
+      }
+      None { }
     }
-    return self.__values.at(self.__head - 1);
+    _panic("front on an empty LinkedList");
+    return _unreachableView<T>(self);
   }
 
   // The last element.
   view fn back() -> view T {
-    if self.__tail == 0 {
-      _panic("back on an empty LinkedList");
+    match self.__tail {
+      n: _Node<T> {
+        return n.value;
+      }
+      None { }
     }
-    return self.__values.at(self.__tail - 1);
+    _panic("back on an empty LinkedList");
+    return _unreachableView<T>(self);
   }
 
   // True when some element == v.
-  view fn contains(v: view T) -> bool { return self.__find(v) != 0; }
+  view fn contains(v: view T) -> bool {
+    cur: weak mut = self.__head; // the cursor: no reference copied out of self
+    while True {
+      match cur {
+        n: _Node<T> {
+          if n.value == v {
+            return True;
+          }
+          cur = n.next;
+        }
+        None { return False; }
+      }
+    }
+    return False;
+  }
 
   // Remove the first element == v, and drop it; True if there was one.
   // When an `equals` the walk called changed the list's length, the node
-  // found may be another one, or none: then nothing is removed, and the
+  // found may no longer be in the list: then nothing is removed, and the
   // result is False.
   fn remove(v: view T) -> bool {
-    let n = self.__values.len();
-    let found = self.__find(v);
-    if found == 0 || self.__values.len() != n {
-      return False;
+    let n = self.__len;
+    cur = self.__head;
+    while True {
+      match cur {
+        node: _Node<T> {
+          if node.value == v {
+            if self.__len != n {
+              return False;
+            }
+            self.__take(node);
+            return True;
+          }
+          cur = node.next;
+        }
+        None { return False; }
+      }
     }
-    self.__take(found - 1);
-    return True;
+    return False;
   }
 
   // Remove every element.
   fn clear() {
-    _check(self.__values.shrink(self.__values.len()));
-    _check(self.__next.shrink(self.__next.len()));
-    _check(self.__prev.shrink(self.__prev.len()));
-    self.__head = 0;
-    self.__tail = 0;
+    self.__head = None;
+    self.__tail = None;
+    self.__len = 0;
   }
 
-  // The link to the first node from the front whose element == v, or 0.
-  // An element's `equals` may change the list: the walk stops at a link
-  // past the end.
-  view fn __find(v: view T) -> unsigned {
-    node = self.__head;
-    while node != 0 && node <= self.__values.len() {
-      if self.__values.at(node - 1) == v {
-        return node;
-      }
-      node = self.__next.at(node - 1);
+  // Take node `n` out of the chain and return its element, which moves
+  // out.
+  fn __take(n: shared mut _Node<T>) -> T {
+    match n.prev {
+      p: _Node<T> { p.next = n.next; }
+      None { self.__head = n.next; }
     }
-    return 0;
-  }
-
-  // A new node holding `v`, which moves in, whose links are `prev` and
-  // `next` (theirs are not changed): the link to it.
-  fn __add(v: T, prev: unsigned, next: unsigned) -> unsigned {
-    _check(self.__values.push(move v));
-    _check(self.__next.push(next));
-    _check(self.__prev.push(prev));
-    return self.__values.len();
-  }
-
-  // Make `to` the node after `node`, or the first node when `node` is 0.
-  fn __setNext(node: unsigned, to: unsigned) {
-    if node == 0 {
-      self.__head = to;
-    } else {
-      _check(self.__next.set(node - 1, to));
+    match n.next {
+      x: _Node<T> { x.prev = n.prev; }
+      None { self.__tail = n.prev; }
     }
-  }
-
-  // Make `to` the node before `node`, or the last node when `node` is 0.
-  fn __setPrev(node: unsigned, to: unsigned) {
-    if node == 0 {
-      self.__tail = to;
-    } else {
-      _check(self.__prev.set(node - 1, to));
-    }
-  }
-
-  // Take node `i` out of the list and return its element, which moves out.
-  // Its neighbours are linked to each other; then the node in the last slot
-  // moves into slot `i`, its neighbours linked to it there, and the last
-  // slot goes.
-  fn __take(i: unsigned) -> T {
-    let prev = self.__prev.at(i);
-    let next = self.__next.at(i);
-    self.__setNext(prev, next);
-    self.__setPrev(next, prev);
-    let last = self.__values.len() - 1;
-    if i != last {
-      self.__setNext(self.__prev.at(last), i + 1);
-      self.__setPrev(self.__next.at(last), i + 1);
-      _check(self.__values.swap(i, last));
-      _check(self.__next.swap(i, last));
-      _check(self.__prev.swap(i, last));
-    }
-    _check(self.__next.shrink(1));
-    _check(self.__prev.shrink(1));
-    return self.__values.pop();
+    n.next = None;
+    n.prev = None;
+    self.__len = self.__len - 1;
+    return move n.value;
   }
 }
 
 impl LinkedList<T: Cloneable> {
   // A clone of the first element, to keep.
   view fn getFront() -> T {
-    if self.__head == 0 {
+    if self.__len == 0 {
       return _fail<T>("getFront on an empty LinkedList");
     }
-    return self.__values.at(self.__head - 1).clone();
+    return self.front().clone();
   }
 
   // A clone of the last element, to keep.
   view fn getBack() -> T {
-    if self.__tail == 0 {
+    if self.__len == 0 {
       return _fail<T>("getBack on an empty LinkedList");
     }
-    return self.__values.at(self.__tail - 1).clone();
+    return self.back().clone();
   }
 
   // Clones of the elements from first to last, in a new list.
   view fn toList() -> List<T> {
     out = List<T>();
-    node = self.__head;
-    while node != 0 {
-      out.push(self.__values.at(node - 1).clone());
-      node = self.__next.at(node - 1);
+    cur: weak mut = self.__head; // the cursor: no reference copied out of self
+    while True {
+      match cur {
+        n: _Node<T> {
+          out.push(n.value.clone());
+          cur = n.next;
+        }
+        None { return out; }
+      }
     }
     return out;
   }
 }
 
-// A clone has clones of the elements, in the same slots, with the same
-// links.
-impl Cloneable for LinkedList<T: Cloneable> {}
+// A clone has clones of the elements, in order, in nodes of its own: a
+// derived clone would share the nodes, which are `shared`.
+impl Cloneable for LinkedList<T: Cloneable> {
+  view fn clone() -> LinkedList<T> {
+    let out: mut = LinkedList<T>();
+    cur: weak mut = self.__head; // the cursor: no reference copied out of self
+    while True {
+      match cur {
+        n: _Node<T> {
+          out.pushBack(n.value.clone());
+          cur = n.next;
+        }
+        None { return out; }
+      }
+    }
+    return out;
+  }
+}
 
 // -- Stack and Queue ------------------------------------------------------------
 
-// Last in, first out: push and pop at the top, O(1) (amortised, as a
-// LinkedList's ends are).
+// Last in, first out: push and pop at the top, O(1), as a LinkedList's
+// ends are.
 struct Stack<T> {
   __list: LinkedList<T>;
 }
@@ -519,8 +539,8 @@ impl Stack<T: Cloneable> {
   view fn toList() -> List<T> { return self.__list.toList(); }
 }
 
-// First in, first out: enqueue at the back and dequeue at the front, O(1)
-// (amortised, as a LinkedList's ends are).
+// First in, first out: enqueue at the back and dequeue at the front, O(1),
+// as a LinkedList's ends are.
 struct Queue<T> {
   __list: LinkedList<T>;
 }
@@ -570,163 +590,199 @@ impl Queue<T: Cloneable> {
 
 // -- HashMap and HashSet --------------------------------------------------------
 
-// The table of a HashMap or a HashSet.  Entry `i` is slot `i` of __keys,
-// __values and __hashes (its key's hash), and of __next, the link to the
-// next entry in its bucket's chain, which names entry `j` as j + 1 and the
-// chain's end as 0; each bucket links to the first entry of its chain the
-// same way.  The entries fill slots 0 to len() - 1: the last entry moves
-// into the slot of one removed.
+// One key and its value, in its bucket's chain.  The entries are `shared
+// mut`: the entry before one (or its bucket) owns it, and a lookup reaches
+// it through a copy of that link, which changes it.
+class _Entry<K, V> {
+  key: K;
+  value: V;
+  hash: int;
+  next: shared mut _Entry<K, V>?;
+}
+
+// A bucket: the first entry of its chain, or None.  (A buffer's element
+// type takes no qualifier yet, #368, so the link is a struct's field.)
+struct _Bucket<K, V> {
+  head: shared mut _Entry<K, V>?;
+}
+
+// The table of a HashMap or a HashSet: its buckets and its number of keys.
 class _Table<K: Hashable, V> {
-  __keys: mem::Buffer<K>;
-  __values: mem::Buffer<V>;
-  __hashes: mem::Buffer<int>;
-  __next: mem::Buffer<unsigned>;
-  __buckets: mem::Buffer<unsigned>;
+  __buckets: mem::Buffer<_Bucket<K, V>>;
+  __size: unsigned;
 }
 
 impl _Table<K, V> {
   fn __init__() {
-    self.__keys = mem::Buffer<K>();
-    self.__values = mem::Buffer<V>();
-    self.__hashes = mem::Buffer<int>();
-    self.__next = mem::Buffer<unsigned>();
-    self.__buckets = _buffer<unsigned>(8);
+    self.__buckets = _buffer<_Bucket<K, V>>(8);
+    self.__size = 0;
   }
 
   // The number of keys.
-  view fn len() -> unsigned { return self.__keys.len(); }
+  view fn len() -> unsigned { return self.__size; }
 
   // True when the map has no keys.
-  view fn isEmpty() -> bool { return self.__keys.len() == 0; }
+  view fn isEmpty() -> bool { return self.__size == 0; }
 
   // Map `k` to `v`, replacing its value if `k` is already a key (and then
   // dropping `k`): both move in.  True if `k` is a new key.
   fn put(k: K, v: V) -> bool {
     let h = k.hash();
-    let found = self.__find(k, h);
-    if found != 0 {
-      _check(self.__values.set(found - 1, move v));
-      return False;
+    match self.__find(k, h) {
+      e: _Entry<K, V> {
+        e.value = move v;
+        return False;
+      }
+      None { }
     }
-    let n = self.__keys.len();
-    if (n + 1) * 4 > self.__buckets.len() * 3 {
+    if (self.__size + 1) * 4 > self.__buckets.len() * 3 {
       self.__rehash(self.__buckets.len() * 2);
     }
     let b = _bucket(h, self.__buckets.len());
-    _check(self.__keys.push(move k));
-    _check(self.__values.push(move v));
-    _check(self.__hashes.push(h));
-    _check(self.__next.push(self.__buckets.at(b)));
-    _check(self.__buckets.set(b, n + 1));
+    let e: shared mut = _Entry<K,
+        V>(move k, move v, h, self.__buckets.get(b).head);
+    _check(self.__buckets.set(b, _Bucket<K, V>(e)));
+    self.__size = self.__size + 1;
     return True;
   }
 
   // The value of `k`, which must be a key, as a `view`.
   view fn at(k: view K) -> view V {
-    let found = self.__find(k, k.hash());
-    if found == 0 {
-      _panic("HashMap.at of a key it does not have");
+    let h = k.hash();
+    match self.__buckets.at(_bucket(h, self.__buckets.len())).head {
+      e: _Entry<K, V> { return self.__valueIn(e, k, h); }
+      None {
+        _panic("HashMap.at of a key it does not have");
+        return _unreachableView<V>(self);
+      }
     }
-    return self.__values.at(found - 1);
   }
 
   // The value of `k`, or `otherwise` if it is not a key, as a `view`.
   view fn atOr(k: view K, otherwise: view V) -> view V {
-    let found = self.__find(k, k.hash());
-    if found == 0 {
-      return otherwise;
+    let h = k.hash();
+    match self.__buckets.at(_bucket(h, self.__buckets.len())).head {
+      e: _Entry<K, V> { return self.__valueOr(e, k, h, otherwise); }
+      None { return otherwise; }
     }
-    return self.__values.at(found - 1);
   }
 
   // True when `k` is a key.
-  view fn containsKey(k: view K) -> bool
-                            { return self.__find(k, k.hash()) != 0; }
+  view fn containsKey(k: view K) -> bool {
+    let h = k.hash();
+    cur: weak mut = self.__buckets.at(_bucket(h, self.__buckets.len())).head;
+    while True {
+      match cur {
+        e: _Entry<K, V> {
+          if e.hash == h && e.key == k {
+            return True;
+          }
+          cur = e.next;
+        }
+        None { return False; }
+      }
+    }
+    return False;
+  }
 
   // Remove `k` and its value, and drop them; True if it was a key.
   fn remove(k: view K) -> bool {
     let h = k.hash();
     let b = _bucket(h, self.__buckets.len());
-    from: unsigned = 0; // the entry whose __next links to `e`; 0: the bucket
-    e = self.__buckets.at(b);
-    while e != 0 {
-      if self.__hashes.at(e - 1) == h && self.__keys.at(e - 1) == k {
-        self.__removeAt(b, from, e - 1);
-        return True;
+    prev: shared mut _Entry<K, V>? = None; // the entry linking to `cur`
+    cur = self.__buckets.get(b).head;
+    while True {
+      match cur {
+        e: _Entry<K, V> {
+          if e.hash == h && e.key == k {
+            match prev {
+              p: _Entry<K, V> { p.next = e.next; }
+              None { _check(self.__buckets.set(b, _Bucket<K, V>(e.next))); }
+            }
+            e.next = None;
+            self.__size = self.__size - 1;
+            return True;
+          }
+          prev = e;
+          cur = e.next;
+        }
+        None { return False; }
       }
-      from = e;
-      e = self.__next.at(e - 1);
     }
     return False;
   }
 
   // Remove every key.
   fn clear() {
-    _check(self.__keys.shrink(self.__keys.len()));
-    _check(self.__values.shrink(self.__values.len()));
-    _check(self.__hashes.shrink(self.__hashes.len()));
-    _check(self.__next.shrink(self.__next.len()));
-    self.__buckets = _buffer<unsigned>(8);
+    self.__buckets = _buffer<_Bucket<K, V>>(8);
+    self.__size = 0;
   }
 
-  // The link to the entry of key `k`, whose hash is `h`, or 0.
-  view fn __find(k: view K, h: int) -> unsigned {
-    e = self.__buckets.at(_bucket(h, self.__buckets.len()));
-    while e != 0 {
-      if self.__hashes.at(e - 1) == h && self.__keys.at(e - 1) == k {
-        return e;
+  // The entry of key `k`, whose hash is `h`, or None.
+  view fn __find(k: view K, h: int) -> shared mut _Entry<K, V>? {
+    cur = self.__buckets.get(_bucket(h, self.__buckets.len())).head;
+    while True {
+      match cur {
+        e: _Entry<K, V> {
+          if e.hash == h && e.key == k {
+            return e;
+          }
+          cur = e.next;
+        }
+        None { return None; }
       }
-      e = self.__next.at(e - 1);
     }
-    return 0;
+    return None;
   }
 
-  // Make `to` the link that entry `from` (bucket `b` when `from` is 0) has
-  // to the next entry of b's chain.
-  fn __setLink(b: unsigned, from: unsigned, to: unsigned) {
-    if from == 0 {
-      _check(self.__buckets.set(b, to));
-    } else {
-      _check(self.__next.set(from - 1, to));
+  // The value of `k`, in the chain from `e`, which has it.
+  view fn __valueIn(e: view _Entry<K, V>, k: view K, h: int) -> view V {
+    if e.hash == h && e.key == k {
+      return e.value;
     }
-  }
-
-  // Take entry `i` out of bucket `b`'s chain, where `from` links to it
-  // (as in __setLink), and drop its key and value.  The last entry moves
-  // into slot `i`, and what linked to it links there.
-  fn __removeAt(b: unsigned, from: unsigned, i: unsigned) {
-    self.__setLink(b, from, self.__next.at(i));
-    let last = self.__keys.len() - 1;
-    if i != last {
-      let lb = _bucket(self.__hashes.at(last), self.__buckets.len());
-      lfrom: unsigned = 0;
-      e = self.__buckets.at(lb);
-      while e != last + 1 {
-        lfrom = e;
-        e = self.__next.at(e - 1);
+    match e.next {
+      n: _Entry<K, V> { return self.__valueIn(n, k, h); }
+      None {
+        _panic("HashMap.at of a key it does not have");
+        return _unreachableView<V>(self);
       }
-      self.__setLink(lb, lfrom, i + 1);
-      _check(self.__keys.swap(i, last));
-      _check(self.__values.swap(i, last));
-      _check(self.__hashes.swap(i, last));
-      _check(self.__next.swap(i, last));
     }
-    _check(self.__keys.shrink(1));
-    _check(self.__values.shrink(1));
-    _check(self.__hashes.shrink(1));
-    _check(self.__next.shrink(1));
+  }
+
+  // The value of `k` in the chain from `e`, or `otherwise`.
+  view fn __valueOr(e: view _Entry<K, V>, k: view K, h: int, otherwise: view V)
+                    -> view V {
+    if e.hash == h && e.key == k {
+      return e.value;
+    }
+    match e.next {
+      n: _Entry<K, V> { return self.__valueOr(n, k, h, otherwise); }
+      None { return otherwise; }
+    }
   }
 
   // Chain every entry into `n` new buckets; no key or value moves.
   fn __rehash(n: unsigned) {
-    self.__buckets = _buffer<unsigned>(n);
+    fresh = _buffer<_Bucket<K, V>>(n);
     i: unsigned = 0;
-    while i < self.__keys.len() {
-      let b = _bucket(self.__hashes.at(i), n);
-      _check(self.__next.set(i, self.__buckets.at(b)));
-      _check(self.__buckets.set(b, i + 1));
+    while i < self.__buckets.len() {
+      cur = self.__buckets.get(i).head;
+      done = False;
+      while !done {
+        match cur {
+          e: _Entry<K, V> {
+            let next = e.next;
+            let b = _bucket(e.hash, n);
+            e.next = fresh.get(b).head;
+            _check(fresh.set(b, _Bucket<K, V>(e)));
+            cur = next;
+          }
+          None { done = True; }
+        }
+      }
       i = i + 1;
     }
+    self.__buckets = move fresh;
   }
 }
 
@@ -735,8 +791,18 @@ impl _Table<K: Cloneable, V> {
   view fn keys() -> List<K> {
     out = List<K>();
     i: unsigned = 0;
-    while i < self.__keys.len() {
-      out.push(self.__keys.at(i).clone());
+    while i < self.__buckets.len() {
+      cur: weak mut = self.__buckets.at(i).head;
+      done = False;
+      while !done {
+        match cur {
+          e: _Entry<K, V> {
+            out.push(e.key.clone());
+            cur = e.next;
+          }
+          None { done = True; }
+        }
+      }
       i = i + 1;
     }
     return out;
@@ -746,37 +812,65 @@ impl _Table<K: Cloneable, V> {
 impl _Table<K, V: Cloneable> {
   // A clone of the value of `k`, which must be a key, to keep.
   view fn get(k: view K) -> V {
-    let found = self.__find(k, k.hash());
-    if found == 0 {
-      return _fail<V>("HashMap.get of a key it does not have");
+    match self.__find(k, k.hash()) {
+      e: _Entry<K, V> { return e.value.clone(); }
+      None { return _fail<V>("HashMap.get of a key it does not have"); }
     }
-    return self.__values.at(found - 1).clone();
   }
 
   // A clone of the value of `k`, or `otherwise` if it is not a key.
   view fn getOr(k: view K, otherwise: V) -> V {
-    let found = self.__find(k, k.hash());
-    if found == 0 {
-      return otherwise;
+    match self.__find(k, k.hash()) {
+      e: _Entry<K, V> { return e.value.clone(); }
+      None { return otherwise; }
     }
-    return self.__values.at(found - 1).clone();
   }
 
   // Clones of the values, in a new list, in the order of keys().
   view fn values() -> List<V> {
     out = List<V>();
     i: unsigned = 0;
-    while i < self.__values.len() {
-      out.push(self.__values.at(i).clone());
+    while i < self.__buckets.len() {
+      cur: weak mut = self.__buckets.at(i).head;
+      done = False;
+      while !done {
+        match cur {
+          e: _Entry<K, V> {
+            out.push(e.value.clone());
+            cur = e.next;
+          }
+          None { done = True; }
+        }
+      }
       i = i + 1;
     }
     return out;
   }
 }
 
-// A clone has clones of the keys and the values, in the same slots, with
-// the same links.
-impl Cloneable for _Table<K: Cloneable, V: Cloneable> {}
+// A clone has clones of the keys and the values, in entries of its own: a
+// derived clone would share the entries, which are `shared`.
+impl Cloneable for _Table<K: Cloneable, V: Cloneable> {
+  view fn clone() -> _Table<K, V> {
+    let out: mut = _Table<K, V>();
+    i: unsigned = 0;
+    while i < self.__buckets.len() {
+      cur: weak mut = self.__buckets.at(i).head;
+      done = False;
+      while !done {
+        match cur {
+          e: _Entry<K, V> {
+            out.put(e.key.clone(), e.value.clone());
+            cur = e.next;
+          }
+          None { done = True; }
+        }
+      }
+      i = i + 1;
+    }
+    return out;
+  }
+}
 
 // The bucket of hash `h` among `n`: the hash's bits read as an unsigned
 // number, modulo `n`, so a negative hash lands in a bucket too.

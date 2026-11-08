@@ -10,7 +10,9 @@
 // frees everything it allocates.  Each also says how many arguments the
 // lending pass lent, how many copies it kept because something between the
 // read and the call may let the object go (the window), and some how many
-// parameters it lent and how many their bodies own from their entry.
+// parameters it lent and how many their bodies own from their entry.  The
+// watched nodes are `shared` (`shared mut` where an `inout` parameter
+// replaces one), since a `weak` reference names only a `shared` object.
 
 #include "CodeGenTestUtils.h"
 
@@ -32,7 +34,7 @@ class Node {
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn report(w: view Watcher, tag: view Str) {
@@ -43,45 +45,45 @@ fn report(w: view Watcher, tag: view Str) {
 }
 
 // Reads its parameter only.
-fn inner(n: Node) {
+fn inner(n: shared Node) {
   io::println("inner reads " + n.name);
 }
 
 // Hands its parameter on at its last use, then does more work.
-fn outer(n: Node, w: view Watcher) {
+fn outer(n: shared Node, w: view Watcher) {
   inner(move n);
   report(w, "in outer, after inner");
 }
 
 // Reassigns its parameter.
-fn rebind(n: Node, w: view Watcher) {
+fn rebind(n: shared Node, w: view Watcher) {
   n = Node("other");
   report(w, "in rebind, after the assignment");
 }
 
 class Holder {
-  n: Node?;
+  n: shared Node?;
 }
 
 // Keeps its parameter in a field, then lets the field go.
-fn stash(h: inout Holder, n: Node, w: view Watcher) {
+fn stash(h: inout Holder, n: shared Node, w: view Watcher) {
   h.n = move n;
   h.n = None;
   report(w, "in stash, after the field let go");
 }
 
 fn main() -> int {
-  a = Node("a");
+  a: shared = Node("a");
   wa = Watcher(a);
   outer(move a, wa);         // a's last use: a transfer
   report(wa, "in main, after outer");
 
-  b = Node("b");
+  b: shared = Node("b");
   wb = Watcher(b);
   rebind(move b, wb);
   report(wb, "in main, after rebind");
 
-  c = Node("c");
+  c: shared = Node("c");
   wc = Watcher(c);
   h: mut = Holder(None);
   stash(h, move c, wc);
@@ -135,7 +137,7 @@ class Holder {
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn report(w: view Watcher, tag: view Str) {
@@ -154,7 +156,7 @@ fn clearThenRead(s: shared Str, h: shared mut Holder) {
 
 // Given a node's name and the node at its last use: the node may die
 // inside, the name must not.
-fn nameAndNode(s: shared Str, n: Node, w: view Watcher) {
+fn nameAndNode(s: shared Str, n: shared Node, w: view Watcher) {
   n = Node("other");
   report(w, "in nameAndNode, after the assignment");
   io::println("name " + s);
@@ -164,7 +166,7 @@ fn main() -> int {
   h: shared mut = Holder(None, "original " + "string");
   clearThenRead(h.s, h);
 
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watcher(x);
   nameAndNode(x.name, move x, wx);   // x's last use
   report(wx, "in main, after nameAndNode");
@@ -196,7 +198,7 @@ class Node {
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -206,14 +208,14 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn g(n: Node) -> bool { return True; }
+fn g(n: shared Node) -> bool { return True; }
 
 fn f(s: shared Str, b: bool, w: view Watch) {
   io::println("in f, x is " + state(w) + "; s = " + s);
 }
 
 fn main() -> int {
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watch(x);
   c = wx.target != None;
   f(x.name, c && g(move x), wx);
@@ -244,7 +246,7 @@ class Node {
 }
 
 class Watch {
-  weak target: shared Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -291,7 +293,7 @@ class Node {
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -301,12 +303,12 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn g(n: Node) -> int { return 1; }
+fn g(n: shared Node) -> int { return 1; }
 
 fn f(s: shared Str, k: int) -> int { return s.len() + k; }
 
 fn main() -> int {
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watch(x);
   r = f(x.name, g(move x));
   io::println("after f: x is " + state(wx) + " (" + Str(r) + ")");
@@ -336,7 +338,7 @@ class Node {
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak mut Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -352,7 +354,7 @@ fn f(s: shared Str, n: inout Node, w: view Watch) {
 }
 
 fn main() -> int {
-  x: mut = Node("x" + "name");
+  x: shared mut = Node("x" + "name");
   wx = Watch(x);
   f(x.name, x, wx);
   io::println("after f: " + x.name);
@@ -382,7 +384,7 @@ class Node {
 }
 
 class Watch {
-  weak target: shared Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -434,11 +436,11 @@ class Node {
 }
 
 class Holder {
-  n: Node;
+  n: shared Node;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -613,7 +615,7 @@ class Node {
 }
 
 class Watch {
-  weak target: shared mut Node?;
+  target: weak mut Node?;
 }
 
 fn state(w: view Watch) -> Str {

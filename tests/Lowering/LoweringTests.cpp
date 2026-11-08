@@ -1197,7 +1197,7 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
     class B {
       s: Str;
       n: int;
-      weak w: B?;
+      w: weak B?;
       g: Box<int>;
       c: Cell<int>;
       o: B?;
@@ -2631,7 +2631,7 @@ TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
 TEST(Lowering, AnInitsFirstAssignmentOfAFieldReleasesNoOldValue) {
   auto l = lower(R"(
     class Node { name: Str; }
-    class Pair { a: Node; b: Node?; weak c: Node?; }
+    class Pair { a: Node; b: Node?; c: weak Node?; }
     class Twice { n: Node; }
     impl Twice {
       fn __init__(first: Node, second: Node) {

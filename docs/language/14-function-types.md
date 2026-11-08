@@ -205,8 +205,8 @@ does not change the variable.  A closure is an object: one that captures an obje
 stored in a field of it is a reference cycle, which [is not
 collected](16-memory.md#reference-cycles) — unless the captured variable is a
 [`weak`](16-memory.md#weak-references) one, which the closure captures weakly: it reads
-as the object while the object is alive and as `None` afterwards (`weak me = self;
-self.onClick = fn() -> Str { match me { ... } };`).
+as the object while the object is alive and as `None` afterwards (`me: weak mut = self;
+self.onClick = fn() -> Str { match me { ... } };` in a `shared fn`).
 
 ```pkn
 import ::io;
@@ -246,18 +246,18 @@ for every Copyable `T`).
 
 A move-only value cannot be captured: a unique object, a `Str`, a container, or a struct,
 tuple, array or optional holding one (`cannot capture 's' (a unique 'Str'): a function
-captures by copy; declare it 'shared Str', or capture a 'weak' local of it`;
-`constant("s")` is `cannot capture 'x' (a unique 'Str') ...`, in the instantiation
-`constant<Str>`).  A clone is just as move-only, so cloning the value before the lambda
-does not help.  What the lambda needs
-reaches it another way:
+captures by copy; declare it 'shared Str' (and then, to keep no owner, capture a 'weak'
+local of it)`; `constant("s")` is `cannot capture 'x' (a unique 'Str') ...`, in the
+instantiation `constant<Str>`).  A clone is just as move-only, so cloning the value before
+the lambda does not help.  What the lambda needs reaches it another way:
 
 - declare the variable `shared` (`let s: shared = "abc";`, `let n: shared mut = Node(1);`),
   and the closure and the function share the object;
 - read what the lambda uses into a Copyable local before it (`let k = s.len();`, then
   `fn() => k`);
 - pass the value to the lambda as an argument instead (`fn(t: view Str) => t.len()`);
-- or capture a `weak` local of an object, which reads as the object while it lives.
+- or declare the object `shared` and capture a `weak` local of it, which reads as the
+  object while it lives and owns nothing.
 
 A function value is Copyable, so a lambda captures one as it does a number: `fn twice(f:
 (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }` returns a
@@ -277,20 +277,29 @@ capture it (copy it into a variable first)`).  Nor is `self` in any other class
 method but a [`shared fn`](05-classes.md#methods-that-hand-on-self-shared-fn), whose `self`
 is a `shared` reference, which a closure holds as it holds any: a method borrows its
 receiver, and a capture is a copy (`cannot capture 'self': a method borrows its receiver,
-and a function captures by copy; capture a 'weak' local of it ('weak me = self;')`).  In
-any method, a closure reaches the object through a `weak` local of `self`,
-which owns nothing and reads as None once the object is gone. What it reads is a `view` of
-the object ([Weak References](16-memory.md#weak-references)), so the closure reads the
-object as it is when it runs, and the object is changed through the references that hold
-it; the method cannot be a `view fn`, since a `weak` local of a `view` is a borrow:
+and a function captures by copy; a 'shared fn' may capture it, or a 'weak' local of it
+('me: weak mut = self;')`).
+
+A closure that captures `self` keeps the object alive, and one the object stores is a
+[cycle](16-memory.md#reference-cycles). A closure that should not keep the object reaches
+it through a `weak` local of `self` instead, which owns nothing and reads as None once the
+object is gone. A weak reference names a shared object, so the method is one whose `self`
+is shared: a `shared view fn`, whose `self` is `shared`, with `me: weak = self;`, or a
+`shared fn`, whose `self` is `shared mut`, with `me: weak mut = self;` ([Weak
+References](16-memory.md#weak-references)). In a plain method or a `view fn`, `self` is the
+borrow of a unique receiver, which no weak reference may name (`cannot store 'self' (a
+'mut Counter') in variable 'me', a 'weak Counter?': a 'weak' reference names a 'shared'
+object; a 'shared view fn' has a 'shared' 'self'`). The closure reads the object as it is
+when it runs: through `weak` it reads a `shared` reference, and through `weak mut` a `shared
+mut` one, which it may change the object through:
 
 ```pkn
 import ::io;
 
 class Counter {
   n: int;
-  fn plus() -> (int) -> int {
-    weak me = self;
+  shared view fn plus() -> (int) -> int {
+    me: weak = self;
     return fn(d: int) -> int {
       match me {
         c: Counter { return c.n + d; }
@@ -298,13 +307,26 @@ class Counter {
       }
     };
   }
+  shared fn bump() -> () -> int {
+    me: weak mut = self;
+    return fn() -> int {
+      match me {
+        c: Counter { c.n = c.n + 1; return c.n; }
+        None { return 0; }
+      }
+    };
+  }
 }
 
 fn main() -> int {
-  let c: mut = Counter(5);
+  c: shared = Counter(5);
   let add = c.plus();
-  c.n = 7;
-  io::println(Str(add(10)) + " " + Str(c.n));
+  let m: shared mut = Counter(1);
+  let tick = m.bump();
+  tick();
+  io::println(Str(add(10)) + " " + Str(tick()) + " " + Str(m.n));
+  c = Counter(7);                  // the first counter dies: add reads None
+  io::println(Str(add(10)) + " " + Str(c.plus()(10)));
   return 0;
 }
 ```
@@ -312,7 +334,8 @@ fn main() -> int {
 Output:
 
 ```
-17 7
+15 3 3
+10 17
 ```
 
 A lambda inside a lambda captures the outer lambda's copy, so a closure returned from a

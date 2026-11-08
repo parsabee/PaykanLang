@@ -726,14 +726,15 @@ nodes.get(0);   // nodes: List<Node> -- error: 'get' needs 'T: Copyable', and 'N
 ### Weak references
 
 A weak reference refers only to a `shared` object and never crosses threads
-(decisions 33 and 37, revising 25).  A `shared` object is a `shared`
-one on one thread, and a cycle can pass through the `shared` references it
-holds, so it may be a weak target too (proposed; owner may change).
-checkWeakType (src/Sema/Sema.cpp:5288) accepts `shared T?` and `shared
-T?`; `weak u = s` takes `s`'s qualifier, and a read gives it back.
+(decisions 33 and 37, revising 25).  It is the `shared` reference that owns
+nothing (the owner's decision of 2026-11-07, #369): `weak` is a qualifier,
+`u: weak Node?` naming a `shared` object and reading as a `shared Node?`,
+`u: weak mut Node?` naming a `shared mut` one and reading as a `shared mut
+Node?`.  A store takes exactly that form (Sema's checkWeakStore), and the
+generated `__init__`'s parameter of a weak field too.
 
 ```pkn
-weak w = a;   // a: Node -- error: a weak reference refers to a 'shared' or 'shared' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)
+w: weak = a;   // a: Node -- error: cannot store 'a' (a 'Node') in variable 'w', a 'weak Node?': a 'weak' reference names a 'shared' object; declare 'a' 'shared Node'
 ```
 
 Handles can form cycles: a `locked Registry` holding an `atomic shared
@@ -781,8 +782,11 @@ classes (proposed; owner may change):
   one unique Buffer, an allocation more than today, to be measured.
 * `HashMap`, `HashSet` and the priority queues become the classes they wrap
   (stdlib/collections.pkn:563-566, 898-903).
-* `Stack` and `Queue` move to a Buffer: LinkedList's weak links
-  (stdlib/collections.pkn:268-281) make its nodes shared and uncrossable.
+* `LinkedList` keeps node objects, `shared mut`, linked by a `shared mut`
+  `next` and `weak mut` `prev` and tail, and the hash table chains
+  `shared mut` entries (the owner's decision, 2026-11-07): their shared
+  parts make them uncrossable, and `Stack` and `Queue`, on a LinkedList,
+  with them.
 * Stores take ownership (`push(v: T)`); the eleven copying getters move to
   `impl X<T: Copyable>` blocks; `at(i) -> view T` borrows; `pop`, `removeAt`
   and `take(i)` move.
@@ -885,7 +889,7 @@ they keep modes (src/Sema/SemaParamModes.cpp:301): `'add' overrides a
 'shared fn'; it must be 'shared fn'` (proposed; owner may change).
 
 ```pkn
-class Node { weak parent: shared Node?; first: shared Node?; next: shared Node?; }
+class Node { parent: weak Node?; first: shared Node?; next: shared Node?; }
 impl Node {
   fn adopt(c: shared Node) { c.next = self; }   // error: cannot copy 'self': a method borrows its receiver; declare the method 'shared fn' to keep a reference to it
   shared fn add(child: shared Node) {

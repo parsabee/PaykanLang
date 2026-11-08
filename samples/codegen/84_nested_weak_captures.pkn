@@ -4,8 +4,8 @@
 //            References"): the innermost reads the object while it is
 //            alive and None once it is gone, however late it was made; an
 //            outer lambda that reads the capture itself too; and a
-//            method's `weak me = self` captured two lambdas deep in a
-//            closure stored in the object, which forms no cycle.  Each
+//            `shared fn`'s `me: weak mut = self` captured two lambdas deep
+//            in a closure stored in the object, which forms no cycle.  Each
 //            inner closure held the object strongly: it read as alive
 //            after its last owner let go of it, and the stored closure
 //            leaked the object.
@@ -20,8 +20,8 @@ class B {
   n: int;
   f: (() -> Str)?;
 
-  fn wire() {
-    weak me = self;
+  shared fn wire() {
+    me: weak mut = self;
     let mk = fn() -> () -> Str {
       return fn() -> Str {
         match me {
@@ -37,8 +37,8 @@ class B {
 fn state(w: view B?) -> Str => if w == None then "gone" else "alive";
 
 fn main() -> int {
-  b = B(1, None);
-  weak me = b;
+  b: shared = B(1, None);
+  me: weak = b;
   // Three lambdas deep: each closure holds the object weakly.
   let three = fn() -> () -> () -> Str {
     return fn() -> () -> Str { return fn() -> Str => state(me); };
@@ -57,8 +57,9 @@ fn main() -> int {
   // A closure made once the object is gone captures None, weakly.
   let late = three()();
   io::println(late());
-  // A method's `weak me = self`, captured two lambdas deep, in self.
-  let c: mut = B(7, None);
+  // A `shared fn`'s `me: weak mut = self`, captured two lambdas deep, in
+  // self.
+  let c: shared mut = B(7, None);
   c.wire();
   match c.f {
     g: () -> Str { io::println(g()); }

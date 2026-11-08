@@ -1,14 +1,15 @@
 // Isolates: fields of a conditional `(if c then a else b)` of class type,
 // the object one of its branches gives (a variable's, or a new one the
 // statement then drops), on both branches:
-//   * read: a `Str` and an `int` field, a `weak` field, an element of a
-//     tuple field, a tuple and a struct field whole, joined with `+`;
+//   * read: a `Str` and an `int` field, a `weak mut` field, an element of
+//     a tuple field, a tuple and a struct field whole, joined with `+`;
 //   * assigned: an `int`, a `Str`, a tuple, a struct and an optional field;
 //   * passed to an `inout` parameter (an `int` and a `Str` field), and
 //     matched (an optional field);
 //   * a method called on it, as before.
-// `b` is `shared`: the optional field `a.next` holds it too, so the match
-// at the end prints the name `shout` gave it.
+// `b` is `shared mut`: the optional field `a.next` holds it too, so the
+// match at the end prints the name `shout` gave it, and its own weak `back`
+// names it (a weak reference names a shared object, never the unique `a`).
 //
 // Runtime sites: the objects and Strs the fields hold, the box each
 // conditional gives (released after the statement), and the new object in
@@ -45,7 +46,7 @@ class Node {
   t: (int, Str);
   p: Point;
   next: shared mut Node?;
-  weak back: Node?;
+  back: weak mut Node?;
 
   view fn greet(k: int) -> Str { return "hi " + self.name + " " + Str(k); }
 }
@@ -61,7 +62,7 @@ fn shout(s: inout Str) {
 fn main() -> int {
   let a: mut = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
   let b: shared mut = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
-  b.back = a;
+  b.back = b;
   for k in 1..=2 {
     let x = (if k == 1 then a else b).name.clone();
     io::println(x + " " + (if k == 1 then a else b).name);

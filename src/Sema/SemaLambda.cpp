@@ -156,7 +156,8 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
                    ? "; declare it '" +
                          qualifiedName(
                              ast::Qualifier{ast::QualForm::Shared, q.Mut}, ty) +
-                         "', or capture a 'weak' local of it"
+                         "' (and then, to keep no owner, capture a 'weak' "
+                         "local of it)"
                    : std::string()));
       return false;
     }
@@ -174,8 +175,9 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
       // `__init__` has assigned yet) still run.
       if (outer && !outer->Struct && !outer->ViewMethod && !outer->SharedMethod)
         error(loc, "cannot capture 'self': a method borrows its receiver, "
-                   "and a function captures by copy; capture a 'weak' local "
-                   "of it ('weak me = self;')");
+                   "and a function captures by copy; a 'shared fn' may "
+                   "capture it, or a 'weak' local of it ('me: weak mut = "
+                   "self;')");
       if (outer && outer->Struct) {
         error(loc, "'self' is the receiver's storage in a method of struct '" +
                        outer->Struct->getName() +

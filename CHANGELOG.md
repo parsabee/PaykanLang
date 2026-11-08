@@ -161,6 +161,20 @@ samples/concurrency/README.md.
   (docs/language/05-classes.md, "Methods that hand on self: `shared fn`"). A module's
   markers are in its interface: an IFACE method's flags gain bit 3, `shared fn`
   (docs/design/pkm.md).
+- **Breaking:** `weak` is a qualifier, after the colon, and a weak reference is a `shared`
+  reference that owns nothing (docs/language/16-memory.md, "Weak references"). `parent: weak
+  Node?` names a `shared` object and reads as a `shared Node?`; `prev: weak mut Node?` names a
+  `shared mut` one and reads as a `shared mut Node?`; locals are `w: weak = x;` and `w: weak
+  mut Node? = x;`. A store takes exactly that form, and so does a generated `__init__`'s
+  parameter of a weak field (`cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut
+  Node?': a 'weak mut' reference names a 'shared mut' object; declare 'a' 'shared mut
+  Node'`), so a unique object is never weakly referenced: a back link to a parent needs the
+  parent shared (a `shared fn`'s `self`). The spelling before, `weak parent: Node?;` and
+  `weak w = x;`, is a syntax error that writes the new one (`'weak' goes after the colon,
+  before the type: write 'parent: weak Node?'`), and `weak x: shared mut T` is `x: weak mut
+  T`. A weak field with a qualifier used to take any store, so a unique object could be
+  changed through a `weak` alias. IFACE and the AST format are unchanged: the weak mark is the
+  field's flag, and the form its qualifier (docs/plugins/ast-format.md).
 - `[v; n]` of a value that is not Copyable evaluates `v` for each element, first to last, so
   `[Node(); 3]` is three nodes (docs/language/09-arrays.md, "Repeated values"); a Copyable
   `v` is evaluated once and copied, as before. A variable or a field there is `'[v; n]'
@@ -210,10 +224,13 @@ samples/concurrency/README.md.
   out. The copying methods (`get`, `getFront`, `getBack`, `getOr`, `keys`, `values`, `toList`,
   `mem::Buffer`'s `get` and `copy(i)`, and `listOf`) clone, and exist only where the elements
   are Cloneable (`impl X<T: Cloneable>` blocks: `no method 'get' on type 'List<Node>'` for a
-  class `Node` that is not); they are `view fn`s now. `LinkedList` keeps its nodes, and the
-  hash tables their entries and chains, in buffers linked by index, not in node objects with
-  `weak` back links, so every element is the container's alone and an end of a `LinkedList`
-  stays O(1) (amortised).
+  class `Node` that is not); they are `view fn`s now. `LinkedList` keeps node objects, now
+  `shared mut`: each owns the next, and the next one's `prev` and the list's tail reach it by
+  `weak mut` references, so either end is O(1) and a node is changed through any link. The
+  hash tables chain `shared mut` entries from their buckets the same way. Every element is
+  still the container's alone, in its private nodes, but the shared parts keep a
+  `LinkedList`, a `Stack`, a `Queue` and a hash table from crossing to another task
+  (docs/stdlib/collections.md).
 - The samples, the benchmarks and the standard library leave out the types the compiler infers:
   a declaration's type when its initializer has exactly that type (`let n = Node(1)`,
   `cur: mut = self.buckets[b]`) and the type arguments its arguments determine (`Str(n)` for
@@ -277,8 +294,7 @@ samples/concurrency/README.md.
 
 ### Removed
 
-- `List<T>.copy()`: `clone()` copies a list whose elements are Cloneable. The private templates
-  `_Node` and `_Entry` of `::collections` are gone with the node objects (docs/stdlib/index.md).
+- `List<T>.copy()`: `clone()` copies a list whose elements are Cloneable.
 - The `mov` keyword, reserved since 0.2.0 removed it: `mov` is an ordinary identifier now, and
   the explicit transfer is `move` (docs/language/19-concurrency.md, "`move`: an explicit transfer").
 

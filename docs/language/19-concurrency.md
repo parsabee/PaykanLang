@@ -634,8 +634,9 @@ A number, a `bool`, a `char`, a `Str`, a handle ([below](#locked-mut-cells-and-l
 and a unique object (a `T` or a `mut T`) whose fields all cross (own and inherited, through
 structs, tuples, arrays, optionals and enum payloads) cross; a unique object crosses by
 `move` or as a temporary, so the caller's variable ends. A `shared` or `weak` reference
-does not cross, since its object is aliased on its own thread, and neither does a function
-value or an `Obj`. The error names the part that cannot cross:
+does not cross, since its object is aliased on its own thread (a `weak` one names a `shared`
+object, [Weak references](16-memory.md#weak-references): `field 'back' is 'weak': ...`),
+and neither does a function value or an `Obj`. The error names the part that cannot cross:
 
 ```pkn
 class Cache {

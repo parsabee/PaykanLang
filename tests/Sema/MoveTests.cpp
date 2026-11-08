@@ -359,9 +359,9 @@ fn viewed(j: view Job) -> int { return keep(move j); }
 fn lent(j: inout Job) -> int { return keep(move j); }
 fn main() -> int {
   n = 0;
-  weak w: Job? = Job("w");
-  n = n + keep(move w);
   a: shared = Job("a");
+  w: weak Job? = a;
+  n = n + keep(move w);
   f = fn() -> int { n2 = a.name.len(); return n2 + keep(move a); };
   n = n + f();
   b = Job("b");
@@ -384,7 +384,7 @@ fn keep2() -> Job { return Job("k"); })");
           ":7:45: error: cannot move 'j': it is a 'view', a borrow",
           ":8:44: error: cannot move 'j': it is an 'inout' parameter, the "
           "caller's storage",
-          ":12:16: error: cannot move 'w': a 'weak' variable holds no strong "
+          ":13:16: error: cannot move 'w': a 'weak' variable holds no strong "
           "reference",
           ":14:57: error: cannot move 'a': the function captures it by copy",
           ":18:16: error: 'b' is viewed by 'view' local 'v' until 'v' is last "
@@ -543,7 +543,7 @@ class Holder {
   job: Job;
   other: shared Job;
   fixed: atomic shared Job;
-  weak back: Job?;
+  back: weak Job?;
   n: int;
   inner: Inner;
   fn take() -> int { return keep(move self.job); }
@@ -581,7 +581,7 @@ fn main() -> int {
   h: shared = make();
   k = fn() -> int { n2 = h.n; return n2 + keep(move h.job); };
   n = n + k();
-  weak w: Holder? = h;
+  w: weak Holder? = h;
   n = n + keep(move w.job);
   return n + keep(move make().job);
 })");

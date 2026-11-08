@@ -1410,14 +1410,14 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
 
 // The counterexamples of the analysis that lets a call keep reads it cannot
 // replace in place (docs/pir.md §7): a call that replaces a field through a
-// narrowed `inout` arm (`d: inout Derived<int>` on a `Base` field) frees
-// the object a read of the field holds, though the object's class is exact
-// and holds no `Base`; one given only a Wrap replaces the field an `inout`
-// parameter names (its slot is of the parameter's superclass); a call
-// given a parameter the function may hand on replaces a field of its
-// object.  Each method runs on, and each string is the one of, the object
-// that was there.  (`run` is a function of an `inout` Holder: a method
-// cannot hand its `self` on.)
+// narrowed `inout` arm (`d: inout Derived<int>` on a `shared mut Base`
+// field, which a `weak mut` one watches) frees the object a read of the
+// field holds, though the object's class is exact and holds no `Base`; one
+// given only a Wrap replaces the field an `inout` parameter names (its slot
+// is of the parameter's superclass); a call given a parameter the function
+// may hand on replaces a field of its object.  Each method runs on, and each
+// string is the one of, the object that was there.  (`run` is a function of
+// an `inout` Holder: a method cannot hand its `self` on.)
 TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -1437,7 +1437,7 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
     impl Plain {
       fn __init__(n: int, t: Str) { __super__(n); self.tag = move t; }
     }
-    class Holder { b: Base; weak w: Base?; }
+    class Holder { b: shared mut Base; w: weak mut Base?; }
     impl Holder {
       fn __init__() { self.b = Derived<int>(100, 9); self.w = self.b; }
       fn state() -> Str {
@@ -1535,12 +1535,14 @@ TEST(Ownership, AContainersStateNeedsNoHoldAcrossItsOwnMethods) {
 // load, which keeps the hand-off its hold made: with the moves at last use
 // made, `v` is handed on to `offer`, and the Pet dies when `offer` returns,
 // before `push` asks, as it did while `self.sink` was held across the call
-// (docs/pir.md §7, §12).
+// (docs/pir.md §7, §12).  The Pet is `shared`, so a `weak` reference can
+// name it, and a unique `Tag` holds it (a `T` parameter takes no `shared`
+// reference): the Tag dies when `offer` returns, and lets the Pet go.
 TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
   LeakGuard g;
   auto r = compileMoveAndRun(R"(import ::io;
     class Pet<X> { name: Str; }
-    class Probe { weak p: Pet<int>?; }
+    class Probe { p: weak Pet<int>?; }
     impl Probe {
       view fn state() -> Str {
         match self.p {
@@ -1549,22 +1551,23 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
         }
       }
     }
+    class Tag { p: shared Pet<int>; }
     class Sink<T> { last: Str; }
     impl Sink<T> {
       fn offer(v: T) { self.last = "seen"; }
     }
-    struct Pile { sink: Sink<Pet<int>>; }
+    struct Pile { sink: Sink<Tag>; }
     impl Pile {
-      fn push(v: Pet<int>, probe: view Probe) -> Str {
+      fn push(v: Tag, probe: view Probe) -> Str {
         self.sink.offer(move v);
         return probe.state();
       }
     }
     fn main() -> int {
-      p = Pile(Sink<Pet<int>>("none"));
-      x = Pet<int>("rex");
+      p = Pile(Sink<Tag>("none"));
+      x: shared = Pet<int>("rex");
       probe = Probe(x);
-      io::println(p.push(move x, probe) + " " + probe.state());
+      io::println(p.push(Tag(move x), probe) + " " + probe.state());
       return 0;
     }
   )");
@@ -1579,15 +1582,18 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
 // whose overrides let go of nothing (`Hush.run`, the pure `Shape.area`'s
 // `Square` one), and keeps one across `Shout.run`, which replaces the Item
 // it is in (its `inout` parameter): the string read is the one of the Item
-// that was there, which dies when the call replaces it.  A map of Dogs,
-// whose death lets go of a string only, reads its table in place across put
-// and remove, and every replaced Dog dies when it is let go of.
+// that was there, which dies when the call replaces it.  A map of Kennels,
+// each holding a Dog whose death lets go of a string only, reads its table
+// in place across put and remove, and every replaced Dog dies when it is let
+// go of.  The Item and the Dogs are `shared` (`shared mut` where a call
+// replaces one), since a `weak` reference names only a `shared` object, and
+// a map's value takes no qualifier, so a struct holds the `shared` Dog.
 TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     import ::collections as c;
     class Item { name: Str; }
-    class Probe { weak it: Item?; }
+    class Probe { it: weak mut Item?; }
     impl Probe {
       view fn state() -> Str {
         match self.it {
@@ -1606,7 +1612,7 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       }
     }
     class Holder {
-      item: Item;
+      item: shared mut Item;
       quiet: Quiet;
       loud: Loud;
       fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
@@ -1623,7 +1629,8 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       return t;
     }
     class Dog { name: Str; }
-    class Watch { weak d: Dog?; }
+    struct Kennel { dog: shared Dog; }
+    class Watch { d: weak Dog?; }
     impl Watch {
       view fn state() -> Str {
         match self.d {
@@ -1639,14 +1646,14 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       io::println(h.viaLoud() + " " + p.state() + " " + h.item.name);
       shapes: Shape[2] = [Square(2), Square(3)];
       io::println(Str(total(shapes)));
-      m = c::HashMap<Str, Dog>();
-      rex = Dog("rex" + Str(1));
+      m = c::HashMap<Str, Kennel>();
+      rex: shared = Dog("rex" + Str(1));
       w = Watch(rex);
-      m.put("d", move rex);
+      m.put("d", Kennel(move rex));
       rex = Dog("max");
       io::println(w.state());
-      m.put("d", move rex);
-      io::println(w.state() + " " + m.at("d").name);
+      m.put("d", Kennel(move rex));
+      io::println(w.state() + " " + m.at("d").dog.name);
       m.remove("d");
       io::println(Str(m.len()));
       return 0;
@@ -1663,12 +1670,12 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
 // whose overrides let go of nothing of its class is read by a stable load,
 // which keeps the hand-off its hold made: `v` is handed on to `offer`, and
 // the Pet dies when `offer` returns, before `push` asks (docs/pir.md §7,
-// §12).
+// §12).  The Pet is `shared`, so a `weak` reference can name it.
 TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
   LeakGuard g;
   auto r = compileMoveAndRun(R"(import ::io;
     class Pet { name: Str; }
-    class Probe { weak p: Pet?; }
+    class Probe { p: weak Pet?; }
     impl Probe {
       view fn state() -> Str {
         match self.p {
@@ -1677,18 +1684,18 @@ TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
         }
       }
     }
-    class Sink { last: Str; fn offer(v: Pet) { self.last = "seen"; } }
-    class Loud : Sink { fn offer(v: Pet) { self.last = v.name.clone(); } }
+    class Sink { last: Str; fn offer(v: shared Pet) { self.last = "seen"; } }
+    class Loud : Sink { fn offer(v: shared Pet) { self.last = v.name.clone(); } }
     struct Pile { sink: Sink; }
     impl Pile {
-      fn push(v: Pet, probe: view Probe) -> Str {
+      fn push(v: shared Pet, probe: view Probe) -> Str {
         self.sink.offer(move v);
         return probe.state();
       }
     }
     fn main() -> int {
       p = Pile(Loud("none"));
-      x = Pet("rex" + Str(1));
+      x: shared = Pet("rex" + Str(1));
       probe = Probe(x);
       io::println(p.push(move x, probe) + " " + probe.state() + " " + p.sink.last);
       return 0;
@@ -1705,12 +1712,13 @@ TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
 // read in place across a closure that replaces `moving` and, through an
 // `inout` argument, `byArg`.  Their reads keep a reference of their own:
 // each is the string of the Item that was there, which dies once the
-// statement has used it.
+// statement has used it.  The Items are `shared mut`, so a `weak mut`
+// reference can name each.
 TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Item { name: Str; }
-    class Probe { weak it: Item?; }
+    class Probe { it: weak mut Item?; }
     impl Probe {
       view fn state() -> Str {
         match self.it {
@@ -1721,9 +1729,9 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
     }
     fn bump(s: inout Item) { s = Item("arg" + Str(3)); }
     class Holder {
-      fixed: Item;
-      moving: Item;
-      byArg: Item;
+      fixed: shared mut Item;
+      moving: shared mut Item;
+      byArg: shared mut Item;
       view fn viaFixed(f: view () -> int) -> Str { return self.fixed.name + Str(f()); }
       view fn viaMoving(f: view () -> int) -> Str { return self.moving.name + Str(f()); }
       view fn viaArg(f: view () -> int) -> Str { return self.byArg.name + Str(f()); }
@@ -1807,42 +1815,42 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
 // `fill` assigns once `self` is given to it, and a superclass's field, which
 // `__super__(...)` assigned.  Each replaced node is reported gone right
 // after its replacement, and nothing leaks, through every pass the driver
-// runs.
+// runs.  The nodes are `shared`, so a `weak` reference can name each.
 TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
   LeakGuard g;
   paykan::pir::Statistics stats;
   auto r = compilePassesAndRun(R"(import ::io;
     class Node { name: Str; }
     impl Cloneable for Node {}
-    class Watcher { weak target: Node?; }
+    class Watcher { target: weak Node?; }
     fn report(w: view Watcher, tag: view Str) {
       match w.target {
         t: Node { io::println(tag + ": alive"); }
         None { io::println(tag + ": gone"); }
       }
     }
-    class Pair { a: Node; b: Node?; weak c: Node?; }
-    class Twice { n: Node; }
+    class Pair { a: shared Node; b: shared Node?; c: weak Node?; }
+    class Twice { n: shared Node; }
     impl Twice {
-      fn __init__(first: Node, second: Node, w: view Watcher) {
+      fn __init__(first: shared Node, second: shared Node, w: view Watcher) {
         self.n = move first;
         self.n = move second;
         report(w, "twice");
       }
     }
-    class Late { a: int; o: Node?; }
+    class Late { a: int; o: shared Node?; }
     impl Late {
-      fn fill(n: Node) -> Node { self.o = move n; return Node("result"); }
-      fn __init__(n: Node, w: view Watcher) {
+      fn fill(n: shared Node) -> Node { self.o = move n; return Node("result"); }
+      fn __init__(n: shared Node, w: view Watcher) {
         self.a = 1;
         self.o = self.fill(move n);
         report(w, "late");
       }
     }
-    class Base { s: Node; }
-    class Kid : Base { t: Node; }
+    class Base { s: shared Node; }
+    class Kid : Base { t: shared Node; }
     impl Kid {
-      fn __init__(a: Node, b: Node, w: view Watcher) {
+      fn __init__(a: shared Node, b: shared Node, w: view Watcher) {
         __super__(move a);
         self.t = b.clone();
         self.s = move b;
@@ -1850,9 +1858,9 @@ TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
       }
     }
     fn main() -> int {
-      x = Node("x");
+      x: shared = Node("x");
       wx = Watcher(x);
-      weak wk = x;
+      wk: weak = x;
       p = Pair(move x, Node("y"), wk);
       match p.c {
         c: Node { io::println(p.a.name + " " + c.name); }
@@ -1860,13 +1868,13 @@ TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
       }
       p = Pair(Node("z"), None, None);
       report(wx, "pair");
-      f = Node("first");
+      f: shared = Node("first");
       wf = Watcher(f);
       t = Twice(move f, Node("second"), wf);
-      m = Node("m");
+      m: shared = Node("m");
       wm = Watcher(m);
       l = Late(move m, wm);
-      a = Node("a");
+      a: shared = Node("a");
       wa = Watcher(a);
       k = Kid(move a, Node("b"), wa);
       io::println(t.n.name + " " + k.s.name + " " + k.t.name);
@@ -1940,7 +1948,7 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
   paykan::pir::Statistics stats;
   auto r = compilePassesAndRun(R"(import ::io;
     class Node { name: Str; }
-    class Probe { weak p: shared Node?; }
+    class Probe { p: weak Node?; }
     impl Probe {
       view fn state() -> Str {
         match self.p {

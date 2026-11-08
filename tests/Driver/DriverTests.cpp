@@ -2625,7 +2625,7 @@ TEST(Driver, AProgramOutOfMemoryPanicsAfterItsOutput) {
                         "    while True { s = s + s; }\n"
                         "  }\n"
                         "  head: Node? = None;\n"
-                        "  while True { head = Node(head); }\n"
+                        "  while True { head = Node(move head); }\n"
                         "  return 0;\n"
                         "}\n";
   auto runOutOfMemory = [](const std::string &exe, const std::string &what) {
@@ -2634,8 +2634,9 @@ TEST(Driver, AProgramOutOfMemoryPanicsAfterItsOutput) {
     EXPECT_EQ(r.out.rfind("start\n", 0), 0U)
         << exe << " " << what << ": " << r.out;
     // A HashMap's buckets are a memory::Buffer, which fails with
-    // OutOfMemory ("out of memory: Cannot allocate memory"); every other
-    // allocation is Paykan_malloc's.
+    // OutOfMemory ("out of memory: Cannot allocate memory"), and its entries
+    // objects, as every other allocation is Paykan_malloc's: either message
+    // starts "out of memory".
     EXPECT_NE(r.out.find(what == "map" ? "\npaykan: out of memory"
                                        : "\npaykan: out of memory allocating "),
               std::string::npos)

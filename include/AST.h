@@ -377,7 +377,7 @@ public:
 
 // Variable declaration with explicit type (x: int = 10), a `let` local
 // (let x = 10;), which cannot be reassigned, or a `weak` local or field
-// (weak y: Point? = x;), which holds a weak reference
+// (y: weak Point? = x;), which holds a weak reference
 // (docs/language/16-memory.md, "Weak references").
 // How a parameter or a local is held
 // (docs/language/03-functions.md, "Parameter modes"): by value (the

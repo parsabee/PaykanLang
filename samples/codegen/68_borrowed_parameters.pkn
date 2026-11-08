@@ -13,9 +13,9 @@
 //            replaces, given to every kind of call; a variable at its
 //            last use that something else the caller holds keeps alive:
 //            a match binding counted down a tree, and one whose field the
-//            callee clears.  The `weak` references show when each object
-//            dies: where it did before arguments were lent, when what
-//            last held it lets it go.
+//            callee clears.  The `weak mut` references (the nodes are
+//            `shared mut`) show when each object dies: where it did before
+//            arguments were lent, when what last held it lets it go.
 // The nodes, the cells and holders handed around with them, and the strings
 // read from them are `shared` (`shared mut` where something writes them): a
 // unique reference is never lent, since it reaches a by-value parameter only
@@ -73,7 +73,7 @@ class Node {
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak mut Node?;
 }
 
 fn report(w: view Watcher, tag: view Str) {

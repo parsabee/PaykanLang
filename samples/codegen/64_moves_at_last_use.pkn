@@ -57,7 +57,7 @@ fn state(w: view Watch) -> Str {
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 class Slot {
@@ -250,7 +250,7 @@ fn main() -> int {
   // scope a copy, read or not: it reads the object until the variable's
   // scope ends.
   let p: shared = Node("p");
-  weak wp = p;
+  wp: weak = p;
   io::print("weak local: " + name(p));
   match wp {
     Node { io::println(" alive"); }

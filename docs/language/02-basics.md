@@ -218,20 +218,24 @@ an object takes, `mut`, `shared`, `shared mut`, `atomic shared` or `locked mut`,
 something, writes, several owners or a crossing between threads
 ([Concurrency](19-concurrency.md)).
 
-A variable declared with `weak` refers to an object without keeping it alive. Its type is
-`T?` for a class `T`, inferred from the initializer when left off, and it reads as `None`
-once the object is gone:
+A variable whose type is qualified `weak` is a `shared` reference that owns nothing: it
+refers to a shared object without keeping it alive, and reads as `None` once the object is
+gone. `weak` names a `shared` object, `weak mut` a `shared mut` one, and a read gives that
+form back. Its type is `T?` for a class `T`, inferred from the initializer when left off:
 
 ```pkn
-p = Point(1, 2);
-weak w: Point? = p;      // p's object, while something holds it
-weak u = p;              // inferred Point?
-weak e: Point?;          // None until assigned
+let p: shared = Point(1, 2);
+w: weak Point? = p;      // p's object, while something holds it
+u: weak = p;             // inferred Point?
+e: weak Point?;          // None until assigned
+let q: shared mut = Point(3, 4);
+m: weak mut = q;         // a 'shared mut' object, changed through m
 ```
 
-`weak` also declares a class field (`weak parent: Node?;`). See
-[Weak references](16-memory.md#weak-references) for what a weak reference is for and how it
-is read.
+`weak` also qualifies a class field (`parent: weak mut Node?;`). A unique object (a `T` or
+`mut T`) has one reference, its owner's, and no weak reference names it. See [Weak
+references](16-memory.md#weak-references) for what a weak reference is for and how it is
+read.
 
 ### Local borrows
 

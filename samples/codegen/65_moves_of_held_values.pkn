@@ -28,7 +28,7 @@ class Node {
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 /// What @p w refers to: "alive" or "gone".

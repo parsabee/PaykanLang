@@ -1175,16 +1175,11 @@ private:
     const SExpr *async = f.optionalList("async");
     if (async && !async->Items.empty())
       return fail(*async, "(async) takes no fields"), nullptr;
-    // A `shared fn` ends with `(shared)`: a class's method only.
+    // A `shared fn` ends with `(shared)`; where one may be is Sema's to say
+    // (`only a method can be a 'shared fn'`), as for `view fn`.
     const SExpr *shared = f.optionalList("shared");
     if (shared && !shared->Items.empty())
       return fail(*shared, "(shared) takes no fields"), nullptr;
-    if (shared && kind != FuncKind::ClassMethod &&
-        kind != FuncKind::ImplMethod && kind != FuncKind::Requirement)
-      return fail(*shared, "function '" + *name +
-                               "' has (shared): only a method can (a "
-                               "'shared fn')"),
-             nullptr;
     // Only a free function is generic, as the grammar has it.
     if (!tparams.empty() &&
         (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod))
@@ -1263,7 +1258,7 @@ private:
         return nullptr;
     }
     // A local borrow (`x: view = e;`) carries (qual view) or (qual inout),
-    // `let x = e;` a trailing (let) and `weak y: T? = e;` (or a class's
+    // `let x = e;` a trailing (let) and `y: weak T? = e;` (or a class's
     // `weak` field) a trailing (weak); a borrow or a let has an initialiser.
     ParamMode mode = ParamMode::Value;
     if (!paramMode(f, mode))

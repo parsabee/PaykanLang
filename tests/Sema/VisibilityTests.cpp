@@ -33,7 +33,7 @@ impl Counter {
   static fn make(n: int) -> Counter { c: mut = Counter(0, n); c.__count = 1; c.__bump(1); return c; }
   fn reset() { self.__count = 0; }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
-  fn later() -> (int) -> int { weak me = self; return fn(d: int) -> int { match me { m: Counter { return m.__count + d; } None { return d; } } }; }
+  shared view fn later() -> (int) -> int { me: weak = self; return fn(d: int) -> int { match me { m: Counter { return m.__count + d; } None { return d; } } }; }
 }
 trait Named { view fn name() -> Str; }
 impl Named for Counter { view fn name() -> Str { return "C" + Str(self.__count); } }
@@ -58,7 +58,8 @@ fn main() -> int {
   n = _Node(5, None);
   b: mut = Box(7);
   b.set(8);
-  return c.value() + d.value() + c.name().len() + p.x() + _helper(n) + b.get() + c.later()(1);
+  s: shared = Counter(4, 1);
+  return c.value() + d.value() + c.name().len() + p.x() + _helper(n) + b.get() + s.later()(1);
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

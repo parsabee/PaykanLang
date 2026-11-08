@@ -3308,8 +3308,9 @@ TEST(Pkm, StructAndClassInstantiationsOfOneNameConflict) {
 
 // A `weak` field crosses modules and prebuilt `.pkm` files: the importer
 // stores and reads it as a weak reference (the interface records the flag),
-// so a tree built from another module's class is freed with its root.  A
-// child is `shared`: the tree and `main` both hold `a`.
+// so a tree built from another module's class is freed with its root.  The
+// nodes are `shared mut`: the tree and `main` both hold `a`, and the back
+// link is `weak mut`, which `add`, a `shared fn`, stores `self` in.
 TEST(Pkm, WeakFieldsAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =
@@ -3318,10 +3319,10 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   writeFile(dir / "tree.pkn",
             "class Node {\n"
             "  name: Str;\n"
-            "  weak parent: Node?;\n"
+            "  parent: weak mut Node?;\n"
             "  first: shared mut Node?;\n"
             "  next: shared mut Node?;\n"
-            "  fn add(child: shared mut Node) {\n"
+            "  shared fn add(child: shared mut Node) {\n"
             "    child.parent = self; child.next = self.first; self.first = "
             "child; }\n"
             "  view fn path() -> Str {\n"
@@ -3333,11 +3334,11 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   writeFile(dir / "main.pkn",
             "import ::io; import tree;\n"
             "fn main() -> int {\n"
-            "  root: mut = tree::Node(\"root\");\n"
+            "  root: shared mut = tree::Node(\"root\");\n"
             "  a: shared mut = tree::Node(\"a\");\n"
             "  root.add(a);\n"
             "  a.parent = root;\n"
-            "  weak w = root;\n"
+            "  w: weak mut = root;\n"
             "  io::print(a.path() + \" \");\n"
             "  root = tree::Node(\"other\");\n"
             "  io::print(a.path() + \" \");\n"
@@ -3360,7 +3361,7 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
   auto dump = paykan("pkm dump --section=iface tree.pkm");
   for (const char *line :
-       {"    field name: Str", "    weak field parent: Node?",
+       {"    field name: Str", "    weak field parent: shared mut Node?",
         "    field first: shared mut Node?"})
     EXPECT_TRUE(contains(dump.out, line)) << line << "\n" << dump.out;
   fs::remove_all(dir);

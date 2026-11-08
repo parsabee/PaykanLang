@@ -666,7 +666,8 @@ use `_`.
 
 An `Obj` converts to `Obj?` as it is, so an `Obj` holding `None` becomes an `Obj?` that holds
 the `None` value, not an absent one: after `x = None;`, `y: Obj? = x;` gives `y == None`
-False, and `match y` takes its `Obj` arm. The same goes for a `weak` local (`weak a = x;`,
-or `weak a = f();` with `f` returning `Obj`), a weak reference to the `None` value, which
-never goes away, so it never reads `None` either. Where nothing is meant, write `None` where
-the optional is: `y: Obj? = None;`, `weak a: Obj? = None;`.
+False, and `match y` takes its `Obj` arm. The same goes for a `weak` local (`a: weak = x;`
+with `x` a `shared Obj`, or `a: weak = f();` with `f` returning `shared Obj`), a weak
+reference to the `None` value, which never goes away, so it never reads `None` either. Where
+nothing is meant, write `None` where the optional is: `y: Obj? = None;`, `a: weak Obj? =
+None;`.
