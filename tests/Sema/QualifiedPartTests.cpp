@@ -369,16 +369,17 @@ fn main() -> int {
 }
 )");
   expectErrors(
-      r, {":9:15: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
-          "'grab<shared mut Node>', an 'inout shared mut Node': a borrow of a "
-          "type argument's form takes that form, which the callee may keep a "
-          "copy of",
-          ":12:3: error: cannot infer type parameter 'T' of 'put': deduced as "
-          "both 'shared mut Node' and 'shared Node'",
-          ":13:31: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
-          "'dup<atomic shared Node>', a 'view atomic shared Node'",
-          ":15:3: error: cannot store a 'shared mut Node' in variable 'back', a "
-          "'mut Node'"});
+      r,
+      {":9:15: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
+       "'grab<shared mut Node>', an 'inout shared mut Node': a borrow of a "
+       "type argument's form takes that form, which the callee may keep a "
+       "copy of",
+       ":12:3: error: cannot infer type parameter 'T' of 'put': deduced as "
+       "both 'shared mut Node' and 'shared Node'",
+       ":13:31: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
+       "'dup<atomic shared Node>', a 'view atomic shared Node'",
+       ":15:3: error: cannot store a 'shared mut Node' in variable 'back', a "
+       "'mut Node'"});
   auto fine = semaCheck(R"(import ::memory as mem;
 class Node { id: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
@@ -480,16 +481,16 @@ fn main() -> int {
 }
 )");
   expectErrors(
-      r,
-      {":10:28: error: cannot pass 'giveRO(...)' (a 'shared Node') to parameter "
-       "'x' of 'dup<shared mut Node>', a 'view shared mut Node'",
-       ":12:28: error: cannot pass 'getH(...).n' (a 'mut Node')",
-       ":14:50: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
-       "'dup<shared Node>'",
-       ":6:58: error: element 'xs[0]' is a 'shared Node', which nothing "
-       "changes, so it cannot be returned 'inout'",
-       ":16:7: error: 'fixed' is immutable (a 'H'; write 'mut H' to change "
-       "it); its field 'm' cannot be passed to 'inout' parameter 's'"});
+      r, {":10:28: error: cannot pass 'giveRO(...)' (a 'shared Node') to "
+          "parameter "
+          "'x' of 'dup<shared mut Node>', a 'view shared mut Node'",
+          ":12:28: error: cannot pass 'getH(...).n' (a 'mut Node')",
+          ":14:50: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
+          "'dup<shared Node>'",
+          ":6:58: error: element 'xs[0]' is a 'shared Node', which nothing "
+          "changes, so it cannot be returned 'inout'",
+          ":16:7: error: 'fixed' is immutable (a 'H'; write 'mut H' to change "
+          "it); its field 'm' cannot be passed to 'inout' parameter 's'"});
   auto fine = semaCheck(R"(class Node { id: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn make() -> Node { return Node(1); }
@@ -601,7 +602,8 @@ fn main() -> int {
 )");
   expectErrors(
       r,
-      {":5:3: error: override of 'Base.make() -> Node' takes and gives the forms "
+      {":5:3: error: override of 'Base.make() -> Node' takes and gives the "
+       "forms "
        "it does: its result is 'shared mut Node', not 'Node'",
        ":11:3: error: cannot copy 'h.slot()' (a unique 'Node')",
        "has a branch of that form and a new value: make the new value 'locked "
@@ -678,5 +680,6 @@ fn main() -> int {
        "mut Node': a borrow of a type argument's form takes that form",
        ":18:11: error: cannot move 'h.slot()': it is a borrow of storage its "
        "owner keeps",
-       ":21:11: error: cannot move a conditional: write 'move' in each branch"});
+       ":21:11: error: cannot move a conditional: write 'move' in each "
+       "branch"});
 }
