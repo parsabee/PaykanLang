@@ -249,7 +249,7 @@ static PaykanMethod PaykanStdin_vtable[PAYKAN_FILE_SLOTS] = {
 
 PaykanFile PaykanFile_Stdin = {
     .vtable = PaykanStdin_vtable,
-    .strong = 1, // immortal: nothing releases this reference
+    .strong = PAYKAN_REF_MAX, // immortal
     .weak = 0,
     .handle = NULL, // stdin is not a constant expression: set at startup
     .lastOp = PAYKAN_FILE_OP_NONE,

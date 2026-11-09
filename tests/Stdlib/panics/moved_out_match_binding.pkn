@@ -1,0 +1,20 @@
+// expect-panic: a value moved out of 'o' is still borrowed
+import ::io;
+import ::memory as mem;
+
+class Node {
+  v: int;
+}
+
+fn main() -> int {
+  o: mut Node? = Node(1);
+  match o {
+    // 'n' reads the value 'o' holds: the path is not owned while it lives.
+    n: Node {
+      let t = mem::take(o);
+      io::println(Str(n.v));
+    }
+    None { }
+  }
+  return 0;
+}

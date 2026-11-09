@@ -60,7 +60,7 @@ struct Wide {
   bool flag;
 };
 RefType kWide = {{sizeof(Wide), alignof(Wide), PAYKAN_KIND_OBJECT, 1, 1},
-                 (int64_t)offsetof(Wide, ref) << 1,
+                 (int64_t)offsetof(Wide, ref) << 2,
                  (int64_t)offsetof(Wide, ref)};
 
 // `(Str, Str?)`: two references, the second may be NULL; the first tells
@@ -76,7 +76,7 @@ struct PairType {
 };
 PairType kPair = {
     {sizeof(Pair), alignof(Pair), PAYKAN_KIND_TUPLE, 2, 1},
-    {(int64_t)offsetof(Pair, a) << 1, (int64_t)offsetof(Pair, b) << 1 | 1},
+    {(int64_t)offsetof(Pair, a) << 2, (int64_t)offsetof(Pair, b) << 2 | 1},
     (int64_t)offsetof(Pair, a)};
 
 // A class holding two references (the second optional) and a pair held in
@@ -512,4 +512,120 @@ TEST(Freeze, StopsAtAnAtomicOrLockedCell) {
   Paykan_release(payload);
   thaw(counts, 1);
   Paykan_release(counts);
+}
+
+// -- The check of a moved value (#368)
+
+namespace {
+
+// As the lowering's `__walk`: a unique field, then a `shared` one.
+struct Link {
+  PaykanMethod *vtable;
+  int32_t strong;
+  int32_t weak;
+  PaykanShared *unique;
+  PaykanShared *shared;
+};
+
+void Link_destroy(PaykanObject *self) {
+  auto *l = reinterpret_cast<Link *>(self);
+  Paykan_release(l->unique);
+  Paykan_release(l->shared);
+}
+
+void Link_walk(PaykanObject *self) {
+  auto *l = reinterpret_cast<Link *>(self);
+  Paykan_walk_child(PaykanShared_get(l->unique), 1);
+  Paykan_walk_child(PaykanShared_get(l->shared), 0);
+}
+
+PaykanMethod Link_vtable[PAYKAN_OBJECT_SLOTS] = {
+    reinterpret_cast<PaykanMethod>(&Link_destroy),
+    reinterpret_cast<PaykanMethod>(&PaykanObject_toString),
+    reinterpret_cast<PaykanMethod>(&PaykanObject_equals),
+    reinterpret_cast<PaykanMethod>(&Link_walk),
+};
+
+PaykanShared *link(PaykanShared *unique, PaykanShared *shared) {
+  auto *l = static_cast<Link *>(Paykan_malloc(sizeof(Link)));
+  std::memset(l, 0, sizeof *l);
+  l->vtable = Link_vtable;
+  l->unique = unique;
+  l->shared = shared;
+  return PaykanShared_new(reinterpret_cast<PaykanObject *>(l));
+}
+
+// `(Node, shared Node)`: the second word has the bit for a reference that
+// is no unique one.
+struct TwoRefs {
+  PaykanType head;
+  int64_t unique;
+  int64_t shared;
+};
+TwoRefs kTwo = {{sizeof(Pair), alignof(Pair), PAYKAN_KIND_OBJECT, 2, 0},
+                (int64_t)offsetof(Pair, a) << 2,
+                (int64_t)offsetof(Pair, b) << 2 | 2};
+
+} // namespace
+
+TEST(MovedUnique, NothingElseHoldsAChainOfUniqueObjects) {
+  TrackingHeap heap;
+  PaykanShared *v = link(link(str("leaf"), nullptr), nullptr);
+  EXPECT_EQ(Paykan_moved_unique(v), 1);
+  Paykan_release(v);
+  EXPECT_EQ(Paykan_moved_unique(nullptr), 1);
+}
+
+TEST(MovedUnique, AHoldOnTheValueOrAUniquePartIsFound) {
+  TrackingHeap heap;
+  PaykanShared *leaf = str("leaf");
+  PaykanShared *v = link(link(leaf, nullptr), nullptr);
+  Paykan_retain(v);
+  EXPECT_EQ(Paykan_moved_unique(v), 0);
+  Paykan_release(v);
+  Paykan_retain(leaf); // two levels down
+  EXPECT_EQ(Paykan_moved_unique(v), 0);
+  Paykan_release(leaf);
+  EXPECT_EQ(Paykan_moved_unique(v), 1);
+  Paykan_release(v);
+}
+
+TEST(MovedUnique, StopsAtASharedLinkAndSkipsAnImmortal) {
+  TrackingHeap heap;
+  PaykanShared *other = str("other");
+  Paykan_retain(other); // a `shared` link's second reference
+  PaykanShared *frozen = str("frozen");
+  Paykan_freeze(obj(frozen));
+  PaykanShared *v = link(frozen, other);
+  EXPECT_EQ(Paykan_moved_unique(v), 1);
+  thaw(frozen, 1);
+  Paykan_release(v);
+  Paykan_release(other);
+}
+
+TEST(MovedUnique, ReadsTheDescriptorOfAValueHeldInMemory) {
+  TrackingHeap heap;
+  Pair p = {str("unique"), str("shared")};
+  Paykan_retain(p.b); // the bit stops it: no matter
+  EXPECT_EQ(Paykan_moved_unique_mem(&kTwo.head, &p), 1);
+  Paykan_retain(p.a);
+  EXPECT_EQ(Paykan_moved_unique_mem(&kTwo.head, &p), 0);
+  Paykan_release(p.a);
+  Paykan_release(p.b);
+  Paykan_release(p.a);
+  Paykan_release(p.b);
+}
+
+TEST(MovedUnique, AFreezeAfterACheckStillFreezes) {
+  TrackingHeap heap;
+  PaykanShared *inner = str("inner");
+  PaykanShared *v = link(inner, nullptr);
+  Paykan_retain(v);
+  EXPECT_EQ(Paykan_moved_unique(v), 0); // stopped early, mode reset
+  Paykan_release(v);
+  Paykan_freeze(obj(v));
+  EXPECT_EQ(inner->strong, PAYKAN_REF_MAX);
+  thaw(inner, 1);
+  thaw(v, 1);
+  Paykan_release(v);
 }

@@ -13,6 +13,15 @@ samples/concurrency/README.md.
 
 ### Added
 
+- A move out of borrowed storage is checked as the program runs (#368; docs/language/19-concurrency.md,
+  "A move out of borrowed storage"). `mem::replace`, `mem::take`, `pop`, `removeAt`, `mem::swap` of a
+  borrowed place with an owned one, and any other function that moves a value out of what its caller
+  named stop the program when something else still holds the value or a unique part of it: `a value
+  moved out of 'q.jobs' is still borrowed`. A slot on an owned path needs no check.
+- `move v` of a value held in memory moves its bytes, leaving zeros, and a by-value parameter takes
+  over a move-only value's references, so such a value has one owner at once. A `view` or `inout`
+  local's hold ends with its last use, an arm that binds nothing lets go of the subject as it
+  begins, and a binding takes over a temporary subject.
 - The keywords `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `mut`, `locked`
   and `lock` (docs/grammar.md).
 - Qualifiers on a reference, as a variable's, a parameter's, a field's or a result's type.
@@ -336,6 +345,16 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A part of an `-> inout` result, of a conditional of places or past a temporary handle (`id(h).n`)
+  is a place for the copy rule (`let x = f(w).n` copied a unique field and left two owners), and a `shared fn` or `shared view fn` on a conditional of places or on a borrowed
+  result takes its receiver's form (`(if p then a else b).share()` and `l.at(0).share()` treated the
+  receiver as a temporary and shared a unique object) (src/Sema/SemaConcurrency.cpp, `isCopyPlace`;
+  src/Sema/SemaViews.cpp, `checkSharedReceiver`; tests/Sema/ConcurrencyTests.cpp).
+- A `move` that takes a value away from what an earlier operand of its statement read holds that
+  operand (`p.s + f(move p)`), and `stdin()`'s object is immortal, as it was meant to be.
+- `move h.f` through a `shared` or `shared mut` handle is an error (it left a field other handles
+  read as empty): `cannot move 'h.n': 'h' is a 'shared mut H', which other references reach; write
+  'mem::replace(h.n, v)'` (src/Sema/SemaConcurrency.cpp, `checkPartialMove`).
 - A cell's contents were reached outside a `lock` block in three ways. A type arm on a
   `locked` subject tested the cell's class, not its contents', so `n: Node` on a `locked mut
   Base` holding a `Node` did not match. A value-mode `match` on a `locked Str` ran the

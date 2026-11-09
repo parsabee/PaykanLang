@@ -147,11 +147,24 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
   pir::LocalId subj = B.addMemLocal("match.subj", l.Size, l.Align);
   Val addr = B.localAddr(subj, "match.subj.addr");
   std::optional<pir::LocalId> place;
-  if (!emitMemMatchSubject(node, addr, place))
-    return Val();
-  CurrentScope->declare("match.subj", subj, et);
+  // Read for its tag alone: nothing is held.
+  const bool holdsNothing = matchHoldsNothing(node);
+  Val tag;
+  if (holdsNothing) {
+    const size_t mark = MemTemps.size();
+    addr = emitMemAddress(node->getSubject());
+    if (!addr)
+      return Val();
+    tag = B.ptrLoad(addr, Type::I64, "enum.tag");
+    releaseMemTemps(mark);
+  } else {
+    if (!emitMemMatchSubject(node, addr, place))
+      return Val();
+    CurrentScope->declare("match.subj", subj, et);
+    tag = B.ptrLoad(addr, Type::I64, "enum.tag");
+  }
 
-  pir::Switch *s = B.openSwitch(B.ptrLoad(addr, Type::I64, "enum.tag"));
+  pir::Switch *s = B.openSwitch(tag);
   for (ast::MatchArm *arm : node->getArms()) {
     if (arm->isWildcard())
       continue;
@@ -159,6 +172,8 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
     assert(idx >= 0 && "Sema should have verified the variant exists");
     B.enter(B.addCase(s, Val::i64(idx)));
     if (!arm->hasBinding()) {
+      if (!holdsNothing)
+        dropMatchSlot(addr, et);
       emitMatchArmBody(arm);
       B.leave();
       continue;
@@ -175,9 +190,9 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
       if (arm->getMode() == ast::ParamMode::View)
         B.markView(local);
       Val own = B.localAddr(local, name + ".addr");
-      B.memCopy(own, B.ptrAdd(addr, Val::i64(off), "variant.addr"),
-                Val::i64(pl.Size));
-      emitMemRetain(own, payload);
+      Val from = B.ptrAdd(addr, Val::i64(off), "variant.addr");
+      B.memCopy(own, from, Val::i64(pl.Size));
+      takeFromMatchSlot(arm, own, from, payload);
       CurrentScope->declare(name, local, payload);
       if (arm->getMode() == ast::ParamMode::Inout && place)
         bindInoutArm(arm, local, *place, et, payload, off, Val::i64(idx));
@@ -187,6 +202,8 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
   }
   if (ast::MatchArm *wildcard = findWildcardArm(node)) {
     B.enter(B.addDefault(s));
+    if (!holdsNothing)
+      dropMatchSlot(addr, et);
     emitMatchArmBody(wildcard);
     B.leave();
   }

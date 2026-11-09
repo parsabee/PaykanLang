@@ -316,8 +316,9 @@ The lowering emits a `.typeN` `data` global for each type argument of a
 generic native function (`Runtime.h`, "Generic native functions": the size,
 the alignment, the `PaykanTypeKind`, the number of references and the number
 of words that tell storage never set from a value, then each reference's byte
-offset `<< 1`, `| 1` when it may be null, then each of those words' byte
-offsets; `[16, 8, 6, 1, 2, 17, 0, 8]` is `enum F { B(s: Str), A }`: a 16-byte
+offset `<< 2`, `| 1` when it may be null, `| 2` when it is no unique
+reference (a `shared` or frozen one, a cell's, a closure), then each of those words' byte
+offsets; `[16, 8, 6, 1, 2, 33, 0, 8]` is `enum F { B(s: Str), A }`: a 16-byte
 tuple whose reference at 8 may be null, never set when its tag at 0 and that
 reference are both 0, and a type whose zero bytes are a value, an `int` or an
 optional, names no such word), and a `.tupleN` one, the layout of a tuple type
@@ -337,7 +338,8 @@ int) }`'s.  An enum nested in a tuple or a struct is an entry of kind `ENUM`,
 its layout inline, and an optional one an `OPTIONAL` entry whose payload kind
 is `ENUM`, followed by a whole `ENUM` entry, as an optional struct's is).  A
 class's walk (§5) passes a `.typeN` global too, the descriptor of each
-`mem` field whose value holds references, to `Paykan_freeze_mem` (§8).  A
+`mem` field whose value holds references (with the field's qualifier), to
+`Paykan_freeze_mem` (§8).  A
 `bytes` global (raw constant bytes) is part of the format, though the lowering
 emits none.
 
@@ -421,10 +423,12 @@ generated like `destroy`, final like it (Sema rejects a class that writes
 one: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'`), and the
 target of the `__walk` slot, which the runtime's `Paykan_freeze` (§8)
 calls once it has made the object immortal, so that a value made `atomic
-shared` is frozen with everything it holds.  The body freezes what the
-object's fields hold: `call @$rt.Paykan_freeze` of the `unbox` of every
-reference field's box but a `weak` field's (the runtime skips a null box
-and an object already immortal, so a cycle ends), and `call
+shared` is frozen with everything it holds, and that the check of a moved
+value (`Paykan_moved_unique`, §8) calls to find what it holds uniquely.  The
+body visits what the object's fields hold: `call @$rt.Paykan_walk_child` of
+the `unbox` of every reference field's box but a `weak` field's and 1 for a
+unique field, 0 for another (the runtime skips a null box and an object
+already immortal, so a cycle ends), and `call
 @$rt.Paykan_freeze_mem` with the field's type descriptor (a `.typeN`
 global, §4) and its `field.addr` for every `mem` field whose value holds
 references; the walk of a class holding no reference is one `ret`.  The
@@ -1418,6 +1422,10 @@ PaykanLocked_unlock(obj) -> void        ; releases the mutex
 ; `atomic shared`: an object made immortal with everything it holds
 Paykan_freeze(obj) -> void              ; makes the object immortal and calls its walk slot (§5); null and an immortal: nothing
 Paykan_freeze_mem(ptr, ptr) -> void     ; freezes the references a value holds: its type descriptor (§4), its address
+Paykan_walk_child(obj, i64) -> void     ; a walk's visit of a field: freezes it, or, in the check of a moved value and when the second argument is 1, looks at it
+Paykan_moved_unique(box) -> i64         ; 1 when every object the value holds uniquely has a strong count of 1, or is immortal
+Paykan_moved_unique_mem(ptr, ptr) -> i64 ; the same for a value held in memory: its type descriptor (§4), its address
+Paykan_panic_moved(ptr) -> void         ; stops the program: "a value moved out of '<place>' is still borrowed"; never returns
 ; globals
 extern obj PaykanObject_None
 ; runtime classes' vtables, their type identities for `match`

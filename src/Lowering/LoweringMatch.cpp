@@ -134,16 +134,49 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     if (!subjRaw)
       return Val();
     if (exprAlreadyShared(node->getSubject())) {
-      sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
-      subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+      if (matchHoldsNothing(node) &&
+          !exprProducesFreshBox(node->getSubject())) {
+        subjRaw = emitSharedGet(subjRaw, "subj.obj");
+      } else {
+        sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
+        subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+      }
     } else if (isTrackedStringTemp(subjRaw)) {
       // A raw string temporary (a literal, a concatenation): box it so the
       // match owns it for its whole duration and arm bindings can share it.
       sharedSubj = emitSharedNew(subjRaw, "subj.box");
     }
   }
-  if (sharedSubj)
-    CurrentScope->PendingReleases.push_back(sharedSubj);
+  // Of a temporary the match is the only owner: an arm's binding takes its
+  // reference over, in a slot of its scope, so that the value keeps one
+  // owner while the arm moves it on.
+  std::optional<pir::LocalId> subjSlot;
+  bool letGoInArms = false;
+  if (sharedSubj) {
+    // So does the hold of a move-only subject end as an arm binding nothing
+    // begins, which only the arm's siblings bind.
+    const auto &arms = node->getArms();
+    const bool bindsTemporary =
+        exprProducesFreshBox(node->getSubject()) &&
+        std::any_of(arms.begin(), arms.end(), [](const ast::MatchArm *a) {
+          return a->hasBinding() && a->getMode() != ast::ParamMode::Inout;
+        });
+    const bool someArmBindsNothing =
+        isPartOfVariable(node->getSubject()) &&
+        holdsUnique(node->getSubject()->getResolvedType()) &&
+        std::any_of(arms.begin(), arms.end(), [](const ast::MatchArm *a) {
+          return !a->hasBinding() && !a->isLiteral();
+        });
+    letGoInArms = someArmBindsNothing;
+    if (bindsTemporary || someArmBindsNothing) {
+      subjSlot = B.addLocal("match.subj", Type::Box);
+      B.store(*subjSlot, sharedSubj);
+      CurrentScope->declare("match.subj", *subjSlot,
+                            node->getSubject()->getResolvedType());
+    } else {
+      CurrentScope->PendingReleases.push_back(sharedSubj);
+    }
+  }
 
   if (auto *subjTy = node->getSubject()->getResolvedType())
     if (ast::isa<ast::EnumType>(subjTy))
@@ -162,10 +195,18 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   if (valueMode)
     return emitValueMatch(node, subjRaw);
 
+  auto letGoOfSubject = [&]() {
+    if (!letGoInArms)
+      return;
+    emitRelease(B.load(*subjSlot, "match.subj"));
+    B.store(*subjSlot, Val::null(Type::Box));
+  };
   ast::MatchArm *wildcard = findWildcardArm(node);
   auto emitDefault = [&]() {
-    if (wildcard)
+    if (wildcard) {
+      letGoOfSubject();
       emitMatchArmBody(wildcard);
+    }
   };
 
   // Optional subject: the `None` arm (if any).
@@ -246,7 +287,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         // optional subject's box is null on the way to its `None` arm,
         // where the same value is released.
         Val box;
-        if (sharedSubj) {
+        if (subjSlot && ta.Arm->getMode() != ast::ParamMode::Inout) {
+          box = B.load(*subjSlot, name + ".box");
+          B.store(*subjSlot, Val::null(Type::Box));
+        } else if (sharedSubj) {
           emitRetain(sharedSubj, /*lend=*/false,
                      node->getSubject()->getResolvedType());
           box = sharedSubj;
@@ -265,6 +309,8 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
       if (ta.Arm->getMode() == ast::ParamMode::Inout && place)
         bindInoutArm(ta.Arm, local, *place,
                      node->getSubject()->getResolvedType(), ta.BindTy);
+    } else {
+      letGoOfSubject();
     }
     emitArmBody(ta.Arm);
   };

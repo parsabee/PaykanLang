@@ -174,8 +174,16 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
   std::unordered_set<std::string> changed;
   std::unordered_set<const ast::Expr *> places;
   auto findChanges = [&](ast::Expr *e) {
-    if (e->isChangedByCall())
-      if (ast::Identifier *root = storageRoot(e)) {
+    // A `move` of a value held in memory takes its bytes away from what an
+    // earlier operand read (a reference has the lending pass's copy).
+    const auto *moved = ast::dyn_cast<ast::UnaryExpr>(e);
+    if (moved && (moved->getOpcode() != ast::UnaryOpcode::Move ||
+                  !ast::isMemType(moved->getOperand()->getResolvedType()) ||
+                  !movesBytes(moved)))
+      moved = nullptr;
+    if (e->isChangedByCall() || moved)
+      if (ast::Identifier *root =
+              storageRoot(moved ? moved->getOperand() : e)) {
         changed.insert(root->getName());
         places.insert(root);
       }
@@ -466,6 +474,7 @@ void ModuleLowering::holdObjects(const std::string &name, std::vector<Val> keep,
   // (holdObjectsIn) moves into a hidden local of its own.  A copy of a
   // slice's elements an argument took (copySliceToTemporary) is no part of
   // the storage, which is never a `view` parameter's: it goes now.
+  std::vector<Scope::VarMeta> &holds = CurrentScope->ObjectHolds[name];
   for (size_t i = mark; i < MemTemps.size(); ++i) {
     const auto &[v, ty, len] = MemTemps[i];
     if (!ty) {
@@ -480,12 +489,14 @@ void ModuleLowering::holdObjects(const std::string &name, std::vector<Val> keep,
     pir::LocalId hold = B.addMemLocal(name + ".obj", l.Size, l.Align);
     B.memCopy(B.localAddr(hold, name + ".obj.addr"), v, Val::i64(l.Size));
     CurrentScope->declare(name + ".obj", hold, ty);
+    holds.push_back({hold, ty});
   }
   MemTemps.resize(mark);
   for (const Val &box : keep) {
     pir::LocalId hold = B.addLocal(name + ".obj", Type::Box);
     B.store(hold, box);
     CurrentScope->declare(name + ".obj", hold, ASTCtx.getObjTy());
+    holds.push_back({hold, nullptr});
   }
 }
 
@@ -681,6 +692,7 @@ void ModuleLowering::bindInoutArm(const ast::MatchArm *arm,
 
 void ModuleLowering::emitArmBody(const ast::MatchArm *arm) {
   const auto &stmts = arm->getBody()->getStatements();
+  const auto viewEnds = sema::viewHoldEnds(stmts);
   for (size_t i = 0; i <= stmts.size(); ++i) {
     // n's last use is done: the subject is the arm's to use again (Sema),
     // so n goes back now, not when the arm ends (a never-used n holds what
@@ -691,8 +703,12 @@ void ModuleLowering::emitArmBody(const ast::MatchArm *arm) {
         emitWriteBack(wbs.back());
       wbs.pop_back();
     }
-    if (i < stmts.size())
+    if (i < stmts.size()) {
       visit(stmts[i]);
+      if (!B.isTerminated())
+        for (const ast::VarDecl *vd : viewEnds[i])
+          endViewHold(vd);
+    }
   }
 }
 

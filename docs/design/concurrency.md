@@ -664,7 +664,7 @@ fn hand(j: view Job, q: shared Queue, lp: task::Loop) -> int {
 ```
 
 So a move out of storage the frame does not own is checked at run time
-(proposed; owner may change).  `mem::replace`, `mem::take` and the Buffer
+(#368; src/Lowering/LoweringMoveOut.cpp).  `mem::replace`, `mem::take` and the Buffer
 take under `pop` and `removeAt` are compiler-known, and a native with an
 `inout` parameter and a move-only result is MovesOut by rule.  A function
 that moves out of its `self` or an `inout` parameter, by them or by calling
@@ -677,7 +677,19 @@ and panics unless every strong count is 1: `a value moved out of 'q.jobs' is
 still borrowed`.  It runs whatever the type's crossability: a held `Str` in
 an uncrossable `Job { name: Str; cache: shared Cache; }` could otherwise
 leave later through an owned path, unchecked.  An unresolved virtual call
-returning a move-only value counts as MovesOut.  The cost is one load per
+returning a move-only value counts as MovesOut, as does a call through a
+function value and one of another module's function, which has no summary in
+its `.pkm`.  A slot is `self` or an `inout` parameter, through unique parts
+only: past a handle the function checks what it takes itself, since its
+caller's path to the handle may be owned, and so does a function whose result
+is of another form, which no caller checks.  A call that may exchange a
+borrowed `inout` place with an owned one (`mem::swap`) is checked in the owned
+place when evaluating that place again runs nothing.  `move h.f` through a handle
+is an error, so a field never reads as empty.  A hold that would be seen as
+a second owner is not left behind: a `view` or `inout` local's ends with its
+last use, an arm that binds nothing lets go of the subject as it begins, `move v` of a value held in memory
+moves its bytes and a by-value parameter takes over a move-only value's
+references.  The cost is one load per
 object moved.  So every unique object reachable from an owned root has count
 1, and a value that crosses (or converts to `locked` or `atomic shared`) is
 new, on an owned path, or checked as it left; the crossing points need no check of their

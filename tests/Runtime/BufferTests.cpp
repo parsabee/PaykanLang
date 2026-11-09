@@ -62,7 +62,7 @@ struct Wide {
   bool flag;
 };
 RefType kWide = {{sizeof(Wide), alignof(Wide), PAYKAN_KIND_OBJECT, 1, 1},
-                 (int64_t)offsetof(Wide, ref) << 1,
+                 (int64_t)offsetof(Wide, ref) << 2,
                  (int64_t)offsetof(Wide, ref)};
 
 // `enum F { B(s: Str), A }` as the compiler lays it out: the tag, then B's
@@ -79,7 +79,7 @@ struct UnionType {
 };
 UnionType kUnion = {
     {sizeof(Union), alignof(Union), PAYKAN_KIND_TUPLE, 1, 2},
-    (int64_t)offsetof(Union, s) << 1 | 1,
+    (int64_t)offsetof(Union, s) << 2 | 1,
     {(int64_t)offsetof(Union, tag), (int64_t)offsetof(Union, s)}};
 
 // A function value, `() -> int`: its code word, never 0 in a value, then
@@ -90,7 +90,7 @@ struct Function {
 };
 RefType kFunction = {
     {sizeof(Function), alignof(Function), PAYKAN_KIND_TUPLE, 1, 1},
-    (int64_t)offsetof(Function, closure) << 1 | 1,
+    (int64_t)offsetof(Function, closure) << 2 | 1,
     (int64_t)offsetof(Function, code)};
 
 // `enum G { A(n: int, s: Str?), B(s: Str) }`: zeros are A(0, None), a
@@ -107,8 +107,8 @@ struct ValuedType {
 };
 ValuedType kValued = {
     {sizeof(Valued), alignof(Valued), PAYKAN_KIND_TUPLE, 2, 0},
-    {(int64_t)offsetof(Valued, a) << 1 | 1,
-     (int64_t)offsetof(Valued, b) << 1 | 1}};
+    {(int64_t)offsetof(Valued, a) << 2 | 1,
+     (int64_t)offsetof(Valued, b) << 2 | 1}};
 
 PaykanObject *obj(PaykanShared *buf) { return PaykanShared_get(buf); }
 

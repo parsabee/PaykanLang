@@ -225,6 +225,16 @@ void PaykanObject_walk(PaykanObject *self);
 void Paykan_freeze(PaykanObject *obj);
 /// Freezes the references the value of PaykanType @p type at @p value holds.
 void Paykan_freeze_mem(const void *type, void *value);
+/// What a class's walk slot calls for each reference field: freezes
+/// @p obj, or in Paykan_moved_unique's walk visits it if @p unique.
+void Paykan_walk_child(PaykanObject *obj, int64_t unique);
+/// Whether the value @p box, moved out of borrowed storage (#368), is held
+/// by nothing else: its count and those of the objects it uniquely holds
+/// are 1, stopping at `shared`, `weak` and function values and skipping
+/// immortal objects.  NULL (None) is.
+int64_t Paykan_moved_unique(PaykanShared *box);
+/// Paykan_moved_unique for the value of PaykanType @p type at @p value.
+int64_t Paykan_moved_unique_mem(const void *type, void *value);
 
 // Default method implementations.  Every `*_equals` takes `other` as its
 // slot does: a box that bit 0 of `owned` says is handed over (released by
@@ -605,9 +615,11 @@ typedef enum PaykanTypeKind {
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
-/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref); then by
-/// `nunset` words, the byte offsets of the words that are all 0 only in
-/// storage never set (PaykanType_unset).
+/// offset in the value << 2, | 1 if it may be NULL, | 2 if it is no unique
+/// reference, a `shared` one, a handle or a function value's closure
+/// (PaykanType_ref, PaykanType_refOffset); then by `nunset` words, the byte
+/// offsets of the words that are all 0 only in storage never set
+/// (PaykanType_unset).
 typedef struct PaykanType {
   int64_t size;   ///< bytes of a value
   int64_t align;  ///< its alignment
@@ -620,6 +632,9 @@ typedef struct PaykanType {
 static inline int64_t PaykanType_ref(const PaykanType *type, int64_t k) {
   return ((const int64_t *)(type + 1))[k];
 }
+
+/// The byte offset of the reference a PaykanType_ref @p word describes.
+static inline int64_t PaykanType_refOffset(int64_t word) { return word >> 2; }
 
 /// The byte offset of the @p k-th word that tells a @p type value from
 /// storage never set.
@@ -812,6 +827,8 @@ void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 /// `mem::swap<T>`: the values of type @p t at @p a and @p b trade places,
 /// each with the references it owns (none is retained or released).
 void Paykan_mem_swap(void *t, void *a, void *b);
+/// The value at @p slot, moved to @p out; @p slot holds zeros.
+void Paykan_mem_move_out(void *t, void *out, void *slot);
 /// PaykanBuffer_grow and PaykanBuffer_reserve that report a failure
 /// instead of panicking: 0, or ENOMEM (the memory, or the size, is not
 /// there) with the buffer unchanged.  The standard library's memory::Buffer
@@ -898,6 +915,9 @@ PAYKAN_NORETURN void Paykan_panic_pure_virtual(const char *cls, int64_t cls_len,
 /// Print `paykan: <message>` and abort: the standard library's `native fn`
 /// for a broken precondition (`pop` on an empty list, say).
 PAYKAN_NORETURN void Paykan_panic_message(PaykanObject *message);
+/// A value moved out of the borrowed storage @p place (its text) is still
+/// held by something else (#368).
+PAYKAN_NORETURN void Paykan_panic_moved(const char *place);
 /// Paykan_panic_message as a generic `native fn` with a result of type @p t
 /// (`-> T`), for where the program needs a value: it never stores one.
 PAYKAN_NORETURN void Paykan_panic_value(void *t, void *out,

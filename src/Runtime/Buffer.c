@@ -42,6 +42,8 @@ static void *buffer_value(const PaykanBuffer *buf, int64_t i) {
 /// values hold (storage never set holds none).
 static void PaykanBuffer_walk(PaykanObject *self) {
   PaykanBuffer *buf = (PaykanBuffer *)self;
+  if (buf->type->nrefs == 0)
+    return;
   for (int64_t i = 0; i < buf->len; ++i) {
     void *v = buffer_value(buf, i);
     if (!PaykanType_isUnset(buf->type, v))
@@ -181,6 +183,12 @@ void Paykan_mem_swap(void *t, void *a, void *b) {
   }
 }
 
+void Paykan_mem_move_out(void *t, void *out, void *slot) {
+  const size_t size = (size_t)((const PaykanType *)t)->size;
+  memcpy(out, slot, size);
+  memset(slot, 0, size);
+}
+
 void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
   const PaykanType *t = (const PaykanType *)type;
   PaykanBuffer *buf = buffer_at(b);
@@ -189,7 +197,7 @@ void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
   // Retain the new value before releasing the old, which may be the same.
   for (int64_t k = 0; k < t->nrefs; ++k) {
     PaykanShared *ref;
-    memcpy(&ref, (const char *)v + (PaykanType_ref(t, k) >> 1),
+    memcpy(&ref, (const char *)v + PaykanType_refOffset(PaykanType_ref(t, k)),
            sizeof(PaykanShared *));
     Paykan_retain_inline(ref);
   }

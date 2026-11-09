@@ -1,0 +1,24 @@
+// expect-panic: a value moved out of 'h.n' is still borrowed
+import ::memory as mem;
+
+class Node {
+  v: int;
+}
+class H {
+  n: mut Node;
+}
+
+// Moves out of what its caller named: the check is the caller's.
+fn f(s: inout Node) -> Node {
+  return mem::replace(s, Node(0));
+}
+
+fn g(h: shared mut H, n: view Node) -> int {
+  let x = f(h.n);
+  return x.v + n.v;
+}
+
+fn main() -> int {
+  h: shared mut H = H(Node(1));
+  return g(h, h.n);
+}

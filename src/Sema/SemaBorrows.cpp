@@ -22,6 +22,7 @@
 
 #include "Sema.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -245,6 +246,58 @@ bool Sema::visitStatements(const std::vector<ast::Stmt *> &stmts) {
     });
   }
   return ok;
+}
+
+std::vector<std::vector<const ast::VarDecl *>>
+viewHoldEnds(const std::vector<ast::Stmt *> &stmts) {
+  struct Local {
+    const ast::VarDecl *Decl;
+    size_t End;
+  };
+  std::vector<Local> locals;
+  for (size_t i = 0; i < stmts.size(); ++i) {
+    const auto *ds = ast::dyn_cast<ast::DeclStmt>(stmts[i]);
+    const auto *vd = ds ? ast::dyn_cast<ast::VarDecl>(ds->getDecl()) : nullptr;
+    if (!vd || vd->getMode() == ast::ParamMode::Value)
+      continue;
+    size_t end = i;
+    for (size_t j = i + 1; j < stmts.size(); ++j)
+      if (mentions(stmts[j], vd->getName()))
+        end = j;
+    locals.push_back({vd, end});
+  }
+  // A borrow of this borrow may lean on its hold; a value computed from it
+  // (`w: view = v.n + 1`) does not.
+  auto borrowsThrough = [](const ast::Expr *init, const std::string &name) {
+    for (;;) {
+      if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(init))
+        init = ma->getReceiver();
+      else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(init))
+        init = se->getArray();
+      else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(init))
+        init = ti->getTuple();
+      else
+        break;
+    }
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(init))
+      return id->getName() == name;
+    return (ast::isa<ast::CallExpr>(init) ||
+            ast::isa<ast::MethodCallExpr>(init) ||
+            ast::isa<ast::TernaryExpr>(init)) &&
+           mentions(init, name);
+  };
+  for (size_t k = locals.size(); k-- > 0;)
+    for (size_t m = k + 1; m < locals.size(); ++m)
+      if (borrowsThrough(locals[m].Decl->getInitExpr(),
+                         locals[k].Decl->getName()))
+        locals[k].End = std::max(locals[k].End, locals[m].End);
+  std::vector<std::vector<const ast::VarDecl *>> ends(stmts.size());
+  for (const Local &l : locals)
+    if (l.End + 1 < stmts.size() && !ast::isa<ast::ReturnStmt>(stmts[l.End]) &&
+        !ast::isa<ast::BreakStmt>(stmts[l.End]) &&
+        !ast::isa<ast::ContinueStmt>(stmts[l.End]))
+      ends[l.End].push_back(l.Decl);
+  return ends;
 }
 
 bool Sema::visitBody(const std::vector<ast::Stmt *> &stmts) {

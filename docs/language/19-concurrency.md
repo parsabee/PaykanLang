@@ -559,6 +559,63 @@ until 'r' is last used; it cannot be moved`), and one call cannot both borrow a 
 move it (`'f' is passed to 'view' parameter 'j'; it cannot also be moved into parameter
 'k'`).
 
+### A move out of borrowed storage
+
+Storage the function does not own may be reached another way at the same time. `view Job`
+accepts a `Job` that sits in a list a `shared mut` reference also reaches, so the compiler
+cannot see whether a `pop` takes the very object a borrow names:
+
+```pkn
+import ::collections as cl;
+
+class Job { id: int; }
+class Queue { jobs: cl::List<Job>; }
+
+fn look(j: view Job, q: shared mut Queue) -> int {
+  let t = q.jobs.pop(); // the Job that 'j' names
+  return j.id + t.id;
+}
+
+fn main() -> int {
+  let q: shared mut Queue = Queue(cl::List<Job>());
+  q.jobs.push(Job(7));
+  return look(q.jobs.at(0), q);
+}
+```
+
+So such a move is checked as the program runs, and this one stops it:
+
+```
+paykan: a value moved out of 'q.jobs' is still borrowed
+```
+
+The check follows the moved value and everything it holds uniquely, and needs every count it
+finds to be 1. It stops at a `shared`, `atomic shared`, `locked` or `weak` link and at a
+function value, whose other holders are expected, and costs one load per object moved.
+
+- It runs on `mem::replace`, `mem::take`, a `List`'s `pop` and `removeAt`, a `LinkedList`'s
+  `popFront` and `popBack`, a call that may exchange a borrowed `inout` place with an owned
+  one (`mem::swap`), and any other function that moves a value out of what its caller named.
+- A slot on an **owned path** needs none: a local, a by-value parameter or an owned `match`
+  binding, followed only by unique fields and fixed-size array elements. Nothing else can
+  reach what that path names.
+- A function that returns the value it moved out of its `self` or an `inout` parameter,
+  through unique fields only, leaves the check to its caller, so the check names the
+  caller's place, `q.jobs` here. Past a handle (`self.q.jobs` with `q: shared mut Q`) the
+  function checks it itself: the caller's own path may be owned while other handles reach
+  the value.
+- A call of a function value, of a virtual method other code may override and of another
+  module's function counts as such a move: the check passes when nothing else holds the value.
+- A borrow holds what it names for as long as it is live: a `view` or `inout` local until
+  the last statement of its block that uses it, a `view` parameter until the call returns, a
+  `match` arm's binding until the arm ends, an `inout` arm's too, so `mem::replace(n, v)` of
+  an `n: inout T` arm stops the program. An arm that binds nothing lets go of the subject as
+  it begins.
+
+`move h.f` never takes a field through a handle: others could read it after, and find it
+empty (`cannot move 'h.n': 'h' is a 'shared mut H', which other references reach; write
+'mem::replace(h.n, v)'`).
+
 ## Tasks: `async fn` and `await`
 
 A function declared `async fn` runs as a task. Calling it starts the task at once and
@@ -1555,7 +1612,8 @@ one.
 - `move x` takes a local variable (a `let` one too) or a by-value parameter, and `move x.f`
   a unique reference field of one, through unique fields only. `move` of a `shared` or
   `weak` field, of a value, or of a field of a borrow is an error (`cannot move 'h.other':
-  it is 'shared Job', not a unique part of 'h'`).
+  it is 'shared Job', not a unique part of 'h'`). Nor can the root be a handle: `move h.f`
+  with `h: shared mut H` is an error.
 - `move` is also how a reference gains `mut`: `let m: mut Node = move n` with `n` a `Node`
   (a `mut T` flows into a `T` without it).
 - A read after a move is an error naming the move (`'a' was moved at 11:16; it cannot be
@@ -1568,6 +1626,8 @@ one.
 - An assignment revives a moved variable; `move x.f` ends `x` until it is assigned whole.
 - A move is a write: not of a variable a `view` local reads until the local's last use, and
   not beside a borrow of the same variable in one call.
+- A move out of storage the function does not own is checked as the program runs: a value
+  something else still borrows stops it (`a value moved out of 'q.jobs' is still borrowed`).
 - `move` before a temporary does nothing. A move-only value read from a place reaches an
   owning slot only by `move` (or a `clone()`, or a borrow), and `return x` of a variable
   moves it with no `move` ([Ownership transfers](16-memory.md#ownership-transfers)).
@@ -1710,7 +1770,6 @@ one.
   struct, and `compareExchange` does not write the value found back into `expected`.
 - `locked` holds an object, not a value: wrap a value in a class.
 - `break` and `continue` cannot be used in a `parallel for` body.
-- A move out of borrowed storage is not checked at run time.
 - An object held in a struct, a tuple or an array is reached through the value, which takes
   no `mut`: the variable's `let` fixes the value's own storage and the objects it holds
   (`'p' is declared with 'let', and so are the objects it holds; drop 'let' to change

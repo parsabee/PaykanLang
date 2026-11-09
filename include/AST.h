@@ -285,9 +285,28 @@ class Expr : public ASTNode {
   // parameter, a result): the slot's type; the lowering makes a new cell
   // holding the value at this use.
   Type *NewAtomicCell = nullptr;
+  // Set by Sema on a call or a `move` with a move-only value (#368): the
+  // text of the first place it may move that value out of that is not on
+  // an owned path, and whether every such place starts at a parameter of
+  // the function it is written in.  Null for none.
+  const std::string *MovedFrom = nullptr;
+  bool MovedFromParam = false;
+  const Expr *MovedInto = nullptr;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
+
+  void setMovedFrom(const std::string *place, bool fromParam,
+                    const Expr *into = nullptr) {
+    MovedFrom = place;
+    MovedFromParam = fromParam;
+    MovedInto = into;
+  }
+  const std::string *getMovedFrom() const { return MovedFrom; }
+  bool isMovedFromParam() const { return MovedFromParam; }
+  /// The owned place a `mem::swap` put the value in; null for a call whose
+  /// result is the value.
+  const Expr *getMovedInto() const { return MovedInto; }
 
   void setMaterialize(QualForm form) { Materialize = form; }
   QualForm getMaterialize() const { return Materialize; }

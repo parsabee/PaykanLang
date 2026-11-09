@@ -201,6 +201,12 @@ inline constexpr const char *kPaykanObjectWalk = "PaykanObject_walk";
 // what it holds become immortal, counted nowhere.
 inline constexpr const char *kPaykanFreeze = "Paykan_freeze";
 inline constexpr const char *kPaykanFreezeMem = "Paykan_freeze_mem";
+// The walk a class's `__walk` makes of a reference field, and the check of
+// a value moved out of borrowed storage (#368).
+inline constexpr const char *kPaykanWalkChild = "Paykan_walk_child";
+inline constexpr const char *kPaykanMovedUnique = "Paykan_moved_unique";
+inline constexpr const char *kPaykanMovedUniqueMem = "Paykan_moved_unique_mem";
+inline constexpr const char *kPaykanPanicMoved = "Paykan_panic_moved";
 inline constexpr const char *kPaykanObjectVtable = "PaykanObject_vtable";
 inline constexpr const char *kPaykanObjectNone = "PaykanObject_None";
 
@@ -253,6 +259,7 @@ inline constexpr const char *kPaykanBufferIsSet = "PaykanBuffer_isSet";
 /// `mem::swap<T>(a: inout T, b: inout T)`: each place takes the other's
 /// value, with the references it owns (#369).
 inline constexpr const char *kPaykanMemSwap = "Paykan_mem_swap";
+inline constexpr const char *kPaykanMemMoveOut = "Paykan_mem_move_out";
 inline constexpr const char *kPaykanBufferTryGrow = "PaykanBuffer_tryGrow";
 inline constexpr const char *kPaykanBufferTryReserve =
     "PaykanBuffer_tryReserve";
@@ -499,6 +506,10 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanObjectWalk,
     kPaykanFreeze,
     kPaykanFreezeMem,
+    kPaykanWalkChild,
+    kPaykanMovedUnique,
+    kPaykanMovedUniqueMem,
+    kPaykanPanicMoved,
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,

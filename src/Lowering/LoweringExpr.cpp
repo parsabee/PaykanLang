@@ -210,8 +210,9 @@ Val ModuleLowering::emitFunctionValueCall(ast::Expr *callee,
 
 Val ModuleLowering::ExprEmitter::visitCallValueExpr(ast::CallValueExpr *node) {
   WantAddress = false; // a function type's result is never an `inout`
-  return L.emitFunctionValueCall(node->getCallee(), node->getArguments(),
-                                 node->getResolvedType());
+  return L.emitMoveOutCheck(
+      node, L.emitFunctionValueCall(node->getCallee(), node->getArguments(),
+                                    node->getResolvedType()));
 }
 
 Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
@@ -1025,8 +1026,9 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     auto *id = L.ASTCtx.make<ast::Identifier>(
         node->getLocation(), L.ASTCtx.intern(node->getCalleeName()));
     id->setResolvedType(L.CurrentScope->lookupASTType(node->getCalleeName()));
-    return L.emitFunctionValueCall(id, node->getArguments(),
-                                   node->getResolvedType());
+    return L.emitMoveOutCheck(node,
+                              L.emitFunctionValueCall(id, node->getArguments(),
+                                                      node->getResolvedType()));
   }
   if (ast::MethodCallExpr *show = L.showCallOf(node))
     return visitMethodCallExpr(show);
@@ -1148,7 +1150,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     }
     L.releaseAfterCall(keep);
     L.releaseMemTemps(mark);
-    return result;
+    L.emitSwapCheck(node);
+    return L.emitMoveOutCheck(node, result);
   }
   size_t fixedMark = L.MemTemps.size();
   InoutPlaces places;
@@ -1201,7 +1204,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     L.B.call(callee->Name, callee->Sig, args);
     L.releaseAfterCall(keep);
     L.releaseMemTemps(fixedMark);
-    return slot;
+    return L.emitMoveOutCheck(node, slot);
   }
   // An `async fn` (the prototype): the call starts a task of its result.
   Val result = callee->IsAsync
@@ -1212,7 +1215,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
                              places);
   L.releaseAfterCall(keep);
   L.releaseMemTemps(fixedMark);
-  return result;
+  L.emitSwapCheck(node);
+  return L.emitMoveOutCheck(node, result);
 }
 
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
@@ -1265,7 +1269,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     if (ast::Type *elem = !wantAddress ? L.bufferElementType(st) : nullptr)
       if (std::optional<Val> read = emitBufferRead(node, elem))
         return *read;
-    return emitStructMethodCall(node, st, wantAddress);
+    return L.emitMoveOutCheck(node,
+                              emitStructMethodCall(node, st, wantAddress));
   }
   // `o.toString()` on an optional (the builtin `Show`).
   if (ast::dyn_cast<ast::OptionalType>(recvResolved) &&
@@ -1277,7 +1282,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       ast::dyn_cast<ast::EnumType>(recvResolved) ||
       ast::dyn_cast<ast::BuiltinType>(recvResolved))
     return emitShowCall(node);
-  return emitClassMethodCall(node, wantAddress);
+  return L.emitMoveOutCheck(node, emitClassMethodCall(node, wantAddress));
 }
 
 // `x.exchange(v)` and `x.compareExchange(expected, desired)` on an `atomic`
@@ -1405,8 +1410,9 @@ Val ModuleLowering::ExprEmitter::emitFieldCall(ast::MethodCallExpr *node) {
       node->getLocation(), node->getReceiver(),
       L.ASTCtx.intern(node->getMethodName()));
   ma->setResolvedType(fieldTy);
-  return L.emitFunctionValueCall(ma, node->getArguments(),
-                                 node->getResolvedType());
+  return L.emitMoveOutCheck(node,
+                            L.emitFunctionValueCall(ma, node->getArguments(),
+                                                    node->getResolvedType()));
 }
 
 // `x.hash()` (the builtin `Hashable`) (visitMethodCallExpr).

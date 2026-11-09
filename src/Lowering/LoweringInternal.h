@@ -236,6 +236,9 @@ private:
     std::unordered_set<std::string> StableVars;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
+    /// What keeps each `inout` local's storage alive (holdObjects): a box's
+    /// slot (null ASTType) or a value held in memory.
+    std::unordered_map<std::string, std::vector<VarMeta>> ObjectHolds;
     /// A `match` arm's `n: inout T` (bindInoutArm): after n's last use in
     /// the arm (emitArmBody), or at the scope's exit by any way out before
     /// it, ahead of every release, n's own value (`Binding`, of type
@@ -594,6 +597,51 @@ private:
   std::unordered_map<const ast::FuncDecl *, ast::Type *> BodyOwners;
   /// The function or method named @p name in Bodies, or null.
   const ast::FuncDecl *bodyOf(const std::string &name) const;
+
+  // -- Values moved out of borrowed storage (LoweringMoveOut.cpp, #368)
+  /// Those of Bodies that may return a value moved out of what a caller
+  /// named: they leave its check to their callers.
+  std::unordered_set<const ast::FuncDecl *> MovesOut;
+  bool MovesOutKnown = false;
+  /// Fill MovesOut, once every body is known.
+  void computeMovesOut();
+  /// Whether the call or `move` @p e may give a value moved out of its slot.
+  bool valueMovesOut(const ast::Expr *e);
+  bool methodMovesOut(ast::ClassType *ct, const std::string &name);
+  /// The result @p v of the call or `move` @p e, once checked when it may
+  /// have come out of borrowed storage and its caller does not check it.
+  Val emitMoveOutCheck(ast::Expr *e, Val v);
+  /// The expression the `return` being lowered returns.
+  const ast::Expr *TailReturn = nullptr;
+  /// Stop the program unless every object @p v (of type @p ty, moved out
+  /// of @p place) holds uniquely has no other holder.
+  void emitMovedValueCheck(const std::string &place, ast::Type *ty,
+                           const Val &v);
+  /// The check of the `mem::swap` @p e (Expr::getMovedInto).
+  void emitSwapCheck(ast::Expr *e);
+  /// Whether a value of type @p ty holds a unique reference: it reaches a
+  /// by-value parameter or a new owner only by moving.
+  static bool holdsUnique(const ast::Type *ty);
+  /// Whether `move` @p u moves the bytes out of a place of a type held in
+  /// memory, leaving zeros: what they own has one owner again at once.
+  static bool movesBytes(const ast::UnaryExpr *u);
+  /// @p arm's binding at @p own has the bytes at @p from, in the match's
+  /// slot: it takes the references over, or retains its own.
+  void takeFromMatchSlot(const ast::MatchArm *arm, const Val &own,
+                         const Val &from, ast::Type *ty);
+  /// An arm that binds nothing has begun: the match's copy of a move-only
+  /// subject in its slot at @p addr holds nothing any more.
+  void dropMatchSlot(const Val &addr, ast::Type *ty);
+  /// The `view` or `inout` local @p vd's borrow is over: its hold goes now.
+  void endViewHold(const ast::VarDecl *vd);
+  /// The statements of a block, ending each `view` local's hold after the
+  /// last statement that uses it.
+  void emitStatements(const std::vector<ast::Stmt *> &stmts);
+  /// Whether @p e is a variable or a part of one.
+  static bool isPartOfVariable(const ast::Expr *e);
+  /// Whether no arm of @p node binds its subject, a variable or a part of
+  /// one: the arms' tests are all it is read for, so it is not held.
+  static bool matchHoldsNothing(const ast::MatchStmt *node);
 
   /// What running some code may do to references held by storage it does
   /// not own (LoweringHolds.cpp, docs/pir.md §7): the classes whose
@@ -1216,6 +1264,9 @@ private:
   MemValue emitMemValue(ast::Expr *e);
   /// emitMemValue, without the copy a read of SnapshotReads takes.
   MemValue emitMemRead(ast::Expr *e);
+  /// `move v` (movesBytes): the bytes, in a temporary that owns what they
+  /// hold.
+  MemValue emitMemMoved(ast::UnaryExpr *u);
   /// A temporary named @p name holding a copy of the value of type @p ty at
   /// @p addr, its references retained: its address.
   Val copyToTemporary(const Val &addr, ast::Type *ty, const std::string &name);

@@ -50,6 +50,14 @@ using ast::typeName;
 /// Result object returned by Sema::run(). Carries the populated ASTContext
 /// and (for imported modules) the owning ParserDriver plus pre-computed child
 /// SemaContexts so the lowering can consume them without re-running Sema.
+/// For each statement of a block, the `view` and `inout` locals of the
+/// block whose borrow ends with it and that a later statement of the block
+/// could run past: the lowering lets go of their holds there, as the borrow is
+/// over (SemaBorrows.cpp, "live ... to the last statement of its block that
+/// uses it").
+std::vector<std::vector<const ast::VarDecl *>>
+viewHoldEnds(const std::vector<ast::Stmt *> &stmts);
+
 struct SemaContext {
   /// For imported modules: owns the ParserDriver (and thus its ASTContext).
   /// nullptr for top-level contexts where the caller owns the driver.
@@ -1271,8 +1279,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       ast::Type *ty = ast::ExprVisitor<ExprChecker, ast::Type *>::visit(e);
       assert(!ChainTypes.count(ast::chainOperand(e)) &&
              "a chain link's visitor visits its operand");
-      if (ty)
+      if (ty) {
         e->setResolvedType(ty);
+        S.noteMovedFrom(e);
+      }
       return ty;
     }
 
@@ -1825,7 +1835,8 @@ private:
   /// form (`shared mut T`, `shared T` for a `shared view fn`), or is a
   /// temporary nothing else holds.  True for any other method.
   bool checkSharedReceiver(const ast::MethodCallExpr *call,
-                           const ast::MethodDecl *method);
+                           const ast::MethodDecl *method,
+                           const ast::Expr *recv = nullptr);
   /// A call of @p method on the receiver of @p call: unless it is a `view
   /// fn`, the receiver must be changeable.
   bool checkMethodReceiver(const ast::MethodCallExpr *call,
@@ -1923,6 +1934,32 @@ private:
   /// Whether a `match` on @p e reads storage: a place, a call's `inout` or
   /// `view` result, or a conditional with a branch that is one (#368).
   bool readsStorage(const ast::Expr *e) const;
+  /// Whether @p e is on an owned path (docs/design/concurrency.md, "Owned
+  /// paths and borrowed roots"): a temporary, or a local or by-value
+  /// parameter held uniquely followed only by unique fields and fixed-array
+  /// elements.  Nothing else can reach what such a path names.
+  bool onOwnedPath(const ast::Expr *e);
+  /// For the call or `move` @p e, whose value is move-only, record the
+  /// first place it may move that value out of that is not on an owned
+  /// path (Expr::getMovedFrom): the lowering checks the value there (#368).
+  void noteMovedFrom(ast::Expr *e);
+  /// In the body of `mem::replace` or `mem::take`.
+  bool inMemoryModuleTake() const;
+  /// The call @p e has a borrowed and an owned `inout` place of one
+  /// move-only type: what it exchanges is checked in the owned one.
+  void noteExchange(ast::Expr *e, const std::vector<ast::Expr *> &args,
+                    const ast::ParamModes &modes);
+  /// Whether evaluating the place @p e again gives the same place and runs
+  /// nothing.
+  static bool isPurePlace(const ast::Expr *e);
+  /// Whether a live plain `match` binding reads the variable @p name.
+  bool isViewBindingSubject(const std::string &name) const;
+  /// Whether a value moved out of @p slot is its caller's to check: @p slot
+  /// is `self` or an `inout` parameter followed only by unique parts.
+  bool slotIsCallers(const ast::Expr *slot);
+  /// Whether the `view` result @p e lends the form @p want: all it borrows
+  /// of its own type has that form (`pick(a)` with T inferred bare).
+  bool lendsForm(const ast::Expr *e, ast::Qualifier want);
   /// Whether @p e is a call returning an `inout` result: a place.
   bool isInoutResult(const ast::Expr *e) const;
   /// Why @p e cannot be returned as the current function's borrowed result;

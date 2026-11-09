@@ -1104,6 +1104,18 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
   ast::Type *ty = resolveExprType(ma); // the root live, not moved, not lent
   if (!ty)
     return nullptr;
+  // What a handle reaches, others reach too: they would find the field
+  // empty.
+  if (const ast::Qualifier rq = qualifierOf(root);
+      rq.Form != ast::QualForm::Unique) {
+    error(loc,
+          "cannot move '" + what + "': '" + name + "' is a '" +
+              qualifiedName(
+                  rq, const_cast<ast::Identifier *>(root)->getResolvedType()) +
+              "', which other references reach; write 'mem::replace(" + what +
+              ", v)'");
+    return nullptr;
+  }
   // Every link a unique field: a `shared` one is an alias, a
   // `weak` one no owner.
   for (const ast::Expr *x = ma;
@@ -1748,19 +1760,45 @@ bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
 }
 
 bool Sema::isCopyPlace(const ast::Expr *e) {
-  // An `inout` result names the storage it borrows (#368): what it holds
-  // stays there, so a copy of it is another owner.
-  if (e && e->isInoutResult())
+  // An `inout` result, or a part of one, names the storage it borrows
+  // (#368): what it holds stays there, so a copy of it is another owner.
+  // (A `view` result cannot be stored at all: checkViewNotStored.)
+  if (const BorrowResult *r = e ? borrowResultOf(e) : nullptr;
+      r && r->Mode == ast::ParamMode::Inout)
     return true;
+  // A part of a conditional is a part of one of its branches.
+  if (const ast::Expr *base = placeBase(e);
+      base != e && ast::isa<ast::TernaryExpr>(base)) {
+    for (const ast::Expr *b : conditionalBranches(base))
+      if (isCopyPlace(b) || borrowResultOf(b))
+        return true;
+    return false;
+  }
   // A named function is no place: naming it makes a new function value.
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
     return !id->isFunctionRef();
+  if (!ast::isa<ast::MemberAccessExpr>(e) && !ast::isa<ast::SubscriptExpr>(e) &&
+      !ast::isa<ast::TupleIndexExpr>(e))
+    return false;
+  if (placeRoot(e))
+    return true;
   // A part of a temporary (`make().a`) is no place either: the temporary
-  // ends with the statement, so its part leaves it.
-  return (ast::isa<ast::MemberAccessExpr>(e) ||
-          ast::isa<ast::SubscriptExpr>(e) ||
-          ast::isa<ast::TupleIndexExpr>(e)) &&
-         placeRoot(e) != nullptr;
+  // ends with the statement, so its part leaves it.  Past a handle
+  // (`id(h).n`) it stays where it is: others reach it.
+  for (const ast::Expr *p = e;;) {
+    const ast::Expr *next = nullptr;
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p))
+      next = ma->getReceiver();
+    else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+      next = se->getArray();
+    else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p))
+      next = ti->getTuple();
+    if (!next)
+      return false;
+    if (qualifierOf(next).Form != ast::QualForm::Unique)
+      return true;
+    p = next;
+  }
 }
 
 bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
@@ -1950,6 +1988,10 @@ std::string Sema::constPlace(const ast::Expr *e) {
       throughObject = true;
       const ast::Qualifier q = qualifierOf(p);
       if (!q.isConst() || q.Form == ast::QualForm::Locked)
+        return "";
+      // A slot of a type argument's form, `value: T` with T = `shared Node`:
+      // a template's `inout T` replaces the reference whole.
+      if (p == e && q.FromArgument && inInstanceCode())
         return "";
       if (ma && q.Form != ast::QualForm::Unique) {
         // Immutable by its own declaration, or only under its root?

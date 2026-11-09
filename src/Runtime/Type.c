@@ -14,7 +14,8 @@
 static PaykanShared *type_ref(const PaykanType *type, const void *value,
                               int64_t k) {
   PaykanShared *ref;
-  memcpy(&ref, (const char *)value + (PaykanType_ref(type, k) >> 1),
+  memcpy(&ref,
+         (const char *)value + PaykanType_refOffset(PaykanType_ref(type, k)),
          sizeof(PaykanShared *));
   return ref;
 }

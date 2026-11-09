@@ -1,0 +1,24 @@
+// expect-panic: a value moved out of 'h.n' or 'k.n' is still borrowed
+import ::memory as mem;
+
+class Node {
+  v: int;
+}
+class H {
+  n: mut Node;
+}
+
+fn f(a: inout Node, b: inout Node) -> Node {
+  return mem::replace(b, Node(5));
+}
+
+fn g(h: shared mut H, k: shared mut H, n: view Node) -> int {
+  let o = f(h.n, k.n);
+  return o.v + n.v;
+}
+
+fn main() -> int {
+  h: shared mut H = H(Node(1));
+  k: shared mut H = H(Node(2));
+  return g(h, k, k.n);
+}
