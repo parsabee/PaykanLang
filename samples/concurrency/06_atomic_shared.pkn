@@ -4,7 +4,6 @@
 // reads inside count nothing.
 // expect-stdout: 32 33 0
 // expect-stdout: demo [0..100]
-// expect-leaks: the frozen object is immortal in the prototype
 
 import ::io;
 

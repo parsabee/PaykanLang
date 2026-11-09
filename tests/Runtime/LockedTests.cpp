@@ -3,11 +3,8 @@
 //
 // Unit tests for the concurrency prototype's `locked T` cell (PaykanLocked_*,
 // src/Runtime/Locked.c): one heap object holding an object's box behind a
-// mutex, which a `lock` block takes for its length.  The cell is immortal,
-// as an atomic cell is: its strong count PAYKAN_REF_MAX, which retains and
-// releases leave alone, its destroy a no-op, so the runtime never frees
-// one, nor the box it holds.  A test that runs on the tracking allocator
-// frees both itself at its end (discard, below).
+// mutex, which a `lock` block takes for its length.  Its count is atomic, as
+// an atomic cell's is, and the last handle frees it and the box it holds.
 
 #include <gtest/gtest.h>
 
@@ -98,48 +95,37 @@ PaykanWalkFn vtWalk(const void *obj) {
 /// of the mutex): the payload is taken out under the lock, and the count
 /// put at 1 is the thaw the design describes, after which the release
 /// frees the block as it frees any object's.
-void discard(PaykanShared *handle) {
-  PaykanShared **p = slot(PaykanLocked_lock(cell(handle)));
-  PaykanShared *payload = *p;
-  *p = nullptr;
-  PaykanLocked_unlock(cell(handle));
-  Paykan_release(payload);
-  ASSERT_EQ(handle->strong, PAYKAN_REF_MAX);
-  handle->strong = 1;
-  Paykan_release(handle);
-}
+void discard(PaykanShared *handle) { Paykan_release(handle); }
 
 } // namespace
 
-// -- The cell is immortal
+// -- The cell is counted atomically
 
-TEST(LockedCell, IsImmortal) {
+TEST(LockedCell, IsCountedAtomicallyAndFreesItsContentsWithItsLastHandle) {
   TrackingHeap heap;
   PaykanShared *c = PaykanLocked_new(counter(1));
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(c->weak, 0);
   const int64_t blocks = Paykan_heap_live_blocks(); // the cell, its payload
   EXPECT_EQ(blocks, 2);
-  // Boxing counts nothing, and the box is the cell: a handle.
+  // A box is another handle to the cell.
   EXPECT_EQ(PaykanShared_new(c), c);
   EXPECT_EQ(PaykanShared_get(c), c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
-  // A retain, by the function or inline, leaves the count alone.
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 2);
   Paykan_retain(c);
   Paykan_retain_inline(c);
   Paykan_retain_nonnull_inline(c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
-  // So does a release, and it never frees the cell or what it holds.
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 5);
   Paykan_release(c);
   Paykan_release_inline(c);
   Paykan_release_nonnull_inline(c);
-  Paykan_dispose(c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
+  Paykan_release(c);
   EXPECT_EQ(Paykan_heap_live_blocks(), blocks);
   PaykanShared **p = slot(PaykanLocked_lock(cell(c)));
   EXPECT_EQ(count(*p), 1);
   PaykanLocked_unlock(cell(c));
-  discard(c);
+  Paykan_release(c);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 TEST(LockedCell, HasOneVTableWhoseWalkIsNothing) {
@@ -150,11 +136,6 @@ TEST(LockedCell, HasOneVTableWhoseWalkIsNothing) {
   // A freeze stops at a cell: its walk is Obj's, nothing, so what the cell
   // holds stays counted (FreezeTests.cpp shows it).
   EXPECT_TRUE(vtWalk(a) == &PaykanObject_walk);
-  // Its destroy tears nothing down: the cell is usable after it.
-  vtDestroy(a)(cell(a));
-  PaykanShared **p = slot(PaykanLocked_lock(cell(a)));
-  EXPECT_EQ(count(*p), 1);
-  PaykanLocked_unlock(cell(a));
   discard(a);
   discard(b);
 }
@@ -230,9 +211,10 @@ TEST(LockedCell, EqualsIsIdentity) {
   // released, as every `*_equals` releases it.
   EXPECT_EQ(vtEquals(a)(cell(a), counter(1), 1), 0);
   EXPECT_EQ(Paykan_heap_live_blocks(), blocks);
-  // A handle handed over is left alone, as every release of a cell is.
+  // A handle handed over is released.
+  Paykan_retain(b);
   EXPECT_EQ(vtEquals(a)(cell(a), b, 1), 0);
-  EXPECT_EQ(b->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(b->strong, PAYKAN_REF_ATOMIC + 1);
   discard(a);
   discard(b);
 }

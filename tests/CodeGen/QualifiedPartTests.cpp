@@ -426,7 +426,7 @@ TEST(QualifiedPart, AnArmInALockBlockReadsTheContents) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "dog 2 4 6\n");
-  EXPECT_EQ(liveBlocksAfterRun(), 6);
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
 }
 
 // A template's `T: Copyable` copies a `view` of a type argument's form as

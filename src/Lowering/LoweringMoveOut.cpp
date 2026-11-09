@@ -194,14 +194,14 @@ void ModuleLowering::emitSwapCheck(ast::Expr *e) {
 }
 
 bool ModuleLowering::holdsUnique(const ast::Type *ty) {
-  if (!ty || ast::isFunctionValue(ty))
-    return false;
+  if (!ty || ast::isFunctionValue(ty) || ast::isa<ast::AtomicType>(ty))
+    return false; // a function value's closure and a cell's handle copy
   if (const auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
     return qt->getQualifier().Form == ast::QualForm::Unique &&
            holdsUnique(qt->getInnerType());
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return holdsUnique(ot->getInnerType());
-  if (ast::isRefType(ty))
+  if (ast::isCountedRef(ty))
     return true;
   if (const auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
     for (size_t i = 0; i < et->getNumVariants(); ++i)

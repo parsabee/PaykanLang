@@ -1,18 +1,13 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 //
-// Unit tests for the concurrency prototype's freeze (Paykan_freeze and
-// Paykan_freeze_mem, src/Runtime/Object.c), what a unique value goes
-// through on its way into an `atomic shared` slot.  A frozen object is
-// immortal, its strong count PAYKAN_REF_MAX, which retains and releases
-// leave alone; and the freeze walks, through the object's walk slot
-// (`__walk`, which the lowering generates per class: Paykan_freeze of each
-// reference field but a `weak` one, Paykan_freeze_mem of each field held
-// in memory; PaykanBuffer_walk for a buffer), everything the object holds,
-// so a whole graph is read by any thread with no count.  The prototype
-// never thaws or frees a frozen object, so a test puts each count back to
-// what it was before the freeze (thaw, below: the thaw the design
-// describes) to end with no live blocks.
+// Unit tests for the freeze (Paykan_freeze and Paykan_freeze_mem,
+// src/Runtime/Object.c), what a unique value goes through on its way into an
+// Unit tests for the freeze (Paykan_freeze and Paykan_freeze_mem,
+// src/Runtime/Object.c), what a unique value goes through on its way into an
+// `atomic shared` slot: it and each object it uniquely holds become counted
+// atomically (PAYKAN_REF_ATOMIC + 1), by the object's walk slot (`__walk`,
+// which the lowering generates per class; PaykanBuffer_walk for a buffer).
 
 #include <gtest/gtest.h>
 
@@ -104,8 +99,8 @@ void Holder_destroy(PaykanObject *self) {
 void Holder_walk(PaykanObject *self) {
   ++gWalks;
   auto *h = reinterpret_cast<Holder *>(self);
-  Paykan_freeze(PaykanShared_get(h->first));
-  Paykan_freeze(PaykanShared_get(h->second));
+  Paykan_walk_child(PaykanShared_get(h->first), 1);
+  Paykan_walk_child(PaykanShared_get(h->second), 1);
   Paykan_freeze_mem(&kPair.head, &h->pair);
 }
 
@@ -152,13 +147,6 @@ PaykanShared *boxAt(RefType &t, PaykanShared *buf, int64_t i) {
   return v;
 }
 
-/// The thaw the prototype lacks: @p box, frozen, gets back the count
-/// @p strong it had before, so that its last release frees it.
-void thaw(PaykanShared *box, int32_t strong) {
-  ASSERT_EQ(box->strong, PAYKAN_REF_MAX);
-  box->strong = strong;
-}
-
 using PaykanWalkFn = void (*)(PaykanObject *);
 PaykanWalkFn vtWalk(const void *o) {
   return vtSlot<PaykanWalkFn>(o, PAYKAN_SLOT_WALK);
@@ -168,43 +156,55 @@ PaykanWalkFn vtWalk(const void *o) {
 
 // -- Paykan_freeze
 
-TEST(Freeze, MakesAnObjectImmortal) {
+TEST(Freeze, MakesARootCountedAtomicallyAndFreesItAtTheLastRelease) {
   TrackingHeap heap;
   PaykanShared *s = str("a");
-  Paykan_retain(s);
-  EXPECT_EQ(s->strong, 2);
   Paykan_freeze(obj(s));
-  EXPECT_EQ(s->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(s->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(s->weak, 0);
-  // A retain or a release, by the function or inline, leaves the count
-  // alone, and no release frees the object.
+  // A retain, by the function or inline, counts one more.
   Paykan_retain(s);
   Paykan_retain_inline(s);
   Paykan_retain_nonnull_inline(s);
-  EXPECT_EQ(s->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(s->strong, PAYKAN_REF_ATOMIC + 4);
+  EXPECT_EQ(PaykanShared_new(obj(s)), s);
+  EXPECT_EQ(s->strong, PAYKAN_REF_ATOMIC + 5);
+  // A release counts one less, and only the last frees it.
   Paykan_release(s);
   Paykan_release_inline(s);
   Paykan_release_nonnull_inline(s);
-  Paykan_dispose(obj(s));
-  EXPECT_EQ(PaykanShared_new(obj(s)), s);
-  EXPECT_EQ(s->strong, PAYKAN_REF_MAX);
+  Paykan_release(s);
+  EXPECT_EQ(s->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(Paykan_heap_live_blocks(), 2); // the string and its data
   EXPECT_STREQ(text(s), "a");
-  // A weak reference loads it without a count, and its release leaves the
-  // block: the object is never destroyed.
-  PaykanWeak *w = Paykan_weak_new(s);
-  EXPECT_EQ(Paykan_weak_load(w), s);
-  EXPECT_EQ(s->strong, PAYKAN_REF_MAX);
-  Paykan_weak_release(w);
-  EXPECT_EQ(s->weak, 0);
-  EXPECT_EQ(Paykan_heap_live_blocks(), 2);
-  thaw(s, 1);
   Paykan_release(s);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 TEST(Freeze, NullIsNothingToFreeze) {
   // An absent optional is a NULL box.
   Paykan_freeze(nullptr);
+}
+
+TEST(FreezeDeathTest, AValueSomethingElseHoldsStopsTheProgram) {
+  PaykanShared *s = str("held");
+  Paykan_retain(s);
+  EXPECT_DEATH(Paykan_freeze(obj(s)),
+               "a value made 'atomic shared' is still borrowed");
+  Paykan_release(s);
+  PaykanShared *a = str("a");
+  Paykan_retain(a);
+  PaykanShared *h = holder(a, nullptr, {str("p"), nullptr});
+  EXPECT_DEATH(Paykan_freeze(obj(h)),
+               "a value made 'atomic shared' is still borrowed");
+  Paykan_release(h);
+  Paykan_release(a);
+  PaykanShared *w = str("w");
+  PaykanWeak *weak = Paykan_weak_new(w);
+  EXPECT_DEATH(Paykan_freeze(obj(w)),
+               "a value made 'atomic shared' is still borrowed");
+  Paykan_weak_release(weak);
+  Paykan_release(w);
 }
 
 TEST(Freeze, WalksWhatTheObjectHoldsThroughTheVTableSlot) {
@@ -213,83 +213,58 @@ TEST(Freeze, WalksWhatTheObjectHoldsThroughTheVTableSlot) {
   PaykanShared *a = str("a");
   PaykanShared *b = str("b");
   PaykanShared *c = str("c");
-  Paykan_retain(a); // held by the holder and by the test
   PaykanShared *h = holder(a, nullptr, {b, c});
-  EXPECT_EQ(a->strong, 2);
-  EXPECT_EQ(b->strong, 1);
-  EXPECT_EQ(c->strong, 1);
   Paykan_freeze(obj(h));
   EXPECT_EQ(gWalks, 1);
-  EXPECT_EQ(h->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(h->strong, PAYKAN_REF_ATOMIC + 1);
   // Its walk froze the reference fields (the NULL one is nothing) and the
   // references in the pair.
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(b->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(b->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(asHolder(h)->second, nullptr);
   // The walk is the slot's, this class's own.
   EXPECT_TRUE(vtWalk(obj(h)) == &Holder_walk);
-  // Freezing a frozen object is a no-op: no second walk, nothing counted.
+  // What it holds is counted too, so a hold of it outlives the root.
+  Paykan_retain(a);
+  Paykan_retain_inline(a);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 3);
+  Paykan_release(a);
+  Paykan_release_inline(a);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
+  // Freezing a frozen value is a no-op: no second walk, nothing counted.
   Paykan_freeze(obj(h));
   Paykan_freeze(obj(a));
   EXPECT_EQ(gWalks, 1);
-  EXPECT_EQ(h->strong, PAYKAN_REF_MAX);
-  thaw(h, 1);
-  thaw(a, 2);
-  thaw(b, 1);
-  thaw(c, 1);
+  EXPECT_EQ(h->strong, PAYKAN_REF_ATOMIC + 1);
   Paykan_release(h); // its destroy releases a, b and c
-  EXPECT_EQ(a->strong, 1);
-  Paykan_release(a);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
-// An object reached twice is walked once: the second visit finds it frozen
-// (the count is set before the walk).  So a cycle ends too: the send check
-// keeps `shared` parts out of a frozen graph and the lowering's walk skips
-// `weak` fields, but the runtime relies on neither.
-TEST(Freeze, WalksEachObjectOnce) {
+TEST(Freeze, AHoldOfAnObjectInsideOutlivesTheRoot) {
   TrackingHeap heap;
-  gWalks = 0;
-  PaykanShared *inner = holder(str("i"), nullptr, {str("p"), nullptr});
-  Paykan_retain(inner); // the outer holder holds it twice
-  Paykan_retain(inner); // and the test once
-  PaykanShared *outer = holder(inner, inner, {str("q"), nullptr});
-  EXPECT_EQ(inner->strong, 3);
-  Paykan_freeze(obj(outer));
-  EXPECT_EQ(gWalks, 2);
-  EXPECT_EQ(inner->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(asHolder(inner)->first->strong, PAYKAN_REF_MAX);
-  // A cycle: each of two holders holds the other.
-  gWalks = 0;
-  PaykanShared *x = holder(str("x"), nullptr, {str("xp"), nullptr});
-  PaykanShared *y = holder(x, nullptr, {str("yp"), nullptr});
-  Paykan_retain(x);
-  Paykan_retain(y);
-  asHolder(x)->second = y;
-  Paykan_freeze(obj(x));
-  EXPECT_EQ(gWalks, 2);
-  EXPECT_EQ(x->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(y->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(asHolder(x)->pair.a->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(asHolder(y)->pair.a->strong, PAYKAN_REF_MAX);
-  // Teardown: the counts as they were, the cycle broken by hand.
-  thaw(outer, 1);
-  thaw(inner, 3);
-  thaw(asHolder(inner)->first, 1);
-  thaw(asHolder(inner)->pair.a, 1);
-  thaw(asHolder(outer)->pair.a, 1);
-  Paykan_release(outer); // releases inner twice
-  EXPECT_EQ(inner->strong, 1);
+  PaykanShared *inner = str("inner");
+  PaykanShared *root = holder(inner, nullptr, {nullptr, nullptr});
+  Paykan_freeze(obj(root));
+  Paykan_retain(inner);
+  Paykan_release(root);
+  EXPECT_STREQ(text(inner), "inner");
+  EXPECT_EQ(inner->strong, PAYKAN_REF_ATOMIC + 1);
   Paykan_release(inner);
-  thaw(x, 2);
-  thaw(y, 2);
-  thaw(asHolder(x)->first, 1);
-  thaw(asHolder(x)->pair.a, 1);
-  thaw(asHolder(y)->pair.a, 1);
-  asHolder(x)->second = nullptr;
-  Paykan_release(y); // y's reference from x
-  Paykan_release(y); // the test's; y's destroy releases x
-  Paykan_release(x);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+}
+
+// Past the walker's inline stack, and deep enough to overflow a recursive
+// walk's C stack.
+TEST(Freeze, AChainOfObjectsIsWalkedAndFreedWithoutRecursion) {
+  TrackingHeap heap;
+  PaykanShared *head = holder(str("leaf"), nullptr, {nullptr, nullptr});
+  for (int i = 0; i < 100000; ++i)
+    head = holder(head, nullptr, {nullptr, nullptr});
+  Paykan_freeze(obj(head));
+  EXPECT_EQ(asHolder(head)->first->strong, PAYKAN_REF_ATOMIC + 1);
+  Paykan_release(head);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 // -- A buffer: PaykanBuffer_walk
@@ -301,33 +276,25 @@ TEST(Freeze, ABufferFreezesTheReferencesItsValuesHold) {
   PaykanShared *b = str("b");
   PaykanBuffer_set(&kStr.head, &buf, 0, &a);
   PaykanBuffer_set(&kStr.head, &buf, 1, &b);
-  PaykanBuffer_set(&kStr.head, &buf, 2, &b);
-  // Value 3 was never set: it holds no reference, and the walk skips it.
-  EXPECT_EQ(PaykanBuffer_isSet(&kStr.head, obj(buf), 3), 0);
-  EXPECT_EQ(a->strong, 2);
-  EXPECT_EQ(b->strong, 3);
+  Paykan_release(a); // the buffer's references are the only ones
+  Paykan_release(b);
+  // Value 2 was never set: it holds no reference, and the walk skips it.
+  EXPECT_EQ(PaykanBuffer_isSet(&kStr.head, obj(buf), 2), 0);
   EXPECT_TRUE(vtWalk(obj(buf)) != &PaykanObject_walk);
   Paykan_freeze(obj(buf));
-  EXPECT_EQ(buf->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(b->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(buf->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(b->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(boxAt(kStr, buf, 0), a);
-  EXPECT_EQ(boxAt(kStr, buf, 2), b);
-  EXPECT_EQ(PaykanBuffer_isSet(&kStr.head, obj(buf), 3), 0);
-  // Reading a frozen buffer's values copies them with no count.
+  EXPECT_EQ(PaykanBuffer_isSet(&kStr.head, obj(buf), 2), 0);
+  // A copy of a frozen buffer's value counts it, atomically.
   PaykanShared *got = nullptr;
   PaykanBuffer_copy(&kStr.head, &got, obj(buf), 0);
   EXPECT_EQ(got, a);
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 2);
   Paykan_release(got);
-  thaw(buf, 1);
-  thaw(a, 2);
-  thaw(b, 3);
-  Paykan_release(buf); // its destroy releases a once and b twice
-  EXPECT_EQ(a->strong, 1);
-  EXPECT_EQ(b->strong, 1);
-  Paykan_release(a);
-  Paykan_release(b);
+  Paykan_release(buf); // its destroy releases a and b
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 TEST(Freeze, ABufferOfNumbersOrOfNoneHasNothingToFreeze) {
@@ -336,21 +303,19 @@ TEST(Freeze, ABufferOfNumbersOrOfNoneHasNothingToFreeze) {
   int64_t v = 7;
   PaykanBuffer_set(&kInt, &ints, 1, &v);
   Paykan_freeze(obj(ints));
-  EXPECT_EQ(ints->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(ints->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(*(const int64_t *)PaykanBuffer_get(&kInt, obj(ints), 1), 7);
   // An optional that is None is a NULL reference: nothing.
   PaykanShared *opts = PaykanBuffer_new(&kOpt.head, 2);
   PaykanShared *a = str("a");
   PaykanBuffer_set(&kOpt.head, &opts, 1, &a);
+  Paykan_release(a);
   Paykan_freeze(obj(opts));
   EXPECT_EQ(boxAt(kOpt, opts, 0), nullptr);
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
-  thaw(ints, 1);
-  thaw(opts, 1);
-  thaw(a, 2);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
   Paykan_release(ints);
   Paykan_release(opts);
-  Paykan_release(a);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 // A value is as wide as its type says, and the walk finds the reference in
@@ -362,72 +327,62 @@ TEST(Freeze, ABufferOfWideValuesFreezesEachReference) {
   Wide x = {8, str("x"), false};
   PaykanBuffer_set(&kWide.head, &buf, 0, &w);
   PaykanBuffer_set(&kWide.head, &buf, 1, &x);
+  Paykan_release(w.ref);
+  Paykan_release(x.ref);
   Paykan_freeze(obj(buf));
-  EXPECT_EQ(w.ref->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(x.ref->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(w.ref->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(x.ref->strong, PAYKAN_REF_ATOMIC + 1);
   Wide got = {};
   PaykanBuffer_copy(&kWide.head, &got, obj(buf), 1);
   EXPECT_EQ(got.n, 8);
   EXPECT_EQ(got.ref, x.ref);
   EXPECT_FALSE(got.flag);
-  thaw(buf, 1);
-  thaw(w.ref, 2);
-  thaw(x.ref, 2);
+  Paykan_release(got.ref);
   Paykan_release(buf);
-  Paykan_release(w.ref);
-  Paykan_release(x.ref);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 // An object holding a buffer (a `mem::Box<mem::Buffer<Str>>`, what
 // samples/concurrency/README.md freezes for a parallel body) is walked in
-// turn: the freeze recurses through each object's own slot.
+// turn, through each object's own slot.
 TEST(Freeze, AnObjectHoldingABufferFreezesItsValuesToo) {
   TrackingHeap heap;
   gWalks = 0;
   PaykanShared *buf = PaykanBuffer_new(&kStr.head, 2);
   PaykanShared *a = str("a");
   PaykanBuffer_set(&kStr.head, &buf, 0, &a);
-  PaykanBuffer_set(&kStr.head, &buf, 1, &a);
+  Paykan_release(a);
   PaykanShared *box = holder(buf, nullptr, {str("p"), nullptr});
-  EXPECT_EQ(a->strong, 3);
   Paykan_freeze(obj(box));
   EXPECT_EQ(gWalks, 1);
-  EXPECT_EQ(box->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(buf->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(asHolder(box)->pair.a->strong, PAYKAN_REF_MAX);
-  thaw(box, 1);
-  thaw(buf, 1);
-  thaw(a, 3);
-  thaw(asHolder(box)->pair.a, 1);
-  Paykan_release(box); // releases the buffer, whose destroy releases a twice
-  EXPECT_EQ(a->strong, 1);
-  Paykan_release(a);
+  EXPECT_EQ(box->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(buf->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(asHolder(box)->pair.a->strong, PAYKAN_REF_ATOMIC + 1);
+  Paykan_release(box);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 // -- Paykan_freeze_mem: the references in a value, by its type
 
+// Outside a walk, each reference in the value is a root.
 TEST(FreezeMem, FollowsTheTypeDescriptor) {
   TrackingHeap heap;
   // A reference in the middle of a struct, found by its offset.
   Wide w = {7, str("w"), true};
   Paykan_freeze_mem(&kWide.head, &w);
-  EXPECT_EQ(w.ref->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(w.ref->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(w.n, 7);
   EXPECT_TRUE(w.flag);
   // Every reference of a value; a NULL one is nothing.
   Pair p = {str("a"), nullptr};
   Paykan_freeze_mem(&kPair.head, &p);
-  EXPECT_EQ(p.a->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(p.a->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(p.b, nullptr);
-  Pair q = {str("b"), str("c")};
-  Paykan_freeze_mem(&kPair.head, &q);
-  EXPECT_EQ(q.a->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(q.b->strong, PAYKAN_REF_MAX);
   // A reference alone, and one that is None.
   PaykanShared *s = str("s");
   Paykan_freeze_mem(&kStr.head, &s);
-  EXPECT_EQ(s->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(s->strong, PAYKAN_REF_ATOMIC + 1);
   PaykanShared *none = nullptr;
   Paykan_freeze_mem(&kOpt.head, &none);
   EXPECT_EQ(none, nullptr);
@@ -435,19 +390,13 @@ TEST(FreezeMem, FollowsTheTypeDescriptor) {
   int64_t n = 5;
   Paykan_freeze_mem(&kInt, &n);
   EXPECT_EQ(n, 5);
-  thaw(w.ref, 1);
-  thaw(p.a, 1);
-  thaw(q.a, 1);
-  thaw(q.b, 1);
-  thaw(s, 1);
   Paykan_release(w.ref);
   PaykanType_drop(&kPair.head, &p);
-  PaykanType_drop(&kPair.head, &q);
   Paykan_release(s);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
-// What a reference in the value names is frozen with what it holds: the
-// freeze of each goes through its walk slot, as Paykan_freeze's does.
+// What a reference in the value names is frozen with what it holds.
 TEST(FreezeMem, FreezesWhatTheReferencesHold) {
   TrackingHeap heap;
   gWalks = 0;
@@ -455,22 +404,20 @@ TEST(FreezeMem, FreezesWhatTheReferencesHold) {
   Pair p = {holder(a, nullptr, {str("p"), nullptr}), nullptr};
   Paykan_freeze_mem(&kPair.head, &p);
   EXPECT_EQ(gWalks, 1);
-  EXPECT_EQ(p.a->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(p.a->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
   // Again: the holder is frozen already, so nothing is walked.
   Paykan_freeze_mem(&kPair.head, &p);
   EXPECT_EQ(gWalks, 1);
-  thaw(p.a, 1);
-  thaw(a, 1);
-  thaw(asHolder(p.a)->pair.a, 1);
   PaykanType_drop(&kPair.head, &p);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 // -- The cells
 
-// A walk reaches a handle like any reference, and the cell is immortal
-// already, so the freeze stops there: an `atomic` field of a frozen object
-// still changes, and a `locked` one keeps counting its contents.
+// A walk reaches a handle like any reference, and a cell is counted
+// atomically, so the freeze stops there: an `atomic` field of a frozen
+// object still changes, and a `locked` one keeps counting its contents.
 TEST(Freeze, StopsAtAnAtomicOrLockedCell) {
   TrackingHeap heap;
   gWalks = 0;
@@ -480,10 +427,10 @@ TEST(Freeze, StopsAtAnAtomicOrLockedCell) {
   PaykanShared *cfg = holder(hits, counts, {str("name"), nullptr});
   Paykan_freeze(obj(cfg));
   EXPECT_EQ(gWalks, 1);
-  EXPECT_EQ(cfg->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(hits->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(counts->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(asHolder(cfg)->pair.a->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(cfg->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(hits->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(counts->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(asHolder(cfg)->pair.a->strong, PAYKAN_REF_ATOMIC + 1);
   // The atomic field still changes.
   EXPECT_EQ(PaykanAtomic_add(PaykanShared_get(hits), 1), 0);
   EXPECT_EQ(PaykanAtomic_load(PaykanShared_get(hits)), 1);
@@ -493,25 +440,8 @@ TEST(Freeze, StopsAtAnAtomicOrLockedCell) {
   Paykan_freeze(obj(hits));
   Paykan_freeze(obj(counts));
   EXPECT_EQ(payload->strong, 1);
-  // Teardown: the holder's destroy releases the handles, which leaves the
-  // cells alone; the test frees them as the runtime never does (the
-  // prototype leaks every cell), the count put at 1 being the design's
-  // thaw.
-  thaw(cfg, 1);
-  thaw(asHolder(cfg)->pair.a, 1);
-  Paykan_release(cfg);
-  EXPECT_EQ(hits->strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(counts->strong, PAYKAN_REF_MAX);
-  thaw(hits, 1);
-  Paykan_release(hits);
-  PaykanShared **slot =
-      static_cast<PaykanShared **>(PaykanLocked_lock(obj(counts)));
-  EXPECT_EQ(*slot, payload);
-  *slot = nullptr;
-  PaykanLocked_unlock(obj(counts));
-  Paykan_release(payload);
-  thaw(counts, 1);
-  Paykan_release(counts);
+  Paykan_release(cfg); // its destroy releases the handles
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 // -- The check of a moved value (#368)
@@ -598,7 +528,6 @@ TEST(MovedUnique, StopsAtASharedLinkAndSkipsAnImmortal) {
   Paykan_freeze(obj(frozen));
   PaykanShared *v = link(frozen, other);
   EXPECT_EQ(Paykan_moved_unique(v), 1);
-  thaw(frozen, 1);
   Paykan_release(v);
   Paykan_release(other);
 }
@@ -624,8 +553,6 @@ TEST(MovedUnique, AFreezeAfterACheckStillFreezes) {
   EXPECT_EQ(Paykan_moved_unique(v), 0); // stopped early, mode reset
   Paykan_release(v);
   Paykan_freeze(obj(v));
-  EXPECT_EQ(inner->strong, PAYKAN_REF_MAX);
-  thaw(inner, 1);
-  thaw(v, 1);
+  EXPECT_EQ(inner->strong, PAYKAN_REF_ATOMIC + 1);
   Paykan_release(v);
 }

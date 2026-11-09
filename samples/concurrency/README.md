@@ -195,10 +195,9 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   design's Runtime section describes.  The Paykan runtime's
   deferred-destroy state became thread-local; an `atomic` cell
   (`src/Runtime/Atomic.c`), a `locked` cell (`Locked.c`) and a frozen
-  object (`Paykan_freeze`, `Object.c`) are immortal, their counts
-  `PAYKAN_REF_MAX`, which retain and release leave alone, so a handle
-  crosses threads without an atomic count and a frozen graph is read
-  without one.
+  object (`Paykan_freeze`, `Object.c`) and what it holds are counted
+  atomically, in the range of counts from `PAYKAN_REF_ATOMIC`, and freed
+  by their last reference.
 
 ## Trying it
 
@@ -220,10 +219,8 @@ a program) and prints the same output.
 ## What is not (on purpose)
 
 Channels, `task::spawnOn`, event loops pinned per thread, cancellation,
-task-handle typestate, the migration tool, holds across an `await`, atomic
-counts on cells and frozen objects (they are immortal: cells and frozen
-graphs leak), `atomic` fixed arrays, `compareExchange`'s `inout` write-back
-of `expected`, `locked` type arguments and `atomic shared` or `locked`
+task-handle typestate, the migration tool, holds across an `await`,
+`locked` type arguments and `atomic shared` or `locked`
 tuple and array elements (`List<shared Node>` and `(int, shared Node)`
 are there), the archetype check of templates (a copy of an unbounded
 `T` is caught per instance only), `match`

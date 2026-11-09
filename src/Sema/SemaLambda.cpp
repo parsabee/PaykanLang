@@ -284,6 +284,9 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   auto *savedRetTy = CurrentReturnType;
   const ResultContext savedResult = CurrentResult;
   const unsigned savedLoopDepth = LoopDepth;
+  const unsigned savedLockBase = std::exchange(ReturnLockBase, LockDepth);
+  const size_t savedParallelBase =
+      std::exchange(ReturnParallelBase, ParallelStack.size());
   MethodUse *savedMethodUse = CurrentMethodUse;
   ClassContext *savedClassCtx = CurrentClassCtx;
   ClassContext lambdaCtx;
@@ -354,6 +357,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     resultQual = CurrentResultQual;
   CurrentResultQual = savedResultQual;
   LoopDepth = savedLoopDepth;
+  ReturnLockBase = savedLockBase;
+  ReturnParallelBase = savedParallelBase;
   MovedVars = std::move(savedMoves);
   LoopMoveStack = std::move(savedLoopMoves);
   FlowEnded = savedFlowEnded;
@@ -394,7 +399,10 @@ ast::Type *Sema::checkFunctionValueCall(ast::FunctionType *fnt,
   bool ok = true;
   for (size_t i = 0; i < args.size(); ++i) {
     ast::Type *want = fnt->getParamType(i);
+    // An `atomic` parameter takes an `atomic` place's handle.
+    WantAtomicHandle = ast::isa<ast::AtomicType>(want) && isPlaceChain(args[i]);
     ast::Type *argTy = resolveExprType(args[i], want);
+    WantAtomicHandle = false;
     if (!argTy) {
       ok = false;
       continue;

@@ -227,7 +227,7 @@ Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,
     return Val();
   if (ast::isMemType(fieldTy)) {
     emitMemAssign(addr, node->getValue());
-  } else if (ast::isRefType(fieldTy)) {
+  } else if (ast::isCountedRef(fieldTy)) {
     // The slot owns a box: the new reference is taken before the old one
     // goes (`p.s = p.s;`); a zeroed slot's null box releases as nothing.
     if (Val box = emitAsShared(node->getValue())) {

@@ -287,6 +287,26 @@ inline constexpr BufferFunction kPaykanBufferFunctions[] = {
 };
 
 // The concurrency prototype's `atomic int` cell (src/Runtime/Atomic.c).
+inline constexpr const char *kPaykanAtomicArrayNew = "PaykanAtomicArray_new";
+inline constexpr const char *kPaykanAtomicArrayClone =
+    "PaykanAtomicArray_clone";
+inline constexpr const char *kPaykanAtomicArrayLoad = "PaykanAtomicArray_load";
+inline constexpr const char *kPaykanAtomicArrayStore =
+    "PaykanAtomicArray_store";
+inline constexpr const char *kPaykanAtomicArrayAdd = "PaykanAtomicArray_add";
+inline constexpr const char *kPaykanAtomicArrayExchange =
+    "PaykanAtomicArray_exchange";
+inline constexpr const char *kPaykanAtomicArrayCompareExchange =
+    "PaykanAtomicArray_compare_exchange";
+inline constexpr const char *kPaykanAtomicArrayFLoad =
+    "PaykanAtomicArray_fload";
+inline constexpr const char *kPaykanAtomicArrayFStore =
+    "PaykanAtomicArray_fstore";
+inline constexpr const char *kPaykanAtomicArrayFAdd = "PaykanAtomicArray_fadd";
+inline constexpr const char *kPaykanAtomicArrayFExchange =
+    "PaykanAtomicArray_fexchange";
+inline constexpr const char *kPaykanAtomicArrayFCompareExchange =
+    "PaykanAtomicArray_fcompare_exchange";
 inline constexpr const char *kPaykanAtomicNew = "PaykanAtomic_new";
 inline constexpr const char *kPaykanAtomicLoad = "PaykanAtomic_load";
 inline constexpr const char *kPaykanAtomicStore = "PaykanAtomic_store";
@@ -488,6 +508,18 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanWeakNew,
     kPaykanWeakLoad,
     kPaykanWeakRelease,
+    kPaykanAtomicArrayNew,
+    kPaykanAtomicArrayClone,
+    kPaykanAtomicArrayLoad,
+    kPaykanAtomicArrayStore,
+    kPaykanAtomicArrayAdd,
+    kPaykanAtomicArrayExchange,
+    kPaykanAtomicArrayCompareExchange,
+    kPaykanAtomicArrayFLoad,
+    kPaykanAtomicArrayFStore,
+    kPaykanAtomicArrayFAdd,
+    kPaykanAtomicArrayFExchange,
+    kPaykanAtomicArrayFCompareExchange,
     kPaykanAtomicNew,
     kPaykanAtomicLoad,
     kPaykanAtomicStore,

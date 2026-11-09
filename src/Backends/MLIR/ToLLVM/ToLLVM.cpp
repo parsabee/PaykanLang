@@ -810,18 +810,18 @@ struct InlineReferenceCountsPass
       return LLVM::ConstantOp::create(b, loc, count,
                                       b.getIntegerAttr(count, v));
     };
-    // A count of PAYKAN_REF_MAX is immortal (the prototype's cells and
-    // frozen objects, Runtime.h), and PAYKAN_REF_MAX - 1 the limit: a
-    // retain's fast path is a count below the limit, a release's one in
-    // [2, PAYKAN_REF_MAX); the function handles the rest.
+    // Counts from PAYKAN_REF_ATOMIC up are atomic, frozen or immortal
+    // (Runtime.h), and PAYKAN_REF_ATOMIC - 1 the plain limit: a retain's
+    // fast path is a count below the limit, a release's one in
+    // [2, PAYKAN_REF_ATOMIC); the function handles the rest.
     Value common =
         retain ? LLVM::ICmpOp::create(
                      b, loc, LLVM::ICmpPredicate::ult, n,
-                     constant(static_cast<int64_t>(PAYKAN_REF_MAX) - 1))
+                     constant(static_cast<int64_t>(PAYKAN_REF_ATOMIC) - 1))
                : LLVM::ICmpOp::create(
                      b, loc, LLVM::ICmpPredicate::ult,
                      LLVM::SubOp::create(b, loc, n, constant(2)),
-                     constant(static_cast<int64_t>(PAYKAN_REF_MAX) - 2));
+                     constant(static_cast<int64_t>(PAYKAN_REF_ATOMIC) - 2));
     // The call is the rare path: laid out away from the common one.
     LLVM::CondBrOp::create(b, loc, common, ValueRange(), ValueRange(),
                            b.getDenseI32ArrayAttr({2000, 1}), fast, slow);

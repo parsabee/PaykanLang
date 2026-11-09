@@ -846,12 +846,11 @@ fn @main() -> i64 {
   // Two retains, the `box`'s and the `retain`'s (a box takes a reference,
   // ABoxTakesItsReferenceInline), and two releases.  Each a test of the
   // count, the common case weighted 2000 to 1: a retain's is a count below
-  // the limit (PAYKAN_REF_MAX - 1), a release's one in [2, PAYKAN_REF_MAX)
-  // as an unsigned compare of the count less 2 (PAYKAN_REF_MAX itself is
-  // immortal, Runtime.h) ...
+  // the limit (PAYKAN_REF_ATOMIC - 1), a release's one in
+  // [2, PAYKAN_REF_ATOMIC) as an unsigned compare of the count less 2 ...
   EXPECT_EQ(linesWith(ir, "icmp ult i32 ").size(), 4u) << ir;
-  EXPECT_EQ(linesWith(ir, ", 2147483646").size(), 2u) << ir;
-  EXPECT_EQ(linesWith(ir, ", 2147483645").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 1073741823").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 1073741822").size(), 2u) << ir;
   EXPECT_EQ(linesWith(ir, "!prof").size(), 4u) << ir;
   EXPECT_FALSE(linesWith(ir, "!{!\"branch_weights\", i32 2000, i32 1}").empty())
       << ir;
@@ -888,7 +887,7 @@ fn @main() -> i64 {
   std::string ir = translatePIR(text, err);
   ASSERT_FALSE(ir.empty()) << err;
   EXPECT_EQ(ir.find("PaykanShared_new"), std::string::npos) << ir;
-  EXPECT_EQ(linesWith(ir, ", 2147483646").size(), 3u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 1073741823").size(), 3u) << ir;
 
   auto r = runPIR(text);
   ASSERT_TRUE(r.Ok) << r.Err;
@@ -1149,15 +1148,15 @@ TEST(PIRLLVM, SwitchCasesOfTheDenseSetKeys) {
 }
 
 TEST(PIRLLVMDeathTest, AnInlineRetainAtTheLimitCallsTheRuntime) {
-  // A count at the limit (PAYKAN_REF_MAX - 1; PAYKAN_REF_MAX itself marks
-  // an immortal object) takes the call, which panics rather than wrap.
+  // A count at the plain limit (PAYKAN_REF_ATOMIC - 1) takes the call,
+  // which panics rather than wrap.
   const std::string text = std::string(kCounted) + R"(
 fn @main() -> i64 {
   %o = new C
   %b = box %o
   %p = cast %o to ptr
   %at = ptr.add %p, 8
-  ptr.store %at, 2147483646
+  ptr.store %at, 1073741823
   retain %b
   ret 0
 }

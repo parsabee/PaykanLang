@@ -116,6 +116,18 @@ void forEachEvaluated(ast::Expr *e,
 
 } // namespace
 
+bool ModuleLowering::runsCode(ast::Expr *e) {
+  bool calls = false;
+  forEachEvaluated(e, [&](ast::Expr *x) {
+    const auto *u = ast::dyn_cast<ast::UnaryExpr>(x);
+    calls = calls || ast::isa<ast::CallExpr>(x) ||
+            ast::isa<ast::MethodCallExpr>(x) ||
+            ast::isa<ast::CallValueExpr>(x) ||
+            (u && u->getOpcode() == ast::UnaryOpcode::Move);
+  });
+  return calls;
+}
+
 ast::Identifier *ModuleLowering::storageRoot(ast::Expr *place) {
   for (ast::Expr *e = place;;) {
     if (auto *id = ast::dyn_cast<ast::Identifier>(e))
@@ -214,7 +226,7 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
         id && !id->isFunctionRef() && changed.count(id->getName()) &&
         !places.count(id) && !inPlace.count(id)) {
       ast::Type *ty = CurrentScope->lookupASTType(id->getName());
-      if (ast::isRefType(ty) || (ast::isMemType(ty) && memHoldsRefs(ty)))
+      if (ast::isCountedRef(ty) || (ast::isMemType(ty) && memHoldsRefs(ty)))
         HeldReads.insert(id);
     }
   };
@@ -324,7 +336,8 @@ size_t ModuleLowering::declareParam(const std::string &name,
     CurrentScope->declareInout(name, local,
                                toPIRType(canonicalizeDeclType(astTy)),
                                canonicalizeDeclType(astTy));
-  else if (astTy && (ast::isRefType(astTy) || ast::isa<ast::AtomicType>(astTy)))
+  else if (astTy &&
+           (ast::isCountedRef(astTy) || ast::isa<ast::AtomicType>(astTy)))
     CurrentScope->declare(name, local, astTy);
   else
     CurrentScope->declare(name, local, nullptr);

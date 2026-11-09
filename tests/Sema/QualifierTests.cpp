@@ -692,11 +692,15 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
   const std::string node =
-      ": error: 'atomic' holds a number, a 'bool' or a 'char', not 'Node': an "
+      ": error: 'atomic' holds a number, a 'bool', a 'char' or a fixed array "
+      "of "
+      "them, not 'Node': an "
       "object crosses threads as 'atomic shared Node' (frozen) or "
       "'locked mut Node'";
   const std::string str =
-      ": error: 'atomic' holds a number, a 'bool' or a 'char', not 'Str': an "
+      ": error: 'atomic' holds a number, a 'bool', a 'char' or a fixed array "
+      "of "
+      "them, not 'Str': an "
       "object crosses threads as 'atomic shared Str' (frozen) or "
       "'locked mut Str'";
   expectErrors(r, {(":2:16" + node).c_str(), (":3:6" + node).c_str(),
@@ -801,7 +805,7 @@ fn main() -> int {
   lock l as held: view { n = n + held.id; }
   return n;
 })");
-  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
   const std::string inout = "; it cannot be passed to 'inout' parameter 'n'";
   expectErrors(
       r, {(":24:8: " + immutable("'c'", "Node") + inout).c_str(),
@@ -815,8 +819,8 @@ fn main() -> int {
           "c: view { }' (or 'inout')",
           ":30:3: error: 'l' is 'locked': reach its contents in 'lock l as c: "
           "view { }' (or 'inout')",
-          ":32:11: error: 'v4' is 'locked': reach its contents in 'lock v4 "
-          "as c: view { }' (or 'inout')"});
+          ":31:3: error: 'l' is 'locked': reach its contents in 'lock l as "
+          "c: view { }' (or 'inout')"});
   // The `mut` and `shared mut` objects borrowed every way, the other forms
   // viewed (lines 11 to 23), and the `lock` block (line 33).
   expectCleanLines(r, {":11:", ":12:", ":13:", ":14:", ":15:", ":16:", ":17:",

@@ -453,7 +453,7 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   an `AtomicType` node over `T`, which at parse time is any annotation
   that does not start with `shared`, `mut` or `const` (`atomic int?` and
   `atomic atomic int` parse); Sema holds `T` to a number type, `bool` or
-  `char` (`'atomic' holds a number, a 'bool' or a 'char', not 'int?' (the
+  `char` (`'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'int?' (the
   prototype has no atomic arrays)`, and for a class `'atomic' holds a
   number, a 'bool' or a 'char', not 'N': an object crosses threads as
   'atomic shared N' (frozen) or 'locked mut N'`).  `atomic` followed by

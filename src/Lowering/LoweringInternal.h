@@ -457,14 +457,28 @@ private:
   Val emitAtomicNew(ast::Type *inner, const Val &v, const std::string &name);
   /// The value of the cell @p cell (a box) holding @p inner, read atomically
   /// and in the type's canonical form.
-  Val emitAtomicLoad(ast::Type *inner, const Val &cell,
-                     const std::string &name);
+  Val emitAtomicLoad(ast::Type *inner, const Val &cell, const std::string &name,
+                     const Val &index = Val());
   /// Stores @p v in the cell atomically.
-  void emitAtomicStore(ast::Type *inner, const Val &cell, const Val &v);
+  void emitAtomicStore(ast::Type *inner, const Val &cell, const Val &v,
+                       const Val &index = Val());
   /// Adds @p v (or its negation) to the cell atomically; the value found,
   /// as emitAtomicLoad gives it.
   Val emitAtomicAdd(ast::Type *inner, const Val &cell, const Val &v,
-                    bool negate, const std::string &name);
+                    bool negate, const std::string &name,
+                    const Val &index = Val());
+  /// A new cell holding @p e of type @p inner: a number's, or an array's.
+  Val emitNewAtomicCell(ast::Type *inner, ast::Expr *e,
+                        const std::string &name);
+  /// The handle @p cell, read from @p handle, is used once @p later have
+  /// been evaluated: whether the operation owns a reference to release
+  /// after it (a temporary's, or a hold when one of them runs code).
+  bool holdCell(const Val &cell, ast::Expr *handle,
+                const std::vector<ast::Expr *> &later);
+  /// Whether evaluating @p e calls anything.
+  static bool runsCode(ast::Expr *e);
+  /// `a[i] = v`, `a[i] += v`, `a[i] -= v` of an `atomic` array.
+  Val emitAtomicElementAssign(ast::SubscriptAssignStmt *node);
   /// @p v, of the value type held in a cell, as the cell's 64 bits: an
   /// integer, a bool or a char as an i64, a float as an f64.
   Val atomicToRaw(ast::Type *inner, const Val &v);
@@ -831,7 +845,7 @@ private:
   /// the same value with no test either): an optional's box is not
   /// marked in the arm that knows it is set.
   static bool neverNull(ast::Type *ty) {
-    return ast::isRefType(ty) && !ast::isa<ast::OptionalType>(ty);
+    return ast::isCountedRef(ty) && !ast::isa<ast::OptionalType>(ty);
   }
   void emitRelease(const Val &shared) { B.release(shared); }
   Val emitSharedNew(const Val &raw, std::string name = "shared");

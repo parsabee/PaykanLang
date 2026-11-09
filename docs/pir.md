@@ -970,7 +970,13 @@ CodeGen enforced, now in one place.
   calls `PaykanAtomic_store`; `+=` and `-=` one `PaykanAtomic_add`
   (`fadd`), of the `neg` of the operand for `-=`; `x.exchange(v)` calls
   `PaykanAtomic_exchange`, and `x.compareExchange(e, d)`
-  `PaykanAtomic_compare_exchange`, whose `i64` is `cast` to the `bool`.
+  `PaykanAtomic_compare_exchange` with the address of a slot holding
+  `e`, whose `i64` is `cast` to the `bool`; the slot's value, the one
+  found on a failure, is then stored back to `e`.  An `atomic T[n]` place
+  holds the handle of `PaykanAtomicArray_new(n, kind)`, whose elements
+  the same operations reach with an index (`PaykanAtomicArray_load`,
+  `_store`, `_add`, `_exchange`, `_compare_exchange`, and `f...` for a
+  float).
   A `locked T` place holds the handle of a locked cell, made by
   `PaykanLocked_new` of the box flowing into the slot (handed over).  A
   `lock c as v: inout { ... }` block (or `: view`) calls

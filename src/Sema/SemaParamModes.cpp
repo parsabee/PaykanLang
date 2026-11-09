@@ -200,6 +200,13 @@ void callsIn(const ast::Expr *e, std::vector<const ast::Expr *> &out) {
 void Sema::declareParamKinds(const ast::FuncDecl *fn) {
   CurrentResult = {fn->getResultMode(), fn, CurrentScope};
   for (const ast::Param &p : fn->getParams())
+    if (p.Mode == ast::ParamMode::Inout &&
+        ast::isa<ast::AtomicType>(p.ParamType))
+      error(fn->getLocation(),
+            "parameter '" + p.getName() +
+                "' is 'inout': an 'atomic' cell is never lent by address; "
+                "take its handle, 'atomic T'");
+  for (const ast::Param &p : fn->getParams())
     if (p.Mode != ast::ParamMode::Value)
       CurrentScope->Kinds[p.getName()] =
           p.Mode == ast::ParamMode::View ? VarKind::View : VarKind::Inout;
@@ -207,6 +214,20 @@ void Sema::declareParamKinds(const ast::FuncDecl *fn) {
 
 std::string Sema::inoutPlaceError(const ast::Expr *place,
                                   const std::string &use) {
+  // A cell is reached by its operations, never by address.
+  if (ast::isa<ast::Identifier>(place) ||
+      ast::isa<ast::MemberAccessExpr>(place))
+    if (isAtomicPlace(place))
+      return "'" + placeText(place) +
+             "' is 'atomic': it has no address and "
+             "cannot be " +
+             use;
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place);
+      se && se->isAtomicElement())
+    return "'" + placeText(place) + "' is an element of an '" +
+           typeName(
+               const_cast<ast::Expr *>(se->getArray())->getResolvedType()) +
+           "': it has no handle and cannot be " + use;
   // A struct's field is in the struct's own bytes: it is a place where the
   // struct is one (a variable, a field of an object or of another struct,
   // an element of a fixed-size array, an `inout` result), not in a

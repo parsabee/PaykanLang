@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The concurrency prototype's `locked T` cell (docs/design/concurrency.md,
 // "locked and lock blocks"): one heap object holding an object's box behind
-// a mutex, which a `lock` block takes for its length.  Immortal, as the
-// atomic cell is (Atomic.c): never counted, never freed.
+// a mutex, which a `lock` block takes for its length.  Counted atomically,
+// as the atomic cell is (Atomic.c); its contents are plain, under the mutex.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -18,7 +18,11 @@ typedef struct PaykanLocked {
   PaykanShared *payload; // the contents, owned by the cell
 } PaykanLocked;
 
-static void PaykanLocked_destroy(PaykanObject *self) { (void)self; }
+static void PaykanLocked_destroy(PaykanObject *self) {
+  PaykanLocked *c = (PaykanLocked *)self;
+  Paykan_release(c->payload);
+  pthread_mutex_destroy(&c->mutex);
+}
 
 static PaykanShared *PaykanLocked_toString(PaykanObject *self) {
   (void)self;
@@ -43,7 +47,7 @@ PaykanMethod PaykanLocked_vtable[PAYKAN_OBJECT_SLOTS] = {
 PaykanShared *PaykanLocked_new(PaykanShared *payload) {
   PaykanLocked *c = (PaykanLocked *)Paykan_malloc(sizeof(PaykanLocked));
   c->vtable = PaykanLocked_vtable;
-  c->strong = PAYKAN_REF_MAX; // immortal (see above)
+  c->strong = PAYKAN_REF_ATOMIC + 1;
   c->weak = 0;
   if (pthread_mutex_init(&c->mutex, NULL) != 0)
     Paykan_runtime_panic("cannot create a lock");

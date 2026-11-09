@@ -129,12 +129,154 @@ bool Sema::checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy) {
 bool Sema::isPlaceChain(const ast::Expr *e) {
   if (ast::isa<ast::Identifier>(e))
     return true;
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    return ast::isa<ast::Identifier>(u->getOperand());
   if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
     return isPlaceChain(ma->getReceiver());
   return false;
 }
 
+bool Sema::isElementOfPlace(const ast::Expr *e) {
+  const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
+  return se && isPlaceChain(se->getArray());
+}
+
+bool Sema::checkAtomicReadable(ast::AtomicType *at, const std::string &what,
+                               ast::SourceLocation loc) {
+  if (!ast::isa<ast::FixedArrayType>(at->getInnerType()))
+    return true;
+  error(loc, "'" + what + "' is an '" + typeName(at) +
+                 "': it is read by "
+                 "element");
+  return false;
+}
+
+bool Sema::checkAtomicElementAssign(ast::SubscriptAssignStmt *node,
+                                    ast::FixedArrayType *ft) {
+  auto *idx = resolveExprType(node->getIndex());
+  if (!idx)
+    return false;
+  if (idx != Ctx.getIntTy()) {
+    error(node->getIndex()->getLocation(),
+          "array index must be 'int', got '" + typeName(idx) + "'");
+    return false;
+  }
+  if (!checkFixedIndex(ft, node->getIndex()))
+    return false;
+  // A cell field of a `let` object is the object's own, and changes.
+  if (const auto *root = ast::dyn_cast<ast::Identifier>(node->getArray());
+      root && varKind(root->getName()) == VarKind::Let) {
+    error(node->getLocation(), "'" + root->getName() +
+                                   "' is declared with 'let' and cannot be "
+                                   "reassigned");
+    return false;
+  }
+  ast::SubscriptExpr place(node->getLocation(), node->getArray(),
+                           node->getIndex());
+  auto kind = checkAtomicValue(&place, node->getValue(),
+                               Ctx.getAtomicType(ft->getElementType()),
+                               node->getLocation());
+  if (!kind)
+    return false;
+  // The copy of the target `+=` reads is never evaluated, but every pass
+  // walks it.
+  if (*kind != ast::AssignStmt::AtomicKind::Store &&
+      !resolveExprType(ast::cast<ast::BinaryExpr>(node->getValue())->getLHS()))
+    return false;
+  node->setAtomicKind(*kind);
+  warnAtomicEveryIteration(node->getArray(), node->getLocation());
+  return true;
+}
+
+bool Sema::sameIndex(const ast::Expr *a, const ast::Expr *b) {
+  if (a->getKind() != b->getKind())
+    return false;
+  if (const auto *x = ast::dyn_cast<ast::IntegerLiteral>(a))
+    return x->getValue() == ast::cast<ast::IntegerLiteral>(b)->getValue();
+  if (const auto *x = ast::dyn_cast<ast::UnaryExpr>(a)) {
+    const auto *y = ast::cast<ast::UnaryExpr>(b);
+    return x->getOpcode() == y->getOpcode() &&
+           sameIndex(x->getOperand(), y->getOperand());
+  }
+  if (const auto *x = ast::dyn_cast<ast::BinaryExpr>(a)) {
+    const auto *y = ast::cast<ast::BinaryExpr>(b);
+    return x->getOpcode() == y->getOpcode() &&
+           sameIndex(x->getLHS(), y->getLHS()) &&
+           sameIndex(x->getRHS(), y->getRHS());
+  }
+  auto sameArgs = [](const std::vector<ast::Expr *> &p,
+                     const std::vector<ast::Expr *> &q) {
+    if (p.size() != q.size())
+      return false;
+    for (size_t i = 0; i < p.size(); ++i)
+      if (!sameIndex(p[i], q[i]))
+        return false;
+    return true;
+  };
+  if (const auto *x = ast::dyn_cast<ast::CallExpr>(a)) {
+    const auto *y = ast::cast<ast::CallExpr>(b);
+    return x->getCalleeName() == y->getCalleeName() &&
+           sameArgs(x->getArguments(), y->getArguments());
+  }
+  if (const auto *x = ast::dyn_cast<ast::MethodCallExpr>(a)) {
+    const auto *y = ast::cast<ast::MethodCallExpr>(b);
+    return x->getMethodName() == y->getMethodName() &&
+           sameIndex(x->getReceiver(), y->getReceiver()) &&
+           sameArgs(x->getArguments(), y->getArguments());
+  }
+  return samePlace(a, b);
+}
+
+bool Sema::checkCrossedClasses() {
+  bool ok = true;
+  std::unordered_set<const ast::ClassType *> reported;
+  const std::vector<const ast::ClassType *> crossed(CrossedClasses.begin(),
+                                                    CrossedClasses.end());
+  for (const ast::ClassType *ct : crossed)
+    for (const auto &[name, other] : Ctx.getClassTypes()) {
+      if (other == ct || reported.count(other))
+        continue;
+      bool derived = false;
+      for (const ast::ClassType *c = other->getSuperClass(); c && !derived;
+           c = c->getSuperClass())
+        derived = c == ct;
+      if (!derived)
+        continue;
+      std::string why = uncrossable(other, {}, "");
+      if (why.empty())
+        continue;
+      reported.insert(other);
+      error(other->getLocation(),
+            "class '" + other->getName() + "' extends '" + ct->getName() +
+                "', which is sent to another thread: " + why);
+      ok = false;
+    }
+  return ok;
+}
+
+bool Sema::isAtomicPlace(const ast::Expr *e) {
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return se->isAtomicElement();
+  ast::Type *ty = nullptr;
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e)) {
+    ty = CurrentScope ? CurrentScope->lookup(id->getName()) : nullptr;
+  } else if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    ast::Type *rt = ast::stripOptional(
+        const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType());
+    if (const auto *ct = rt ? ast::dyn_cast<ast::ClassType>(rt) : nullptr)
+      ty = ct->findField(ma->getFieldName());
+  }
+  return ty && ast::isa<ast::AtomicType>(ty);
+}
+
 bool Sema::samePlace(const ast::Expr *a, const ast::Expr *b) {
+  if (const auto *sa = ast::dyn_cast<ast::SubscriptExpr>(a)) {
+    const auto *sb = ast::dyn_cast<ast::SubscriptExpr>(b);
+    if (!sb || !samePlace(sa->getArray(), sb->getArray()))
+      return false;
+    return sameIndex(sa->getIndex(), sb->getIndex());
+  }
   const auto *ia = ast::dyn_cast<ast::Identifier>(a);
   const auto *ib = ast::dyn_cast<ast::Identifier>(b);
   if (ia || ib)
@@ -241,9 +383,17 @@ bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
                                    "reassigned");
     return false;
   }
+  if (ast::isa<ast::FixedArrayType>(at->getInnerType())) {
+    error(node->getLocation(), "'" + node->getVarName() + "' is an '" +
+                                   typeName(at) +
+                                   "': it is written by element");
+    return false;
+  }
   auto kind = checkAtomicValue(node->getLHS(), node->getValue(), at,
                                node->getLocation());
   if (!kind)
+    return false;
+  if (!checkNotMoved(node->getVarName(), node->getLocation()))
     return false;
   node->setAtomicKind(*kind);
   warnAtomicEveryIteration(node->getLHS(), node->getLocation());
@@ -300,8 +450,17 @@ bool Sema::checkAtomicMemberAssign(ast::MemberAssignStmt *node,
   // Synthetic member access of the field: the place the value goes to.
   ast::MemberAccessExpr place(node->getLocation(), node->getReceiver(),
                               node->getFieldName());
+  if (ast::isa<ast::FixedArrayType>(at->getInnerType()) && !inInit) {
+    error(node->getLocation(), "'" + placeText(&place) + "' is an '" +
+                                   typeName(at) +
+                                   "': it is written by element");
+    return false;
+  }
   auto kind = checkAtomicValue(&place, value, at, node->getLocation(), valTy);
   if (!kind)
+    return false;
+  if (const ast::Identifier *root = placeRoot(node->getReceiver());
+      root && !checkNotMoved(root->getName(), node->getLocation()))
     return false;
   node->setAtomicKind(*kind);
   warnAtomicEveryIteration(&place, node->getLocation());
@@ -314,6 +473,18 @@ ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
   ast::Type *inner = at->getInnerType();
   const bool exchange = m == names::kMethodExchange;
   const bool compare = m == names::kMethodCompareExchange;
+  // An array is used by element; its length is its type's.
+  if (ast::isa<ast::FixedArrayType>(inner)) {
+    if (m != names::kMethodLength || node->getNumArguments() != 0) {
+      error(node->getLocation(),
+            "'" + typeName(at) + "' has no method '" + m +
+                "': an array is used by element, and has 'len()'");
+      return nullptr;
+    }
+    ast::Type *len = Ctx.getBuiltinType(ast::BuiltinType::U64);
+    node->setResolvedType(len);
+    return len;
+  }
   if (!exchange && !compare) {
     error(node->getLocation(), "'" + typeName(at) + "' has no method '" + m +
                                    "': an atomic place has 'exchange(v)' and "
@@ -322,7 +493,10 @@ ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
   }
   // Both change the cell, which a `let` variable's name never does (a cell
   // field of a `let` object is the object's own, and changes).
-  if (const auto *id = ast::dyn_cast<ast::Identifier>(node->getReceiver());
+  const ast::Expr *base = node->getReceiver();
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(base))
+    base = se->getArray();
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(base);
       id && !id->isFunctionRef() && varKind(id->getName()) == VarKind::Let) {
     error(node->getLocation(), "'" + id->getName() +
                                    "' is declared with 'let' and cannot be "
@@ -347,6 +521,33 @@ ast::Type *Sema::checkAtomicMethodCall(ast::MethodCallExpr *node,
                                     m + "' has type '" + typeName(ty) +
                                     "', expected '" + typeName(inner) + "'");
       return nullptr;
+    }
+    // `expected` is written the value found, as an `inout` argument is.
+    if (compare && i == 0) {
+      if (!placeRoot(arg) || ty != inner || arg->getNewAtomicCell() ||
+          isAtomicPlace(arg)) {
+        error(arg->getLocation(),
+              "'compareExchange' writes the value it found into its first "
+              "argument: it is a variable of type '" +
+                  typeName(inner) + "', not a value");
+        return nullptr;
+      }
+      if (std::string why =
+              inoutPlaceError(arg, "written by 'compareExchange'");
+          !why.empty()) {
+        error(arg->getLocation(), why);
+        return nullptr;
+      }
+      if (const ast::Identifier *root = placeRoot(arg);
+          root && !ParallelStack.empty() &&
+          isOuterScope(CurrentScope->findOwner(root->getName()))) {
+        error(arg->getLocation(),
+              "'" + root->getName() +
+                  "' is written by 'compareExchange' in a 'parallel for' "
+                  "body: two iterations could write it");
+        return nullptr;
+      }
+      arg->setChangedByCall(true);
     }
   }
   ast::Type *result = exchange ? inner : Ctx.getBoolTy();
@@ -659,7 +860,22 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
   if (std::find(onTheWay.begin(), onTheWay.end(), ct) != onTheWay.end())
     return "";
   onTheWay.push_back(ct);
+  CrossedClasses.insert(ct);
   std::string why;
+  // A value typed as this class may be of a class derived from it.
+  for (const auto &[name, other] : Ctx.getClassTypes()) {
+    if (other == ct || !why.empty())
+      continue;
+    for (const ast::ClassType *c = other->getSuperClass(); c;
+         c = c->getSuperClass())
+      if (c == ct) {
+        why = uncrossable(other, q, path);
+        if (!why.empty())
+          why += " (of class '" + other->getName() + "', derived from '" +
+                 ct->getName() + "')";
+        break;
+      }
+  }
   for (const ast::ClassType *c = ct; c && why.empty(); c = c->getSuperClass())
     for (const auto &[f, fty] : c->getFields()) {
       std::string sub = path;
@@ -1074,6 +1290,15 @@ void Sema::checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc) {
   }
 }
 
+bool Sema::checkNotReadByArm(const std::string &name, ast::SourceLocation loc) {
+  if (!isViewBindingSubject(name))
+    return true;
+  error(loc, "'" + name +
+                 "' is read by a 'match' binding until its arm ends; "
+                 "it cannot be moved there");
+  return false;
+}
+
 ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
                                   ast::MemberAccessExpr *ma) {
   const ast::SourceLocation loc = node->getLocation();
@@ -1090,6 +1315,8 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
     return nullptr;
   }
   const std::string &name = root->getName();
+  if (!checkNotReadByArm(name, loc))
+    return nullptr;
   switch (varKind(name)) {
   case VarKind::Plain:
   case VarKind::Let:
@@ -1189,6 +1416,8 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand()))
     return checkPartialMove(node, ma);
   auto *id = ast::dyn_cast<ast::Identifier>(node->getOperand());
+  if (id && !checkNotReadByArm(id->getName(), node->getLocation()))
+    return nullptr;
   if (!id) {
     ast::Expr *operand = node->getOperand();
     if (ast::isa<ast::SubscriptExpr>(operand) ||
@@ -1323,10 +1552,18 @@ ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
       return f;
     return t;
   }
-  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
-    return u->getOpcode() == ast::UnaryOpcode::Move
-               ? qualifierOf(u->getOperand())
-               : ast::Qualifier{};
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    if (u->getOpcode() == ast::UnaryOpcode::Move)
+      return qualifierOf(u->getOperand());
+    // `await` hands on the form the task's result was declared with.
+    if (u->getOpcode() == ast::UnaryOpcode::Await)
+      if (const auto *tt = ast::dyn_cast<ast::TaskType>(
+              const_cast<ast::Expr *>(u->getOperand())->getResolvedType()))
+        if (const auto *qt =
+                ast::dyn_cast<ast::QualifiedType>(tt->getInnerType()))
+          return qt->getQualifier();
+    return ast::Qualifier{};
+  }
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
     return id->isFunctionRef() ? ast::Qualifier{}
                                : qualifierOfVar(id->getName());
@@ -1396,6 +1633,11 @@ ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
     return it->second;
   if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
     if (ce->calleeIsValue())
+      return {};
+    // A task has no form until it is awaited.
+    if (ce->getResolvedType() &&
+        ast::isa<ast::TaskType>(
+            const_cast<ast::CallExpr *>(ce)->getResolvedType()))
       return {};
     if (const FunctionSig *sig = lookupFunction(ce->getCalleeName()))
       return sig->ResultQual;
@@ -2050,8 +2292,13 @@ ast::Qualifier Sema::elementQualifier(const ast::Expr *e) {
 }
 
 bool Sema::checkNotLocked(const ast::Expr *place, ast::SourceLocation loc) {
-  if (LockOperand || !place)
+  if (!place || place == LockOperand)
     return true;
+  if (const auto *te =
+          LockOperand ? ast::dyn_cast<ast::TernaryExpr>(LockOperand) : nullptr)
+    for (const ast::Expr *b : conditionalBranches(te))
+      if (b == place)
+        return true;
   // A conditional reaches each branch's contents (#368): qualifierOf holds
   // it in its true branch's form, which a `locked` false branch is not.
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(place))

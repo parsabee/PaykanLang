@@ -311,7 +311,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   std::unordered_map<const ast::Expr *, ast::Qualifier> ValueCallResultQuals;
   /// Set while a `lock` statement's operand is checked, where a `locked`
   /// place may be named.
-  bool LockOperand = false;
+  const ast::Expr *LockOperand = nullptr;
   /// The `lock` blocks being checked, innermost last (no `await`, `return`,
   /// nested `lock` or `parallel for` inside one).
   unsigned LockDepth = 0;
@@ -611,6 +611,29 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                    ast::AtomicType *at);
   /// A variable, or a field reached through variables and fields only.
   static bool isPlaceChain(const ast::Expr *e);
+  /// An element of a place: `a[i]` of `a` or `o.a`.
+  static bool isElementOfPlace(const ast::Expr *e);
+  /// Whether two index expressions are written the same.
+  static bool sameIndex(const ast::Expr *a, const ast::Expr *b);
+  /// Whether @p e names an `atomic` variable, field or element.
+  bool isAtomicPlace(const ast::Expr *e);
+  /// `move` of a variable a live plain `match` binding reads is refused.
+  bool checkNotReadByArm(const std::string &name, ast::SourceLocation loc);
+  /// The classes the send check let cross: every class derived from one,
+  /// the instances too, is checked once the module's are all known.
+  std::unordered_set<const ast::ClassType *> CrossedClasses;
+  bool checkCrossedClasses();
+  /// What a `return`, `break` or `continue` may not leave: a lambda's body
+  /// and a loop inside a `lock` block are the block's own.
+  unsigned ReturnLockBase = 0;
+  size_t ReturnParallelBase = 0;
+  unsigned LockLoopBase = 0;
+  /// Whether a value read of the `atomic` place @p what is one thing (an
+  /// array is read by element).
+  bool checkAtomicReadable(ast::AtomicType *at, const std::string &what,
+                           ast::SourceLocation loc);
+  bool checkAtomicElementAssign(ast::SubscriptAssignStmt *node,
+                                ast::FixedArrayType *ft);
   /// `T` when @p ty is the standard library's `mem::Buffer<T>` (a struct of
   /// one field, `__data`, the runtime's buffer object as an `Obj`); nullptr
   /// otherwise.

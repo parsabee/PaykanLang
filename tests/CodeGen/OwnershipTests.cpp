@@ -2024,13 +2024,13 @@ TEST(Ownership, SharedNewRetainsTheObject) {
   Paykan_release(first); // destroys and frees obj
 }
 
-// The immortal None singleton: its strong count starts at 1 and nothing
-// releases that reference, so boxings and releases never destroy it.
+// The immortal None singleton: no retain or release writes its count, so
+// any thread may box it.
 TEST(Ownership, NoneSingletonStaysAlive) {
-  ASSERT_EQ(PaykanObject_None.strong, 1);
+  ASSERT_EQ(PaykanObject_None.strong, PAYKAN_REF_MAX);
   PaykanShared *s = PaykanShared_new(&PaykanObject_None);
   EXPECT_EQ(s, &PaykanObject_None);
-  EXPECT_EQ(PaykanObject_None.strong, 2);
+  EXPECT_EQ(PaykanObject_None.strong, PAYKAN_REF_MAX);
   Paykan_release(s);
-  EXPECT_EQ(PaykanObject_None.strong, 1);
+  EXPECT_EQ(PaykanObject_None.strong, PAYKAN_REF_MAX);
 }

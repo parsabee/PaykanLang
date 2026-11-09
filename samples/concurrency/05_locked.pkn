@@ -2,7 +2,6 @@
 // A unique value flowing into a `locked mut` slot becomes a cell; its handle
 // copies into tasks, and its contents are reached only in a `lock` block.
 // expect-stdout: total 3000, sum 3000, ids 6
-// expect-leaks: the locked cell is immortal in the prototype
 
 import ::io;
 

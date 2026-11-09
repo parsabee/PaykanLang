@@ -467,7 +467,7 @@ void ModuleLowering::emitWalk(ast::ClassDecl *node, ast::ClassType *ct) {
                      B.fieldAddr(self, ct->getName(), fname, fname + ".addr")});
       continue;
     }
-    if (!ast::isRefType(fty) || ct->isWeakField(fname))
+    if (!ast::isCountedRef(fty) || ct->isWeakField(fname))
       continue;
     Val box = B.fieldLoad(self, ct->getName(), fname, Type::Box, fname);
     const bool unique =
@@ -521,7 +521,7 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
                        fty);
       continue;
     }
-    if (!ast::isRefType(fty))
+    if (!ast::isCountedRef(fty))
       continue;
     if (ct->isWeakField(fname)) {
       B.weakRelease(B.fieldLoad(self, ct->getName(), fname, Type::Weak, fname));
@@ -562,7 +562,7 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     emitMemAssign(B.fieldAddr(objPtr, ct->getName(), node->getFieldName(),
                               node->getFieldName() + ".addr"),
                   node->getValue());
-  } else if (fieldASTTy && ast::isRefType(fieldASTTy)) {
+  } else if (fieldASTTy && ast::isCountedRef(fieldASTTy)) {
     // The slot owns a box (or, for a `weak` field, a weak reference):
     // retain/steal the new one, release the old one.
     Val newShared;
@@ -665,6 +665,10 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
     Val out = node->isAtomicHandle() ? cell
                                      : emitAtomicLoad(at->getInnerType(), cell,
                                                       node->getFieldName());
+    // A temporary's cell, as a handle, outlives the temporary; a held read
+    // has a reference of its own (exprProducesFreshBox).
+    if (node->isAtomicHandle() && (recv.Owned.isOwned() || isHeldRead(node)))
+      emitRetain(cell, /*lend=*/false, fieldASTTy);
     releaseIfOwned(recv.Owned);
     return out;
   }
@@ -682,7 +686,7 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
     fieldVal = B.weakLoad(fieldVal, node->getFieldName());
   // The field of a temporary, or a held read (noteBorrowedReads), is a +1
   // box (exprProducesFreshBox).
-  if (ast::isRefType(fieldASTTy) && !weak &&
+  if (ast::isCountedRef(fieldASTTy) && !weak &&
       (recv.Owned.isOwned() || isHeldRead(node)))
     emitRetain(fieldVal, /*lend=*/false, fieldASTTy);
   releaseIfOwned(recv.Owned);

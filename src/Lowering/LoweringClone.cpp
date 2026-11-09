@@ -105,7 +105,11 @@ void ModuleLowering::cloneMemParts(const Val &addr, ast::Type *ty) {
     return;
   // A part at @p at of type @p part, held with qualifier @p q.
   auto clonePart = [&](const Val &at, ast::Type *part, ast::Qualifier q) {
-    if (ast::isRefType(ast::stripOptional(part))) {
+    // A cell's handle is Copyable: the clone shares the cell, already
+    // retained with the bytes.
+    if (ast::isa<ast::AtomicType>(part))
+      return;
+    if (ast::isCountedRef(ast::stripOptional(part))) {
       if (q.Form == ast::QualForm::Unique)
         cloneRefSlot(at, part);
       return;
@@ -130,7 +134,7 @@ void ModuleLowering::cloneMemParts(const Val &addr, ast::Type *ty) {
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     for (size_t i = 0; i < st->getNumFields(); ++i) {
       ast::Type *part = st->getElementType(i);
-      if (!ast::isRefType(ast::stripOptional(part)) && !memHoldsRefs(part))
+      if (!ast::isCountedRef(ast::stripOptional(part)) && !memHoldsRefs(part))
         continue;
       const int64_t off = tupleElementOffset(st, i);
       clonePart(off == 0 ? addr : B.ptrAdd(addr, Val::i64(off), "field.addr"),
@@ -141,7 +145,7 @@ void ModuleLowering::cloneMemParts(const Val &addr, ast::Type *ty) {
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     for (size_t i = 0; i < tt->getArity(); ++i) {
       ast::Type *part = tt->getElementType(i);
-      if (!ast::isRefType(ast::stripOptional(part)) && !memHoldsRefs(part))
+      if (!ast::isCountedRef(ast::stripOptional(part)) && !memHoldsRefs(part))
         continue;
       const int64_t off = tupleElementOffset(tt, i);
       clonePart(off == 0 ? addr : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
@@ -201,12 +205,19 @@ void ModuleLowering::emitDerivedClone(pir::Function *fn, ast::ClassType *ct) {
     // An `atomic` field: a cell of its own, holding the value it has now.
     if (auto *at = ast::dyn_cast<ast::AtomicType>(fty)) {
       Val cell = B.fieldLoad(self, cls, fname, Type::Box, fname);
+      if (ast::isa<ast::FixedArrayType>(at->getInnerType())) {
+        B.fieldStore(obj, cls, fname,
+                     callRuntime(names::kPaykanAtomicArrayClone,
+                                 {emitSharedGet(cell, fname + ".obj")},
+                                 fname + ".cell"));
+        continue;
+      }
       Val v = emitAtomicLoad(at->getInnerType(), cell, fname + ".value");
       B.fieldStore(obj, cls, fname,
                    emitAtomicNew(at->getInnerType(), v, fname + ".cell"));
       continue;
     }
-    if (ast::isRefType(ast::stripOptional(fty))) {
+    if (ast::isCountedRef(ast::stripOptional(fty))) {
       Val box = B.fieldLoad(self, cls, fname, Type::Box, fname);
       if (q.Form == ast::QualForm::Unique) {
         B.fieldStore(obj, cls, fname, emitCloneBox(box, fty));
@@ -263,7 +274,7 @@ Val ModuleLowering::ExprEmitter::emitBuiltinClone(ast::MethodCallExpr *node) {
     return copy;
   }
   // A reference (a `Str`, or an optional object): its object's clone.
-  if (ast::isRefType(ast::stripOptional(ty))) {
+  if (ast::isCountedRef(ast::stripOptional(ty))) {
     Receiver receiver = L.emitReceiver(recv, "clone.recv");
     if (!receiver)
       return Val();
