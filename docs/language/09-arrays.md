@@ -427,7 +427,7 @@ of a nested `_`. Anything else gives the lengths of the array it is.
 ```pkn
 import ::io;
 
-fn fill<T>(v: T) -> T[3] { return [v; 3]; }
+fn fill<T: Copyable>(v: T) -> T[3] { return [v; 3]; }
 
 fn main() -> int {
   let x: int[_][_] = [[1, 2, 3], [4, 5, 6]];   // an int[2][3]

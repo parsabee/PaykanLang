@@ -1615,17 +1615,32 @@ bool Sema::isOwnedBinder(const ast::Expr *e) {
   return k == VarKind::Plain || k == VarKind::Let;
 }
 
+std::vector<ast::Expr *> Sema::conditionalBranches(const ast::Expr *e) {
+  std::vector<ast::Expr *> out;
+  std::function<void(const ast::Expr *)> walk = [&](const ast::Expr *b) {
+    if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(b)) {
+      walk(te->getTrueExpr());
+      walk(te->getFalseExpr());
+    } else {
+      out.push_back(const_cast<ast::Expr *>(b));
+    }
+  };
+  walk(e);
+  return out;
+}
+
 bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                               const std::string &what, ast::SourceLocation loc,
                               bool implicitMove, bool materialize) {
   // A conditional's value is one of its branches: each flows as it would
   // alone; the conditional is what becomes a cell or a frozen object.
   if (auto *te = src ? ast::dyn_cast<ast::TernaryExpr>(src) : nullptr) {
-    bool ok = checkQualifiedFlow(dst, te->getTrueExpr(), what, loc,
-                                 implicitMove, /*materialize=*/false);
-    ok = checkQualifiedFlow(dst, te->getFalseExpr(), what, loc, implicitMove,
-                            /*materialize=*/false) &&
-         ok;
+    bool ok = true;
+    BranchWalk walk(*this);
+    for (ast::Expr *b : conditionalBranches(te))
+      ok = checkQualifiedFlow(dst, b, what, loc, implicitMove,
+                              /*materialize=*/false) &&
+           ok;
     // Made a cell or frozen as a whole, so its branches are both new values
     // or both of the form: a cell beside a new object would be one, or two.
     // Every branch, through nested conditionals; a None is neither.
@@ -1751,8 +1766,11 @@ bool Sema::isCopyPlace(const ast::Expr *e) {
 bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
                          bool implicitMove) {
   if (auto *te = src ? ast::dyn_cast<ast::TernaryExpr>(src) : nullptr) {
-    bool ok = checkCopyRule(te->getTrueExpr(), loc, implicitMove);
-    return checkCopyRule(te->getFalseExpr(), loc, implicitMove) && ok;
+    bool ok = true;
+    BranchWalk walk(*this);
+    for (ast::Expr *b : conditionalBranches(te))
+      ok = checkCopyRule(b, loc, implicitMove) && ok;
+    return ok;
   }
   ast::Type *ty = src ? src->getResolvedType() : nullptr;
   if (!ty || !sharesStorage(ty) || ast::isa<ast::PoisonType>(ty) ||
@@ -1787,6 +1805,7 @@ bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
   if (sq.Form != ast::QualForm::Unique || isCopyablePart(ty, sq, &part))
     return true;
   const std::string text = placeText(inner);
+  noteArchetypeCopy(src->getLocation(), ty, "to copy it");
   std::string msg = "cannot copy '" + text + "'";
   if (ast::isRefType(ty))
     msg += " (a unique '" + qualifiedName(sq, ty) + "')";

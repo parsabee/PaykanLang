@@ -144,8 +144,8 @@ TEST(OptionalPrimitive, ViewIsNotConvertedToAnOptional) {
 TEST(OptionalPrimitive, GenericsInstantiateWithOptionalPrimitives) {
   expectOk(R"(
     class Cell<T> { v: T; }
-    impl Cell<T> { fn __init__(x: T) { self.v = x; } }
-    class Slot<T> { v: T?; fn put(x: T) { self.v = x; } }
+    impl Cell<T> { fn __init__(x: T) { self.v = move x; } }
+    class Slot<T> { v: T?; fn put(x: T) { self.v = move x; } }
     impl Slot<T> { fn __init__() { } }
     fn wrap<T>(x: T) -> T? { return x; }
     fn main() -> int {

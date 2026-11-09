@@ -132,7 +132,7 @@ class Doubler<T> {
 }
 
 impl Doubler<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
 fn main() -> int {
@@ -149,6 +149,69 @@ Error:
 error: operator '+' is not defined for types 'bool' and 'bool'
 note: in instantiation of 'Doubler<bool>' requested here
 ```
+
+### The archetype check
+
+Checked per instantiation, a template used only with `int` would hide a copy of its `T`:
+an `int` copies, a class does not ([Copyable](06-traits.md#copyable)). So each template of a
+module is checked once more. Every type parameter not bounded `Copyable` is given an
+archetype, a class of its own that no program can name. Like every class, an archetype is
+move-only. A copy of an archetype is reported at the template, whether or not any instance
+asks for it:
+
+```pkn
+fn dup<T>(x: T) -> (T, T) { return (x, x); }
+
+fn main() -> int {
+  let p = dup(1);   // fine for an int: the copies are hidden
+  return p.0;
+}
+```
+
+Error:
+
+```
+error: 'T' is not 'Copyable': declare 'T: Copyable' to copy it
+```
+
+A copy is any of these:
+- a value used twice, or read from a place into a slot that owns it without `move`;
+- a value read out of a borrow: a `view fn`'s field returned, or a `view` parameter's
+  element returned, stored or passed by value (`... to return a copy`, `... to pass a
+  copy`);
+- a `T` handed to a template that needs `T: Copyable` (`... for 'twice', which needs it`).
+
+Fix it where the value goes:
+- `move` it where it leaves, which works for every `T` (`self.v = move v;` in an
+  `__init__`, `Res::Ok(move v)`);
+- declare `T: Copyable` where it is copied;
+- or put a copying method in a conditional `impl Box<T: Copyable>` block, which only the
+  instances meeting the bound have (`..., or put the method in 'impl Box<T: Copyable>'`).
+
+The message names the parameter as the code does, an `impl R<U>` block's `U` included.
+
+Only copies are reported. Everything else an archetype lacks (`+`, `Str(x)`, a method) is
+checked per instance, as before. The check runs only when the module has no other error.
+
+A parameter bounded by a trait other than `Copyable` (`K: Hashable`, `T: Show`,
+`T: ValueType`) is an archetype too, which meets the bound. Its copies are checked the same
+way: a value type that holds a unique object is move-only, so `twice<T: ValueType>` copies
+only with `T: ValueType + Copyable`.
+
+A parameter bounded `Copyable` copies, so it is given a type that meets its bounds instead
+(`int`, `float`, `bool` or `Str`). A template whose `Copyable` parameter none of these meets is
+not checked. A conditional block bounded `Copyable` on a parameter (`impl Pair<A: Copyable,
+B>`) is checked with such a type there, and the archetypes elsewhere.
+
+What a copy needs is the code's own: a method's, its signature's, and a lambda's in it, a
+static fn's, a field's type, an enum's payload. A `T: Copyable` instance copies a `view` of
+its type argument's form as the argument copies: with `T` = `shared Node`, the copy is the
+same object.
+
+An archetype has `Obj`'s methods and a `clone`. Code that needs another method of a bound
+(a trait's own, `x.make()`) is checked per instance only, and so are the copies after it. A
+class whose two conditional blocks give the same method under different bounds is checked
+per instance only too, since an archetype meets both.
 
 ## Project: undo with a generic stack
 
@@ -299,7 +362,7 @@ In [Modules and imports](15-modules.md), `tasks` is split into several files.
 ## Declaring a Generic Class
 
 ```pkn
-class Box<T> {
+class Box<T: Copyable> {
   v: T;
   fn get() -> T      { return self.v; }
   fn set(v: T)       { self.v = v; }
@@ -309,7 +372,7 @@ impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
 
-class Pair<K, V> {
+class Pair<K: Copyable, V: Copyable> {
   k: K;
   v: V;
   fn key() -> K   { return self.k; }
@@ -320,6 +383,10 @@ impl Pair<K, V> {
   fn __init__(k: K, v: V) { self.k = k; self.v = v; }
 }
 ```
+
+`get`, `key` and `value` hand out copies of the fields, so their parameters are bounded
+`Copyable` ([The archetype check](#the-archetype-check)); a class that only moves its values,
+`self.v = move v`, takes any `T`.
 
 - Type parameter names go in `<…>` right after the class name. Any identifier
   works; single capital letters are the convention.
@@ -488,7 +555,7 @@ parameter name` (`T = 3;` in a body `... as a variable`), for each instantiation
 Tuples and optionals work inside templates and as type arguments:
 
 ```pkn
-class Pair<A, B> {
+class Pair<A: Copyable, B: Copyable> {
   p: (A, B);
   fn swap() -> (B, A) { return (self.p.1, self.p.0); }
 }
@@ -497,7 +564,7 @@ impl Pair<A, B> {
   fn __init__(a: A, b: B) { self.p = (a, b); }
 }
 fn orElse<T>(x: T?, d: T) -> T {
-  match x {
+  match move x {
     v: T { return v; }
     None { return d; }
   }
@@ -569,7 +636,8 @@ template's source and says which instantiation was being checked, as the `Double
 example in [How generic code is checked](#how-generic-code-is-checked) shows: the error
 points at `self.v + self.v`, and a note points at `Doubler<bool>(True)`.
 
-A generic declaration that is never instantiated is only parsed, not checked.
+A generic declaration that is never instantiated is only parsed, not checked, but for its
+copies, which [the archetype check](#the-archetype-check) reports.
 Nested instantiation is bounded: a class that instantiates itself with an
 ever-growing argument (`inner: Bad<Bad<T>>`) stops with "exceeds the maximum
 instantiation depth (16)". An argument that grows faster, as a tuple of two or
@@ -620,7 +688,7 @@ class Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 fn _serial() -> int { return 7; }
 fn mk() -> Box<int> { return Box<int>(41); }
@@ -704,6 +772,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` in a class body or an `impl` block (a syntax error): `a method cannot have type parameters of its own: only a free function is generic ...`, `a 'static fn' cannot have type parameters of its own: ...` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
+| Copy of a parameter without bounds | a template's copy of an unbounded `T`, used or not: `'T' is not 'Copyable': declare 'T: Copyable' to copy it` ([The archetype check](#the-archetype-check)) |
 | Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument, 17 deep: `instantiating 'Bad<…>' exceeds the maximum instantiation depth (16); a generic class may not instantiate itself with an ever-growing type argument` |
 | Instantiation name too long | an instantiation inside one of its own template's that grows its type arguments from that one's, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |

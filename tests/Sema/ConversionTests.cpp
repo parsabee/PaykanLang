@@ -543,7 +543,7 @@ TEST(Conversion, InferredFormTakesExactlyOneArgument) {
 TEST(Conversion, InferredFormInsideGenericsAndCalls) {
   expectOk(R"(
     class Box<T> { v: T; }
-    impl Box<T> { fn __init__(x: T) { self.v = x; } }
+    impl Box<T> { fn __init__(x: T) { self.v = move x; } }
     fn ident<T>(x: T) -> T { return x; }
     fn show<T>(x: T) -> Str { return "?"; }
     fn main() -> int {
@@ -715,7 +715,7 @@ TEST(Conversion, RemovedNamesAreOrdinaryIdentifiersAgain) {
 TEST(Conversion, GenericCallsAreStillGenericCalls) {
   expectOk(R"(
     class Box<T> { v: T; }
-    impl Box<T> { fn __init__(x: T) { self.v = x; } }
+    impl Box<T> { fn __init__(x: T) { self.v = move x; } }
     fn ident<T>(x: T) -> T { return x; }
     fn main() -> int {
       b = Box<int>(int<float>(1.5));

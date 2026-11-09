@@ -9,7 +9,7 @@ import ::io;
 import containers::box;
 import counter;
 
-class Holder<T> {
+class Holder<T: Copyable> {
   b: box::Box<T>;
   view fn peek() -> T { return self.b.get(); }
 }

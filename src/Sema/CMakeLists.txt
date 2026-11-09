@@ -14,6 +14,7 @@ add_library(paykan_sema STATIC
     SemaLambda.cpp
     SemaVisibility.cpp
     SemaConcurrency.cpp
+    SemaArchetypes.cpp
     NativeABI.cpp
 )
 target_link_libraries(paykan_sema

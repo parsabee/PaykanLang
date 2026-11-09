@@ -35,7 +35,7 @@ impl Fast {
   fn __init__() { __super__(); }
 }
 
-class Box<T> {
+class Box<T: Copyable> {
   value: T;
   view fn get() -> T { return self.value; }
 }

@@ -33,7 +33,7 @@ fn pairOf<A, B>(a: A, b: B) -> Pair<A, B> {
 }
 
 // Moves `p.a` out of `p` and copies `p.b`, which needs a Copyable `B`.
-fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+fn swap<A, B: Copyable>(p: Pair<A, B>) -> Pair<B, A> {
   return Pair(p.b, move p.a);
 }
 

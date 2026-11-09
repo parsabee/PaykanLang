@@ -236,7 +236,7 @@ class Square : Shape {
 impl Square {
   fn __init__() { __super__(); }
 }
-class Box<T> { v: T; n: int; fn get() -> T { return self.v; } fn count() -> int { return self.n; } }
+class Box<T: Copyable> { v: T; n: int; fn get() -> T { return self.v; } fn count() -> int { return self.n; } }
 impl Box<T> { fn __init__(v: T) { self.v = move v; self.n = 1; } }
 fn main() -> int {
   b: mut = Box<int>(1);
@@ -253,7 +253,7 @@ fn twiceOf(n: int) -> int { return 2 * n; }
             std::string::npos)
       << r.Diagnostics;
   for (const char *loc : {":3:3: warning: 'area' ", ":4:3: warning: 'twice' ",
-                          ":21:63: warning: 'count' "})
+                          ":21:73: warning: 'count' "})
     EXPECT_NE(r.Diagnostics.find(std::string(loc) + kSuffix), std::string::npos)
         << loc << "\n"
         << r.Diagnostics;
@@ -270,21 +270,21 @@ fn twiceOf(n: int) -> int { return 2 * n; }
 
 // A generic type's method is one declaration for all its instances: it is
 // warned about only when it could be a `view fn` in every one.  `get`, which
-// returns a copy of `self.v`, is not warned about: a copy of a type
-// argument's value is a `view fn`'s to hand out only while the argument is a
-// value (`int`, `Pt`); a move-only one (`Str`) cannot be copied at all, and
-// an argument that is a `shared mut` reference (`Box<shared mut Node>`,
-// #368) could be changed through the copy.  So it is not warned about with
+// returns a copy of `self.v` (so `Box` declares `T: Copyable`), is not warned
+// about: a copy of a type argument's value is a `view fn`'s to hand out only
+// while the argument is a value (`int`, `Pt`); one that is a `shared mut`
+// reference (`Box<shared mut Node>`, #368) is Copyable too, but could be
+// changed through the copy.  So it is not warned about with
 // `Box<int>` alone either, which another file, an importer of the module, may
 // instantiate otherwise; nor is `first`, which calls it.  A method every
 // instance could make a `view fn` is, once.
 TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   const std::string boxes =
       "import ::io;\n"
-      "struct Box<T> { v: T; n: int; }\n"
+      "struct Box<T: Copyable> { v: T; n: int; }\n"
       "impl Box<T> { fn get() -> T => self.v; fn count() -> int => self.n; "
       "fn first() -> T => self.get(); }\n"
-      "class Cell<T> { v: T; fn get() -> T { return self.v; } }\n"
+      "class Cell<T: Copyable> { v: T; fn get() -> T { return self.v; } }\n"
       "impl Cell<T> { fn __init__(v: T) { self.v = move v; } }\n"
       "struct Pt { x: int; }\n";
   const std::string warning = "never changes 'self': make it a 'view fn'";
@@ -321,7 +321,7 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   // `view fn` could not for an argument that is a reference ("'self' is
   // read-only in 'view fn kept'; it cannot be stored").
   auto stores = semaCheck(
-      "struct Box<T> { v: T; n: int; }\n"
+      "struct Box<T: Copyable> { v: T; n: int; }\n"
       "impl Box<T> {\n"
       "  fn kept() -> T { let x = self.v; return x; }\n"
       "  fn put() -> T { x = self.v; return x; }\n"
@@ -351,7 +351,7 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   auto dir = tempDir() / "view_fn_template_modules";
   std::filesystem::remove_all(dir);
   writeModule(dir, "box.pkn",
-              "struct Box<T> { v: T; n: int; }\n"
+              "struct Box<T: Copyable> { v: T; n: int; }\n"
               "impl Box<T> { fn get() -> T => self.v; "
               "fn count() -> int => self.n; }\n"
               "fn useIt() -> int { b = Box<int>(1, 2); "
@@ -373,7 +373,7 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
       << r.Diagnostics;
   // Likewise for a `get` that keeps it in a local first.
   writeModule(dir, "kept.pkn",
-              "struct Box<T> { v: T; }\n"
+              "struct Box<T: Copyable> { v: T; }\n"
               "impl Box<T> { fn get() -> T { let x = self.v; return x; } }\n"
               "fn useIt() -> int { b = Box<int>(1); return b.get(); }\n");
   r = semaCheckPath(

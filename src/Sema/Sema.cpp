@@ -205,6 +205,14 @@ bool Sema::isImportClashUse(std::string_view name) {
 }
 
 void Sema::error(ast::SourceLocation loc, const std::string &msg) {
+  // A conditional's branches are checked against one slot's location: the
+  // same error from another branch is the one already reported.
+  if (BranchErrors &&
+      !BranchErrors
+           ->insert(std::to_string(loc.getLineStart()) + ":" +
+                    std::to_string(loc.getColumnStart()) + ":" + msg)
+           .second)
+    return;
   Diags.error(loc, msg);
   // An error inside an instantiation points at the template's source text
   // (clones keep their locations); say which instantiation was being checked
@@ -1469,6 +1477,7 @@ bool Sema::checkRepeatValue(ast::ArrayLiteralExpr *node, ast::Type *elemTy,
   const std::string each =
       "'[v; n]' evaluates its value for each of its " + n + " elements";
   if (repeatsAPlace(node, elemTy)) {
+    noteArchetypeCopy(v->getLocation(), elemTy, "to repeat it");
     std::string msg = each + ", and '" + placeText(v) + "' (a '" +
                       typeName(elemTy) +
                       "') is not Copyable: write a value made for each";
@@ -1494,6 +1503,7 @@ bool Sema::checkRepeatValue(ast::ArrayLiteralExpr *node, ast::Type *elemTy,
     }
   }
   if (!name.empty()) {
+    noteArchetypeCopy(at, elemTy, "to repeat it");
     error(at, each + ", so it cannot move '" + name + "' (that would move it " +
                   n + " times)");
     return false;
@@ -1511,12 +1521,13 @@ static bool isPlaceExpr(const ast::Expr *e) {
 }
 
 /// Whether a `match` on @p e reads storage (#368): a place, a call's
-/// `inout` result, or a conditional with a branch that is one.  A binding
-/// of a move-only part of it is a borrow of that storage, never a copy.
-static bool readsStorage(const ast::Expr *e) {
+/// `inout` or `view` result, or a conditional with a branch that is one.
+/// A binding of a move-only part of it is a borrow of that storage, never
+/// a copy, and none of it is a new value.
+bool Sema::readsStorage(const ast::Expr *e) const {
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
     return readsStorage(te->getTrueExpr()) || readsStorage(te->getFalseExpr());
-  return isPlaceExpr(e) || e->isInoutResult();
+  return isPlaceExpr(e) || e->isInoutResult() || borrowResultOf(e);
 }
 
 bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
@@ -3313,10 +3324,24 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // Copyable type's clone is its copy, the same object.  A form the
   // template or the program writes (`s: shared Node`) is cloned by its
   // class, into a new unique object.
+  // A conditional's is each branch's: qualifierOf joins a unique one into
+  // the other's form.
+  const ast::Qualifier joined = S.qualifierOf(node->getReceiver());
+  std::function<bool(const ast::Expr *)> eachFromArgument =
+      [&](const ast::Expr *e) -> bool {
+    if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+      return eachFromArgument(te->getTrueExpr()) &&
+             eachFromArgument(te->getFalseExpr());
+    if (ast::isa<ast::NoneLiteral>(e))
+      return true;
+    const ast::Qualifier q = S.qualifierOf(e);
+    return q.FromArgument && q.Form == joined.Form && q.Mut == joined.Mut;
+  };
   if (const ast::Qualifier q = S.qualifierOf(node->getReceiver());
       node->getMethodName() == names::kMethodClone &&
       node->getNumArguments() == 0 && S.inInstanceCode() && q.FromArgument &&
-      ast::isRefType(recvTy) && S.isCopyablePart(recvTy, q)) {
+      eachFromArgument(node->getReceiver()) && ast::isRefType(recvTy) &&
+      S.isCopyablePart(recvTy, q)) {
     node->setCloneIsCopy(true);
     node->setResolvedType(recvTy);
     return recvTy;
@@ -4451,8 +4476,11 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   visit(tu);
   // A binder is poisoned only after its declaration's error was reported, so
   // a program without errors has none, and the poison type never reaches the
-  // lowering.  Guard that invariant: never hand such a program on.
-  if (PoisonedBindings && !hasErrors()) {
+  // lowering.  Guard that invariant: never hand such a program on.  An
+  // import of a module whose failure another import reported counts no
+  // error here (RepeatedImportFailures), and what this module takes from it
+  // is poisoned: that report covers it, and the module fails all the same.
+  if (PoisonedBindings && !hasErrors() && RepeatedImportFailures == 0) {
     assert(false && "a binder was poisoned without an error being reported");
     error(tu->getLocation(),
           "internal compiler error: a declaration failed without a diagnostic");
@@ -4934,6 +4962,11 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!checkPendingInstantiations())
     ok = false;
 
+  // Each of the module's templates once more, with a move-only class for
+  // each parameter without bounds: its copies need `T: Copyable` (#368).
+  if (ok && !hasErrors() && !checkArchetypes())
+    ok = false;
+
   // Hand the instantiations to the lowering as ordinary declarations.
   injectInstantiations(node);
 
@@ -5385,6 +5418,27 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
               qualifiedName(CurrentResultQual, CurrentReturnType) +
               "', but what it returns is held as '" +
               qualifiedName(have, valTy) + "'";
+      // A `view` of a type argument's shared form, a frozen object's or a
+      // cell's lends exactly that form (#368): the template's code may keep
+      // a copy of it, as the argument's.  A unique one (`mut Node`) copies
+      // for no T, and a `view` of it reads any form.
+      if (why.empty() && CurrentResult.Mode == ast::ParamMode::View &&
+          CurrentResultQual.FromArgument &&
+          (CurrentResultQual.isSharedForm() ||
+           CurrentResultQual.Form == ast::QualForm::Locked) &&
+          ast::isRefType(valTy))
+        for (const ast::Expr *b : conditionalBranches(node->getReturnValue())) {
+          const ast::Qualifier have = qualifierOf(b);
+          if (ast::isa<ast::NoneLiteral>(b) ||
+              (have.Form == CurrentResultQual.Form &&
+               have.Mut == CurrentResultQual.Mut))
+            continue;
+          why = "a 'view' result of a type argument's form is held as '" +
+                qualifiedName(CurrentResultQual, CurrentReturnType) +
+                "', but what it returns is held as '" +
+                qualifiedName(have, valTy) + "'";
+          break;
+        }
       // The caller keeps alive the storage it named, not an object reached
       // through a field of another one.
       if (why.empty() && CurrentResult.Mode == ast::ParamMode::Inout)
@@ -6315,6 +6369,8 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
   ClassContext *savedClassCtx = std::exchange(CurrentClassCtx, nullptr);
   MethodUse *savedMethodUse = std::exchange(CurrentMethodUse, nullptr);
   const StringSet *savedTypeParams = std::exchange(CurrentTypeParams, nullptr);
+  const ast::FuncDecl *savedImplMethod =
+      std::exchange(ImplScopeMethod, nullptr);
   const size_t savedDepth = CurrentInstantiationDepth;
   fn.State = Inference::InProgress;
   bool ok;
@@ -6345,6 +6401,7 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
   CurrentClassCtx = savedClassCtx;
   CurrentMethodUse = savedMethodUse;
   CurrentTypeParams = savedTypeParams;
+  ImplScopeMethod = savedImplMethod;
   if (!ok)
     ++SuppressedFollowOns; // the use, of a function whose error is reported
   return ok;

@@ -50,7 +50,7 @@ class Registry {
 }
 
 /// The first element of @p xs that @p pred accepts.
-fn find<T>(xs: view T[], pred: (view T) -> bool) -> Maybe<T> {
+fn find<T: Copyable>(xs: view T[], pred: (view T) -> bool) -> Maybe<T> {
   for i in 0..xs.len() {
     if (pred(xs[i])) {
       return Maybe::Just(xs[i]);

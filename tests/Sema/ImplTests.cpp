@@ -104,7 +104,7 @@ impl A { fn __init__(n: int) { self.n = n; } }
 class B : A { m: int; }
 impl B { fn __init__() { __super__(1); self.m = 2; } }
 class Box<T> { v: T; }
-impl Box<U> { fn __init__(v: U) { self.v = v; } }
+impl Box<U> { fn __init__(v: U) { self.v = move v; } }
 fn main() -> int { b = B(); return b.n + b.m + A(3).n + Box(4).v; }
 )");
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;

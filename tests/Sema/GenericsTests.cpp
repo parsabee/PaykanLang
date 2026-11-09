@@ -242,7 +242,7 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
     }
 
     impl Node<T> {
-      fn __init__(v: T) { self.v = v; self.next = None; }
+      fn __init__(v: T) { self.v = move v; self.next = None; }
     }
   )",
                               "a: mut = Node<int>(1); a.link(Node<int>(2));"));
@@ -276,7 +276,7 @@ TEST(Generics, UninstantiatedTemplateBodyIsNotChecked) {
     }
 
     impl Broken<T> {
-      fn __init__(v: T) { self.v = v; }
+      fn __init__(v: T) { self.v = move v; }
     }
   )",
                               ""));
@@ -347,7 +347,7 @@ TEST(Generics, ErrorInsideInstantiationNamesIt) {
     }
 
     impl Adder<T> {
-      fn __init__(v: T) { self.v = v; }
+      fn __init__(v: T) { self.v = move v; }
     }
   )",
                               "a = Adder<bool>(True);"));
@@ -366,7 +366,7 @@ TEST(Generics, ErrorInsideInstantiationNamesIt) {
     }
 
     impl Adder<T> {
-      fn __init__(v: T) { self.v = v; }
+      fn __init__(v: T) { self.v = move v; }
     }
   )",
                                "a = Adder<int>(1); n: int = a.twice();"));
@@ -588,7 +588,7 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
     bools += ", bool";
   const std::string pair =
       "class Pair<A, B> { a: A; b: B; }\n"
-      "impl Pair<A, B> {\n"
+      "impl Pair<A: Copyable, B: Copyable> {\n"
       "  fn swap() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }\n"
       "  fn dup() -> Pair<A, A> { return Pair<A, A>(self.a, self.a); }\n"
       "}\n";
@@ -602,7 +602,7 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
     r = semaCheck(src);
     EXPECT_TRUE(r.Ok) << r.Diagnostics;
   }
-  r = semaCheck("struct P<A, B> { a: A; b: B; }\n"
+  r = semaCheck("struct P<A: Copyable, B: Copyable> { a: A; b: B; }\n"
                 "impl P<A, B> { fn swap() -> P<B, A> "
                 "{ return P<B, A>(self.b, self.a); } }\n"
                 "fn take(p: P<(" +
@@ -655,7 +655,7 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   // Nor with an argument grown from one it keeps: the `Q<A, (A, A)>` of a
   // `Q<A, (A, A)>` is itself.
-  r = semaCheck("class Q<A, B> { a: A; b: B; }\n"
+  r = semaCheck("class Q<A: Copyable, B> { a: A; b: B; }\n"
                 "impl Q<A, B> { fn grow() -> Q<A, (A, A)> "
                 "{ return Q<A, (A, A)>(self.a, (self.a, self.a)); } }\n"
                 "fn main() -> int { let q: Q<(" +
@@ -790,7 +790,7 @@ TEST(Generics, InferenceFromTheExpectedType) {
   const std::string decls = "class Node { n: int; }\n"
                             "fn none<T>() -> T? { return None; }\n"
                             "fn tagged<A, B>(a: A) -> (A, B?) { "
-                            "return (a, None); }\n"
+                            "return (move a, None); }\n"
                             "fn id<T>(x: T) -> T { return x; }\n"
                             "fn take(n: Node?) -> bool { return n == None; }\n"
                             "fn find() -> Node? { return none(); }\n";
@@ -992,7 +992,7 @@ TEST(Generics, ImportedTemplateErrorsPointIntoTheirModule) {
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib/show.pkn", R"(
 fn show<T>(x: T) -> Str { return x.label(); }
-fn twice<T>(x: T) -> Str { return show(x) + show(x); }
+fn twice<T: Copyable>(x: T) -> Str { return show(x) + show(x); }
 )");
   auto r = semaCheckFile(writeProjectFile(dir, "main.pkn", R"(
 import lib::show as s;
@@ -1004,7 +1004,7 @@ fn main() -> int { a = s::twice(1); b = s::twice(2); return 0; }
   EXPECT_TRUE(has(r.Diagnostics, "lib/show.pkn:2:34: error: method call on "
                                  "non-class type 'int'"))
       << r.Diagnostics;
-  EXPECT_TRUE(has(r.Diagnostics, "lib/show.pkn:3:35: note: in instantiation "
+  EXPECT_TRUE(has(r.Diagnostics, "lib/show.pkn:3:45: note: in instantiation "
                                  "of 'lib::show::show<int>' requested here"))
       << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics.find('$'), std::string::npos) << r.Diagnostics;
@@ -1330,9 +1330,9 @@ TEST(GenericsTypes, TupleArityMismatchLeftToArgumentCheck) {
 // optional type it is diagnosed, attributed to the instantiation.
 TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
   auto r = semaCheck(R"(
-    class Slot<T> {
+    class Slot<T: Copyable> {
       v: T?;
-      fn put(x: T) { self.v = x; }
+      fn put(x: T) { self.v = move x; }
       fn get() -> T? { return self.v; }
     }
 

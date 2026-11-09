@@ -572,6 +572,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   InstantiationStack.push_back(request);
   const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
   InstantiatingTemplates.push_back(self);
+  std::optional<MakingInstance> making(std::in_place, *this, tmpl, args);
   OriginSource inOrigin(*this, origin);
 
   ast::StructType *st = Ctx.registerStructType(instName, loc);
@@ -597,6 +598,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     else if (!checkTraitImpl(im, st))
       ok = false;
   }
+  making.reset();
   InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
@@ -710,6 +712,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
   InstantiatingTemplates.push_back({tmpl, &clone->getName(), argParams});
+  std::optional<MakingInstance> making(std::in_place, *this, tmpl, args);
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very
@@ -755,6 +758,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
         ok = false;
       }
   }
+  making.reset();
   InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 

@@ -344,8 +344,8 @@ TEST(SizedTypes, BuiltinMethodsAndTraits) {
 }
 
 TEST(SizedTypes, SizedTypesAreTypeArgumentsOptionalsAndMatchSubjects) {
-  expectOk("class Box<T> { v: T; }\n"
-           "impl Box<T> { fn __init__(v: T) { self.v = v; } "
+  expectOk("class Box<T: Copyable> { v: T; }\n"
+           "impl Box<T> { fn __init__(v: T) { self.v = move v; } "
            "view fn get() -> T { return self.v; } }\n"
            "struct Pair<A, B> { a: A; b: B; }\n" +
            inMain(R"(

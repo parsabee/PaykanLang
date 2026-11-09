@@ -153,6 +153,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
         kind != VarKind::Captured && name != names::kSelf &&
         !isCopyablePart(ty, qualifierOfVar(name))) {
       const ast::Qualifier q = qualifierOfVar(name);
+      noteArchetypeCopy(loc, ty, "to capture it");
       error(
           loc,
           "cannot capture '" + name + "' (a unique '" + qualifiedName(q, ty) +
@@ -312,8 +313,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     Scope *savedFunctionScope = std::exchange(FunctionScope, CurrentScope);
     std::unordered_map<std::string, ast::SourceLocation> savedTasks =
         std::exchange(TaskLocals, {});
-    LambdaStack.push_back(
-        {node, CurrentScope, savedClassCtx, savedMethodUse, Borrows});
+    LambdaStack.push_back({node, CurrentScope, savedClassCtx, savedMethodUse,
+                           Borrows, savedResult.Fn});
     for (size_t i = 0; i < node->getParams().size(); ++i) {
       const ast::Param &p = node->getParams()[i];
       CurrentScope->declare(p.getName(), paramTys[i]);

@@ -452,8 +452,10 @@ implements 'Show'`).  A struct with a field that does not implement `Show`, a fu
 value or an aggregate holding one, does not either, and cannot, since its `toString` is
 built in: `io::println(s)` and `s.toString()` are errors naming the field (`its field 'f'
 has type '(int) -> int', which does not implement it`), and so is `impl Show for S {}`.
-`Hashable` and user traits are implemented with `impl Trait for Name` blocks, as for a
-class:
+A `ValueType` is not always Copyable (a struct holding a unique object moves), so a template
+that copies one declares `T: Copyable` too, as `twice` below does
+([The archetype check](13-generics.md#the-archetype-check)). `Hashable` and user traits are
+implemented with `impl Trait for Name` blocks, as for a class:
 
 ```pkn
 import ::io;
@@ -468,7 +470,7 @@ trait Named { view fn name() -> Str; }
 impl Named for Point { view fn name() -> Str { return "Point"; } }
 
 fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
 fn greet<T: Named>(x: view T) -> Str { return x.name(); }
 fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
 

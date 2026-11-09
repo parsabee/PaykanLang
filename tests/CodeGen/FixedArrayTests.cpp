@@ -534,7 +534,7 @@ TEST(FixedArray, InferredLengths) {
     impl B {
       fn __init__(n: int) { __super__(n); }
     }
-    fn fill<T>(v: T) -> T[3] { return [v, v, v]; }
+    fn fill<T: Copyable>(v: T) -> T[3] { return [v, v, v]; }
     fn rows() -> int[2][3] { return [[1, 2, 3], [4, 5, 6]]; }
     fn main() -> int {
       x: int[_][_] = [[1, 2, 3], [4, 5, 6]];

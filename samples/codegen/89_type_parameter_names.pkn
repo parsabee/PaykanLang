@@ -20,7 +20,7 @@ class R<T> {
 }
 
 impl R<U> {
-  fn __init__(v: U)              { self.v = v; }
+  fn __init__(v: U)              { self.v = move v; }
   view fn bump(T: int) -> int    { T = T + 1; return T; }
   static fn twice(T: int) -> int { return 2 * T; }
   view fn show() -> Str          { return "R(" + Str(self.v) + ")"; }

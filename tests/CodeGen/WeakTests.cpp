@@ -227,7 +227,7 @@ TEST(Weak, InheritedAndGenericFields) {
     class Derived : Base { tag: Str; }
     impl Derived { fn __init__(t: Str) { __super__(); self.tag = move t; } }
     class Cell<T> { value: T; next: weak Cell<T>?; }
-    impl Cell<T> { fn __init__(v: T) { self.value = v; self.next = None; } }
+    impl Cell<T> { fn __init__(v: T) { self.value = move v; self.next = None; } }
     fn main() -> int {
       d: mut = Derived("d");
       e: shared = Derived("e");

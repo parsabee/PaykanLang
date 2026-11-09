@@ -33,6 +33,18 @@ void DiagEngine::closeGroup() {
 
 DiagEngine::~DiagEngine() { closeGroup(); }
 
+DiagEngine::Mark DiagEngine::mute() {
+  closeGroup();
+  Muted = true;
+  return {Diagnostics.size(), ErrorCount};
+}
+
+void DiagEngine::unmute(Mark m) {
+  Muted = false;
+  Diagnostics.resize(m.Diagnostics);
+  ErrorCount = m.Errors;
+}
+
 namespace {
 
 // A source line of up to kSnippetWidth characters is shown whole; a longer
@@ -163,6 +175,12 @@ void printWindow(std::ostream &os, std::string_view line, const Window &w) {
 
 void DiagEngine::emit(Diagnostic::Severity level, ast::SourceLocation loc,
                       const std::string &msg) {
+  if (Muted) {
+    Diagnostics.push_back({level, loc, msg});
+    if (level == Diagnostic::Error)
+      ++ErrorCount;
+    return;
+  }
 #ifndef NDEBUG
   // Only a group whose error or warning has a location is checked, and only
   // while the locations are exact (DiagEngine.h).

@@ -46,7 +46,7 @@ impl P {
 }
 class _Node { v: int; next: _Node?; }
 fn _helper(n: view _Node) -> int { return n.v; }
-class Box<T> { __v: T; view fn get() -> T { return self.__v; } fn set(v: T) { self.__v = v; } }
+class Box<T: Copyable> { __v: T; view fn get() -> T { return self.__v; } fn set(v: T) { self.__v = v; } }
 impl Box<T> { fn __init__(v: T) { self.__v = v; } fn take(o: Box<T>) { self.__v = o.__v; } }
 fn main() -> int {
   c: mut = Counter::make(3);

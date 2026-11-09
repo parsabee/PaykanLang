@@ -437,8 +437,8 @@ fn main() -> int {
 TEST(QualifiedPart, InferenceSeesThePartsForms) {
   auto r = semaCheck(R"(class Node { id: int; }
 fn head<T: Cloneable>(xs: view T[]) -> T { return xs[0].clone(); }
-fn first<T>(t: (T, int)) -> T { return t.0; }
-fn call<T>(f: (T) -> int, x: T) -> int { return f(x); }
+fn first<T: Copyable>(t: (T, int)) -> T { return t.0; }
+fn call<T>(f: (T) -> int, x: T) -> int { return f(move x); }
 fn read(n: shared Node) -> int { return n.id; }
 fn same(n: shared Node) => n;
 fn main() -> int {

@@ -363,11 +363,11 @@ TEST(Module, ImportedGenerics) {
 class Box<T> {
   v: T;
   view fn get() -> view T { return self.v; }
-  fn set(v: T) { self.v = v; }
+  fn set(v: T) { self.v = move v; }
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 fn _bump(n: int) -> int { return n + 1; }
 fn sum<T>(xs: view Box<T>[], f: int) -> int { return xs.len() + _bump(f); }
@@ -818,8 +818,8 @@ enum Maybe<T> { Just(value: T), Nothing }
 fn id<T>(x: T) -> T { return x; }
 fn useInt() -> int { return id(3); }
 fn orElse<T>(m: Maybe<T>, d: T) -> T {
-  match m {
-    j: Just { return j.value; }
+  match move m {
+    j: Just { return move j.value; }
     Nothing { return d; }
   }
 }
@@ -828,7 +828,7 @@ fn half(n: int) -> Maybe<int> {
 }
 fn total() -> int { return orElse(half(4), 0) + orElse(half(3), 10); }
 struct Box<T> { v: T; }
-impl Box<T> { static fn of(v: T) -> Box<T> { return Box<T>(v); } }
+impl Box<T> { static fn of(v: T) -> Box<T> { return Box<T>(move v); } }
 fn boxed<T>(x: T) -> int { return orElse(Maybe::Just(Box<int>::of(7).v), 0); }
 )");
 

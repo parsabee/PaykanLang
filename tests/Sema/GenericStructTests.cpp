@@ -229,7 +229,7 @@ impl Named for NoName<T> {}
 fn greet<T: Named>(x: view T) -> Str { return x.name(); }
 fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
 fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
 fn main() -> int {
   h = H(2.5);
   g = H("s");
@@ -438,8 +438,8 @@ TEST(GenericStruct, ImportedTemplates) {
        "import lib::gen;\n"
        "struct W<T> { b: gen::Box<T>; }\n"
        "impl W<T> { fn __init__(x: T) { self.b = gen::Box<T>(move x); } }\n"
-       "fn wrap<T>(x: T) -> gen::Pair<T, T> { return gen::Pair<T, T>(x, "
-       "x); }\n"
+       "fn wrap<T: Copyable>(x: T) -> gen::Pair<T, T> { return "
+       "gen::Pair<T, T>(x, x); }\n"
        "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
        "return wrap(2).b + w.b.get(); }"},
   };

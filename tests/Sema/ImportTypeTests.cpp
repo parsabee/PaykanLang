@@ -531,7 +531,7 @@ struct P { x: int; }
 impl P { fn ___init__(x: int) { self.x = x; } }
 fn mkP() -> P { return P(2); }
 class Box<T> { v: T; }
-impl Box<T> { fn ___init__(v: T) { self.v = v; } }
+impl Box<T> { fn ___init__(v: T) { self.v = move v; } }
 fn boxOf(v: int) -> Box<int> { return Box<int>(v); }
 )");
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -794,14 +794,14 @@ TEST(Module, ImporterInstantiationChecksTraitBlock) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_trait_block").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "gb.pkn", R"(class Box<T> { v: T; }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }
 trait Named { view fn name() -> Str; }
 class NBox<T> { v: T; }
-impl NBox<T> { fn __init__(v: T) { self.v = v; } }
+impl NBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Named for NBox<T> { view fn name() -> Str { return self.v.name(); } }
 class SBox<T> { v: T; }
-impl SBox<T> { fn __init__(v: T) { self.v = v; } }
+impl SBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Show for SBox<T> {}
 )");
   auto main = writeFile(tmp, "main.pkn", R"(import gb;
@@ -936,10 +936,10 @@ class Dog { view fn name() -> Str { return "Rex"; } }
 impl Named for Dog {}
 fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
 fn w2<T>(x: T) -> Str { return greet(Dog()); }
-fn w1<T>(x: T) -> Str { return w2(x); }
+fn w1<T>(x: T) -> Str { return w2(move x); }
 )");
   writeFile(t27, "lib2.pkn", R"(import lib;
-fn go<T>(x: T) -> Str { return lib::wrap(x); }
+fn go<T>(x: T) -> Str { return lib::wrap(move x); }
 )");
   writeFile(cap, "lib.pkn", R"(trait Named { view fn name() -> Str; }
 trait Conv<U> { view fn conv() -> U; }

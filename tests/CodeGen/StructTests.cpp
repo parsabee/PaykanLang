@@ -218,11 +218,11 @@ TEST(Struct, ImplBlocksTraitsAndGenerics) {
     trait Named { view fn name() -> Str; }
     impl Named for Point { view fn name() -> Str { return "Point"; } }
     fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-    fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+    fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
     fn greet<T: Named>(x: view T) -> Str { return x.name(); }
     fn hashOf<T: Hashable>(x: view T) -> bool { return x.hash() == x.hash(); }
-    class Box<T> { v: T; view fn get() -> view T { return self.v; } fn set(v: T) { self.v = v; } }
-    impl Box<T> { fn __init__(v: T) { self.v = v; } }
+    class Box<T> { v: T; view fn get() -> view T { return self.v; } fn set(v: T) { self.v = move v; } }
+    impl Box<T> { fn __init__(v: T) { self.v = move v; } }
     fn pick<T>(first: bool, a: T, b: T) -> T { return if first then a else b; }
     fn main() -> int {
       p = Point(1, 2);

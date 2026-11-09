@@ -12,7 +12,7 @@ fn adder(n: int) -> (int) -> int {
   return fn(x: int) => x + n;
 }
 
-fn scale<T>(by: T) -> (T) -> T {
+fn scale<T: Copyable>(by: T) -> (T) -> T {
   return fn(x: T) => x * by;
 }
 

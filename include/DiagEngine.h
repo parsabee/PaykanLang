@@ -78,6 +78,9 @@ class DiagEngine {
   // Whether the open group is checked: used by debug builds only.
   [[maybe_unused]] bool CheckGroup = true;
   void closeGroup();
+  // A muted stretch (mute): recorded and counted, never printed or checked
+  // for repeats.
+  bool Muted = false;
 
 public:
   explicit DiagEngine(std::ostream &os) : OS(os) {}
@@ -118,6 +121,18 @@ public:
   unsigned getErrorCount() const { return ErrorCount; }
   bool hasErrors() const { return ErrorCount > 0; }
   const std::vector<Diagnostic> &getDiagnostics() const { return Diagnostics; }
+
+  // A speculative stretch, such as Sema's archetype check (#368): from
+  // mute() on, diagnostics are recorded and counted, so that whatever
+  // tests for an error sees one, but nothing is printed; unmute() drops
+  // them, as if they had never been reported.  Not nested.
+  struct Mark {
+    size_t Diagnostics = 0;
+    unsigned Errors = 0;
+  };
+  Mark mute();
+  void unmute(Mark m);
+  bool isMuted() const { return Muted; }
 
   std::ostream &getOS() { return OS; }
 };

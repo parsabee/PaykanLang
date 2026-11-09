@@ -429,7 +429,7 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
 TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
-    class Cell<T> {
+    class Cell<T: Copyable> {
       v: T;
       fn get() -> T { return self.v; }
     }
@@ -437,7 +437,7 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
     impl Cell<T> {
       fn __init__(x: T) { self.v = x; }
     }
-    class Slot<T> {
+    class Slot<T: Copyable> {
       v: T?;
       fn put(x: T) { self.v = x; }
       fn take() -> T? { r = self.v; self.v = None; return r; }
@@ -447,7 +447,7 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
       fn __init__() { }
     }
     fn wrap<T>(x: T) -> T? { return x; }
-    fn orElse<T>(o: T?, d: T) -> T { match o { v: T { return v; } None { return d; } } }
+    fn orElse<T: Copyable>(o: T?, d: T) -> T { match o { v: T { return v; } None { return d; } } }
     fn main() -> int {
       c: mut = Cell<int?>(None);
       io::println(c.get());
@@ -546,7 +546,7 @@ TEST(OptionalPrimitive, TuplesHoldOptionalsInline) {
 TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
-    class Stack<T> {
+    class Stack<T: Copyable> {
       items: T[8];
       n: int;
       fn push(x: T) {
@@ -566,7 +566,7 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
         self.n = 0;
       }
     }
-    class Slots<T> {
+    class Slots<T: Copyable> {
       s: T?[3];
       fn put(i: int, x: T) { self.s[i] = x; }
       fn get(i: int) -> T? { return self.s[i]; }

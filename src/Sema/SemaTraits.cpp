@@ -645,10 +645,19 @@ bool Sema::implBoundsHold(const ast::ImplDecl *im,
       if (!namesBuiltinTrait(b))
         return false; // reported with the block
       auto tr = resolveTraitRef(b, subst, im->getLocation());
-      if (!tr || !traitImplOwner(args[i], *tr))
+      if (!tr ||
+          (!traitImplOwner(args[i], *tr) && !archetypeMeets(args[i], *tr)))
         return false;
     }
   return true;
+}
+
+bool Sema::archetypeMeets(const ast::Type *arg, const TraitRef &tr) const {
+  if (const auto *qt = arg ? ast::dyn_cast<ast::QualifiedType>(arg) : nullptr)
+    arg = qt->getInnerType(); // `shared T`: the bound is T's
+  return Archetypes && Archetypes->Classes.count(arg) &&
+         !(tr.Trait->IsBuiltin &&
+           tr.Trait->Decl->getName() == names::kTraitCopyable);
 }
 
 bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
@@ -694,7 +703,7 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
         ok = false;
         continue;
       }
-      if (!traitImplOwner(args[i], *tr)) {
+      if (!traitImplOwner(args[i], *tr) && !archetypeMeets(args[i], *tr)) {
         // A tuple, struct, enum or optional that does not show itself names
         // the part that does not.
         std::string why;
@@ -703,6 +712,8 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
           why = noTextReason(args[i]);
         else if (tr->Trait->IsBuiltin &&
                  tr->Trait->Decl->getName() == names::kTraitCopyable) {
+          noteArchetypeCopy(loc, args[i],
+                            "for '" + displayName(name) + "', which needs it");
           std::string part;
           isCopyable(args[i], &part);
           why = part.empty() ? "a reference, a 'Str' or a task is move-only"

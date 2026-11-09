@@ -171,7 +171,7 @@ TEST(Struct, StructInEveryTypePosition) {
 struct P { x: int; }
 class Holder { p: P; ps: P[2]; view fn get() -> P { return self.p; } }
 class Box<T> { v: T; }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn f(a: P, b: view P, c: inout P) -> P { c.x = b.x; return a; }
 fn g() -> (P, int) { return (P(1), 2); }
 fn h(xs: view P[]) -> int { return xs[0].x + xs.len(); }
@@ -372,7 +372,7 @@ impl Hashable for Point {
 trait Named { view fn name() -> Str; }
 impl Named for Point { view fn name() -> Str { return "Point"; } }
 fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
 fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
 fn greet<T: Named>(x: view T) -> Str { return x.name(); }
 fn bump(n: inout int) { n = n + 1; }

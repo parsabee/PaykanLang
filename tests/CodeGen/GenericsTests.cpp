@@ -345,8 +345,8 @@ TEST(Generics, ExportedInstantiationAcrossModules) {
   {
     std::ofstream lib(dir / "lib" / "gen.pkn");
     lib << R"(
-class Box<T> { v: T; fn get() -> T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+class Box<T: Copyable> { v: T; fn get() -> T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn mk() -> Box<int> { return Box<int>(41); }
 )";
   }
@@ -380,7 +380,7 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
     impl Pair<A, B> {
       fn __init__(a: A, b: B) { self.p = (move a, move b); }
     }
-    fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
+    fn firstOf<A: Copyable, B>(p: (A, B)) -> A { return p.0; }
     fn dup<T>(x: T) -> (T, T) { return (x.clone(), move x); }
     fn main() -> int {
       q: mut = Pair<Str, int>("a", 1);

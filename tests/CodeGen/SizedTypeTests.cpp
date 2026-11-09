@@ -248,7 +248,7 @@ TEST(SizedTypes, SizedValuesInAggregatesGenericsAndMatch) {
   LeakGuard g;
   auto r =
       compileAndRun("struct Pixel { r: u8; g: u8; b: u8; a: f32; }\n"
-                    "class Box<T> { v: T; }\n"
+                    "class Box<T: Copyable> { v: T; }\n"
                     "impl Box<T> { fn __init__(v: T) { self.v = v; } "
                     "view fn get() -> T { return self.v; } }\n"
                     "fn sum(xs: view u16[3]) -> u16 { t: u16 = 0; i = 0; "

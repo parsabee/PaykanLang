@@ -30,7 +30,7 @@ impl Box<T> {
   fn __init__(v: T) { self.v = move v; }
 }
 
-class Pair<K, V> {
+class Pair<K, V: Copyable> {
   k: K;
   v: V;
   view fn key() -> view K { return self.k; }
@@ -73,7 +73,7 @@ fn first<T>(xs: view T[]) -> view T {
   return xs[0];
 }
 
-fn unbox<T>(b: Box<T>) -> T {
+fn unbox<T: Copyable>(b: Box<T>) -> T {
   return b.get();
 }
 

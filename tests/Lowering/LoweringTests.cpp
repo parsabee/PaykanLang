@@ -1177,7 +1177,7 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
 // is read as before.
 TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
   auto l = lower(R"(
-    class Box<T> { v: T; view fn at(k: int) -> T { return self.v; } }
+    class Box<T: Copyable> { v: T; view fn at(k: int) -> T { return self.v; } }
     class Cell<T> { v: T; name: Str; }
     class Par { name: Str; }
     impl Par { fn __init__(n: Str) { self.name = move n; } }
@@ -1318,7 +1318,7 @@ TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
     }
     class Derived<X> : Base { v: X; }
     impl Derived<X> {
-      fn __init__(n: int, v: X) { __super__(n); self.v = v; }
+      fn __init__(n: int, v: X) { __super__(n); self.v = move v; }
     }
     class Plain : Base { tag: Str; }
     impl Plain {
@@ -3638,7 +3638,7 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
          "view fn n() -> int { return _h(); } }\n"
          "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n"
          "fn _h() -> int { return 1; }\n"
-         "fn first<T>(xs: view T[]) -> T { return xs[0]; }\n";
+         "fn first<T: Copyable>(xs: view T[]) -> T { return xs[0]; }\n";
   for (const char *m : {"a", "b"})
     std::ofstream(dir / (std::string(m) + ".pkn"))
         << "import lib::gen;\n"
@@ -3683,7 +3683,7 @@ TEST(Lowering, EveryModuleLowersItsOwnCopiesUntilShared) {
       << "class Box<T> { v: T; "
          "view fn n() -> int { return 1; } }\n"
          "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n"
-         "fn first<T>(xs: view T[]) -> T { return xs[0]; }\n";
+         "fn first<T: Copyable>(xs: view T[]) -> T { return xs[0]; }\n";
   for (const char *m : {"a", "b"})
     std::ofstream(dir / (std::string(m) + ".pkn"))
         << "import lib::gen;\n"

@@ -38,7 +38,7 @@ enum Two<A, B> {
 
 fn none<T>() -> Maybe<T> => Maybe::Nothing;
 
-fn ok<T, E>(v: T) -> Res<T, E> => Res::Ok(v);
+fn ok<T, E>(v: T) -> Res<T, E> => Res::Ok(move v);
 
 fn main() -> int {
   let x = Maybe::Just(5);

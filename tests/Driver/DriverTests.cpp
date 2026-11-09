@@ -1163,7 +1163,7 @@ static std::string everyChainKind(int links) {
       "P(n + 1); }; }\n"
       "  view fn c() -> C { return mk(self.x + 1); }\n"
       "}\n"
-      "struct G<T> { x: T; }\n"
+      "struct G<T: Copyable> { x: T; }\n"
       "impl G<T> { view fn m() -> G<T> { return G<T>(self.x); } }\n"
       "struct S { f: () -> S; x: int; }\n"
       "class C { x: int; f: () -> C; p: P;\n"
@@ -1860,7 +1860,9 @@ TEST(Driver, AQualifierClashNamesEachModuleCanonically) {
 // Finding 99: an error in an imported module's template, reported at its
 // instantiation, names the module's generic enum, its variants and its
 // generic functions as the program spells them (`lib::g::R::Ok`), not by
-// the module's hidden qualifier (`$lib::g::R::Ok`).
+// the module's hidden qualifier (`$lib::g::R::Ok`).  `wrap` copies out of
+// a view of a `Str`, not of its `T`: that copy, of a `T` without bounds, is
+// the archetype check's error at the module (#368).
 TEST(Driver, ErrorsInAnImportedTemplateNameItsGenericsPlainly) {
   auto dir = std::filesystem::temp_directory_path() /
              ("drv_hidden_names_" + std::to_string(getpid()));
@@ -1868,21 +1870,21 @@ TEST(Driver, ErrorsInAnImportedTemplateNameItsGenericsPlainly) {
   std::filesystem::create_directories(dir / "lib");
   std::ofstream(dir / "lib" / "g.pkn")
       << "enum R<T> { Ok(v: T), No }\n"
-         "fn wrap<T>(s: view T) -> R<T> => R::Ok(s);\n"
+         "fn wrap<T>(s: view Str) -> R<T> => R::Ok(s);\n"
          "fn bad<T>(x: T) -> R<int> => R::Ok(x);\n"
          "fn none<T>(x: T) -> R<T> => R::No(x);\n"
          "fn pick<U>() -> int => 0;\n"
          "fn infer<T>(x: T) -> int => pick();\n"
          "fn guess<T>(x: T) -> int { r = R::No; return 0; }\n";
   std::ofstream(dir / "main.pkn")
-      << "import lib::g;\nfn main() -> int {\n  a = g::wrap(\"x\");\n"
+      << "import lib::g;\nfn main() -> int {\n  a = g::wrap<Str>(\"x\");\n"
          "  b = g::bad(\"y\");\n  c = g::none(1);\n  d = g::infer(2);\n"
          "  e = g::guess(3);\n  return 0;\n}\n";
   auto r = run("cd " + dir.string() + " && " + std::string(kPaykan) +
                " --no-module-cache --check-only main.pkn 2>&1");
   EXPECT_EQ(r.exitCode, 1) << r.out;
   for (const char *message :
-       {"lib/g.pkn:2:40: error: 's' is a 'view' parameter; it can only be "
+       {"lib/g.pkn:2:42: error: 's' is a 'view' parameter; it can only be "
         "passed to a 'view' parameter, and parameter 1 of 'lib::g::R::Ok' is "
         "not one",
         "lib/g.pkn:3:36: error: field 'v' of 'lib::g::R::Ok' has type 'int', "

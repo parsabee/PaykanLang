@@ -414,6 +414,10 @@ inline constexpr const char *kQualSep = "::"; ///< Module qualifier separator
 /// Prefix of the qualifier an importer registers a module under for the
 /// bodies of its templates (Sema::hiddenQualifier); no source can spell it.
 inline constexpr const char *kHiddenQualPrefix = "$";
+/// Prefix of an archetype's name (`%T`), the move-only class Sema's
+/// archetype check gives a template's type parameter `T` (#368); no source
+/// can spell it, and no module's interface holds it.
+inline constexpr const char *kArchetypePrefix = "%";
 inline constexpr const char *kStdlibDir =
     "stdlib"; ///< Standard library subdirectory
 

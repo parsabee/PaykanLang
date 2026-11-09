@@ -105,7 +105,7 @@ impl Question {
 
 // ---- generics: T? with T = int ---------------------------------------------
 
-class Cache<T> {
+class Cache<T: Copyable> {
   slot: T?;
   view fn get() -> T? { return self.slot; }
   fn put(v: T)        { self.slot = v; }
