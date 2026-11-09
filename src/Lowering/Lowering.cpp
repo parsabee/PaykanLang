@@ -1464,7 +1464,9 @@ Val ModuleLowering::emitParallelFor(ast::ForStmt *node) {
   std::vector<Reduction> reductions;
   for (const ast::ForStmt::Reduction &r : node->getReductions()) {
     pir::LocalId target = CurrentScope->lookup(*r.Name);
-    Type rty = B.localType(target);
+    // An `inout` variable's slot holds its address.
+    const Type pointee = CurrentScope->inoutType(*r.Name);
+    Type rty = pointee != Type::Void ? pointee : B.localType(target);
     const Opcode op =
         r.Op == ast::BinaryOpcode::Mul ? Opcode::Mul : Opcode::Add;
     pir::LocalId part = B.addLocal(*r.Name + ".part", rty);
@@ -1514,11 +1516,23 @@ Val ModuleLowering::emitParallelFor(ast::ForStmt *node) {
   for (const Reduction &r : reductions)
     par.Reductions.push_back({r.Partial, r.Op});
   w->Par = std::move(par);
-  // Each partial folds into its variable.
-  for (const Reduction &r : reductions)
-    B.store(r.Target,
-            B.binary(r.Op, B.load(r.Target, r.Name),
-                     B.load(r.Partial, r.Name + ".part"), r.Name + ".fold"));
+  // Each partial folds into its variable, wrapping as `+` and `*` of its
+  // type do (the chunks' partials were combined at full width).
+  for (const Reduction &r : reductions) {
+    const Type pointee = CurrentScope->inoutType(r.Name);
+    Val addr =
+        pointee != Type::Void ? B.load(r.Target, r.Name + ".addr") : Val();
+    Val current =
+        addr ? B.ptrLoad(addr, pointee, r.Name) : B.load(r.Target, r.Name);
+    Val folded = canonicalize(B.binary(r.Op, current,
+                                       B.load(r.Partial, r.Name + ".part"),
+                                       r.Name + ".fold"),
+                              r.ASTType);
+    if (addr)
+      B.ptrStore(addr, folded);
+    else
+      B.store(r.Target, folded);
+  }
   return Val();
 }
 

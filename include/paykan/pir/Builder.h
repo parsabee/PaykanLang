@@ -10,6 +10,7 @@
 #include "paykan/pir/PIR.h"
 
 #include <cassert>
+#include <deque>
 #include <string>
 #include <utility>
 #include <variant>
@@ -49,7 +50,7 @@ class Builder {
   /// Statements emitted after a terminator go here and are discarded, so the
   /// lowering never has to check reachability itself (mirrors emitting into
   /// a dead LLVM block).
-  Block Dead;
+  std::deque<Block> Dead;
   /// While nesting depth, for the verifier-visible break/continue rule.
   unsigned LoopDepth = 0;
 
@@ -80,10 +81,11 @@ class Builder {
   Block &target() {
     assert(!Stack.empty() && "no insertion block");
     Block &b = *Stack.back();
-    // Dead code accumulates until the next function; nested statements may
-    // still point into it, so it is never cleared mid-function.
+    // Dead code is kept: a statement opened there may still be open when
+    // more follows it, or when a lambda in it builds a function of its own.
+    // Each has a block of its own, which nothing moves.
     if (endsInTerminator(b))
-      return Dead;
+      return Dead.emplace_back();
     return b;
   }
 
@@ -94,7 +96,6 @@ public:
   void setFunction(Function *fn) {
     Fn = fn;
     Stack.clear();
-    Dead.Stmts.clear();
     LoopDepth = 0;
     if (fn)
       Stack.push_back(&fn->Body);

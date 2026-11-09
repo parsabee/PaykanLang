@@ -422,7 +422,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
                              (m->isView() ? ast::MethodDecl::View : 0) |
                              (m->isImpl() ? ast::MethodDecl::Impl : 0) |
                              (m->isShared() ? ast::MethodDecl::Shared : 0) |
-                             (m->isPure() ? ast::MethodDecl::Pure : 0));
+                             (m->isPure() ? ast::MethodDecl::Pure : 0) |
+                             (m->isParSafe() ? ast::MethodDecl::ParSafe : 0));
     mi.Modes = m->getParamModes();
     return mi;
   };
@@ -538,6 +539,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
           sig.ParamTypes[i]));
     fi.Modes = sig.Modes;
     fi.Native = sig.Native;
+    fi.ParSafe = sig.ParSafe;
     info.ExportedFunctions.push_back(std::move(fi));
   }
   sortModuleInfo(info);
@@ -549,7 +551,8 @@ static_assert(ast::MethodDecl::Private == pkm::kMethodPrivate &&
                   ast::MethodDecl::View == pkm::kMethodView &&
                   ast::MethodDecl::Impl == pkm::kMethodImpl &&
                   ast::MethodDecl::Shared == pkm::kMethodShared &&
-                  ast::MethodDecl::Pure == pkm::kMethodPure,
+                  ast::MethodDecl::Pure == pkm::kMethodPure &&
+                  ast::MethodDecl::ParSafe == pkm::kMethodParSafe,
               "the IFACE method flag bits are ast::MethodDecl's");
 
 // The IFACE records' parameter modes (pkm::kMode*, a byte per parameter,
@@ -583,7 +586,7 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
   pkm::Interface iface;
   for (auto &fi : info.ExportedFunctions)
     iface.Functions.push_back({fi.Name, fi.ReturnTypeName, fi.ParamTypeNames,
-                               toModeRecs(fi.Modes), fi.Native});
+                               toModeRecs(fi.Modes), fi.Native, fi.ParSafe});
   for (auto &ci : info.ExportedClasses) {
     pkm::ClassRec cr;
     cr.Name = ci.Name;
@@ -622,7 +625,7 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   for (auto &fr : iface.Functions)
     info.ExportedFunctions.push_back({fr.Name, fr.ReturnTypeName,
                                       fr.ParamTypeNames, fromModeRecs(fr.Modes),
-                                      fr.Native});
+                                      fr.Native, fr.ParSafe});
   for (auto &cr : iface.Classes) {
     ModuleInfo::ClassInfo ci;
     ci.Name = cr.Name;
@@ -1036,6 +1039,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   importSema.FailedModules = FailedModules;
   importSema.ImportDepth = ImportDepth;
   importSema.Resolver = Resolver;
+  importSema.setOpenWorld(true);
 
   auto *importRoot = importDriverPtr->getRoot();
   auto childCtx = importSema.run(importRoot);
@@ -1507,6 +1511,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     sig.ResultQual = resultQual;
     sig.ParamQuals = std::move(quals);
     sig.Native = fi.Native;
+    sig.ParSafe = fi.ParSafe;
     sig.Imported = true;
     if (fi.Native)
       ImportedNatives.insert(name);

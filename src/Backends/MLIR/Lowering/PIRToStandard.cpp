@@ -53,6 +53,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace paykan::mlir_backend {
@@ -162,6 +163,9 @@ private:
   /// pir.local value -> its slot's type.
   llvm::DenseMap<Value, Type> SlotTypes;
   llvm::DenseMap<Operation *, unsigned> ExitCache;
+  /// Where a loop's `alloca` goes so that it runs once: the top of the
+  /// function, or of the `parallel for` chunk being lowered.
+  Block *AllocaBlock = nullptr;
   Value ExitSlot; // the exit flag (null in a function without one)
   Value RetSlot;  // the returned value (null when not needed)
   Type RetType;   // the function's result type (null for void)
@@ -552,6 +556,8 @@ void FunctionLowering::run() {
     B.setInsertionPointToEnd(&exec.getBodyRegion().front());
   }
 
+  AllocaBlock = B.getInsertionBlock();
+
   // The locals are slots at the top of the function, as PIR declares them.
   for (auto l : body.getOps<P::LocalOp>()) {
     Type slot = l.getSlot().getType().getSlot();
@@ -666,6 +672,13 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
                : Value(arith::AddIOp::create(B, Loc, a, b));
   };
 
+  // `continue` ends an iteration by the exit flag, as in a `while`.  A
+  // `break` or `return` cannot leave the body (Sema).
+  const unsigned bodyExits = exits(op.getBody());
+  bool usesFlag = false;
+  op.getBody().walk(
+      [&](Operation *o) { usesFlag |= isa<P::BreakOp, P::ContinueOp>(o); });
+
   // The loop run in order on the calling thread: the C path's, and a light
   // body's below the threshold.
   auto emitSequential = [&] {
@@ -674,6 +687,8 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
     B.setInsertionPointToStart(loop.getBody());
     Map.map(index, toI64(loop.getInductionVar()));
     lowerBlock(body);
+    if (bodyExits & kContinue)
+      resetFlagIf(kContinuing); // the next iteration runs
   };
   if (M.sequential()) {
     emitSequential();
@@ -705,13 +720,18 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
   Value kSafe = arith::MaxSIOp::create(B, Loc, k, i64(1));
   Value q = arith::DivSIOp::create(B, Loc, count, kSafe);
   Value r = arith::RemSIOp::create(B, Loc, count, kSafe);
-  // Each reduction's 256 chunk partials (allocated before the choice of
-  // path, where every alloca of the function is).
+  // Each reduction's 256 chunk partials, once however often the loop runs:
+  // an alloca here would take 2 KB of stack each time round an enclosing
+  // loop.
   std::vector<Value> arrays;
-  for (Value p : partials) {
-    auto [size, align] = sizeAlign(slotOf(p));
-    arrays.push_back(
-        P::AllocaOp::create(B, Loc, 256 * size, align, "partials"));
+  {
+    OpBuilder::InsertionGuard guard(B);
+    B.setInsertionPointToStart(AllocaBlock);
+    for (Value p : partials) {
+      auto [size, align] = sizeAlign(slotOf(p));
+      arrays.push_back(
+          P::AllocaOp::create(B, Loc, 256 * size, align, "partials"));
+    }
   }
   scf::IfOp small;
   if (light) {
@@ -729,6 +749,7 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
       B, Loc, ValueRange{cst(0)}, ValueRange{toIndex(k)}, ValueRange{cst(1)});
   {
     OpBuilder::InsertionGuard guard(B);
+    Block *functionAllocas = std::exchange(AllocaBlock, par.getBody());
     B.setInsertionPoint(par.getBody()->getTerminator());
     Value c = toI64(par.getInductionVars()[0]);
     Value lo =
@@ -756,13 +777,23 @@ void FunctionLowering::lowerParallel(P::ParallelOp op) {
       P::PtrStoreOp::create(B, Loc, a, identity(slotOf(p), reductions[i] == 1));
       chunkPartials.push_back(a);
     }
+    // The chunk's own exit flag: another thread runs the function's.
+    Value functionFlag = ExitSlot;
+    if (usesFlag) {
+      ExitSlot = P::AllocaOp::create(B, Loc, 1, 1, "exit");
+      setFlag(kRunning);
+    }
     auto inner = scf::ForOp::create(B, Loc, toIndex(lo), toIndex(hi), cst(1));
     {
       OpBuilder::InsertionGuard g(B);
       B.setInsertionPointToStart(inner.getBody());
       Map.map(index, toI64(inner.getInductionVar()));
       lowerBlock(body);
+      if (bodyExits & kContinue)
+        resetFlagIf(kContinuing); // the next iteration runs
     }
+    ExitSlot = functionFlag;
+    AllocaBlock = functionAllocas;
     for (auto [i, p] : llvm::enumerate(partials)) {
       Type t = slotOf(p);
       auto [size, align] = sizeAlign(t);

@@ -1,0 +1,26 @@
+// What a `parallel for` body cannot call: anything that prints, down any
+// chain of calls; a function value; a native outside `::math` and the Str,
+// buffer and cell runtime.
+import ::io;
+
+native fn sysAbs(x: int) -> int = "abs";
+
+fn log(i: int) {
+  io::println(Str(i));
+}
+fn deep(i: int) {
+  log(i);
+}
+
+fn main() -> int {
+  parallel for i in 0..4 {
+    io::println("hi");                           // error: not par-safe
+    deep(i);                                     // error: it calls 'log', ...
+    let f = fn(x: int) -> int { return x; };
+    let a = f(i);                                // error: a function value
+    let b = sysAbs(i);                           // error: a native function
+    if i == 3 { continue; }                      // fine
+    for j in 0..2 { if j == 1 { break; } }       // fine: the inner loop's
+  }
+  return 0;
+}

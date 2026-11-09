@@ -57,10 +57,24 @@ bool Sema::isOuterScope(Scope *owner) const {
   return true;
 }
 
-bool Sema::checkParallelRead(const std::string &name, ast::Type *ty,
-                             ast::SourceLocation loc) {
-  if (!isOuterScope(CurrentScope->findOwner(name)))
+void Sema::forEachParallelOutside(
+    Scope *owner, const std::function<void(ParallelContext &)> &f) {
+  for (size_t i = ParallelStack.size(); i-- > ReturnParallelBase;) {
+    for (Scope *s = owner; s; s = s->Parent)
+      if (s == ParallelStack[i].Boundary)
+        return; // bound by this loop, or inside its body
+    f(ParallelStack[i]);
+  }
+}
+
+bool Sema::checkParallelRead(const ast::Expr *node, const std::string &name,
+                             ast::Type *ty, ast::SourceLocation loc) {
+  Scope *owner = CurrentScope->findOwner(name);
+  if (!isOuterScope(owner))
     return true;
+  forEachParallelOutside(owner, [&](ParallelContext &loop) {
+    loop.Reads.push_back({node, name});
+  });
   if (isPlainValue(ty) || ast::isa<ast::AtomicType>(ty))
     return true;
   // A `mem::Buffer<T>` of plain values: read at any index, written at the
@@ -103,6 +117,9 @@ bool Sema::checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy) {
                          (be->getOpcode() == ast::BinaryOpcode::Add ||
                           be->getOpcode() == ast::BinaryOpcode::Sub ||
                           be->getOpcode() == ast::BinaryOpcode::Mul);
+  // `s op= e` reads `s` only as this statement, right or wrong.
+  if (lhs && lhs->getName() == name)
+    ReductionOperands.insert(lhs);
   if (!reduction) {
     error(node->getLocation(),
           "cannot assign to '" + name +
@@ -119,8 +136,161 @@ bool Sema::checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy) {
                                    "' of type '" + typeName(varTy) + "'");
     return false;
   }
-  ParallelStack.back().Loop->addReduction(Ctx.intern(name), be->getOpcode());
-  return true;
+  // The variable is a reduction of every enclosing loop it is outside of, or
+  // the fold of an inner one would be a write to it from several threads.
+  const auto isMul = [](ast::BinaryOpcode op) {
+    return op == ast::BinaryOpcode::Mul;
+  };
+  bool ok = true;
+  const std::string &interned = Ctx.intern(name);
+  forEachParallelOutside(
+      CurrentScope->findOwner(name), [&](ParallelContext &loop) {
+        for (const ast::ForStmt::Reduction &r : loop.Loop->getReductions())
+          if (r.Name == &interned && isMul(r.Op) != isMul(be->getOpcode()))
+            ok = false;
+        loop.Loop->addReduction(interned, be->getOpcode());
+      });
+  if (!ok)
+    error(node->getLocation(),
+          "'" + name +
+              "' is a reduction of this 'parallel for' by another operation: "
+              "'+=' and '-=' combine with each other, '*=' with itself");
+  return ok;
+}
+
+Sema::ParallelContext::ElementPath Sema::elementPath(const ast::Expr *place,
+                                                     const ast::Expr *last) {
+  ParallelContext::ElementPath path;
+  const auto addIndex = [&](const ast::Expr *index) {
+    path.Indices.push_back(index);
+    const auto *id = ast::dyn_cast<ast::Identifier>(index);
+    path.Owners.push_back(id ? CurrentScope->findOwner(id->getName())
+                             : nullptr);
+  };
+  if (last)
+    addIndex(last);
+  for (const ast::Expr *e = place;;) {
+    if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+      addIndex(se->getIndex());
+      e = se->getArray();
+    } else if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+      e = ma->getReceiver();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+      e = ti->getTuple();
+    } else {
+      return path;
+    }
+  }
+}
+
+bool Sema::checkParallelWrite(const ast::Expr *place, const ast::Expr *last,
+                              const std::string &how, ast::SourceLocation loc) {
+  if (ParallelStack.empty())
+    return true;
+  const ast::Identifier *root = placeRoot(place);
+  if (!root)
+    return true; // what a call returned, or a temporary
+  const ParallelContext::ElementPath path = elementPath(place, last);
+  bool ok = true;
+  forEachParallelOutside(
+      CurrentScope->findOwner(root->getName()), [&](ParallelContext &loop) {
+        if (!ok)
+          return;
+        const std::string &var = loop.Loop->getVar()->getName();
+        for (size_t i = 0; i < path.Indices.size(); ++i) {
+          const auto *id = ast::dyn_cast<ast::Identifier>(path.Indices[i]);
+          if (id && id->getName() == var && path.Owners[i] == loop.Boundary) {
+            loop.Writes.push_back({root->getName(), place, path});
+            return;
+          }
+        }
+        ok = false;
+        if (path.Indices.empty()) {
+          error(loc, "'" + placeText(place) + "' is " + how +
+                         " in a 'parallel for' body: what the enclosing "
+                         "function holds changes only by a reduction of a "
+                         "variable, or at the loop's variable in an array");
+          return;
+        }
+        error(path.Indices.back()->getLocation(),
+              "'" + root->getName() + "' is " + how +
+                  " in a 'parallel for' body at an index other than the "
+                  "loop's variable '" +
+                  var + "': two iterations could write one element");
+      });
+  return ok;
+}
+
+void Sema::noteParallelElementRead(const ast::Expr *e) {
+  const ast::Identifier *root = placeRoot(e);
+  if (!root)
+    return;
+  for (ParallelContext &loop : ParallelStack)
+    for (auto r = loop.Reads.rbegin(); r != loop.Reads.rend(); ++r)
+      if (r->Node == root) {
+        r->Element = e;
+        r->Path = elementPath(e);
+        break;
+      }
+}
+
+void Sema::noteParallelNoElementRead(const ast::Expr *root) {
+  for (ParallelContext &loop : ParallelStack)
+    for (auto r = loop.Reads.rbegin(); r != loop.Reads.rend(); ++r)
+      if (r->Node == root) {
+        r->ReadsNoElement = true;
+        break;
+      }
+}
+
+bool Sema::checkWrittenArraysNotRead(const ParallelContext &loop) {
+  bool ok = true;
+  for (const ParallelContext::Read &read : loop.Reads) {
+    if (read.ReadsNoElement)
+      continue;
+    for (const ParallelContext::Write &write : loop.Writes) {
+      if (write.Name != read.Name)
+        continue;
+      bool same = read.Element && read.Path.Indices == write.Path.Indices;
+      if (read.Element && !same &&
+          read.Path.Indices.size() == write.Path.Indices.size()) {
+        same = true;
+        for (size_t i = 0; same && i < read.Path.Indices.size(); ++i)
+          same = read.Path.Owners[i] == write.Path.Owners[i] &&
+                 sameIndex(read.Path.Indices[i], write.Path.Indices[i]);
+      }
+      if (same)
+        continue;
+      if (ReportedReductionReads.insert(read.Node).second)
+        error(read.Node->getLocation(),
+              "'" + read.Name +
+                  "' is written in a 'parallel for' body and "
+                  "cannot be read there except at the place "
+                  "written: another iteration could be "
+                  "writing what it reads");
+      ok = false;
+      break;
+    }
+  }
+  return ok;
+}
+
+bool Sema::checkReductionsNotRead(const ParallelContext &loop) {
+  bool ok = true;
+  for (const ParallelContext::Read &read : loop.Reads) {
+    if (ReductionOperands.count(read.Node))
+      continue;
+    for (const ast::ForStmt::Reduction &r : loop.Loop->getReductions())
+      if (*r.Name == read.Name) {
+        if (ReportedReductionReads.insert(read.Node).second)
+          error(read.Node->getLocation(),
+                "'" + read.Name +
+                    "' is a reduction of this 'parallel for' and cannot be "
+                    "read in its body: an iteration sees only part of it");
+        ok = false;
+      }
+  }
+  return ok;
 }
 
 // -- Atomic places (the prototype): a variable or a class field of an
@@ -402,10 +572,12 @@ bool Sema::checkAtomicAssign(ast::AssignStmt *node, ast::AtomicType *at) {
 
 void Sema::warnAtomicEveryIteration(const ast::Expr *place,
                                     ast::SourceLocation loc) {
-  // The body's own statements run every iteration; one in an `if` or a
-  // `match` inside it is in a scope of its own below the body's.
+  // The body's own statements run every iteration, up to a `continue`; one
+  // in an `if` or a `match` inside it is in a scope of its own below the
+  // body's.
   if (ParallelStack.empty() ||
-      CurrentScope->Parent != ParallelStack.back().Boundary)
+      CurrentScope->Parent != ParallelStack.back().Boundary ||
+      ParallelStack.back().SawContinue)
     return;
   const ast::Identifier *root = placeRoot(place);
   if (!root || !isOuterScope(CurrentScope->findOwner(root->getName())))
@@ -755,17 +927,27 @@ bool Sema::checkParallelBufferCall(const ast::MethodCallExpr *node,
   const std::string &m = node->getMethodName();
   if (m == "at" || m == "get" || m == "len")
     return true;
-  const std::string &var = ParallelStack.back().Loop->getVar()->getName();
+  std::string var = ParallelStack.back().Loop->getVar()->getName();
   if (m == "set" && node->getNumArguments() == 2) {
     // `set(i, v)`, or `set(unsigned<int>(i), v)`: the index is the loop's
-    // variable, possibly converted.
+    // variable, possibly converted, of each loop the buffer is outside of.
     const ast::Expr *idx = node->getArguments()[0];
     if (const auto *conv = ast::dyn_cast<ast::CallExpr>(idx);
         conv && conv->getNumArguments() == 1 &&
         isConversionTarget(conv->getCalleeName()))
       idx = conv->getArguments()[0];
     const auto *id = ast::dyn_cast<ast::Identifier>(idx);
-    if (id && id->getName() == var)
+    bool atEveryLoop = true;
+    forEachParallelOutside(
+        CurrentScope->findOwner(name), [&](ParallelContext &loop) {
+          const std::string &v = loop.Loop->getVar()->getName();
+          if (atEveryLoop && (!id || id->getName() != v ||
+                              CurrentScope->findOwner(v) != loop.Boundary)) {
+            atEveryLoop = false;
+            var = v;
+          }
+        });
+    if (atEveryLoop)
       return true;
     error(node->getArguments()[0]->getLocation(),
           "'" + name +
@@ -1412,6 +1594,10 @@ bool Sema::checkMovable(const std::string &name, ast::SourceLocation loc,
 }
 
 ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
+  // `move` leaves zeros behind: it writes what it moves from.
+  if (!checkParallelWrite(node->getOperand(), nullptr, "moved",
+                          node->getLocation()))
+    return nullptr;
   // `move x.f` (the prototype): the field leaves, and x ends.
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand()))
     return checkPartialMove(node, ma);

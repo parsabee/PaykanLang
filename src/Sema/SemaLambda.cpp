@@ -285,6 +285,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   const ResultContext savedResult = CurrentResult;
   const unsigned savedLoopDepth = LoopDepth;
   const unsigned savedLockBase = std::exchange(ReturnLockBase, LockDepth);
+  const unsigned savedLockLoopBase = std::exchange(LockLoopBase, 0u);
   const size_t savedParallelBase =
       std::exchange(ReturnParallelBase, ParallelStack.size());
   MethodUse *savedMethodUse = CurrentMethodUse;
@@ -359,6 +360,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   LoopDepth = savedLoopDepth;
   ReturnLockBase = savedLockBase;
   ReturnParallelBase = savedParallelBase;
+  LockLoopBase = savedLockLoopBase;
   MovedVars = std::move(savedMoves);
   LoopMoveStack = std::move(savedLoopMoves);
   FlowEnded = savedFlowEnded;

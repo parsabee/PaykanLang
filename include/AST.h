@@ -1504,6 +1504,9 @@ public:
     // slot with no definition.  The value of the `.pkm` design's PURE bit
     // (docs/design/pkm.md §3.5).
     Pure = 1 << 4,
+    // A `parallel for` body may call it (Sema::checkParSafety): read by its
+    // module's importers, who have not its body.
+    ParSafe = 1 << 5,
   };
 
 private:
@@ -1563,6 +1566,10 @@ public:
   /// Pure virtual: a vtable slot without a definition, which a subclass
   /// implements by overriding it (docs/language/05-classes.md).
   bool isPure() const { return MethodFlags & Pure; }
+  bool isParSafe() const { return MethodFlags & ParSafe; }
+  void setParSafe(bool v) {
+    MethodFlags = v ? MethodFlags | ParSafe : MethodFlags & ~ParSafe;
+  }
   /// The type's `___init__`: constructed, and extended, by its module only
   /// (Sema::checkConstructible).
   bool isModulePrivateInit() const { return ModulePrivateInit; }

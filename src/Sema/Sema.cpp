@@ -1646,7 +1646,10 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
             "' inside an optional yet";
     else
       msg = inoutPlaceError(subject, "bound by " + what);
-    if (msg.empty()) {
+    if (msg.empty() && !checkParallelWrite(subject, nullptr, "bound 'inout'",
+                                           arm->getLocation())) {
+      // Reported.
+    } else if (msg.empty()) {
       // The storage's writes; a `shared mut` subject's binding is that
       // form (#368), so `mem::replace` through it trades shared references.
       CurrentScope->Kinds[name] = VarKind::Inout;
@@ -2145,7 +2148,7 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
   if (ty && !S.checkNotMoved(node->getName(), node->getLocation()))
     return nullptr;
   if (ty && !S.ParallelStack.empty() &&
-      !S.checkParallelRead(node->getName(), ty, node->getLocation()))
+      !S.checkParallelRead(node, node->getName(), ty, node->getLocation()))
     return nullptr;
   // Inside a lambda, a variable of the function it is written in is
   // captured (by copy) when it is first used; an `atomic` one too (before
@@ -3472,6 +3475,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   " has 'len()')");
       return nullptr;
     }
+    if (!S.ParallelStack.empty())
+      S.noteParallelNoElementRead(node->getReceiver());
     node->setResolvedType(S.Ctx.getIntTy());
     return S.Ctx.getIntTy();
   }
@@ -3990,6 +3995,8 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   S.WantAtomicHandle = false;
   if (!arrayTy)
     return nullptr;
+  if (!S.ParallelStack.empty())
+    S.noteParallelElementRead(node);
   if (!S.checkNotLocked(node->getArray(), node->getLocation()))
     return nullptr;
   if (auto *at = ast::dyn_cast<ast::AtomicType>(arrayTy))
@@ -4476,6 +4483,13 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       continue;
     }
     if (!checkReassignable(name, target.Loc)) {
+      ok = false;
+      continue;
+    }
+    if (isOuterScope(owner)) {
+      error(target.Loc, "cannot assign to '" + name +
+                            "' in a 'parallel for' body: a variable of the "
+                            "enclosing function changes only by a reduction");
       ok = false;
       continue;
     }
@@ -5072,6 +5086,11 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // Hand the instantiations to the lowering as ordinary declarations.
   injectInstantiations(node);
 
+  // Every body is checked now, and each instantiation is the module's: what
+  // a `parallel for` body calls can be judged, and what importers will read.
+  if (ok && !hasErrors() && !checkParSafety(node))
+    ok = false;
+
   // The suggestions need every body checked, and are noise next to errors.
   if (ok && !hasErrors())
     warnMissingViewFns();
@@ -5298,8 +5317,15 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
         return false;
       return checkAtomicAssign(node, at);
     }
-    if (isOuterScope(owner))
+    if (isOuterScope(owner)) {
+      // A reduction changes the variable all the same.
+      if (!LambdaStack.empty() && !captureVariable(node->getVarName(), varTy,
+                                                   owner, node->getLocation()))
+        return false;
+      if (!checkReassignable(node->getVarName(), node->getLocation()))
+        return false;
       return checkParallelAssign(node, varTy);
+    }
   }
   // An existing variable's type is the value's expected type.
   ast::Type *expected = nullptr;
@@ -5751,7 +5777,7 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
     return false;
   }
   if (node->isParallel())
-    ParallelStack.push_back({node, CurrentScope});
+    ParallelStack.push_back({node, CurrentScope, LoopDepth + 1, false, {}, {}});
   if (!discard)
     DeclLoopDepth[varKey(CurrentScope, name)] = LoopDepth + 1;
   beginLoopMoves(node->getLocation());
@@ -5759,8 +5785,12 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   bool bodyOk = visit(node->getBody());
   --LoopDepth;
   finishLoopMoves();
-  if (node->isParallel())
+  if (node->isParallel()) {
+    if (!checkReductionsNotRead(ParallelStack.back()) ||
+        !checkWrittenArraysNotRead(ParallelStack.back()))
+      bodyOk = false;
     ParallelStack.pop_back();
+  }
   return ok && bodyOk;
 }
 
@@ -5839,9 +5869,12 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
     error(node->getLocation(), "'break' cannot leave a 'lock' block");
     return false;
   }
-  if (!ParallelStack.empty()) {
+  // The `parallel for`'s own iterations cannot be left early; a loop in its
+  // body can.
+  if (ParallelStack.size() > ReturnParallelBase &&
+      LoopDepth <= ParallelStack.back().LoopBase) {
     error(node->getLocation(),
-          "'break' cannot be used in a 'parallel for' body (the prototype)");
+          "'break' cannot be used in a 'parallel for' body");
     return false;
   }
   // The moves so far leave the loop by this path; the task handles of the
@@ -5864,11 +5897,10 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
     error(node->getLocation(), "'continue' cannot leave a 'lock' block");
     return false;
   }
-  if (!ParallelStack.empty()) {
-    error(node->getLocation(), "'continue' cannot be used in a 'parallel "
-                               "for' body (the prototype)");
-    return false;
-  }
+  // It ends the iteration of a `parallel for` it is directly in.
+  if (ParallelStack.size() > ReturnParallelBase &&
+      LoopDepth <= ParallelStack.back().LoopBase)
+    ParallelStack.back().SawContinue = true;
   // The next iteration starts here; the task handles of the scopes inside
   // the loop are spent before it (the prototype).
   if (!LoopMoveStack.empty()) {
@@ -6506,6 +6538,12 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
   auto savedLambdas = std::exchange(LambdaStack, {});
   auto savedBorrows = std::exchange(Borrows, {});
   const unsigned savedLoopDepth = std::exchange(LoopDepth, 0u);
+  // … nor is a `parallel for` or a `lock` it is first used in.
+  auto savedParallel = std::exchange(ParallelStack, {});
+  const size_t savedParallelBase = std::exchange(ReturnParallelBase, size_t{0});
+  const unsigned savedLockDepth = std::exchange(LockDepth, 0u);
+  const unsigned savedLockBase = std::exchange(ReturnLockBase, 0u);
+  const unsigned savedLockLoopBase = std::exchange(LockLoopBase, 0u);
   ClassContext *savedClassCtx = std::exchange(CurrentClassCtx, nullptr);
   MethodUse *savedMethodUse = std::exchange(CurrentMethodUse, nullptr);
   const StringSet *savedTypeParams = std::exchange(CurrentTypeParams, nullptr);
@@ -6517,6 +6555,7 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
   if (const PendingInstantiation *p = fn.Instance.get()) {
     InstantiationStack.push_back(
         {p->Name, p->RequestLoc, p->RequestFile, p->RequestLines});
+    InstanceFrames[fn.Decl] = InstantiationStack;
     CurrentTypeParams = &p->TypeParams;
     CurrentInstantiationDepth = p->Depth;
     std::vector<InstantiatingTemplate> savedTemplates =
@@ -6538,6 +6577,11 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
   LambdaStack = std::move(savedLambdas);
   Borrows = std::move(savedBorrows);
   LoopDepth = savedLoopDepth;
+  ParallelStack = std::move(savedParallel);
+  ReturnParallelBase = savedParallelBase;
+  LockDepth = savedLockDepth;
+  ReturnLockBase = savedLockBase;
+  LockLoopBase = savedLockLoopBase;
   CurrentClassCtx = savedClassCtx;
   CurrentMethodUse = savedMethodUse;
   CurrentTypeParams = savedTypeParams;
@@ -6841,6 +6885,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       !checkBorrowForm(node->getInitExpr(), qual, node->getMode(),
                        "local '" + node->getName() + "'"))
     viewOk = false;
+  if (node->getMode() == ast::ParamMode::Inout && node->getInitExpr() &&
+      !checkParallelWrite(node->getInitExpr(), nullptr, "bound 'inout'",
+                          node->getLocation()))
+    viewOk = false;
   // An `inout` local is the borrow's writes (a unique one's: a shared
   // form is its own, #368).
   if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy) &&
@@ -7033,6 +7081,10 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   // (an immutable or a frozen object's cells are usable).
   if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldTy))
     return checkAtomicMemberAssign(node, at);
+  if (ast::isa<ast::StructType>(recvTy) &&
+      !checkParallelWrite(node->getReceiver(), nullptr, "written",
+                          node->getLocation()))
+    return false;
 
   const bool path = ast::isa<ast::MemberAccessExpr>(node->getReceiver()) ||
                     ast::isa<ast::SubscriptExpr>(node->getReceiver()) ||
@@ -7105,29 +7157,14 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   } else if (idxTy && fixed && !checkFixedIndex(fixed, node->getIndex())) {
     return false;
   }
-  // A `parallel for` body (the prototype) writes an array of the enclosing
-  // function at the loop's variable only (its first index, for an array of
-  // arrays): no two iterations then write one element.
-  if (!ParallelStack.empty()) {
-    const ast::Expr *arr = node->getArray();
-    const ast::Expr *first = node->getIndex();
-    while (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(arr)) {
-      first = se->getIndex();
-      arr = se->getArray();
-    }
-    const auto *root = ast::dyn_cast<ast::Identifier>(arr);
-    const auto *idx = ast::dyn_cast<ast::Identifier>(first);
-    const std::string &var = ParallelStack.back().Loop->getVar()->getName();
-    if (root && isOuterScope(CurrentScope->findOwner(root->getName())) &&
-        (!idx || idx->getName() != var)) {
-      error(first->getLocation(),
-            "'" + root->getName() +
-                "' is written in a 'parallel for' body at an index other "
-                "than the loop's variable '" +
-                var + "': two iterations could write one element");
-      return false;
-    }
-  }
+  // A `parallel for` body writes an array of the enclosing function at the
+  // loop's variable only: no two iterations then write one element.
+  if (const ast::Identifier *root = placeRoot(node->getArray());
+      root && !ParallelStack.empty())
+    noteParallelNoElementRead(root);
+  if (!checkParallelWrite(node->getArray(), node->getIndex(), "written",
+                          node->getLocation()))
+    return false;
   // An error in the array or the index, as a read of them reports it.
   const bool targetFailed =
       Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;

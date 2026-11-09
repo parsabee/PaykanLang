@@ -25,6 +25,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `errors/err_atomic_spellings.pkn` | the spellings the parser rejects: `const` in any form, `atomic shared mut`, `atomic mut`, `mut shared`, a second qualifier |
 | `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
 | `errors/err_buffers.pkn` | a buffer written at another index than the loop's variable, or reshaped, in a parallel body |
+| `errors/err_parsafe.pkn` | what a `parallel for` body cannot call, directly or through what it calls |
 | `errors/err_send.pkn` | a `shared` part, an `Obj`, a function value or a `weak` field that cannot cross; a result that cannot; qualifiers on borrows rejected; `Copyable` |
 
 ## What is in the prototype
@@ -231,8 +232,7 @@ parameter, async methods, importing a module that declares an `async fn`
 be imported in the prototype`), a task whose result is a tuple, a struct
 or an optional value (`an 'async fn' returns a number, bool, char, a
 reference or nothing in the prototype`), task handles in fields, elements
-or tuples (not followed by the await check), `break`/`continue` in a
-parallel body, the par-safe call check, and the diagnostics' final
+or tuples (not followed by the await check), and the diagnostics' final
 wording.  A program with an `async fn` is compiled with the `-O1` pipeline
 under `-O0` (the coroutines of MLIR's async runtime do not survive an
 unoptimized split; the design's own runtime replaces the lowering).
