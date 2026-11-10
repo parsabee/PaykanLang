@@ -471,8 +471,9 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
       *why = "its " + what + " ('" + qualifiedName(q, t) + "') " +
              (what == "elements" ? "are" : "is") + " not Cloneable";
   };
-  // Every Copyable type is Cloneable: its clone is the copy.
-  if (isCopyable(ty) || ty == Ctx.getStrTy())
+  // Every Copyable type is Cloneable: its clone is the copy (one already
+  // reported, with no type, too).
+  if (!ty || isCopyable(ty) || ty == Ctx.getStrTy())
     return true;
   if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
     return isCloneablePart(qt->getInnerType(), qt->getQualifier(), why);
@@ -864,12 +865,22 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
         quals[i].Form == ast::QualForm::Shared &&
         !ast::isa<ast::NoneLiteral>(args[i]) && !(q == quals[i])) {
       const char *form = quals[i].Mut ? "weak mut" : "weak";
-      error(args[i]->getLocation(),
-            "cannot pass '" + text + "' (a '" + qualifiedName(q, ty) +
-                "') to parameter '" + modes.name(i) + "' of '" + callee +
-                "', a '" + form + "' field's: a '" + form +
-                "' reference names a '" + qualifiedName(quals[i], nullptr) +
-                "' object");
+      std::string msg = "cannot pass '";
+      msg += text;
+      msg += "' (a '";
+      msg += qualifiedName(q, ty);
+      msg += "') to parameter '";
+      msg += modes.name(i);
+      msg += "' of '";
+      msg += callee;
+      msg += "', a '";
+      msg += form;
+      msg += "' field's: a '";
+      msg += form;
+      msg += "' reference names a '";
+      msg += qualifiedName(quals[i], nullptr);
+      msg += "' object";
+      error(args[i]->getLocation(), msg);
       ok = false;
       continue;
     }
@@ -1733,9 +1744,11 @@ bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
 }
 
 bool Sema::isCopyPlace(const ast::Expr *e) {
+  if (!e)
+    return false;
   // An `inout` result names the storage it borrows (#368): what it holds
   // stays there, so a copy of it is another owner.
-  if (e && e->isInoutResult())
+  if (e->isInoutResult())
     return true;
   // A named function is no place: naming it makes a new function value.
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))

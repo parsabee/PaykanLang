@@ -174,7 +174,8 @@ TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys,
   auto it = TupleTypes.find(key);
   if (it != TupleTypes.end())
     return it->second;
-  auto *tt = make<TupleType>(SourceLocation(), elemTys, std::move(elemQuals));
+  auto *tt = make<TupleType>(SourceLocation(), std::move(elemTys),
+                             std::move(elemQuals));
   TupleTypes[std::move(key)] = tt;
   return tt;
 }
