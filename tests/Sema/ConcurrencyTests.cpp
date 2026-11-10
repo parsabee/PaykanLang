@@ -424,10 +424,11 @@ fn main() -> int {
 
 // What a body may not do: read a reference of the enclosing function (an
 // object, an array of objects, a `Str`); assign an outer variable other
-// than by a reduction (`=` of a value, `/=`; `x = x + e` and `x = x * e`
-// are the reductions the parser spells `+=` and `*=`); write an outer array
-// at any index but the loop's variable; `break`, `continue`, `return`
-// (from an inner loop too), `await`, or start a task.
+// than by a reduction (`=` of a value, `/=`; `x = x + e` and `x = x - e`
+// are the reductions the parser spells `+=` and `-=`); write an outer array
+// at any index but the loop's variable; `break`, `return`, `await`, or
+// start a task.  A `continue` ends the iteration, and a loop in the body has
+// its own `break`.
 TEST(Concurrency, ParallelForBodyRejects) {
   auto r = semaCheck(R"(class Node { id: int; }
 async fn consume(n: int) -> int { return n; }
@@ -446,7 +447,7 @@ fn main() -> int {
     total += 1;
     total /= 2;
     total = total + i;
-    total = total * 2;
+    total = total - 2;
   }
   let xs = [0.0; 4];
   ys = [0.0; 4];
@@ -464,9 +465,9 @@ fn main() -> int {
   parallel for i in 0..4 { for j in 0..2 { break; } }
   return total;
 })");
-  // The thirteen rejections, and the task `t` of line 31 that the body may
+  // The eleven rejections, and the task `t` of line 31 that the body may
   // not await (line 32) and the function never does: the handle check.
-  EXPECT_EQ(r.ErrorCount, 14u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 12u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find(":34:3: error: task 't' is not awaited before "
                                "this 'return'"),
             std::string::npos)
@@ -488,16 +489,557 @@ fn main() -> int {
           (":11:13: error: 's' (a 'Str') " + read).c_str(),
           (":14:5" + assign).c_str(), (":16:5" + assign).c_str(),
           (":23:8" + atIndex).c_str(), (":24:8" + atIndex).c_str(),
-          ":27:28: error: 'break' cannot be used in a 'parallel for' body "
-          "(the prototype)",
-          ":28:28: error: 'continue' cannot be used in a 'parallel for' body "
-          "(the prototype)",
+          ":27:28: error: 'break' cannot be used in a 'parallel for' body",
           ":29:28: error: 'return' cannot leave a 'parallel for' body",
           ":30:36: error: a task cannot be started in a 'parallel for' body",
-          ":32:36: error: 'await' cannot be used in a 'parallel for' body",
-          ":33:44: error: 'break' cannot be used in a 'parallel for' body "
-          "(the prototype)"});
-  expectCleanLines(r, {":15:", ":17:", ":18:", ":25:"});
+          ":32:36: error: 'await' cannot be used in a 'parallel for' body"});
+  expectCleanLines(r, {":15:", ":17:", ":18:", ":25:", ":28:", ":33:"});
+}
+
+// `continue` ends an iteration, and a loop in the body has its own `break`
+// and `continue`, in a lambda too.
+TEST(Concurrency, ParallelForContinueAndItsInnerLoops) {
+  auto r = semaCheck(R"(fn main() -> int {
+  s = 0;
+  parallel for i in 0..4 {
+    if i == 1 { continue; }
+    for j in 0..3 {
+      if j == 1 { continue; }
+      if j == 2 { break; }
+      s += 1;
+    }
+    n = 0;
+    while True {
+      n += 1;
+      if n > 2 { break; }
+    }
+    let f = fn(x: int) -> int {
+      for k in 0..x { if k == 1 { break; } }
+      return x;
+    };
+    parallel for k in 0..2 { if k == 0 { continue; } }
+  }
+  return s;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// A body calls what is par-safe: its own functions, to a fixed point over
+// recursion; `::math`; `Str` and buffers; constructors; methods the compiler
+// can resolve (a struct's, an `impl` block's, of a generic class; in a
+// program, of a class with every override known).
+TEST(Concurrency, ParallelForCallsParSafeFunctions) {
+  auto r = semaCheck(R"(import ::math as m;
+import ::memory as mem;
+struct P { x: int; }
+impl P { view fn twice() -> int { return self.x * 2; } }
+class C { n: int; view fn get() -> int { return self.n; } }
+impl C {
+  fn __init__(n: int) { self.n = n; }
+  view fn direct() -> int { return self.n; }
+}
+class D : C { view fn get() -> int { return self.n + 1; } }
+impl D { fn __init__(n: int) { __super__(n); } }
+fn fib(n: int) -> int {
+  if n < 2 { return n; }
+  return fib(n - 1) + fib(n - 2);
+}
+fn even(n: int) -> bool {
+  if n == 0 { return True; }
+  return odd(n - 1);
+}
+fn odd(n: int) -> bool {
+  if n == 0 { return False; }
+  return even(n - 1);
+}
+fn same<T>(x: T) -> T { return x; }
+fn main() -> int {
+  parallel for i in 0..4 {
+    let a = m::sqrt(float(i)) + m::pow(2.0, float(i));
+    let b = fib(i) + same<int>(i) + P(i).twice();
+    let c: C = D(i);
+    let d = c.get() + c.direct();
+    let e = Str(i) + "x";
+    if even(i) && e == "1x" { continue; }
+    let o = mem::Box<int>(i);
+    let v = o.value();
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// What a body cannot call: printing, directly or down a chain of calls and
+// through a recursion; a function value, wherever it is held; a native
+// outside the list; an override that prints.
+TEST(Concurrency, ParallelForRefusesCallsThatAreNotParSafe) {
+  auto r = semaCheck(R"(import ::io;
+fn log(x: int) { io::println(Str(x)); }
+fn deep(x: int) { log(x); }
+fn apply(x: int) -> int {
+  let g = fn(y: int) -> int { return y; };
+  return g(x);
+}
+class H { cb: (int) -> int; }
+impl H { fn __init__() { self.cb = fn(x: int) -> int { return x; }; } }
+class Base { view fn m() -> int { return 1; } }
+impl Base { fn __init__() { } }
+class Over : Base { view fn m() -> int { io::println("o"); return 2; } }
+impl Over { fn __init__() { __super__(); } }
+native fn sysAbs(x: int) -> int = "abs";
+fn ring(x: int) -> int {
+  if x > 0 { return back(x); }
+  return 0;
+}
+fn back(x: int) -> int {
+  io::println("b");
+  return ring(x - 1);
+}
+fn quiet(x: int) -> int { return x; }
+fn main() -> int {
+  parallel for i in 0..2 {
+    io::println("hi");
+    deep(i);
+    let a = apply(i);
+    let f = fn(x: int) -> int { return x; };
+    let b = f(i);
+    let h = H();
+    let c = h.cb(i);
+    let o: Base = Base();
+    let d = o.m();
+    let e = sysAbs(i);
+    let r = ring(i);
+    let q = quiet(i);
+    parallel for j in 0..2 { log(j); }
+  }
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  const std::string prefix = ": error: a 'parallel for' body cannot call ";
+  const std::string println =
+      "'::io::println<Str>', which calls '::io::_println', which is not "
+      "par-safe";
+  expectErrors(
+      r,
+      {(":26:5" + prefix + println).c_str(),
+       (":27:5" + prefix + "'deep', which calls 'log', which calls " + println)
+           .c_str(),
+       (":28:13" + prefix + "'apply', which calls a function value").c_str(),
+       (":30:13" + prefix + "a function value").c_str(),
+       (":32:13" + prefix + "a function value").c_str(),
+       (":34:13" + prefix + "'Over.m', which calls " + println).c_str(),
+       (":35:13" + prefix +
+        "'sysAbs', which is a native function outside the par-safe list")
+           .c_str(),
+       (":36:13" + prefix + "'ring', which calls 'back', which calls " +
+        println)
+           .c_str(),
+       (":38:30" + prefix + "'log', which calls " + println).c_str()});
+  expectCleanLines(r, {":29:", ":31:", ":33:", ":37:"});
+}
+
+// A module that others may import does not know what is derived from its
+// classes: a virtual call cannot be resolved, one on a generic instance and
+// an `impl` block's can.  A lambda's body is judged only where it is called;
+// its own `parallel for` is checked.
+TEST(Concurrency, ParallelForInAModuleThatMayBeImported) {
+  auto r = semaCheck(R"(import ::io;
+class C { view fn m() -> int { return 1; } }
+impl C {
+  fn __init__() { }
+  view fn direct() -> int { return 2; }
+}
+class G<T> { view fn m() -> int { return 1; } }
+impl G<T> { fn __init__() { } }
+fn f() {
+  parallel for i in 0..2 {
+    let o = C();
+    let a = o.direct();
+    let b = o.m();
+    let c = o == o;
+    let t = Str(o);
+    let g = G<int>();
+    let h = g.m();
+    let w = fn(x: int) -> int { io::println("in a lambda"); return x; };
+  }
+  let v = fn(x: int) -> int {
+    parallel for i in 0..x { io::println("in its loop"); }
+    return x;
+  };
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  const std::string may = "', which a class derived from 'C' may override";
+  const std::string prefix = ": error: a 'parallel for' body cannot call '";
+  expectErrors(
+      r, {(":13:13" + prefix + "C.m" + may).c_str(),
+          (":14:13" + prefix + "C.equals" + may).c_str(),
+          (":15:13" + prefix + "C.toString" + may).c_str(),
+          (":21:30" + prefix +
+           "::io::println<Str>', which calls '::io::_println', which is not "
+           "par-safe")
+              .c_str()});
+  expectCleanLines(r, {":12:", ":16:", ":17:", ":18:"});
+}
+
+// `==` on a struct is the runtime's, field by field, whatever `equals` it
+// declares: what the check follows is its fields' objects.
+TEST(Concurrency, ParallelForFollowsWhatEqualityRuns) {
+  auto hidden = semaCheck(R"(import ::io;
+class C {
+  view fn equals(other: Obj) -> bool {
+    io::println("from the body");
+    return True;
+  }
+}
+struct S { c: C; }
+impl S { view fn equals(q: view S) -> bool { return True; } }
+fn main() -> int {
+  parallel for i in 0..2 {
+    let a = S(C()) == S(C());
+    let t = (S(C()), 1) != (S(C()), 1);
+  }
+  return 0;
+}
+)");
+  EXPECT_EQ(hidden.ErrorCount, 2u) << hidden.Diagnostics;
+  expectErrors(hidden, {":12:13: error: a 'parallel for' body cannot call "
+                        "'C.equals'",
+                        ":13:13: error: a 'parallel for' body cannot call "
+                        "'C.equals'"});
+  auto declared = semaCheck(R"(import ::io;
+struct S { x: int; }
+impl S {
+  view fn equals(q: view S) -> bool {
+    io::println("never run by ==");
+    return False;
+  }
+}
+fn main() -> int {
+  parallel for i in 0..2 {
+    let a = S(1) == S(1);
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(declared.Ok) << declared.Diagnostics;
+}
+
+// A reduction is mentioned nowhere else in its body, and takes one kind of
+// operation, also in the loops around the one it is written in.
+TEST(Concurrency, ParallelForReductionsAreOnlyAccumulated) {
+  auto r = semaCheck(R"(fn main() -> int {
+  s = 0;
+  parallel for i in 0..4 {
+    if s > 10 { continue; }
+    s += 1;
+  }
+  t = 0;
+  parallel for i in 0..4 {
+    t += t;
+  }
+  u = 1;
+  parallel for i in 0..4 {
+    u += 1;
+    u *= 2;
+  }
+  v = 0;
+  parallel for i in 0..4 {
+    let a = v;
+    parallel for j in 0..4 { v += 1; }
+  }
+  w = 1;
+  parallel for i in 0..4 {
+    w *= 2;
+    parallel for j in 0..4 { w += 1; }
+  }
+  return s + t + u + v + w;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  const std::string read =
+      "is a reduction of this 'parallel for' and cannot be read in its body: "
+      "an iteration sees only part of it";
+  const std::string other =
+      "is a reduction of this 'parallel for' by another operation: '+=' and "
+      "'-=' combine with each other, '*=' with itself";
+  expectErrors(r, {(":4:8: error: 's' " + read).c_str(),
+                   (":9:10: error: 't' " + read).c_str(),
+                   (":14:5: error: 'u' " + other).c_str(),
+                   (":18:13: error: 'v' " + read).c_str(),
+                   (":24:30: error: 'w' " + other).c_str()});
+  auto fine = semaCheck(R"(fn main() -> int {
+  p = 1;
+  parallel for i in 0..4 { p = p * 2; }
+  s = 0;
+  parallel for i in 0..4 {
+    s += i;
+    s -= 1;
+    x = 0;
+    parallel for j in 0..4 {
+      s += j;
+      x += j;
+    }
+    let y = x;
+  }
+  return s;
+}
+)");
+  EXPECT_TRUE(fine.Ok) << fine.Diagnostics;
+}
+
+// A function whose result is inferred has its body checked where it is
+// first used: as a body of its own, whatever loop or lock that is in; and a
+// lambda's own loop is its own, in a `lock` block too.
+TEST(Concurrency, ABodyCheckedAtItsFirstUseIsItsOwn) {
+  auto r = semaCheck(R"(class C { x: int; }
+fn sq(x) => x * x;
+fn same<T: Copyable>(x: T) => x;
+fn twice(x) => x + x;
+fn main() -> int {
+  s = 0;
+  parallel for i in 0..4 { s += sq(i) + same(i); }
+  let c: locked mut = C(0);
+  parallel for i in 0..2 {
+    lock c as v: inout {
+      v.x = twice(1);
+      let f = fn(x: int) -> int {
+        for k in 0..x { if k == 1 { break; } else { continue; } }
+        return x;
+      };
+    }
+  }
+  return s;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// A `continue` before it means a statement does not run on every iteration.
+TEST(Concurrency, ParallelForAtomicWarningComesBeforeAContinue) {
+  auto skipped = semaCheck(R"(fn main() -> int {
+  hits: atomic int = 0;
+  parallel for i in 0..10 {
+    if i % 10 != 0 { continue; }
+    hits += 1;
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(skipped.Ok) << skipped.Diagnostics;
+  EXPECT_EQ(skipped.Diagnostics.find("warning:"), std::string::npos)
+      << skipped.Diagnostics;
+  auto every = semaCheck(R"(fn main() -> int {
+  hits: atomic int = 0;
+  parallel for i in 0..10 {
+    hits += 1;
+    if i % 10 != 0 { continue; }
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(every.Ok) << every.Diagnostics;
+  EXPECT_NE(every.Diagnostics.find(":4:5: warning: 'hits' changes on every "
+                                   "iteration"),
+            std::string::npos)
+      << every.Diagnostics;
+}
+
+// An instantiation of a generic `async fn` is `async`.
+TEST(Concurrency, AGenericAsyncFunctionStartsATask) {
+  auto r = semaCheck(R"(async fn t<T: Copyable>(x: T) -> int { return 1; }
+fn main() -> int {
+  parallel for i in 0..2 {
+    let a = t(i);
+  }
+  return 0;
+}
+)");
+  expectErrors(r, {":4:13: error: a task cannot be started in a 'parallel "
+                   "for' body"});
+}
+
+// What the enclosing function holds changes only by a reduction, or in an
+// array through a subscript that is the variable of each loop it is outside
+// of: not through a field, an `inout` argument or local, a struct's changing
+// method, a destructuring or a `move`.
+TEST(Concurrency, ParallelForRefusesWritesToWhatTheFunctionHolds) {
+  auto r = semaCheck(R"(struct P { x: int; }
+impl P { fn bump() { self.x = self.x + 1; } }
+fn nudge(v: inout int) { v += 1; }
+fn fill(v: inout int[]) { v[0] = 1; }
+fn main() -> int {
+  p = P(0);
+  x = 0;
+  ys = [0; 4];
+  ps = [P(0), P(0)];
+  a = 0;
+  b = 0;
+  parallel for i in 0..2 {
+    p.x += 1;
+    nudge(x);
+    r: inout = x;
+    nudge(ys[0]);
+    fill(ys);
+    p.bump();
+    ps[0].x = 1;
+    a, b = (i, i);
+    let m = move p;
+  }
+  return 0;
+}
+)");
+  const std::string only =
+      "in a 'parallel for' body: what the enclosing function holds changes "
+      "only by a reduction of a variable, or at the loop's variable in an "
+      "array";
+  const std::string index = "in a 'parallel for' body at an index other than "
+                            "the loop's variable 'i': two iterations could "
+                            "write one element";
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
+  expectErrors(r,
+               {(":13:5: error: 'p' is written " + only).c_str(),
+                (":14:11: error: 'x' is passed 'inout' " + only).c_str(),
+                (":15:5: error: 'x' is bound 'inout' " + only).c_str(),
+                (":16:14: error: 'ys' is passed 'inout' " + index).c_str(),
+                (":17:10: error: 'ys' is passed 'inout' " + only).c_str(),
+                (":18:5: error: 'p' is changed by 'bump' " + only).c_str(),
+                (":19:8: error: 'ps' is written " + index).c_str(),
+                ":20:5: error: cannot assign to 'a' in a 'parallel for' body",
+                ":20:8: error: cannot assign to 'b' in a 'parallel for' body",
+                (":21:13: error: 'p' is moved " + only).c_str()});
+}
+
+// The index is the loop's variable itself, not a name like it, and of each
+// loop the array is outside of; an array it writes is read at that place
+// only.  `y[i][j]` and `y[j][i]` both name one element per iteration.
+TEST(Concurrency, ParallelForArrayWritesAreAtEachLoopsVariable) {
+  auto r = semaCheck(R"(fn main() -> int {
+  ys = [0; 8];
+  parallel for i in 0..2 {
+    parallel for j in 0..8 { ys[j] = 1; }
+  }
+  parallel for i in 0..2 {
+    for i in 0..8 { ys[i] = 1; }
+  }
+  parallel for i in 1..8 {
+    ys[i] = ys[i - 1] + 1;
+  }
+  v = [0; 8];
+  parallel for i in 0..8 {
+    w: inout = v;
+    w[0] = 1;
+  }
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  const std::string index =
+      "'ys' is written in a 'parallel for' body at an index other than the "
+      "loop's variable 'i': two iterations could write one element";
+  expectErrors(r, {(":4:33: error: " + index).c_str(),
+                   (":7:24: error: " + index).c_str(),
+                   ":10:13: error: 'ys' is written in a 'parallel for' body "
+                   "and cannot be read there except at the place written",
+                   ":14:5: error: 'v' is bound 'inout'"});
+  auto fine = semaCheck(R"(struct P { x: int; }
+impl P { fn bump() { self.x = self.x + 1; } }
+fn nudge(v: inout int) { v += 1; }
+fn main() -> int {
+  ys = [0; 4];
+  ps = [P(0), P(0), P(0), P(0)];
+  parallel for i in 0..4 {
+    nudge(ys[i]);
+    ps[i].bump();
+    ps[i].x = ps[i].x + 1;
+    r: inout = ys[i];
+    r += 1;
+    q = P(0);
+    q.x += 1;
+    q.bump();
+    let n = ys.len();
+    ys[i] = ys[i] * 2;
+    ys[i] += 1;
+  }
+  y = [[0; 4]; 4];
+  z = [[0; 4]; 4];
+  parallel for i in 0..4 {
+    parallel for j in 0..4 {
+      y[i][j] = i * j;
+      z[j][i] = y[i][j] * 0 + z[j][i];
+    }
+  }
+  return y[3][3];
+}
+)");
+  EXPECT_TRUE(fine.Ok) << fine.Diagnostics;
+}
+
+// A reduction changes its variable all the same: not a `let`, a loop's
+// variable, a `view` or a lambda's capture.
+TEST(Concurrency, ParallelForReductionIsAnAssignment) {
+  auto r = semaCheck(R"(fn f(v: view int) -> int {
+  parallel for i in 0..2 { v += 1; }
+  return v;
+}
+fn main() -> int {
+  let s = 0;
+  parallel for i in 0..2 { s += 1; }
+  for k in 0..2 { parallel for i in 0..2 { k += 1; } }
+  q = 0;
+  let g = fn() -> int {
+    parallel for i in 0..2 { q += 1; }
+    return 1;
+  };
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  expectErrors(r, {":2:28: error: cannot assign to 'view' parameter 'v'",
+                   ":7:28: error: 's' is declared with 'let'",
+                   ":8:44: error: 'k' is the variable of a 'for' loop",
+                   ":11:30: error: cannot assign to 'q': the function "
+                   "captures it by copy"});
+}
+
+// A derived `clone` runs the clones of the fields.
+TEST(Concurrency, ParallelForFollowsADerivedClone) {
+  auto r = semaCheck(R"(import ::io;
+class Inner { n: int; }
+impl Cloneable for Inner {
+  view fn clone() -> Inner {
+    io::println("clone");
+    return Inner(self.n);
+  }
+}
+class Outer { x: Inner; }
+impl Cloneable for Outer {}
+class Plain { x: int; }
+impl Cloneable for Plain {}
+fn main() -> int {
+  parallel for i in 0..2 {
+    let a = Plain(i).clone();
+    let b = Outer(Inner(i)).clone();
+  }
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":16:13: error: a 'parallel for' body cannot call "
+                   "'Outer.clone', which calls 'Inner.clone'"});
+}
+
+// Every `native fn` of `::math` is one a body can call.
+TEST(Concurrency, ParallelForCanCallAllOfMath) {
+  for (const char *symbol :
+       {"sqrt", "pow", "atan2", "fmod", "remainder", "lgamma", "tgamma"})
+    EXPECT_TRUE(paykan::sema::isParSafeNative(symbol)) << symbol;
+  for (const char *symbol : {"abs", "Paykan_print", "Paykan_println",
+                             "Paykan_io_read", "Paykan_io_write", "getenv"})
+    EXPECT_FALSE(paykan::sema::isParSafeNative(symbol)) << symbol;
 }
 
 // An `atomic` variable of the enclosing function (an `atomic shared`

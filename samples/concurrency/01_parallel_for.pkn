@@ -8,8 +8,10 @@
 // expect-stdout: dot = 333283335000
 // expect-stdout: ys[7] = 21
 // expect-stdout: hits = 1000
+// expect-stdout: roots = 333283
 
 import ::io;
+import ::math as m;
 
 fn dot(xs: view float[], ys: view float[]) -> float {
   s = 0.0;
@@ -43,5 +45,13 @@ fn main() -> int {
     if i % 10 == 0 { hits += 1; }
   }
   io::println("hits = " + Str(hits));
+
+  // `continue` ends one iteration; the body calls only par-safe functions.
+  roots = 0.0;
+  parallel for i in 0..n {
+    if i % 2 == 1 { continue; }
+    roots += m::sqrt(float(i));
+  }
+  io::println("roots = " + Str(int(roots)));
   return 0;
 }

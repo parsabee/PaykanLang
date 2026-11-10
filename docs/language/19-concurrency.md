@@ -853,12 +853,16 @@ ys[7] = 15
 
 A body may read values of the enclosing function (numbers, `bool`, `char`, enums, and
 arrays of them, `view` or `inout`), its cells and frozen objects (`atomic`, `locked mut` and
-`atomic shared` variables), and the reduction variables; a reference, a `Str` or a function
-value of the enclosing function cannot be used, since reading one would count its object
-from several threads. A reduction is folded in a fixed order, so the result is the same on every run and
+`atomic shared` variables); a reference, a `Str` or a function value of the enclosing function
+cannot be used, since reading one would count its object from several threads. A reduction
+variable is only accumulated: an iteration sees just its own part of it, so reading it in the
+body is an error (`'s' is a reduction of this 'parallel for' and cannot be read in its body`),
+and one variable takes `+=` and `-=` or `*=`, not both. A reduction is folded in a fixed order, so the result is the same on every run and
 with any number of threads (a float sum may differ from the sequential loop's, never between
-runs). The body may call functions and run loops of its own, and `..=` and `step` are
-allowed; `break`, `continue`, `return`, `await` and starting a task are not:
+runs). The body may call [par-safe](#what-a-body-can-call) functions and run loops of its own,
+and `..=` and `step` are allowed. `continue` ends the iteration, and a loop inside the body has
+its own `break` and `continue`; a `break` of the `parallel for` itself, `return`, `await` and
+starting a task are not allowed:
 
 ```pkn
 class Node {
@@ -892,8 +896,15 @@ Error:
 ```
 'nodes' (a 'Node[2]') cannot be used in a 'parallel for' body: an iteration uses only values, arrays of values and 'atomic' variables of the enclosing function
 'ys' is written in a 'parallel for' body at an index other than the loop's variable 'i': two iterations could write one element
-'break' cannot be used in a 'parallel for' body (the prototype)
+'break' cannot be used in a 'parallel for' body
 ```
+
+An array is written only at the loop's variable, which keeps two iterations from writing one
+element, and read only at the place the body writes: `ys[i] = ys[i - 1] + 1` could read what
+another iteration is writing. With loops nested, the array is written at the variable of each
+loop it is outside of, as in `y[i][j]`. The same goes for passing an element `inout`, or calling
+a method of a struct that changes it. Anything else the enclosing function holds, a field, a whole
+array or a scalar, changes only by a reduction.
 
 (`count = count + 1` is `count += 1`, a reduction; the parser rewrites it.) A result that
 is not a reduction can be an `atomic` cell ([below](#atomic-cells)), changed from any
@@ -987,6 +998,48 @@ A buffer's `at`, `get` and `len` on a number type are read in place by the compi
 check and a load, with no call into the memory module and no count on the buffer's object,
 whether the buffer is the function's own or frozen in a box; `set` is still a call of the
 memory module's method (it checks the index and returns an `err::Error`).
+
+### What a body can call
+
+The iterations run in no particular order, so a body calls only **par-safe** functions, whose
+effect does not depend on that order. A function is par-safe unless it, or anything it calls:
+
+- prints or does other I/O;
+- calls a `native fn` other than those of `::math` and the runtime of `Str`, buffers and cells;
+- starts a task;
+- calls a function value, whether held in a variable, a field or an array;
+- makes a virtual call the compiler cannot resolve.
+
+The compiler follows the calls itself, through recursion and across modules:
+
+```pkn
+import ::io;
+
+fn log(i: int) {
+  io::println(Str(i));
+}
+
+fn main() -> int {
+  parallel for i in 0..4 {
+    log(i);
+  }
+  return 0;
+}
+```
+
+Error:
+
+```
+a 'parallel for' body cannot call 'log', which calls '::io::println<Str>', which calls '::io::_println', which is not par-safe
+```
+
+A virtual call is resolved when the compiler knows every method it can reach. That is so for
+a `Str` and an instance of a generic class, from which no class derives, and for a class of a
+program's main module, where the compiler has seen all the classes derived from it and checks
+each override. In a module that others import, a class can still be derived from elsewhere, so
+a virtual call on one of its classes is an error; an `impl` block's method is never overridden
+and can be called. `a == b` and `Str(a)` count as calls of `equals` and `toString` on the objects
+`a` holds.
 
 ## `locked mut` cells and `lock` blocks
 
@@ -1708,21 +1761,34 @@ one.
   statement. `..=` and `step` are allowed; the range is evaluated once, as for `for`.
 - A body uses, of the enclosing function: values (numbers, `bool`, `char`, enums, and arrays
   of them, a `view` or `inout` slice too), read only unless a reduction; `atomic`, `locked`,
-  `locked mut` and `atomic shared` variables and parameters; and the reduction variables. A
+  `locked mut` and `atomic shared` variables and parameters. A
   reference, a `Str`, a function value or an array of references is an error (`'nodes' (a
   'Node[2]') cannot be used in a 'parallel for' body: an iteration uses only values, arrays
   of values and 'atomic' variables of the enclosing function`).
 - A variable of the enclosing function changes only by a reduction, `s += e`, `s -= e` or
   `s *= e`, or, if `atomic`, by its operations (`cannot assign to 'mx' in a 'parallel for'
   body: a variable of the enclosing function changes only by a reduction ('mx += e', 'mx -=
-  e', 'mx *= e') or, if 'atomic', by its operations`).
-- An `inout` array of the enclosing function is written at the loop's index only (`'ys' is
-  written in a 'parallel for' body at an index other than the loop's variable 'i': two
-  iterations could write one element`).
-- `break`, `continue`, `return`, `await` and starting a task are errors in the body (`'break'
-  cannot be used in a 'parallel for' body (the prototype)`, `'return' cannot leave a
-  'parallel for' body`, `'await' cannot be used in a 'parallel for' body`, `a task cannot be
-  started in a 'parallel for' body`). The body may call functions and run loops.
+  e', 'mx *= e') or, if 'atomic', by its operations`). A reduction is mentioned nowhere else
+  in the body (`'s' is a reduction of this 'parallel for' and cannot be read in its body: an
+  iteration sees only part of it`), in a nested loop too.
+- What the enclosing function holds changes in no other way. An array, of a value or an `inout`
+  one, is written, passed `inout` or changed by a struct's method only at the variable of each
+  `parallel for` it is outside of (`y[i][j]` under loops on `i` and `j`; `'ys' is written in a
+  'parallel for' body at an index other than the loop's variable 'i': two iterations could
+  write one element`), and is read only at the place written. A field, a whole array or a
+  scalar is not written, passed `inout`, bound `inout`, moved or changed by a struct's method
+  (`'p' is written in a 'parallel for' body: what the enclosing function holds changes only by
+  a reduction of a variable, or at the loop's variable in an array`).
+- `continue` ends the iteration, and a loop inside the body has its own `break` and
+  `continue`. A `break` of the `parallel for` itself, `return`, `await` and starting a task
+  are errors in the body (`'break' cannot be used in a 'parallel for' body`, `'return' cannot
+  leave a 'parallel for' body`, `'await' cannot be used in a 'parallel for' body`, `a task
+  cannot be started in a 'parallel for' body`).
+- A body calls only [par-safe](#what-a-body-can-call) functions: no printing or I/O, no
+  `native fn` outside `::math` and the `Str`, buffer and cell runtime, no task started, no
+  function value and no virtual call the compiler cannot resolve, in what it calls either
+  (`a 'parallel for' body cannot call 'log', which calls ..., which is not par-safe`). A
+  function's verdict is in its module's interface.
 - The iterations are split into at most 256 chunks, each with a partial of its own for every
   reduction, folded in chunk order afterwards: the result does not depend on the number of
   threads or on which thread ran a chunk. A parallel float sum may differ from the
@@ -1808,7 +1874,6 @@ one.
   cloned.
 - A task is held by a variable: not in a tuple or an array, and not as a type argument.
 - `locked` holds an object, not a value: wrap a value in a class.
-- `break` and `continue` cannot be used in a `parallel for` body.
 - An object held in a struct, a tuple or an array is reached through the value, which takes
   no `mut`: the variable's `let` fixes the value's own storage and the objects it holds
   (`'p' is declared with 'let', and so are the objects it holds; drop 'let' to change

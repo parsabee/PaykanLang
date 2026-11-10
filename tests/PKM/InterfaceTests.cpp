@@ -345,6 +345,23 @@ TEST(Interface, NativeFunctions) {
       std::string::npos);
 }
 
+// A function's and a method's par-safe bits round-trip; a function with one
+// writes its flags byte, as a native does.
+TEST(Interface, ParSafeFunctionsAndMethods) {
+  Interface i = sortedSample();
+  Interface safe = i;
+  safe.Functions[2].ParSafe = true;
+  safe.Classes[0].Methods[1].Flags |= kMethodParSafe;
+  StatusOr<Interface> back =
+      readInterface(writeInterface(safe), "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, safe);
+  EXPECT_TRUE((*back).Functions[2].ParSafe);
+  EXPECT_FALSE((*back).Functions[2].Native);
+  EXPECT_FALSE((*back).Functions[0].ParSafe);
+  EXPECT_TRUE((*back).Classes[0].Methods[1].Flags & kMethodParSafe);
+}
+
 // A method's flags byte carries its pure virtual bit (§3.5's PURE, 0x10):
 // a CLASS record of a pure method round-trips; the bit on a struct's method,
 // an `impl` block's, an initializer or `destroy`, or a bit the format does
@@ -385,9 +402,9 @@ TEST(Interface, PureVirtualMethods) {
         << slotless;
   }
   bad = i;
-  bad.Classes[0].Methods[1].Flags = 0x60;
+  bad.Classes[0].Methods[1].Flags = 0xC0;
   EXPECT_NE(readError(writeInterface(bad), "shapes")
-                .find("method 'kind' has unknown flags 0x60"),
+                .find("method 'kind' has unknown flags 0xc0"),
             std::string::npos);
   // A `shared fn` is a class's method other than its initializer and its
   // destroy (Sema rejects the others).

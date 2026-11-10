@@ -13,6 +13,17 @@ samples/concurrency/README.md.
 
 ### Added
 
+- `continue` ends an iteration of a `parallel for`, and a loop in its body has its own `break` and
+  `continue` (#368). A `break` of the `parallel for` itself stays an error.
+- A `parallel for` body calls only par-safe functions (#368; docs/language/19-concurrency.md, "What
+  a body can call"): no printing or I/O, no `native fn` outside `::math` and the `Str`, buffer and
+  cell runtime, no task started, no function value and no virtual call the compiler cannot
+  resolve, in anything it calls. A function's verdict is in its module's `.pkm`.
+- A `parallel for` body changes what the enclosing function holds only by a reduction, or in an array
+  at the variable of each loop the array is outside of, and reads that array only where it writes
+  it (#368). A field, an `inout` argument or local, a struct's changing method, a destructuring and
+  a `move` go by the same rule. A reduction cannot be read in the body, cannot mix `+=` with `*=`,
+  and is folded in its own type, so a `u8` wraps as `+=` on it does.
 - Cells and frozen objects are freed (#368). An `atomic` or `locked` cell and every object of an
   `atomic shared` value are counted atomically, and the last reference to one, on any thread, frees
   it. A value made `atomic shared` while something else holds it stops the

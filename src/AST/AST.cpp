@@ -933,6 +933,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   clone->setView(fn->isView());
   clone->setShared(fn->isShared());
   clone->setStatic(fn->isStatic());
+  clone->setAsync(fn->isAsync());
   clone->setModulePrivateInit(fn->isModulePrivateInit());
   clone->setResultMode(fn->getResultMode());
   clone->setInferredResult(fn->hasInferredResult());
@@ -1051,6 +1052,7 @@ FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
   out->setView(copy->isView());
   out->setShared(copy->isShared());
   out->setStatic(copy->isStatic());
+  out->setAsync(copy->isAsync());
   out->setModulePrivateInit(copy->isModulePrivateInit());
   out->setResultMode(copy->getResultMode());
   out->setInferredResult(copy->hasInferredResult());

@@ -58,6 +58,11 @@ using ast::typeName;
 std::vector<std::vector<const ast::VarDecl *>>
 viewHoldEnds(const std::vector<ast::Stmt *> &stmts);
 
+/// Whether a `native fn` bound to the C function @p symbol may be called in
+/// a `parallel for` body: `::math`, and the Str, Buffer and cell runtime
+/// (docs/design/concurrency.md, "Calls, control and nesting").
+bool isParSafeNative(const std::string &symbol);
+
 struct SemaContext {
   /// For imported modules: owns the ParserDriver (and thus its ASTContext).
   /// nullptr for top-level contexts where the caller owns the driver.
@@ -574,14 +579,80 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct ParallelContext {
     ast::ForStmt *Loop;
     Scope *Boundary;
+    /// LoopDepth inside its body: a `break` at this depth is of the loop
+    /// itself, one deeper is of a loop in the body.
+    unsigned LoopBase;
+    /// A `continue` of this loop has been seen: what follows does not run
+    /// on every iteration.
+    bool SawContinue = false;
+    /// The subscripts on a place's way to its root, each with the scope
+    /// that binds it when it is a name.
+    struct ElementPath {
+      std::vector<const ast::Expr *> Indices;
+      std::vector<Scope *> Owners;
+    };
+    /// The reads, in the body, of variables from outside the loop.
+    struct Read {
+      const ast::Expr *Node;
+      std::string Name;
+      /// The element read, where the name is read through a subscript.
+      const ast::Expr *Element = nullptr;
+      ElementPath Path = {};
+      /// `xs.len()`, or the name of what an assignment writes: no element
+      /// is read.
+      bool ReadsNoElement = false;
+    };
+    std::vector<Read> Reads;
+    /// What the body writes of the arrays from outside the loop.
+    struct Write {
+      std::string Name;
+      const ast::Expr *Place;
+      ElementPath Path;
+    };
+    std::vector<Write> Writes;
   };
   std::vector<ParallelContext> ParallelStack;
+  /// The par-safe check and summaries (SemaParSafe.cpp), once every body is
+  /// checked.
+  struct ParSafety;
+  bool checkParSafety(ast::TranslationUnit *tu);
+  /// An importer may derive classes from this module's: set for an import
+  /// and for `--emit-pkm`.  Without it, a module with a `main` is a program
+  /// and knows every class derived from its own.
+  bool OpenWorld = false;
   /// Whether @p owner, the scope a name is bound in, is outside the
   /// innermost `parallel for`.
   bool isOuterScope(Scope *owner) const;
-  /// Whether a `parallel for` body may read @p name, of type @p ty.
-  bool checkParallelRead(const std::string &name, ast::Type *ty,
-                         ast::SourceLocation loc);
+  /// Whether a `parallel for` body may read @p name, of type @p ty, by the
+  /// identifier @p node.
+  bool checkParallelRead(const ast::Expr *node, const std::string &name,
+                         ast::Type *ty, ast::SourceLocation loc);
+  /// Calls @p f on each `parallel for` being checked, innermost first, that
+  /// @p owner, the scope a name is bound in, is outside of.
+  void forEachParallelOutside(Scope *owner,
+                              const std::function<void(ParallelContext &)> &f);
+  /// A reduction is mentioned nowhere else in its body (#368).
+  bool checkReductionsNotRead(const ParallelContext &loop);
+  /// The subscripts on the way from @p place to its root; @p last, if given,
+  /// is the one applied to @p place itself.
+  ParallelContext::ElementPath elementPath(const ast::Expr *place,
+                                           const ast::Expr *last = nullptr);
+  /// A `parallel for` body changes (@p how: "written", "passed 'inout'", ...)
+  /// what @p place names, with @p last subscripting it if given.  Storage of
+  /// the enclosing function changes only in an array, through a subscript
+  /// that is the variable of each loop it is outside of (#368).
+  bool checkParallelWrite(const ast::Expr *place, const ast::Expr *last,
+                          const std::string &how, ast::SourceLocation loc);
+  /// The body reads the element @p e: of the read of its root just made.
+  void noteParallelElementRead(const ast::Expr *e);
+  /// The body's read of the name @p root reads no element of it.
+  void noteParallelNoElementRead(const ast::Expr *root);
+  /// An array the body writes is read only at the written paths (#368).
+  bool checkWrittenArraysNotRead(const ParallelContext &loop);
+  /// The left operands of the reductions, which are not reads of them.
+  std::unordered_set<const ast::Expr *> ReductionOperands;
+  /// The reads of a reduction reported, once with nested loops.
+  std::unordered_set<const ast::Expr *> ReportedReductionReads;
   /// An assignment to a variable of the enclosing function in a `parallel
   /// for` body: a reduction, recorded on the loop.
   bool checkParallelAssign(ast::AssignStmt *node, ast::Type *varTy);
@@ -727,6 +798,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// An `async fn` (the concurrency prototype): ReturnType is the task
     /// of its result.
     bool Async = false;
+    /// A `parallel for` body may call it (SemaParSafe.cpp); for an import,
+    /// what its module's interface says.
+    bool ParSafe = false;
     /// The parameters' and the result's qualifiers (the prototype).
     std::vector<ast::Qualifier> ParamQuals;
     ast::Qualifier ResultQual;
@@ -1591,6 +1665,8 @@ public:
       ast::ParamModes Modes; // `n: inout int`
       /// A `native fn` (FunctionSig::Native).
       bool Native = false;
+      /// FunctionSig::ParSafe.
+      bool ParSafe = false;
       bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -1770,6 +1846,8 @@ public:
   /// Set the resolver imports go through (the driver's).  Child Semas
   /// inherit it.
   void setResolver(modules::ModuleResolver *resolver) { Resolver = resolver; }
+  /// See OpenWorld.
+  void setOpenWorld(bool open) { OpenWorld = open; }
 
 private:
   /// Resolve a module path to an absolute file path.
@@ -2706,6 +2784,10 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// The instantiations being checked around a template's body when it was
+  /// checked, for the notes of an error found after them.
+  std::unordered_map<const ast::Decl *, std::vector<InstantiationFrame>>
+      InstanceFrames;
   /// Where each class, struct and enum instantiation made here was first
   /// requested, by instantiation name: its template, the request, and the
   /// instantiations it was requested in (InstantiationStack then).  Type

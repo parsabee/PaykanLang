@@ -151,6 +151,212 @@ TEST(Concurrency, ParallelForReductions) {
 // An array is written at the loop's index only: through an `inout`
 // parameter, and a local array of the caller's own.  Every element is
 // written by exactly one iteration, so the loop needs no reduction.
+// `continue` ends one iteration, on every path: in order on the calling
+// thread, and in chunks whose threads each have their own exit flag.  What
+// the iteration holds is let go of.  A loop in the body has its own `break`
+// and `continue`.
+TEST(Concurrency, ParallelForContinue) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn main() -> int {
+      few = 0;
+      parallel for i in 0..100 {
+        if i % 2 == 0 { continue; }
+        few += i;
+      }
+      many = 0;
+      parallel for i in 0..100000 {
+        if i % 3 == 0 { continue; }
+        many += 1;
+      }
+      owned = 0;
+      parallel for i in 0..20000 {
+        let s = Str(i);
+        if i % 2 == 0 { continue; }
+        owned += s.len() - s.len() + 1;
+      }
+      inner = 0;
+      parallel for i in 0..20000 {
+        j = 0;
+        while True {
+          j += 1;
+          if j == 2 { continue; }
+          if j > 4 { break; }
+          inner += 1;
+        }
+        for k in 0..3 {
+          if k == 1 { continue; }
+          inner += 1;
+        }
+        if i % 2 == 0 { continue; }
+        inner += 1;
+      }
+      nested = 0;
+      parallel for i in 0..64 {
+        if i % 4 != 0 { continue; }
+        parallel for j in 0..64 {
+          if j % 2 == 0 { continue; }
+          nested += 1;
+        }
+      }
+      after = 0;
+      for i in 0..4 {
+        if i == 2 { continue; }
+        after += 1;
+      }
+      io::println(Str(few) + " " + Str(many) + " " + Str(owned) + " "
+                  + Str(inner) + " " + Str(nested) + " " + Str(after));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "2500 66666 10000 110000 512 3\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  g.expectNoLeaks("ParallelForContinue");
+}
+
+// A reduction written in a nested loop is a reduction of each loop it is
+// outside of: the inner loop's fold is a chunk's partial, not the variable.
+TEST(Concurrency, ParallelForNestedReductionIsFoldedOnce) {
+  auto r = compileAndRun(R"(import ::io;
+    fn main() -> int {
+      s = 0;
+      parallel for i in 0..2000 {
+        parallel for j in 0..100 {
+          s += 1;
+        }
+      }
+      io::println(Str(s));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "200000\n");
+}
+
+// The partials of a loop with a reduction are stack space of the function,
+// not of each time round the loop around it.
+TEST(Concurrency, ParallelForInALoopKeepsItsPartialsOnce) {
+  auto r = compileAndRun(R"(import ::io;
+    fn f(i: int) -> int { return i; }
+    fn main() -> int {
+      r = 0;
+      for j in 0..100000 {
+        s = 0;
+        parallel for i in 0..3 { s += f(i); }
+        r += s;
+      }
+      io::println(Str(r));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "300000\n");
+  EXPECT_EQ(r.ExitCode, 0);
+}
+
+// Code after a `continue` is dead, and may open statements of its own.
+TEST(Concurrency, DeadCodeAfterAContinueIsDiscarded) {
+  auto r = compileAndRun(R"(import ::io;
+    fn main() -> int {
+      parallel for i in 0..1 {
+        continue;
+        if i == 1 {
+          continue;
+          if i == 2 { }
+          while i == 3 { }
+          parallel for j in 0..2 { }
+        } else { }
+      }
+      io::println("done");
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "done\n");
+}
+
+TEST(Concurrency, AGenericAsyncFunctionIsAwaited) {
+  auto r = compileAndRun(R"(import ::io;
+    async fn t<T: Copyable>(x: T) -> T { return x; }
+    async fn m() -> int {
+      let h = t(7);
+      return await h;
+    }
+    fn main() -> int {
+      let h = m();
+      io::println(Str(await h));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n");
+}
+
+// The folds wrap as the type's own operations do, whatever the chunks'
+// partials added up to; a reduction on an `inout` writes through it.
+TEST(Concurrency, ParallelForReductionsKeepTheirType) {
+  auto r = compileAndRun(R"(import ::io;
+    fn f(s: inout int) { parallel for i in 0..4 { s += i; } }
+    fn g(s: inout float, t: inout u8) {
+      parallel for i in 0..4 { s += 0.5; t += 100; }
+    }
+    fn main() -> int {
+      s: u8 = 200;
+      parallel for i in 0..100 { s += 1; }
+      a: u8 = 0;
+      parallel for i in 0..10000 { if i % 2 == 0 { continue; } a += 1; }
+      b: i32 = 2147483647;
+      parallel for i in 0..2 { b += 1; }
+      c: i8 = -100;
+      parallel for i in 0..100 { c -= 1; }
+      d: u8 = 3;
+      parallel for i in 0..3 { d *= 7; }
+      n: u8 = 0;
+      parallel for i in 0..3000 { parallel for j in 0..3 { n += 1; } }
+      io::println(Str(s) + " " + Str(a) + " " + Str(b) + " " + Str(c) + " "
+                  + Str(d) + " " + Str(n));
+      t = 10;
+      f(t);
+      k = 1;
+      r: inout = k;
+      parallel for i in 0..10 { r += 1; }
+      x = 0.0;
+      y: u8 = 0;
+      g(x, y);
+      io::println(Str(t) + " " + Str(k) + " " + Str(x) + " " + Str(y));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "44 136 -2147483647 56 5 40\n16 11 2 144\n");
+  EXPECT_EQ(r.ExitCode, 0);
+}
+
+// A lambda in dead code builds a function of its own while the dead
+// statement around it is still open.
+TEST(Concurrency, ALambdaInDeadCodeLeavesItsStatementOpen) {
+  auto r = compileAndRun(R"(fn f() -> int {
+      return 1;
+      if True {
+        let g = fn(x: int) -> int { return x; };
+      }
+      return 0;
+    }
+    fn main() -> int {
+      parallel for i in 0..3 {
+        continue;
+        if i == 1 {
+          let g = fn() -> int { return 1; };
+        }
+      }
+      return f();
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 1);
+}
+
 TEST(Concurrency, ParallelForWritesAnInoutArrayAtTheLoopsIndex) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -977,13 +1183,23 @@ TEST(Concurrency, ACompoundAssignmentWhoseIndexTakesAnArgumentCompiles) {
 
 TEST(Concurrency, NoneIsNotCountedAcrossThreads) {
   auto r = compileAndRun(R"(import ::io;
-    fn main() -> int {
-      parallel for i in 0..4 {
-        match io::open("/dev/null", "r") {
-          o: Ok { for j in 0..200000 { let r = o.value.readln(); } }
-          e: Err { }
-        }
+    async fn reader() -> int {
+      match io::open("/dev/null", "r") {
+        o: Ok { for j in 0..200000 { let r = o.value.readln(); } }
+        e: Err { }
       }
+      return 0;
+    }
+    async fn run() -> int {
+      let a = reader();
+      let b = reader();
+      let c = reader();
+      let d = reader();
+      return await a + await b + await c + await d;
+    }
+    fn main() -> int {
+      let t = run();
+      await t;
       io::println("done");
       return 0;
     }

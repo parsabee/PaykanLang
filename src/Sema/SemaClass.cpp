@@ -3195,6 +3195,10 @@ bool Sema::checkPendingInstantiationBodies(
     }
     InstantiationStack.push_back(
         {p.Name, p.RequestLoc, p.RequestFile, p.RequestLines});
+    if (const ast::Decl *d = p.Class    ? static_cast<ast::Decl *>(p.Class)
+                             : p.Struct ? static_cast<ast::Decl *>(p.Struct)
+                                        : static_cast<ast::Decl *>(p.Func))
+      InstanceFrames[d] = InstantiationStack;
     const StringSet *savedParams = CurrentTypeParams;
     CurrentTypeParams = &p.TypeParams;
     const size_t savedDepth = CurrentInstantiationDepth;

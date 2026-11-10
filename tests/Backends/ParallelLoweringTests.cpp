@@ -1090,6 +1090,66 @@ TEST(ParallelLowering, ABodyWithALoopOrACallAlwaysForks) {
   }
 }
 
+// `continue` ends an iteration by the exit flag, and a chunk has its own:
+// the function's is another thread's to write.
+const char *const kContinue = R"(module "main"
+
+fn @work(%n.1: i64) -> i64 {
+  local %n.0: i64
+  local %s.1: i64
+  local %s.part.2: i64
+  local %par.k.3: i64
+  local %i.4: i64
+  store %n.0, %n.1
+  store %s.1, 0
+  %n.2 = load %n.0
+  store %s.part.2, 0
+  store %par.k.3, 0
+  while {
+    %par.kv.8 = load %par.k.3
+    %par.go.9 = ucmp lt %par.kv.8, %n.2
+    cond %par.go.9
+  } {
+    %par.idx.10 = load %par.k.3
+    %par.next.11 = add %par.idx.10, 1
+    store %par.k.3, %par.next.11
+    store %i.4, %par.idx.10
+    %i.13 = load %i.4
+    %eq.14 = cmp eq %i.13, 1
+    if %eq.14 {
+      continue
+    }
+    %s.15 = load %s.part.2
+    %add.16 = add %s.15, 1
+    store %s.part.2, %add.16
+  } parallel %par.k.3, %n.2 privates(%i.4) reduce(%s.part.2 add)
+  %s.17 = load %s.1
+  %s.part.18 = load %s.part.2
+  %s.fold.19 = add %s.17, %s.part.18
+  store %s.1, %s.fold.19
+  %s.20 = load %s.1
+  ret %s.20
+}
+
+fn @main() -> i64 {
+  ret 0
+}
+)";
+
+TEST(ParallelLowering, EachChunkHasItsOwnExitFlag) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  auto mod = lowerText(kContinue, *ctx, mlir_backend::Stage::SCF, err);
+  ASSERT_TRUE(mod) << err;
+  const std::string scf = print(*mod);
+  mlir::Operation *fn = functionNamed(mod->getOperation(), "pk_main_Swork");
+  ASSERT_TRUE(fn) << scf;
+  auto parallels = opsNamed(fn, "scf.parallel");
+  ASSERT_EQ(parallels.size(), 1u) << scf;
+  EXPECT_EQ(allocasNamed(parallels[0], "exit").size(), 1u) << scf;
+  expectRoundTrip(scf, *ctx);
+}
+
 // The LLVM path: the chunks become an omp.parallel / omp.wsloop, and the
 // loop carries `schedule(dynamic = 1)`, which convert-scf-to-openmp leaves
 // off (the runtime's default, static, lets a thread on a slow core set the

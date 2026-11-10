@@ -1852,6 +1852,135 @@ TEST(Pkm, ViewFnAcrossModules) {
 // byte, bit 4): the importer, without the source, works out which classes
 // are abstract, implements them in a subclass and runs it, and is refused
 // what it may not do with an abstract class.
+// An importer reads what a body may call from the module's interface; the
+// standard library's natives of `::math` are all par-safe.
+TEST(Pkm, ParSafeAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_parsafe_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "base.pkn", "import ::io;\n"
+                              "fn calm(x: int) -> int { return x + 1; }\n"
+                              "fn loud(x: int) -> int {\n"
+                              "  io::println(Str(x));\n"
+                              "  return x;\n}\n"
+                              "struct S { v: int; }\n"
+                              "impl S {\n"
+                              "  view fn calm() -> int { return self.v; }\n"
+                              "  view fn loud() -> int {\n"
+                              "    io::println(\"s\");\n"
+                              "    return self.v;\n  }\n}\n");
+  writeFile(dir / "main.pkn", "import ::io; import base;\n"
+                              "fn main() -> int {\n"
+                              "  s = 0;\n"
+                              "  parallel for i in 0..8 {\n"
+                              "    s += base::calm(i) + base::S(1).calm();\n"
+                              "  }\n"
+                              "  io::println(Str(s));\n"
+                              "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import base;\n"
+                             "fn main() -> int {\n"
+                             "  parallel for i in 0..8 {\n"
+                             "    let a = base::loud(i);\n"
+                             "    let b = base::S(1).loud();\n"
+                             "  }\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto expectRefused = [&] {
+    auto bad = paykan("--check-only bad.pkn");
+    EXPECT_NE(bad.exitCode, 0);
+    EXPECT_TRUE(contains(bad.out, "bad.pkn:4:13: error: a 'parallel for' body "
+                                  "cannot call 'base::loud', which is not "
+                                  "par-safe"))
+        << bad.out;
+    EXPECT_TRUE(contains(bad.out, "bad.pkn:5:13: error: a 'parallel for' body "
+                                  "cannot call 'S.loud', which is not "
+                                  "par-safe"))
+        << bad.out;
+  };
+  // From the source, and from the module file alone.
+  auto fromSource = paykan("--no-module-cache main.pkn");
+  ASSERT_EQ(fromSource.exitCode, 0) << fromSource.out;
+  EXPECT_TRUE(contains(fromSource.out, "44\n")) << fromSource.out;
+  expectRefused();
+  ASSERT_EQ(paykan("--emit-pkm base.pkn").exitCode, 0);
+  fs::remove(dir / "base.pkn");
+  auto fromFile = paykan("main.pkn");
+  ASSERT_EQ(fromFile.exitCode, 0) << fromFile.out;
+  EXPECT_TRUE(contains(fromFile.out, "44\n")) << fromFile.out;
+  expectRefused();
+  auto dump = paykan("pkm dump --section=iface base.pkm");
+  EXPECT_TRUE(contains(dump.out, "func calm(int) -> int par-safe")) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "func loud(int) -> int\n")) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "method calm() -> int flags 0x6 par-safe"))
+      << dump.out;
+  fs::remove_all(dir);
+#ifdef PAYKAN_TEST_STDLIB_DIR
+  auto math = run(paykanCmd() + " pkm dump --section=iface " +
+                  std::string(PAYKAN_TEST_STDLIB_DIR) + "/math.pkm");
+  ASSERT_EQ(math.exitCode, 0) << math.out;
+  std::istringstream lines(math.out);
+  size_t natives = 0;
+  for (std::string line; std::getline(lines, line);) {
+    if (line.find("native func ") == std::string::npos)
+      continue;
+    ++natives;
+    EXPECT_NE(line.find("par-safe"), std::string::npos) << line;
+  }
+  EXPECT_GT(natives, 30u);
+#endif
+}
+
+// What an importer's object inherits unchanged from a class compiled
+// elsewhere, and an instance that a module exports, have verdicts too.  An
+// error in another module's template says which instantiation asked for it.
+TEST(Pkm, ParSafeOfWhatAClassInherits) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_parinh_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "a.pkn", "import ::io;\n"
+                           "class C { }\n"
+                           "class Box<T> { v: int; }\n"
+                           "fn mk() -> Box<int> { return Box<int>(1); }\n"
+                           "fn each<T>(x: T) {\n"
+                           "  parallel for i in 0..4 { io::println(\"h\"); }\n"
+                           "}\n");
+  writeFile(dir / "main.pkn", "import a;\n"
+                              "class D : a::C { }\n"
+                              "fn main() -> int {\n"
+                              "  parallel for i in 0..4 {\n"
+                              "    let d = D();\n"
+                              "    let s = Str(d);\n"
+                              "    let e = d == d;\n"
+                              "    let b = a::mk();\n"
+                              "    let t = Str(b);\n"
+                              "    let u = b == b;\n"
+                              "  }\n"
+                              "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import a;\n"
+                             "fn main() -> int { a::each(1); return 0; }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto ok = paykan("--no-module-cache main.pkn");
+  EXPECT_EQ(ok.exitCode, 0) << ok.out;
+  ASSERT_EQ(paykan("--emit-pkm a.pkn").exitCode, 0);
+  auto fromFile = paykan("main.pkn");
+  EXPECT_EQ(fromFile.exitCode, 0) << fromFile.out;
+  auto bad = paykan("--no-module-cache --check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0);
+  EXPECT_TRUE(contains(bad.out, "a.pkn:6:28: error: a 'parallel for' body "
+                                "cannot call"))
+      << bad.out;
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:2:20: note: in instantiation of "
+                                "'a::each<int>' requested here"))
+      << bad.out;
+  fs::remove_all(dir);
+}
+
 TEST(Pkm, PureVirtualMethodsAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =

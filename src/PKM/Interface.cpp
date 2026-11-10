@@ -194,13 +194,15 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
       writeSig(v, strs, f->ReturnTypeName, f->ParamTypeNames);
       // The modes, the result's and the flags, each written when it or
       // what follows says anything.
-      const bool result = f->Native || f->Modes.Result != kModeValue;
+      const uint8_t flags = static_cast<uint8_t>(
+          (f->Native ? kFuncNative : 0) | (f->ParSafe ? kFuncParSafe : 0));
+      const bool result = flags != 0 || f->Modes.Result != kModeValue;
       if (!f->Modes.Modes.empty() || result)
         writeModes(v, strs, f->Modes);
       if (result)
         v.u8(f->Modes.Result);
-      if (f->Native)
-        v.u8(kFuncNative);
+      if (flags != 0)
+        v.u8(flags);
     });
   for (const StructRec *s : sortedByName(iface.Structs))
     record(decls, static_cast<uint64_t>(DeclTag::Struct), [&](ByteWriter &v) {
@@ -336,6 +338,7 @@ private:
       return r.fail("function '" + out.Name + "' has unknown flags " +
                     detail::hex(flags & ~kFuncKnownFlags));
     out.Native = flags & kFuncNative;
+    out.ParSafe = flags & kFuncParSafe;
     return true;
   }
   /// `uleb count` then records; @p body gets (tag, payload reader) for a

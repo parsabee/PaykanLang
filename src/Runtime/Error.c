@@ -10,6 +10,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -74,7 +75,12 @@ PaykanShared *Paykan_error_text(int64_t err) {
     int n = snprintf(text, sizeof text, "Unknown error %lld", (long long)err);
     return PaykanShared_new((PaykanObject *)PaykanString_new(text, n));
   }
+  // strerror's text may live in one buffer: a `parallel for` body may get
+  // here from several threads (Sema: isParSafeNative).
+  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+  pthread_mutex_lock(&lock);
   const char *text = strerror((int)err);
-  return PaykanShared_new(
-      (PaykanObject *)PaykanString_new(text, (int64_t)strlen(text)));
+  PaykanString *copy = PaykanString_new(text, (int64_t)strlen(text));
+  pthread_mutex_unlock(&lock);
+  return PaykanShared_new((PaykanObject *)copy);
 }

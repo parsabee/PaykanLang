@@ -80,8 +80,11 @@ inline constexpr uint8_t kMethodShared = 1 << 3;
 /// PURE bit).  Never an `impl` method's, a struct's, an initializer's or
 /// `destroy`'s (readInterface rejects it there).
 inline constexpr uint8_t kMethodPure = 1 << 4;
-inline constexpr uint8_t kMethodKnownFlags =
-    kMethodPrivate | kMethodView | kMethodImpl | kMethodShared | kMethodPure;
+/// A `parallel for` body may call it (ast::MethodDecl::ParSafe).
+inline constexpr uint8_t kMethodParSafe = 1 << 5;
+inline constexpr uint8_t kMethodKnownFlags = kMethodPrivate | kMethodView |
+                                             kMethodImpl | kMethodShared |
+                                             kMethodPure | kMethodParSafe;
 
 /// The modes of a signature's parameters (ast::ParamModes): one per
 /// parameter with its name, or none when every parameter is by value, and
@@ -99,7 +102,9 @@ struct ModeRecs {
 /// Functions"): it keeps nothing it is lent and changes only what its
 /// `inout` arguments name.
 inline constexpr uint8_t kFuncNative = 1 << 0;
-inline constexpr uint8_t kFuncKnownFlags = kFuncNative;
+/// Bit 1: a `parallel for` body may call it (FunctionSig::ParSafe).
+inline constexpr uint8_t kFuncParSafe = 1 << 1;
+inline constexpr uint8_t kFuncKnownFlags = kFuncNative | kFuncParSafe;
 
 /// ModuleInfo::FunctionInfo.
 struct FuncRec {
@@ -107,7 +112,8 @@ struct FuncRec {
   std::string ReturnTypeName;
   std::vector<std::string> ParamTypeNames;
   ModeRecs Modes;
-  bool Native = false; ///< kFuncNative
+  bool Native = false;  ///< kFuncNative
+  bool ParSafe = false; ///< kFuncParSafe
   bool operator==(const FuncRec &) const = default;
 };
 

@@ -449,8 +449,15 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
   // A struct's method that may change `self` changes the receiver's
   // storage, which the lowering must know of (ast::Expr::isChangedByCall).
   if (receiver && method && !method->isView() &&
-      ast::dyn_cast<ast::StructType>(receiver->getResolvedType()))
+      ast::dyn_cast<ast::StructType>(receiver->getResolvedType())) {
     const_cast<ast::Expr *>(receiver)->setChangedByCall(true);
+    // A buffer has rules of its own (checkParallelBufferCall).
+    if (!bufferElementType(receiver->getResolvedType()) &&
+        !checkParallelWrite(receiver, nullptr,
+                            "changed by '" + method->getName() + "'",
+                            receiver->getLocation()))
+      ok = false;
+  }
   if (receiver && method) {
     std::vector<std::string> paths;
     borrowedPaths(receiver, paths);
@@ -559,6 +566,9 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
       msg = std::move(why);
     } else {
       arg->setChangedByCall(true);
+      if (!checkParallelWrite(arg, nullptr, "passed 'inout'",
+                              arg->getLocation()))
+        ok = false;
       // An `inout` result passes on what its call borrowed.
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);

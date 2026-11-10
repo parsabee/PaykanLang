@@ -1612,7 +1612,11 @@ parallel for i in 0..n { total += nodes.at(i).w; }
 * An array the body writes is read only at the written paths, and a whole
   outer array is never passed `inout`.
 * An outer scalar other than an `atomic` changes only by a recognised
-  reduction, mentioned nowhere else in the body.
+  reduction, mentioned nowhere else in the body.  A reduction is one of
+  every enclosing loop the variable is outside of, and each fold wraps to
+  the variable's type.  `Sema::checkParallelWrite` is the one check of
+  what a body changes: an assignment, an `inout` argument or local, a
+  `match` arm's `inout` binding, a struct's changing method, a `move`.
 
 The reductions (proposed; owner may change) are `s += e`, `s -= e`,
 `s *= e`, `s = m::max(s, e)` and `s = m::min(s, e)` on floats
@@ -1641,12 +1645,20 @@ has too (proposed; owner may change).  Integer reductions are exact: `+` and
 ### Calls, control and nesting
 
 * `break`, `return` and `await` are errors; `continue` ends the iteration.
-  The prototype rejects `continue` as well: `'continue' cannot be used in a
-  'parallel for' body (the prototype)` (prototype, 2026-11-03).
+  A loop inside the body has its own `break` and `continue`.  The mlir
+  backend gives each chunk its own exit flag.
 * Calls go only to par-safe functions: no printing or I/O, no native outside
   an allow-list (`::math`, the Str, Buffer, cell and channel runtime), no
   spawn or join, no function value, and no virtual call unresolved through
-  an exact or closed class (src/Lowering/LoweringInternal.h:578-599).
+  an exact or closed class.  The check is a fixed point over the call graph
+  of the module (src/Sema/SemaParSafe.cpp, `Sema::checkParSafety`), taken
+  once every body and instantiation is checked; a function's verdict is a
+  bit in its module's interface (`.pkm` `kFuncParSafe`, `kMethodParSafe`).
+  A closed class is one of a program's main module, which has a `main` and
+  is neither imported nor written with `--emit-pkm`.  The allow-list also
+  has the errno text of the error module, which a Buffer's `set` reaches,
+  and the panics.  Nothing but the `.pkm` bit says a non-generic import is
+  par-safe; a generic one is judged in the instance the importer checks.
 * Locks, atomic operations and channel try operations are allowed, in
   unspecified order; reductions stay reproducible.
 * Nested `parallel` loops cannot deadlock: with caller-runs scheduling, a
@@ -1835,7 +1847,7 @@ change).
 | Holds | borrowed roots keep BorrowedReads and SnapshotReads, except in a `const` region (an immutable root's, in the mut model), whose storage nothing writes; holds through handles; type arms over borrowed subjects bind borrows; `join` Unknown | src/Lowering/LoweringHolds.cpp:62-152, 1750-1752 |
 | `const`, cells, send check | `const` access (the mut model: the access through a reference not written `mut`) as `view` access, with its exceptions; `atomic` operators and lending rules, `locked` only in `lock`; `atomic shared` boxing of value types; handle classes final; the send check in new SemaSend.cpp; the class flag | src/Sema/SemaViews.cpp:43-168 |
 | Generics | Copyable, conditional impls, archetypes, joined qualifiers | src/Sema/SemaTraits.cpp:68-100, 306-320; include/Sema.h:2004-2013 |
-| Summaries | par-safe, Waits, Joins, MovesOut: a call-graph fixpoint in Sema | src/Lowering/LoweringInternal.h:537-620 |
+| Summaries | par-safe (done, src/Sema/SemaParSafe.cpp), Waits, Joins, MovesOut: a call-graph fixpoint in Sema | src/Lowering/LoweringInternal.h:537-620 |
 | `parallel` verifier | new SemaPar.cpp | src/Sema/Sema.cpp:4423 |
 | `move`, counts, walks | a load and a null store, as moves-at-last-use emits; count flags, atomic for every handle; the walk slot | src/Lowering/Lowering.cpp:1934-1973; LoweringInternal.h:711-727; LoweringClass.cpp:423-426 |
 | Async lowering | frame, create, take, resume, outlined like closures; an await is an unknown-effect call for holds | src/Lowering/LoweringClosure.cpp:88-316; LoweringHolds.cpp:256-336; LoweringInternal.h:569 |
@@ -1845,7 +1857,7 @@ change).
 | Backends | LLVM inlines atomic counts and may inline cell operations; C calls the runtime | ToLLVM.cpp:617-707; ToEmitC.cpp:312-323; PIRToStandard.cpp:1055-1061 |
 | AST interchange | qualifiers, `move`, `await`, `async`, receiver prefixes, `lock` and `parallel` in the reader, writer and format document; the differential frontend tests | src/ASTInterchange/Reader.cpp, Writer.cpp:437-450; docs/plugins/ast-format.md; tests/Frontend/DifferentialTests.cpp |
 | JIT | new runtime symbols | src/Backends/LLVM/JIT/JIT.cpp:38, 56-140 |
-| `.pkm` | qualifiers in types; flag bits (par-safe, Waits, Joins, MovesOut, async, frame-pinned); the class flag; impl bounds | include/paykan/pkm/Interface.h:80, 94-99; docs/design/pkm.md:441-449 |
+| `.pkm` | qualifiers in types; flag bits (par-safe (done), Waits, Joins, MovesOut, async, frame-pinned); the class flag; impl bounds | include/paykan/pkm/Interface.h:80, 94-99; docs/design/pkm.md:441-449 |
 
 The split leaves ordinary PIR: a frame class (state, awaitable, result,
 parameters, the locals live across an `await`), a create function under the
@@ -2421,7 +2433,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | read of a written array | `'ys' is written at 'ys[i]' and cannot be read at 'ys[i - 1]' in the same 'parallel' loop` |
 | whole array `inout` | `'ys' cannot be passed whole to 'inout' parameter 'p' in a 'parallel' loop body` |
 | outer scalar | `'count' is assigned in a 'parallel' loop body; an outer variable changes only by a reduction ('count += e')` |
-| reduction read | `'s' is a reduction of this 'parallel' loop and cannot be read in its body` |
+| reduction read | `'s' is a reduction of this 'parallel for' and cannot be read in its body: an iteration sees only part of it` |
 | `break`, `return` | `'break' cannot leave a 'parallel' loop: every iteration runs` (also `'return'`) |
 | unsafe call | `'log' cannot be called in a 'parallel' loop body: it prints (through 'g')` |
 | unresolved virtual call | `'shape.area' may run an override from another module; a 'parallel' loop body calls only methods it can resolve` |
