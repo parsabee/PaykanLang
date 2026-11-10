@@ -9,6 +9,7 @@
 #include "LoweringInternal.h"
 #include "Names.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace paykan::lowering {
