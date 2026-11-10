@@ -2891,11 +2891,9 @@ bool Sema::inferTypeArgs(const std::string &templateName,
         // into a `Box<shared Node>`; the argument flows into that form.
         if (fresh)
           continue;
-        if (const auto *q = ast::dyn_cast<ast::QualifiedType>(ty);
-            q && q->getInnerType() == it->second)
-          it->second = ty;
-        else if (ast::Type *joined = joinPartForms(it->second, ty);
-                 joined == ty)
+        const auto *q = ast::dyn_cast<ast::QualifiedType>(ty);
+        if ((q && q->getInnerType() == it->second) ||
+            joinPartForms(it->second, ty) == ty)
           it->second = ty;
       }
   }

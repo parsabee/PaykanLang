@@ -127,6 +127,7 @@ TEST(AtomicCell, ACountChangedFromManyThreadsIsExact) {
   TrackingHeap heap;
   PaykanShared *c = PaykanAtomic_new(0, PAYKAN_ATOMIC_INT);
   std::vector<std::thread> threads;
+  threads.reserve(8);
   for (int t = 0; t < 8; ++t)
     threads.emplace_back([c] {
       for (int i = 0; i < 20000; ++i) {
