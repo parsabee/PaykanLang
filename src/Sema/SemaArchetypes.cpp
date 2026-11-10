@@ -203,14 +203,25 @@ void Sema::noteArchetypeCopy(ast::SourceLocation loc, const ast::Type *ty,
       }
       if (fresh.empty())
         fresh = "T" + std::to_string(i);
-      msg = "parameter '" + std::string(untyped) +
-            "' takes any type, which may not be 'Copyable': write its type, "
-            "'" +
-            std::string(untyped) + ": " + fresh + "' with '" + fresh +
-            ": Copyable', " + what;
-    } else
-      msg = "'" + p + "' is not 'Copyable': declare '" + p + ": Copyable' " +
-            what;
+      msg = "parameter '";
+      msg += untyped;
+      msg += "' takes any type, which may not be 'Copyable': write its type, "
+             "'";
+      msg += untyped;
+      msg += ": ";
+      msg += fresh;
+      msg += "' with '";
+      msg += fresh;
+      msg += ": Copyable', ";
+      msg += what;
+    } else {
+      msg = "'";
+      msg += p;
+      msg += "' is not 'Copyable': declare '";
+      msg += p;
+      msg += ": Copyable' ";
+      msg += what;
+    }
     // A method's copy may instead go in a conditional `impl` block, whose
     // methods exist only on the instances meeting its bounds; not a trait
     // method's, which every instance has.
@@ -399,8 +410,8 @@ bool Sema::checkArchetypes() {
           if (i < bounds.size())
             all.insert(all.end(), bounds[i].begin(), bounds[i].end());
           std::vector<ast::Type *> one;
-          if (!argsFor(tmpl, {params[i]}, {all}, values, one))
-            ; // the stand-in, if any, is in `one`
+          // The stand-in, if any, is in `one`.
+          static_cast<void>(argsFor(tmpl, {params[i]}, {all}, values, one));
           if (one.size() == 1 && !check.Classes.count(one[0])) {
             args[i] = one[0];
             changed = true;
