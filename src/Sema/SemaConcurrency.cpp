@@ -1744,9 +1744,11 @@ bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
 }
 
 bool Sema::isCopyPlace(const ast::Expr *e) {
+  if (!e)
+    return false;
   // An `inout` result names the storage it borrows (#368): what it holds
   // stays there, so a copy of it is another owner.
-  if (e && e->isInoutResult())
+  if (e->isInoutResult())
     return true;
   // A named function is no place: naming it makes a new function value.
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
