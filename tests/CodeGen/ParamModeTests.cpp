@@ -123,7 +123,7 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
       if loud { s = s + Str(end); }
       return s;
     }
-    fn at<T>(xs: view T[], i: view int) -> T { return xs[i]; }
+    fn at<T: Copyable>(xs: view T[], i: view int) -> T { return xs[i]; }
     fn main() -> int {
       let k = 3;
       c: mut Counter = Twice(k);

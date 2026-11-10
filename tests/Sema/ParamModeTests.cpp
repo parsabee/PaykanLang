@@ -97,7 +97,7 @@ impl Counter {
 }
 fn f(o: view int?, xs: inout int[], t: view (int, int), b: view Obj) { }
 fn reset(c: inout Counter, s: inout Str) { c = Counter(s); s = "new"; }
-fn first<T>(x: view T) -> T { return x; }
+fn first<T: Copyable>(x: view T) -> T { return x; }
 fn swap<T>(a: inout T, b: inout T) { t = a.clone(); a = b.clone(); b = move t; }
 class Box<T> { n: int; }
 impl Box<T> { fn __init__(v: view T) { self.n = 1; } }

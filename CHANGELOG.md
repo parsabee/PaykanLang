@@ -256,6 +256,29 @@ samples/concurrency/README.md.
   - A function value of a named function has its parameters' and result's qualifiers in its
     type, and a call through a function value converts each argument into its parameter's
     form (a `shared` argument to a unique parameter was accepted there).
+- The archetype check of templates (#368; docs/language/13-generics.md, "The archetype
+  check"). Each template of a module is checked once more with an archetype, a move-only
+  class of its own, for each type parameter without bounds. A copy of one is reported at
+  the template, used or not: `'T' is not 'Copyable': declare 'T: Copyable' to copy it`
+  (`to return a copy`, `to pass a copy`, `for 'twice', which needs it`; a method's adds
+  `, or put the method in 'impl Box<T: Copyable>'`). A template used only with `int` hid
+  it, and a class's instance found it per instance. Only copies are reported, when the
+  module has no other error, and nothing the check makes reaches the lowering or the
+  module's interface.
+  - A parameter bounded by another trait (`K: Hashable`, `T: ValueType`) is an archetype
+    too, which meets the bound; one bounded `Copyable` takes `int`, `float`, `bool` or `Str`.
+    A copy is also `[v; n]`, a lambda's capture, and a `Copyable` bound a field's or a
+    signature's type needs; a conditional block's methods, a static fn's and an enum's payload
+    are checked too.
+  - **Breaking:** a template that copies a `T` not bounded `Copyable` is an error even if no
+    instance is move-only, `twice<T: ValueType>` included. Write `move` where the value
+    leaves (`self.v = move v` in an `__init__`), `T: Copyable` where it is copied, or put the
+    method in `impl Box<T: Copyable>`.
+  - In a template's code, `T: Copyable` copies a `view` of a type argument's form as the
+    argument copies. With T = `shared Node`, a `view fn`'s field returned, a `view T`
+    stored or returned, or passed by value, is the same object. Only `clone()` copied it. A
+    `-> view T` result of a shared form or a cell lends exactly T's form (`a 'view' result of
+    a type argument's form is held as ...`), so what it hands out can be kept.
 - A `match` binding holds its subject's form (#368; docs/language/08-match.md, "A qualified
   subject"): a downcast of a `shared Animal` binds a `shared Dog`, Copyable and read-only,
   and one of a `shared mut Animal` writes the object. A qualifier written on the arm, which

@@ -540,8 +540,8 @@ fn divide(a: int, b: int) -> Result<int, Str> {
 }
 
 fn orElse<T>(m: Maybe<T>, d: T) -> T {
-  match m {
-    j: Just { return j.value; }
+  match move m {
+    j: Just { return move j.value; }
     Nothing { return d; }
   }
 }

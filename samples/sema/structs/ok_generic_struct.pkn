@@ -2,15 +2,16 @@
 // (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`);
 // its `impl` blocks name the type parameters and apply to every
 // instantiation, and so do `impl Trait for` blocks.
+import ::memory as mem;
+
 struct Pair<A, B> {
   a: A;
   b: B;
 }
 
 impl Pair<A, B> {
-  view fn first() -> view A { return self.a; }
-  fn swapWith(other: inout Pair<A, B>)
-                            { let t = self.a; self.a = other.a; other.a = t; }
+  view fn first() -> view A            { return self.a; }
+  fn swapWith(other: inout Pair<A, B>) { mem::swap(self.a, other.a); }
 }
 
 impl Hashable for Pair<A, B> {
@@ -22,7 +23,7 @@ struct Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T)       { self.v = v; }
+  fn __init__(v: T)       { self.v = move v; }
   view fn get() -> view T { return self.v; }
 }
 

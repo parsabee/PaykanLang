@@ -726,7 +726,16 @@ impl Copyable for Job {}   // error: 'Copyable' is built in: a type is Copyable 
 Templates are checked per instantiation (docs/language/13-generics.md:105-145),
 so one used only with `int` would hide a missing bound.  An archetype check
 runs each template once more with a synthetic move-only class for every
-unbounded parameter, reporting only copy errors (proposed; owner may change).
+unbounded parameter, reporting only copy errors (#368, src/Sema/
+SemaArchetypes.cpp).  It runs when the module has no other error, on the
+module's own templates (functions, classes, structs, enums).  A copy is the
+copy rule's, a value read out of a borrow, `[v; n]`, a capture, or a `T:
+Copyable` bound the archetype fails: `'T' is not 'Copyable': declare 'T:
+Copyable' to copy it`.  An archetype meets every bound but `Copyable`, so a
+parameter bounded otherwise is an archetype too; one bounded `Copyable`
+takes `int`, `float`, `bool` or `Str` when one meets its bounds, and a
+template none meets is not checked.  The archetypes (`%T`) and what they
+instantiate reach neither the lowering nor the module's interface.
 
 A method has no bounds of its own (docs/grammar.md:243-247), so methods that
 copy go in a conditional `impl` block (`implParam`), whose methods exist only

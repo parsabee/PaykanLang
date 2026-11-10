@@ -455,7 +455,7 @@ TEST(FixedArray, InferredLengths) {
   auto r = semaCheck(R"(
     class A {}
     class B : A {}
-    fn fill<T>(v: T) -> T[3] { return [v, v, v]; }
+    fn fill<T: Copyable>(v: T) -> T[3] { return [v, v, v]; }
     fn main() -> int {
       x: int[_][_] = [[1, 2, 3], [4, 5, 6]];
       y: A[_] = [B(), A(), B()];
@@ -515,7 +515,7 @@ TEST(FixedArray, RepeatLiterals) {
     fn count(xs: view int?[]) -> int { return xs.len(); }
     fn rows(g: view int[3][]) -> int { return g.len(); }
     fn zeros() -> float[8] { return [0; 8]; }
-    fn fill<T>(v: T) -> T[4] { return [v; 4]; }
+    fn fill<T: Copyable>(v: T) -> T[4] { return [v; 4]; }
     fn main() -> int {
       fs: float[4] = [0; 4];
       os: int?[8] = [None; 8];

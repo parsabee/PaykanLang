@@ -404,6 +404,9 @@ type](19-concurrency.md#qualifiers-in-a-type)), so `twice(s)` with `s: shared mu
 binds `T` to `shared mut Node`, which is Copyable: its copies are the same node, as the
 copies of `Ref` are. A value that is not Copyable flows into an owning slot only by `move`,
 by `clone()` or to a borrow ([Ownership transfers](16-memory.md#ownership-transfers)).
+A template that copies its `T` without the bound is reported at the template, even if it
+is only ever used with `int`: `'T' is not 'Copyable': declare 'T: Copyable' to copy it`
+([The archetype check](13-generics.md#the-archetype-check)).
 
 ## Cloneable
 

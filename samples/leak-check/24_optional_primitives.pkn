@@ -28,7 +28,7 @@ impl Holder {
 
 class Slot<T> {
   v: T?;
-  fn set(x: T) { self.v = x; }
+  fn set(x: T) { self.v = move x; }
 }
 
 impl Slot<T> {

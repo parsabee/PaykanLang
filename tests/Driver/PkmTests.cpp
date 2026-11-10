@@ -1383,8 +1383,8 @@ struct Hierarchy {
               "class Shape { n: int; m: int;\n"
               "  view fn area() -> int;\n"
               "  view fn perimeter() -> int { return self.n + self.m; } }\n"
-              "class Box<T> { v: T; view fn get() -> T { return self.v; } "
-              "}\n");
+              "class Box<T: Copyable> { v: T; view fn get() -> T { "
+              "return self.v; } }\n");
     writeFile(Dir / "lib" / "b.pkn",
               "import lib::a;\n"
               "class Line : a::Shape { k: int;\n"
@@ -2161,7 +2161,7 @@ TEST(Pkm, GenericsAcrossModulesAreCached) {
   writeFile(dir / "lib" / "gen.pkn",
             "class Box<T> { v: T;\n"
             "  view fn one() -> int { return 1; } }\n"
-            "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n");
+            "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n");
   writeFile(dir / "m1.pkn", "import lib::gen;\n"
                             "fn one() -> int { return gen::Box<int>(0).one(); "
                             "}\n");
@@ -2197,7 +2197,7 @@ TEST(Pkm, GenericsAcrossModulesAreCached) {
   writeFile(dir / "lib" / "gen.pkn",
             "class Box<T> { v: T;\n"
             "  view fn one() -> int { return 10; } }\n"
-            "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n");
+            "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n");
   auto p1 = paykan("--verbose p1.pkn");
   EXPECT_EQ(p1.exitCode, 12) << p1.out;
   EXPECT_TRUE(contains(p1.out, "module m2: cache .paykan_cache/m2.pkm is stale "
@@ -2235,7 +2235,7 @@ TEST(Pkm, ModuleCodeKeepsWhatTheModuleAndItsImportersUse) {
       "impl Pair<A, B> { view fn first() -> view A { return self.a; }\n"
       "  view fn second() -> view B { return self.b; } }\n"
       "class Box<T> { v: T; view fn get() -> view T { return self.v; } }\n"
-      "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n");
+      "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n");
   writeFile(
       dir / "m2.pkn",
       "import lib::gen;\n"
@@ -2676,6 +2676,50 @@ TEST(Pkm, ExtractWritesTheCompiledCodeAsAnObject) {
   fs::remove_all(dir);
 }
 
+// The archetype check (#368) instantiates each template of a module once
+// more, with an archetype (`%T`) for a parameter without bounds and a
+// stand-in (`int`) for one with bounds: neither, nor what they instantiate
+// (`cl::List<int>`, `Box<%V>`), is the module's, so none is in its
+// interface or its code.
+TEST(Pkm, WhatTheArchetypeCheckMakesIsNotTheModules) {
+  REQUIRE_BACKEND();
+  fs::path dir = fs::temp_directory_path() /
+                 ("pkm_archetypes_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "gen.pkn",
+            "import ::collections as cl;\n"
+            "class Box<T> { v: T; }\n"
+            "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n"
+            "fn keys<K: Hashable, V>(k: K, v: V) -> int {\n"
+            "  l: cl::List<K> = cl::List<K>();\n"
+            "  l.push(move k);\n"
+            "  let b = Box<V>(move v);\n"
+            "  return 1;\n"
+            "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto emit = paykan("--emit-pkm lib/gen.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  auto check = paykan("pkm check lib/gen.pkm");
+  EXPECT_EQ(check.exitCode, 0) << check.out;
+  EXPECT_TRUE(contains(check.out, "usable")) << check.out;
+  for (const char *section : {"iface", "code"}) {
+    auto dump =
+        paykan(std::string("pkm dump --section=") + section + " lib/gen.pkm");
+    EXPECT_EQ(dump.exitCode, 0) << dump.out;
+    for (const char *made : {"%", "List<int>", "Box<"})
+      EXPECT_FALSE(contains(dump.out, made)) << section << ": " << made << "\n"
+                                             << dump.out;
+  }
+  writeFile(dir / "main.pkn", "import lib::gen;\n"
+                              "fn main() -> int { return gen::keys(1, \"v\") + "
+                              "41; }\n");
+  auto r = paykan("main.pkn");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  fs::remove_all(dir);
+}
+
 TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
   REQUIRE_BACKEND();
   fs::path dir = fs::temp_directory_path() /
@@ -2685,7 +2729,7 @@ TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
             "class Box<T> { v: T;\n"
             "  view fn get() -> view T { return self.v; }\n"
             "  view fn twice() -> T { return self.v + self.v; } }\n"
-            "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
+            "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n"
             "struct Pair<A, B> { a: A; b: B; }\n"
             "fn first<T>(x: T, y: T) -> T { return _keep(move x); }\n"
             "fn _keep<T>(x: T) -> T { return x; }\n");
@@ -3145,7 +3189,7 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
             "class Gen<T> { __v: T;\n"
             "  view fn get() -> T {\n"
             "    return self.__v + _helper(0) + Pub::_make()._w - 3; } }\n"
-            "impl Gen<T> { fn __init__(v: T) { self.__v = v; } }\n"
+            "impl Gen<T> { fn __init__(v: T) { self.__v = move v; } }\n"
             "class _GenHidden<T> { v: T; }\n"
             "fn useHidden() -> int {\n"
             "  h = _GenHidden<int>(3); p = Pub::_make();\n"

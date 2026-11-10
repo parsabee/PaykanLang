@@ -393,6 +393,12 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     auto it = ImportedTypeOrigins.find(name);
     return it == ImportedTypeOrigins.end() ? std::string() : it->second;
   };
+  // What the archetype check made (an archetype `%T`, `Box<%T>`, or a
+  // `List<int>` only its stand-ins asked for) is not the module's.
+  auto isArchetypeName = [&](const std::string &name) {
+    return ArchetypeMade.count(name) != 0 ||
+           name.find(names::kArchetypePrefix) != std::string::npos;
+  };
   StringSet localClasses, localEnums, localStructs;
   for (auto *cd : tu->getClassDecls())
     localClasses.insert(cd->getName());
@@ -441,7 +447,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     // identity.
     if (name != ct->getName())
       continue;
-    if (isBootstrapClassName(name))
+    if (isBootstrapClassName(name) || isArchetypeName(name))
       continue;
     ModuleInfo::ClassInfo ci;
     ci.Name = name;
@@ -475,8 +481,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
   // `impl` methods, which importers call directly (canonical entries only,
   // as for classes).
   for (auto &[name, st] : Ctx.getStructTypes()) {
-    if (name != st->getName())
-      continue; // alias key — skip
+    if (name != st->getName() || isArchetypeName(name))
+      continue; // alias key, or the archetype check's — skip
     ModuleInfo::StructInfo si;
     si.Name = name;
     // A variant's fields are its enum's.
@@ -500,8 +506,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
   // Enum types: name + variants in declaration order, and those with fields
   // (canonical entries only, as for classes).
   for (auto &[name, et] : Ctx.getEnumTypes()) {
-    if (name != et->getName())
-      continue; // alias key — skip
+    if (name != et->getName() || isArchetypeName(name))
+      continue; // alias key, or the archetype check's — skip
     ModuleInfo::EnumInfo ei;
     ei.Name = name;
     ei.IsLocal = localEnums.count(name) != 0;
@@ -521,7 +527,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     // Instantiations of other modules' templates (and their constructors)
     // are those modules'.
     if (sig.IsBuiltin || name.starts_with(names::kHiddenQualPrefix) ||
-        ImportedTypeOrigins.count(name))
+        ImportedTypeOrigins.count(name) || isArchetypeName(name))
       continue;
     ModuleInfo::FunctionInfo fi;
     fi.Name = name;

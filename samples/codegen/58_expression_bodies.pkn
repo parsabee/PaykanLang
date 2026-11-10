@@ -40,7 +40,7 @@ fn twice<T>(f: (view T) -> T, x: view T) -> T {
   return f(f(x));
 }
 
-fn constant<T>(v: T) -> () -> T {
+fn constant<T: Copyable>(v: T) -> () -> T {
   return fn() => v;
 }
 

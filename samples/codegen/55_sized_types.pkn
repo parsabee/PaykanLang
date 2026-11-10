@@ -25,7 +25,7 @@ struct Pixel {
   a: f32;
 }
 
-class Box<T> {
+class Box<T: Copyable> {
   v: T;
 }
 impl Box<T> {

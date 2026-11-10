@@ -59,7 +59,7 @@ class Holder<T> {
 }
 
 impl Holder<T> {
-  fn __init__(x: T) { self.p = Pair<T, Str>(x, "held"); }
+  fn __init__(x: T) { self.p = Pair<T, Str>(move x, "held"); }
 }
 
 fn sumInts(p: view Pair<int, int>) -> int {

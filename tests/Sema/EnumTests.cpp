@@ -559,7 +559,7 @@ TEST(Enum, GenericCallsAndOpenVariantsTakeTheOtherSideEitherWay) {
   auto r = semaCheck(withEnums(std::string(kGeneric) + R"(
     enum Pair<A, B> { Both(a: A, b: B), Left(a: A), Neither }
     fn none<T>() -> Maybe<T> => Maybe::Nothing;
-    fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(v);)",
+    fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(move v);)",
                                R"(
     n = 2;
     a: bool = Maybe::Just(1) == none();

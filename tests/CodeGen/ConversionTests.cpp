@@ -188,7 +188,7 @@ TEST(Conversion, NestedAndInsideOtherExpressions) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Box<T> { v: T; }
-    impl Box<T> { fn __init__(x: T) { self.v = x; } }
+    impl Box<T> { fn __init__(x: T) { self.v = move x; } }
     fn twice(n: int) -> int { return n * 2; }
     fn main() -> int {
       b = Box<int>(int<float>(4.75));          // a real generic class still works

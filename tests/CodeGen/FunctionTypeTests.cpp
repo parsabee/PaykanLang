@@ -163,7 +163,7 @@ TEST(FunctionType, CapturedValuesAreReadAsValues) {
   auto r = compileAndRun(R"(import ::io;
     struct P { name: shared Str; }
     enum Shape { Circle(r: int), Named(label: shared Str) }
-    fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }
+    fn constant<T: Copyable>(x: T) -> () -> T { return fn() -> T { return x; }; }
     fn show(p: P) -> Str { return p.name.clone(); }
     fn describe(s: Shape) -> Str {
       match s { n: Named { return n.label.clone(); } _ { return "circle"; } }
@@ -290,8 +290,8 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
 TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class Box<T> { v: T; view fn get() -> view T { return self.v; } fn set(v: T) { self.v = v; } }
-    impl Box<T> { fn __init__(v: T) { self.v = v; } }
+    class Box<T> { v: T; view fn get() -> view T { return self.v; } fn set(v: T) { self.v = move v; } }
+    impl Box<T> { fn __init__(v: T) { self.v = move v; } }
     fn main() -> int {
       f = fn(x: int) -> int { return x + 1; };
       g = f;                           // the same closure

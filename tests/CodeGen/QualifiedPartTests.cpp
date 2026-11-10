@@ -152,9 +152,9 @@ TEST(QualifiedPart, ATemplatesSharedValuesCloneAsTheirCopy) {
     import ::collections as cl;
     class Node { id: int; }
     impl Cloneable for Node {}
-    fn viaVar<T: Cloneable>(v: T) -> T { x: T = v; return x.clone(); }
+    fn viaVar<T: Cloneable>(v: T) -> T { x: T = move v; return x.clone(); }
     fn viaTuple<T: Cloneable>(p: (T, int)) -> T { return p.0.clone(); }
-    fn viaArray<T: Cloneable>(v: T) -> T { xs: T[2] = [v, v]; return xs[1].clone(); }
+    fn viaArray<T: Cloneable>(v: T) -> T { xs: T[2] = [v.clone(), move v]; return xs[1].clone(); }
     fn main() -> int {
       s: shared mut Node = Node(0);
       viaVar(s).id = 1;
@@ -427,4 +427,53 @@ TEST(QualifiedPart, AnArmInALockBlockReadsTheContents) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "dog 2 4 6\n");
   EXPECT_EQ(liveBlocksAfterRun(), 6);
+}
+
+// A template's `T: Copyable` copies a `view` of a type argument's form as
+// the argument copies (#368): with T = `shared mut Node`, a `view fn`'s
+// field, a `view` slice's element and a `view` parameter come out as the
+// same object, counted.
+TEST(QualifiedPart, ACopyableArgumentsFormIsCopiedOutOfABorrow) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Node { v: int; }
+    class Box<T: Copyable> { v: T; view fn get() -> T { return self.v; } }
+    impl Box<T: Copyable> { fn __init__(v: T) { self.v = move v; } }
+    fn first<T: Copyable>(xs: view T[]) -> T { return xs[0]; }
+    fn keep<T: Copyable>(x: view T) -> T { let k = x; return k; }
+    fn main() -> int {
+      s: shared mut Node = Node(1);
+      let b = Box<shared mut Node>(s);
+      let g = b.get();
+      g.v = 2;
+      let a: shared mut Node[2] = [s, s];
+      let t = first<shared mut Node>(a);
+      let k = keep<shared mut Node>(s);
+      k.v += 1;
+      io::println(Str(s.v) + " " + Str(t.v) + " " + Str(b.get().v));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3 3 3\n");
+  g.expectNoLeaks("ACopyableArgumentsFormIsCopiedOutOfABorrow");
+}
+
+// The archetype check (#368) instantiates an unused template, whose code
+// copies another module's instance (`cl::List<Str>`) into this one: none
+// of it is lowered, and the program builds and runs.
+TEST(QualifiedPart, AnUnusedTemplatesInstancesAreNotLowered) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::collections as cl;
+    import ::io;
+    fn names<T>(x: view T) -> unsigned {
+      l = cl::List<Str>();
+      l.push("a");
+      return l.len();
+    }
+    fn main() -> int { io::println("ok"); return 0; }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "ok\n");
+  g.expectNoLeaks("AnUnusedTemplatesInstancesAreNotLowered");
 }

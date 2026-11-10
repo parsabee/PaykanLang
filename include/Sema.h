@@ -224,6 +224,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The local borrows live where the lambda is written: capturing a
     /// variable uses it, and copies a reference it holds.
     std::vector<Borrow> OuterBorrows;
+    /// The function it is written in (null in another lambda's body).
+    const ast::FuncDecl *OuterFn = nullptr;
   };
   std::vector<LambdaContext> LambdaStack;
   /// Check a lambda: its signature, its body as a function's, and the
@@ -325,6 +327,31 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                           const std::string &what, ast::SourceLocation loc,
                           bool implicitMove = false, bool materialize = true);
+  /// The branches of @p e, through nested conditionals, in order; @p e
+  /// alone when it is no conditional.
+  static std::vector<ast::Expr *> conditionalBranches(const ast::Expr *e);
+  /// While a conditional's branches are checked against one slot's
+  /// location, the errors reported: another branch's identical one is not
+  /// reported again (Sema::error).
+  std::unordered_set<std::string> *BranchErrors = nullptr;
+  /// While alive, BranchErrors is set (the outermost conditional's).
+  class BranchWalk {
+    Sema &S;
+    std::unordered_set<std::string> Own;
+    bool Active;
+
+  public:
+    explicit BranchWalk(Sema &s) : S(s), Active(!s.BranchErrors) {
+      if (Active)
+        S.BranchErrors = &Own;
+    }
+    ~BranchWalk() {
+      if (Active)
+        S.BranchErrors = nullptr;
+    }
+    BranchWalk(const BranchWalk &) = delete;
+    BranchWalk &operator=(const BranchWalk &) = delete;
+  };
   /// The copy rule alone, for @p src flowing into an owning slot that takes
   /// any form (a literal's element, a destructuring's value): a move-only
   /// value read from a place moves only by `move`.
@@ -1893,6 +1920,9 @@ private:
   static bool reachesPlace(ast::Type *ty, ast::Type *place);
   /// The borrowed result the place @p e is part of, or null.
   const BorrowResult *borrowResultOf(const ast::Expr *e) const;
+  /// Whether a `match` on @p e reads storage: a place, a call's `inout` or
+  /// `view` result, or a conditional with a branch that is one (#368).
+  bool readsStorage(const ast::Expr *e) const;
   /// Whether @p e is a call returning an `inout` result: a place.
   bool isInoutResult(const ast::Expr *e) const;
   /// Why @p e cannot be returned as the current function's borrowed result;
@@ -2334,6 +2364,9 @@ private:
       ImplMethodTypeParams;
   /// Record the methods of @p copy, an instantiation's copy of @p im, there.
   void noteImplTypeParams(const ast::ImplDecl *im, const ast::ImplDecl *copy);
+  /// The `impl` block (the template's) each instance method came from.
+  std::unordered_map<const ast::FuncDecl *, const ast::ImplDecl *>
+      ImplMethodBlocks;
   /// Set once checkImplDecls has run (see PendingTraitImpls).
   bool ImplsChecked = false;
 
@@ -2443,6 +2476,64 @@ private:
 
   /// Check that the bounds of the module's templates name traits.
   bool checkBoundDecls(ast::TranslationUnit *tu);
+  /// The archetype check (#368; docs/language/13-generics.md, "The
+  /// archetype check"): each template of this module once more, with an
+  /// archetype (a move-only class, `%T`) for each type parameter without
+  /// bounds and a type meeting them for each with bounds.  A copy of an
+  /// archetype in the template's own code is a missing `T: Copyable`, which
+  /// an instance with `int` never shows.  Everything else it finds, and
+  /// everything it makes, is dropped (src/Sema/SemaArchetypes.cpp).
+  /// Returns false after reporting a copy.
+  bool checkArchetypes();
+  struct ArchetypeCheck {
+    std::unordered_set<const ast::Type *> Classes; // the archetypes
+    /// The module's templates checked, each with the type arguments of its
+    /// own instances (an archetype, or a stand-in, for each parameter; one
+    /// more for each `impl` block bounded `Copyable`): only those
+    /// instances' code reports, in its own parameters' names.
+    std::unordered_map<const ast::Decl *, std::vector<std::vector<ast::Type *>>>
+        Own;
+    std::vector<std::pair<ast::SourceLocation, std::string>> Copies;
+    std::unordered_set<std::string> Seen;
+  };
+  /// The archetype check in progress, or null.
+  ArchetypeCheck *Archetypes = nullptr;
+  /// The functions and types the archetype check made (its instances with
+  /// an archetype, and those with a stand-in no other code asked for): none
+  /// is in the module's code, so none is in its interface.
+  StringSet ArchetypeMade;
+  /// In the archetype check, a copy of @p ty at @p loc that only `T:
+  /// Copyable` would allow, when @p ty holds the archetype of a type
+  /// parameter `T` of the template whose code is being checked: recorded
+  /// as "'T' is not 'Copyable': declare 'T: Copyable' " + @p what.
+  /// @p view: the copy is of a value read out of a borrow, which `T:
+  /// Copyable` allows when T is what shares storage.
+  void noteArchetypeCopy(ast::SourceLocation loc, const ast::Type *ty,
+                         const std::string &what, bool view = false);
+  /// The instantiations being made (their fields, signatures and `impl`
+  /// blocks resolved), innermost last, each with its type arguments:
+  /// beside InstantiatingTemplates, for the archetype check, as
+  /// CurrentInstanceArgs is for the bodies.
+  std::vector<std::pair<const ast::Decl *, const std::vector<ast::Type *> *>>
+      MakingInstances;
+  /// While alive, an instantiation of @p tmpl with @p args is being made.
+  class MakingInstance {
+    Sema &S;
+    const ast::FuncDecl *SavedMethod;
+
+  public:
+    MakingInstance(Sema &s, const ast::Decl *tmpl,
+                   const std::vector<ast::Type *> &args)
+        : S(s), SavedMethod(std::exchange(s.ImplScopeMethod, nullptr)) {
+      S.MakingInstances.push_back({tmpl, &args});
+    }
+    ~MakingInstance() {
+      S.MakingInstances.pop_back();
+      S.ImplScopeMethod = SavedMethod;
+    }
+    MakingInstance(const MakingInstance &) = delete;
+    MakingInstance &operator=(const MakingInstance &) = delete;
+  };
   /// Check that @p args implement the traits template @p tmpl (named
   /// @p name) requires of its type parameters.
   bool checkBounds(const ast::Decl *tmpl, const std::string &name,
@@ -2730,6 +2821,12 @@ private:
   /// argument's own Copyable form (the instance has `q ty` as an argument):
   /// a part's qualifier carries no FromArgument mark of its own.
   bool isArgumentForm(ast::Qualifier q, ast::Type *ty) const;
+  /// Whether @p e, of type @p ty, read out of a borrow (stored, returned,
+  /// passed by value), is a copy a type argument allows (#368): in a
+  /// template's code, a reference held in a Copyable form a type argument
+  /// gave (T = `shared Node`), or a value of a Copyable type argument.  The
+  /// template's `T: Copyable` copies it, for every instance.
+  bool copiesArgumentForm(const ast::Expr *e, ast::Type *ty);
   /// While alive, CurrentTypeParams is @p params: a template's declarations
   /// (its fields, its parameters, its methods' and `static fn`s') are
   /// checked with its own type parameters, not those of the generic body
@@ -2737,11 +2834,15 @@ private:
   class TypeParamScope {
     Sema &S;
     const StringSet *Saved;
+    const ast::FuncDecl *SavedMethod;
     StringSet Params;
 
   public:
     TypeParamScope(Sema &s, const std::vector<const std::string *> &params);
-    ~TypeParamScope() { S.CurrentTypeParams = Saved; }
+    ~TypeParamScope() {
+      S.CurrentTypeParams = Saved;
+      S.ImplScopeMethod = SavedMethod;
+    }
     TypeParamScope(const TypeParamScope &) = delete;
     TypeParamScope &operator=(const TypeParamScope &) = delete;
   };
@@ -2750,6 +2851,15 @@ private:
   /// ImplMethodTypeParams); otherwise leave it empty.
   void implTypeParamScope(std::optional<TypeParamScope> &scope,
                           const ast::FuncDecl *fn);
+  /// The instance method whose `impl` block's names are open
+  /// (implTypeParamScope): its signature, its body and the lambdas in it
+  /// are in those names.  Null outside one.
+  const ast::FuncDecl *ImplScopeMethod = nullptr;
+  /// In the archetype check, whether the archetype @p arg meets the bound
+  /// @p tr: every bound but `Copyable`, which no class meets.  An archetype
+  /// stands for any type, so what a bound gives (a trait's methods) is
+  /// each instance's question.
+  bool archetypeMeets(const ast::Type *arg, const TraitRef &tr) const;
 
   /// Classes constructed inside each class's method bodies (by name).  Used to
   /// order instantiated classes for the lowering: a constructor must be

@@ -306,8 +306,11 @@ bool Sema::checkViewArgs(const ast::ParamModes &modes,
     // `self` for the 'never changes self' warning, as before.
     const bool shares = sharesStorage(args[i]->getResolvedType());
     std::string msg = viewOf(args[i], shares);
-    if (msg.empty() || !shares)
+    if (msg.empty() || !shares ||
+        copiesArgumentForm(args[i], args[i]->getResolvedType()))
       continue;
+    noteArchetypeCopy(args[i]->getLocation(), args[i]->getResolvedType(),
+                      "to pass a copy", /*view=*/true);
     msg += "; it can only be passed to a 'view' parameter, and parameter ";
     msg += std::to_string(i + 1);
     msg += " of '";
@@ -333,6 +336,33 @@ bool Sema::checkViewLocalNotConverted(const std::string &name,
   return false;
 }
 
+bool Sema::copiesArgumentForm(const ast::Expr *e, ast::Type *ty) {
+  if (!inInstanceCode() || !ty || !e)
+    return false;
+  // A conditional is each of its branches (qualifierOf joins a unique one
+  // into the other's form): a `None` is no copy.
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    auto branch = [&](const ast::Expr *b) {
+      return ast::isa<ast::NoneLiteral>(b) ||
+             copiesArgumentForm(
+                 b, b->getResolvedType()
+                        ? const_cast<ast::Expr *>(b)->getResolvedType()
+                        : ty);
+    };
+    return branch(te->getTrueExpr()) && branch(te->getFalseExpr());
+  }
+  ast::Type *inner = ast::stripOptional(ty);
+  if (ast::isRefType(inner)) {
+    const ast::Qualifier q = qualifierOf(e);
+    return !q.isUnique() && (q.FromArgument || isArgumentForm(q, inner)) &&
+           isCopyablePart(ty, q);
+  }
+  for (ast::Type *arg : *CurrentInstanceArgs)
+    if ((arg == ty || arg == inner) && isCopyable(ty))
+      return true;
+  return false;
+}
+
 bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {
   // A value type is copied, and the copy is the holder's own; for another
   // instance, it may not be.
@@ -340,9 +370,23 @@ bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {
     noteTypeArgumentCopy(e);
     return true;
   }
-  std::string msg = viewOf(e);
+  // Every branch's, which records what it does to `self`.
+  std::string msg;
+  std::function<void(const ast::Expr *)> each = [&](const ast::Expr *b) {
+    if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(b)) {
+      each(te->getTrueExpr());
+      each(te->getFalseExpr());
+    } else if (std::string why = viewOf(b); msg.empty()) {
+      msg = why;
+    }
+  };
+  each(e);
   if (msg.empty())
     return true;
+  // So is a type argument's Copyable form (#368).
+  if (copiesArgumentForm(e, const_cast<ast::Type *>(ty)))
+    return true;
+  noteArchetypeCopy(e->getLocation(), ty, "to copy it", /*view=*/true);
   msg += "; it cannot be stored, only read or passed to a 'view' parameter";
   error(e->getLocation(), msg);
   return false;
@@ -452,6 +496,9 @@ bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
     noteTypeArgumentCopy(e);
     return true;
   }
+  // So is a type argument's Copyable form (#368), once what it does to
+  // `self` is recorded below.
+  const bool argumentCopy = copiesArgumentForm(e, const_cast<ast::Type *>(ty));
   // Part of `self` is a `view` in a `view fn`, so it is returned as one
   // (`-> view T`): as a copy, its caller could change it.  Another method
   // may return it, and so hands out a way to change `self`.  A `view`
@@ -468,6 +515,8 @@ bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
         CurrentMethodUse->ChangesSelf = true;
       return true;
     }
+    if (argumentCopy)
+      return true;
     const std::string &name = CurrentClassCtx->MethodName;
     std::string msg = "'self' is read-only in 'view fn " + name +
                       "', so part of it can only be returned as a 'view'";
@@ -482,12 +531,16 @@ bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
       msg += ": write 'view' before its result type";
     else
       msg += ": write '-> view " + typeName(CurrentReturnType) + "'";
+    noteArchetypeCopy(e->getLocation(), ty, "to return a copy", /*view=*/true);
     error(e->getLocation(), msg);
     return false;
   }
+  if (argumentCopy)
+    return true;
   std::string msg = viewOf(e);
   if (msg.empty())
     return true;
+  noteArchetypeCopy(e->getLocation(), ty, "to return a copy", /*view=*/true);
   msg += "; it cannot be returned";
   error(e->getLocation(), msg);
   return false;

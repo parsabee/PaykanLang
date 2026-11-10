@@ -1153,7 +1153,11 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
            c = c->getSuperClass())
         for (const auto &[fname, fty] : c->getFields())
           if (!ct->isWeakField(fname) && !ast::isa<ast::AtomicType>(fty) &&
-              !isCloneablePart(fty, ct->findFieldQualifier(fname))) {
+              !isCloneablePart(fty, ct->findFieldQualifier(fname)) &&
+              // An archetype stands for any type: whether a `T` has a
+              // `clone` is each instance's question (#368), in a part too.
+              !(Archetypes && typeName(fty).find(names::kArchetypePrefix) !=
+                                  std::string::npos)) {
             std::string inner;
             isCloneable(fty, &inner);
             why = "its field '" + fname + "' ('" +
@@ -1819,7 +1823,8 @@ void Sema::noteForeignSource(const ast::Decl *d,
 
 Sema::TypeParamScope::TypeParamScope(
     Sema &s, const std::vector<const std::string *> &params)
-    : S(s), Saved(s.CurrentTypeParams) {
+    : S(s), Saved(s.CurrentTypeParams),
+      SavedMethod(std::exchange(s.ImplScopeMethod, nullptr)) {
   for (const std::string *p : params)
     Params.insert(*p);
   S.CurrentTypeParams = &Params;
@@ -1827,14 +1832,19 @@ Sema::TypeParamScope::TypeParamScope(
 
 void Sema::noteImplTypeParams(const ast::ImplDecl *im,
                               const ast::ImplDecl *copy) {
-  for (const ast::FuncDecl *fn : copy->getMethods())
+  for (const ast::FuncDecl *fn : copy->getMethods()) {
     ImplMethodTypeParams[fn] = &im->getTypeParams();
+    ImplMethodBlocks[fn] = im;
+  }
 }
 
 void Sema::implTypeParamScope(std::optional<TypeParamScope> &scope,
                               const ast::FuncDecl *fn) {
-  if (auto it = ImplMethodTypeParams.find(fn); it != ImplMethodTypeParams.end())
+  if (auto it = ImplMethodTypeParams.find(fn);
+      it != ImplMethodTypeParams.end()) {
     scope.emplace(*this, *it->second);
+    ImplScopeMethod = fn; // restored with the scope
+  }
 }
 
 Sema::OriginSource::OriginSource(Sema &s, const ModuleTemplates *origin)
@@ -2281,6 +2291,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   InstantiationStack.push_back(request);
   const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
   InstantiatingTemplates.push_back(self);
+  std::optional<MakingInstance> making(std::in_place, *this, tmpl, args);
   OriginSource inOrigin(*this, origin);
   bool ok = true;
 
@@ -2337,6 +2348,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     else if (!checkTraitImpl(im, ct))
       ok = false;
   }
+  making.reset();
   InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
@@ -2379,6 +2391,9 @@ void Sema::declareInstantiationStatics(const std::string &instName,
   std::vector<InstantiatingTemplate> savedTemplates =
       std::exchange(InstantiatingTemplates, base.Templates);
   OriginSource inOrigin(*this, base.Origin);
+  std::optional<MakingInstance> making;
+  if (!base.Templates.empty())
+    making.emplace(*this, base.Templates.back().Template, base.Args);
   for (auto *im : it->second) {
     if (im->getTrait())
       continue;
@@ -2527,6 +2542,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   {
     OriginSource inOrigin(*this, origin);
     TypeParamScope params(*this, tmpl->getTypeParams());
+    MakingInstance making(*this, tmpl, args);
     ok = declareFunctionSignature(clone);
   }
   InstantiatingTemplates.pop_back();

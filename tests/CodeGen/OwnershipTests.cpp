@@ -1428,7 +1428,7 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
     impl Base { fn __init__(n: int) { self.n = n; } }
     class Derived<X> : Base { v: X; }
     impl Derived<X> {
-      fn __init__(n: int, v: X) { __super__(n); self.v = v; }
+      fn __init__(n: int, v: X) { __super__(n); self.v = move v; }
     }
     class Plain : Base {
       tag: Str;

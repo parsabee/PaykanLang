@@ -409,12 +409,16 @@ Output:
   value is (`fn(n: shared Node) => n` gives a `shared Node`), and a constructor's type
   arguments also come from the slot's type (`h: Box<shared Node> = Box(Node(1))`).
 - **A borrow of a type argument's form** (`view T`, `inout T` with T = `shared Node`) reads as
-  that form, so the template's code may keep a copy of it (its clone is the copy) or trade it
-  for another (`mem::replace`): it takes a reference of exactly that form, through each
+  that form, so the template's code may keep a copy of it or trade it for another
+  (`mem::replace`). Under `T: Copyable` the copy is the reference itself: a `view fn`'s
+  field returned, a `view T` stored or returned, and its clone are the same object
+  ([The archetype check](13-generics.md#the-archetype-check)). it takes a reference of exactly that form, through each
   branch of a conditional, or, for a `view`, a fresh unique value (`Node(1)`, a unique
   result, `move u`), which becomes that form, frozen for `atomic shared`. A local borrow
-  (`v: view T = n`) takes it as a parameter does. An `inout` result names storage of exactly
-  its own form, or for a plain `-> inout C` a unique or `shared mut` slot, as an `inout`
+  (`v: view T = n`) takes it as a parameter does. A `view` result of a type argument's
+  shared form or cell lends exactly that form (`a 'view' result of a type argument's form is
+  held as 'shared mut Node', but what it returns is held as 'Node'`). An `inout` result names
+  storage of exactly its own form, or for a plain `-> inout C` a unique or `shared mut` slot, as an `inout`
   parameter takes. `cl::HashSet<shared Key>.contains(b)` with `b:
   shared mut Key` is `cannot pass 'b' (a 'shared mut Key') to parameter 'k' of 'contains', a
   'view shared Key': a borrow of a type argument's form takes that form, which the callee may
