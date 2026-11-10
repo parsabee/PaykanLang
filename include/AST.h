@@ -927,6 +927,7 @@ class MatchArm : public ASTNode {
   ParamMode Mode = ParamMode::Value; // a binding's borrow of the subject
   size_t BindingUses = 0;            // set by Sema (see bindingUses)
   Type *BindType = nullptr;          // see getBindType
+  bool Uncounted = false;            // set by Sema (see bindsUncounted)
 
 public:
   // Type arm (or wildcard when armType == nullptr).
@@ -967,6 +968,12 @@ public:
   /// written back to the subject there.
   size_t bindingUses() const { return BindingUses; }
   void setBindingUses(size_t uses) { BindingUses = uses; }
+  /// Set by Sema for a binding that is a `view` of a subject that is a
+  /// borrow itself, `self` or a `view` parameter, local or binding (#368):
+  /// it names what the subject does without counting it, and is never
+  /// assigned, moved, stored or passed to an `inout` parameter.
+  bool bindsUncounted() const { return Uncounted; }
+  void setBindsUncounted(bool v) { Uncounted = v; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchArm; }
 };

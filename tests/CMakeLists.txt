@@ -71,6 +71,7 @@ add_executable(sema_tests
     Sema/MoveTests.cpp
     Sema/QualifierTests.cpp
     Sema/QualifiedPartTests.cpp
+    Sema/MatchBindingTests.cpp
     Sema/FuncTests.cpp
     Sema/NativeTests.cpp
     Sema/ControlFlowTests.cpp

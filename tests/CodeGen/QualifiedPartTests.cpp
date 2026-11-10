@@ -232,3 +232,199 @@ TEST(QualifiedPart, CellsAreMadeWhereValuesBecomeThem) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "6 none 4\n");
 }
+
+// A match binding holds its subject's form: an `inout` arm of a `shared
+// mut` optional trades shared references, and in a template's code the
+// clone of a `view T?` subject's binding with T = `shared mut Node` is the
+// same object.  An arm over a borrowed subject binds it without counting.
+TEST(QualifiedPart, MatchBindingsHoldTheirSubjectsForm) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
+    class Base { v: int; }
+    class Node : Base { w: int; }
+    fn first<T: Cloneable>(o: view T?) -> T? {
+      match o { v: T { return v.clone(); } None { return None; } }
+    }
+    fn peek(o: view Base) -> int {
+      match o { n: Node { return n.w; } _ { return 0; } }
+    }
+    fn main() -> int {
+      s: shared mut Node = Node(1, 2);
+      o: shared mut Node? = s;
+      match first<shared mut Node>(o) { n: Node { n.w = 7; } None { } }
+      match o {
+        n: inout Node {
+          let old = mem::replace(n, Node(0, 9));
+          old.w += 1;
+        }
+        None { }
+      }
+      match o { n: Node { io::print(Str(n.w) + " "); } None { } }
+      io::println(Str(s.w) + " " + Str(peek(s)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "9 8 8\n");
+  g.expectNoLeaks("MatchBindingsHoldTheirSubjectsForm");
+}
+
+// An arm over a borrowed subject binds it without counting, so what leaves
+// the arm is counted where it lands: a clone pushed into a list, as its
+// copy, outlives the subject's variable, and a `view fn`'s arm over `self`
+// reads its binding.
+TEST(QualifiedPart, AnUncountedBindingIsCountedWhereItLands) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::collections as cl;
+    class Base { v: int; }
+    class Node : Base { w: int; }
+    fn keepAll<T: Cloneable>(o: view T?, l: inout cl::List<T>) {
+      match o { v: T { l.push(v.clone()); } None { } }
+    }
+    fn grab<T: Cloneable>(o: view T?) -> T? {
+      match o { v: T { let k = v.clone(); return k; } None { return None; } }
+    }
+    impl Base {
+      view fn kind() -> int {
+        match self { n: Node { return n.w; } _ { return 0; } }
+      }
+    }
+    fn main() -> int {
+      l: cl::List<shared mut Node> = cl::List<shared mut Node>();
+      o: shared mut Node? = Node(1, 2);
+      keepAll(o, l);
+      keepAll(o, l);
+      o = None;
+      let g = grab<shared mut Node>(l.get(0));
+      match g { n: Node { n.w = 5; } None { } }
+      io::print(Str(l.get(1).w) + " " + Str(l.len()) + " ");
+      b: Base = Node(3, 4);
+      io::println(Str(b.kind()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "5 2 4\n");
+  g.expectNoLeaks("AnUncountedBindingIsCountedWhereItLands");
+}
+
+// A `shared fn`'s `self` is a `shared mut` reference, so a binding of it is
+// a copy the arm may assign, move or pass `inout`, counted as any copy is;
+// the object `self` names stays as it was.
+TEST(QualifiedPart, ASharedFnsSelfBindingIsACountedCopy) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
+    class Base { v: int; }
+    class Node : Base { w: int; }
+    fn take(x: shared mut Node) -> int { return x.w; }
+    impl Base {
+      shared fn swapOut() -> int {
+        match self {
+          n: Node {
+            let old = mem::replace(n, Node(0, 0));
+            return old.w + n.w;
+          }
+          _ { return 0; }
+        }
+      }
+      shared fn renew() -> int {
+        match self {
+          n: Node { for i in 0..3 { n = Node(i, i); } return n.w; }
+          _ { return 0; }
+        }
+      }
+      shared fn hand() -> int {
+        match self { n: Node { return take(move n); } _ { return 0; } }
+      }
+    }
+    fn main() -> int {
+      s: shared mut Base = Node(1, 2);
+      io::print(Str(s.swapOut()) + " " + Str(s.swapOut()) + " ");
+      io::print(Str(s.renew()) + " " + Str(s.hand()) + " ");
+      io::println(Str(s.v));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "2 2 2 2 1\n");
+  g.expectNoLeaks("ASharedFnsSelfBindingIsACountedCopy");
+}
+
+// An arm's `view` of a `view` parameter is another name for it, lent on to
+// each call as the parameter is; an optional `view` parameter's arm and a
+// counted arm over a field read the same object.
+TEST(QualifiedPart, ABorrowedArmIsLentAsItsSubjectIs) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Animal { n: int; }
+    class Dog : Animal { }
+    class H { a: Animal; }
+    fn show(x: view Animal) -> int { return x.n; }
+    fn viaParam(p: view Animal, k: int) -> int {
+      t = 0;
+      match p { d: Dog { for i in 0..k { t += show(d); } } _ { } }
+      return t;
+    }
+    fn viaOptional(p: view Animal?) -> int {
+      match p { d: Dog { return show(d); } _ { return 0; } }
+    }
+    fn viaField(h: view H, k: int) -> int {
+      t = 0;
+      match h.a { d: Dog { for i in 0..k { t += show(d); } } _ { } }
+      return t;
+    }
+    fn main() -> int {
+      let h = H(Dog(7));
+      o: Animal? = Dog(5);
+      io::println(Str(viaParam(h.a, 3)) + " " + Str(viaOptional(o)) + " " +
+                  Str(viaField(h, 3)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "21 5 21\n");
+  g.expectNoLeaks("ABorrowedArmIsLentAsItsSubjectIs");
+}
+
+// A `lock` block's `view` binding is the address of the cell's contents,
+// so an arm's `view` of it reads the contents through that address: a
+// local cell, a field cell and an optional cell, passed on to a `view`
+// parameter too.  A cell is never freed for now (docs/language/
+// 19-concurrency.md, "Limits for now"): the three cells and their contents
+// are the six blocks left, and the arms add none.
+TEST(QualifiedPart, AnArmInALockBlockReadsTheContents) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Base { v: int; }
+    class Dog : Base { w: int; }
+    class H { c: locked mut Base; }
+    fn show(d: view Dog) -> int { return d.w; }
+    fn peek(h: view H) -> int {
+      t = 0;
+      lock h.c as v: view { match v { d: Dog { t = d.w; } _ { t = -1; } } }
+      return t;
+    }
+    fn main() -> int {
+      let c: locked mut Base = Dog(1, 2);
+      lock c as v: view {
+        match v { d: Dog { io::print("dog " + Str(show(d)) + " "); } _ { } }
+      }
+      o: locked mut Base? = Dog(3, 4);
+      match o {
+        b: Base {
+          lock b as v: view { match v { d: view Dog { io::print(Str(d.w) + " "); } _ { } } }
+        }
+        None { }
+      }
+      let h = H(Dog(5, 6));
+      io::println(Str(peek(h)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "dog 2 4 6\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 6);
+}

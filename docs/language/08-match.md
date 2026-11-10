@@ -380,8 +380,9 @@ match x {
 
 What a binding may do with what it names depends on what is matched:
 
-- On a variable, a parameter or a field, a binding of a move-only part (an object, a
-  `Str`, a value holding one) is a **borrow** of the subject, a `view`: the subject keeps
+- On a variable, a parameter or a field (or a call's `inout` result, or a conditional with
+  a branch that is one of these), a binding of a move-only part (an object, a `Str`, a
+  value holding one) is a **borrow** of the subject, a `view`: the subject keeps
   the object, and the binding reads it, calls its `view fn` methods and is passed on to
   `view` parameters, but is not stored, moved, returned or written through (the errors are
   below). A copy of it is made with `clone()` when its type is
@@ -394,10 +395,10 @@ What a binding may do with what it names depends on what is matched:
 - A Copyable part (a number, a `bool`, an enum of such fields) is copied into the
   binding.
 
-An owned binding takes no qualifier and is in the subject's form: under a bare subject it
-reads the object and calls its `view fn` methods (`'d' is immutable (a 'Dog'; write 'mut
-Dog' to change it); cannot assign to its field 'n'`). To change the subject's object in
-place, match on a `mut` variable or field with an `inout` binding
+An owned binding is in the subject's form ([A qualified subject](#a-qualified-subject)):
+under a bare subject it reads the object and calls its `view fn` methods (`'d' is immutable
+(a 'Dog'; write 'mut Dog' to change it); cannot assign to its field 'n'`). To change the
+subject's object in place, match on a `mut` variable or field with an `inout` binding
 ([Borrowing the subject](#borrowing-the-subject)).
 
 ```pkn
@@ -473,6 +474,101 @@ Bindings are available on type arms (including the `T` arm of an optional) and o
 of an enum's variants with fields, which bind the fields
 ([Variant Mode](#variant-mode--matching-on-an-enum)): value-pattern arms, the arms of a
 variant without fields and `_` do not bind.
+
+### A qualified subject
+
+A binding holds its subject's [form](19-concurrency.md#who-holds-an-object-the-qualifiers),
+as a part of it does. A downcast of a `shared Animal` binds a `shared Dog`: like any
+`shared` reference it is Copyable, so the arm may store it or hand it on, and it reads the
+object. On a `shared mut Animal`, the binding writes the object too.
+
+You may write the form on the arm, `d: shared Dog`. It must then be the subject's, `mut`
+included: `d: mut Dog` takes a `mut` subject, such as a `mut` variable or a call's `inout`
+result. An arm with no binding follows the same rule
+(`the arm matches part of a 'shared Animal': its type is 'shared Dog', not 'atomic shared
+Dog'`).
+
+```pkn
+import ::io;
+
+class Animal { n: int; }
+class Dog : Animal { }
+
+fn main() -> int {
+  let s: shared Animal = Dog(1);
+  let m: shared mut Animal = Dog(2);
+  kept: shared Dog? = None;
+  match s {
+    d: Dog { kept = d; }             // a 'shared Dog', copied out
+    _ { }
+  }
+  match m {
+    d: shared mut Dog { d.n = 3; }   // the form, written
+    _ { }
+  }
+  match kept { d: Dog { io::println(Str(d.n)); } None { } }
+  io::println(Str(m.n));
+  return 0;
+}
+```
+
+Output:
+
+```
+1
+3
+```
+
+```pkn
+class Animal { n: int; }
+class Dog : Animal { }
+
+fn main() -> int {
+  let s: shared Animal = Dog(1);
+  match s {
+    d: shared mut Dog { }
+    _ { }
+  }
+  let a: Animal = Dog(2);
+  match a {
+    d: mut Dog { }
+    _ { }
+  }
+  return 0;
+}
+```
+
+Error:
+
+```
+'d' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mut Dog'
+'d' binds part of a 'Animal': its type is 'Dog', not 'mut Dog'
+```
+
+A [borrowing](#borrowing-the-subject) binding is in the subject's form too:
+- A `view` arm reads the subject in its form.
+- An `inout` arm of a `shared mut` subject names `shared mut` storage, so what
+  `mem::replace` takes out through it is a `shared mut` reference, never a unique one.
+
+A borrowing arm takes no written qualifier: `'view' arm 'd' takes no qualifier ('shared
+mut'): a borrow binds the subject whatever its form`. In a template's code, a binding keeps
+the form a type argument gave. For example, `v: T` on a `view T?` subject, with T =
+`shared mut Node`, is a `shared mut Node`, and its `clone()` is a copy of the reference
+([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)).
+
+A conditional subject is held in one form, so each of its branches must have it. A
+`None` branch is allowed, and so is a new object becoming `shared`:
+
+```
+'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one
+```
+
+A `locked` subject's class is its contents' class, and only a `lock` block reaches the
+contents ([`locked mut` cells](19-concurrency.md#locked-mut-cells-and-lock-blocks)). So a
+type arm on a cell is an error, and so is a value-mode `match` on a `locked Str`: `'c' is
+'locked': reach its contents in 'lock c as c: view { }' (or 'inout')`. Match the block's binding instead, `lock c as v: view { match v { … }
+}`. On an optional cell, `locked mut Node?`, the arm naming `Node` binds the cell, a handle
+that a `lock` block opens.
 
 ### Borrowing the subject
 
@@ -830,6 +926,10 @@ match f.readln() {
 | Binding redeclaration | An arm body redeclares the arm's binding name |
 | Binding named `self` | In a method's body, an arm's binding is named `self`, which names the method's object or receiver (`'self' cannot be used as a variable name in method 'm' of class 'C'; it is the implicit receiver`) |
 | `view` binding changed or passed on | A `name: view T` binding is assigned, written through, passed to a parameter that is not `view`, or stored; or the subject's variable changes while it is live |
+| Arm qualifier not the subject's form | A qualifier written on a type arm, with a binding or without, is not the subject's form, `mut` included (`'d' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mut Dog'`, `the arm matches part of ...`) |
+| Qualifier on a borrowing arm | A `view` or `inout` arm is written with a qualifier (`'view' arm 'd' takes no qualifier ('shared mut'): a borrow binds the subject whatever its form`) |
+| Conditional subject of two forms | A binding's subject is a conditional whose branches are held in two forms (`'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one`) |
+| Cell's contents outside a `lock` | A type arm tests the class of a `locked` subject, or a value-mode `match` compares one (`'c' is 'locked': reach its contents in 'lock c as c: view { }' (or 'inout')`) |
 | `inout` binding of something else | A `name: inout T` arm's subject is not a variable, a field or a call's `inout` result, is `self`, a `let` local, a `view` or a `weak` reference, or is an optional primitive or enum; or the subject's variable is used while the binding is live |
 | Arm body type error | Any type error inside an arm body |
 | Wildcard not last | A `_` arm is followed by another arm |

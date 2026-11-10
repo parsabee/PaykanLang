@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -1509,10 +1510,74 @@ static bool isPlaceExpr(const ast::Expr *e) {
          ast::isa<ast::SubscriptExpr>(e) || ast::isa<ast::TupleIndexExpr>(e);
 }
 
+/// Whether a `match` on @p e reads storage (#368): a place, a call's
+/// `inout` result, or a conditional with a branch that is one.  A binding
+/// of a move-only part of it is a borrow of that storage, never a copy.
+static bool readsStorage(const ast::Expr *e) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return readsStorage(te->getTrueExpr()) || readsStorage(te->getFalseExpr());
+  return isPlaceExpr(e) || e->isInoutResult();
+}
+
 bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
-                       ast::Type *bindTy) {
+                       ast::Type *bindTy, ast::Qualifier written) {
   const std::string &name = arm->getBinding();
   std::string msg;
+  arm->setBindsUncounted(false);
+  // The binding holds its subject's form (#368: on a `shared Obj`, `p:
+  // Node` binds a `shared Node`), which a qualifier written on the arm must
+  // be; a borrow's arm takes none written, but a type argument's.
+  const ast::Qualifier form = qualifierOf(subject);
+  if (!written.isUnique() && arm->getMode() != ast::ParamMode::Value &&
+      !written.FromArgument) {
+    error(arm->getLocation(),
+          std::string("'") + ast::paramModeName(arm->getMode()) + "' arm '" +
+              name + "' takes no qualifier ('" + written.spelling() +
+              "'): a borrow binds the subject whatever its form");
+    declarePoisoned(CurrentScope, name);
+    return false;
+  }
+  if (!checkArmForm(subject, bindTy, written, "'" + name + "' binds",
+                    arm->getLocation())) {
+    declarePoisoned(CurrentScope, name);
+    return false;
+  }
+  // A conditional is held in its true branch's form (qualifierOf), which
+  // each branch must have, a `None` aside: a frozen object is never bound
+  // `shared mut`, a `shared mut` one never `atomic shared`.  A new object
+  // may become `shared` (only a whole conditional is made a cell or
+  // frozen); storage of a unique one never does.
+  if (ast::isRefType(bindTy) && ast::isa<ast::TernaryExpr>(subject)) {
+    std::string other;
+    std::function<void(const ast::Expr *)> branches = [&](const ast::Expr *b) {
+      if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(b)) {
+        branches(te->getTrueExpr());
+        branches(te->getFalseExpr());
+        return;
+      }
+      if (ast::isa<ast::NoneLiteral>(b) || !other.empty())
+        return;
+      const ast::Qualifier q = qualifierOf(b);
+      const bool same = q.Form == form.Form &&
+                        (q.Form == ast::QualForm::Unique || q.Mut == form.Mut);
+      const bool fresh = q.Form == ast::QualForm::Unique &&
+                         form.Form == ast::QualForm::Shared && !readsStorage(b);
+      if (!same && !fresh)
+        other = qualifiedName(q, const_cast<ast::Expr *>(b)->getResolvedType());
+    };
+    branches(subject);
+    if (!other.empty()) {
+      error(arm->getLocation(),
+            "'" + name +
+                "' binds part of a conditional whose branches have two "
+                "forms, '" +
+                qualifiedName(
+                    form, const_cast<ast::Expr *>(subject)->getResolvedType()) +
+                "' and '" + other + "': a binding holds one");
+      declarePoisoned(CurrentScope, name);
+      return false;
+    }
+  }
   if (!checkBinderName(name, arm->getLocation()) ||
       !checkNotSelf(name, arm->getLocation())) {
     // Reported.
@@ -1532,32 +1597,81 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     else
       msg = inoutPlaceError(subject, "bound by " + what);
     if (msg.empty()) {
+      // The storage's writes; a `shared mut` subject's binding is that
+      // form (#368), so `mem::replace` through it trades shared references.
       CurrentScope->Kinds[name] = VarKind::Inout;
-      CurrentScope->Quals[name] = ast::Qualifier{ast::QualForm::Unique, true};
+      CurrentScope->Quals[name] =
+          form.Form == ast::QualForm::Unique
+              ? ast::Qualifier{ast::QualForm::Unique, true}
+              : form;
       return true;
     }
     error(subject->getLocation(), msg);
   } else {
-    // `n: view T` is a `view` local of the subject, whatever the subject is.
-    if (arm->getMode() == ast::ParamMode::View)
+    // `n: view T` is a `view` local of the subject, whatever the subject is,
+    // reading it in its form (#368).
+    bool view = true;
+    if (arm->getMode() == ast::ParamMode::View) {
       CurrentScope->Kinds[name] = VarKind::ViewLocal;
-    else if (MatchSubjectIsView ||
-             (isPlaceExpr(subject) &&
-              !isCopyablePart(bindTy, qualifierOf(subject)))) {
+    } else if (MatchSubjectIsView ||
+               (readsStorage(subject) && !isCopyablePart(bindTy, form))) {
       // A binding of a `view` subject is a `view`; so is a plain binding of
       // a move-only part of a place (the copy rule): the place keeps its
       // value, and `match move x` binds owned parts instead.
       CurrentScope->Kinds[name] = VarKind::ViewBinding;
       CurrentScope->ViewSubjects[name] = subject;
     } else {
-      // A plain binding is a copy of the subject's reference and keeps its
-      // form (the prototype): a `mut` subject's object stays writable.
-      CurrentScope->Quals[name] = qualifierOf(subject);
+      view = false;
     }
+    // A `view` of a subject that is a borrow itself counts nothing (#368):
+    // the subject's holder keeps the object for the whole arm.  A binding
+    // that is a copy (a `shared` part, of a `shared fn`'s `self` too) may
+    // be assigned, moved or passed `inout`, and is counted.
+    if (view)
+      if (const auto *id = ast::dyn_cast<ast::Identifier>(subject)) {
+        const VarKind k = varKind(id->getName());
+        arm->setBindsUncounted((id->getName() == names::kSelf &&
+                                CurrentClassCtx && !CurrentClassCtx->Struct) ||
+                               k == VarKind::View || k == VarKind::ViewLocal ||
+                               k == VarKind::ViewBinding);
+      }
+    // A plain binding is a copy of the subject's reference and keeps its
+    // form (the prototype): a `mut` subject's object stays writable.  A
+    // borrow's keeps it too, for what it reads (a type argument's form, a
+    // clone of which is its copy in a template's code).
+    if (!form.isUnique())
+      CurrentScope->Quals[name] = form;
     return true;
   }
   // Its uses in the arm's body are follow-ons of the reported error.
   declarePoisoned(CurrentScope, arm->getBinding());
+  return false;
+}
+
+bool Sema::checkArmForm(const ast::Expr *subject, ast::Type *bindTy,
+                        ast::Qualifier written, const std::string &who,
+                        ast::SourceLocation loc) {
+  if (written.isUnique() || !ast::isRefType(bindTy))
+    return true;
+  // An `inout` result names writable storage, as a `mut` place is; so
+  // does a conditional of such branches.  A `None` branch is no storage,
+  // and the binding is then immutable (qualifierOf), as a `mut` would not be.
+  ast::Qualifier form = qualifierOf(subject);
+  std::function<bool(const ast::Expr *)> writable = [&](const ast::Expr *b) {
+    if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(b))
+      return writable(te->getTrueExpr()) && writable(te->getFalseExpr());
+    return b->isInoutResult() || qualifierOf(b).Mut;
+  };
+  if (form.Form == ast::QualForm::Unique && writable(subject))
+    form.Mut = true;
+  if (written.Form == form.Form && written.Mut == form.Mut)
+    return true;
+  error(loc,
+        who + " part of a '" +
+            qualifiedName(form,
+                          const_cast<ast::Expr *>(subject)->getResolvedType()) +
+            "': its type is '" + qualifiedName(form.form(), bindTy) +
+            "', not '" + qualifiedName(written.form(), bindTy) + "'");
   return false;
 }
 
@@ -6630,6 +6744,10 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   // its type known.
   const bool recvFailed =
       Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;
+  // A cell's contents are written in a `lock` block (#368: `c.f = v` on a
+  // `locked mut` cell wrote into the cell).
+  if (!checkNotLocked(node->getReceiver(), node->getLocation()))
+    return false;
 
   // A field cannot be assigned through an optional receiver (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
@@ -6854,7 +6972,8 @@ bool Sema::visitImportDecl(ast::ImportDecl *) {
 // Value-mode match: the subject is a primitive (int/float/bool/char) or Str.
 // Every non-wildcard arm must be a literal whose type matches the subject.
 bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
-  bool ok = true;
+  // A `locked Str`'s contents are compared in a `lock` block (#368).
+  bool ok = checkNotLocked(node->getSubject(), node->getLocation());
   bool seenWildcard = false;
 
   for (ast::MatchArm *arm : node->getArms()) {
@@ -7115,10 +7234,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
       // 2. Resolve the arm's type annotation.
       auto *resolvedArmTy =
           resolveType(arm->getArmType(), arm->getLocation(), "match arm");
-      // A qualifier written on the arm's type (not part of an arm's binding
-      // yet: it takes the subject's form) must not reach the next
-      // declaration resolved.
-      (void)takeQualifier();
+      // A qualifier written on the arm's type is the binding's, which must
+      // be the subject's form (bindArmName).
+      const ast::Qualifier written = takeQualifier();
       arm->setArmType(resolvedArmTy); // write canonical pointer back
       auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy)
                                   : nullptr;
@@ -7150,14 +7268,30 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
           // rely on.
           reportAbstractArm(arm, armCt);
           ok = false;
+        } else if (!checkNotLocked(node->getSubject(), arm->getLocation())) {
+          // The exact-class test reads a cell's contents, which a `lock`
+          // block reaches (#368: it tested the cell).  The binding's uses
+          // in the body follow from it.
+          ok = false;
+          armCt = nullptr;
         }
+        // A qualifier a type argument gave an arm without a binding tests
+        // nothing; one written must be the subject's form (#368).
+        if (armCt && !arm->hasBinding() && !written.FromArgument &&
+            !checkArmForm(node->getSubject(), armCt, written, "the arm matches",
+                          arm->getLocation()))
+          ok = false;
 
         // 4. Declare the binding variable with the narrowed (arm) type.  An
         //    arm naming a type parameter that is an optional `X?` binds the
         //    `X` it matches too (ASTCloner): the subject is never None, so an
         //    `inout` binding of a `T` could not go back to it.
         arm->setBindType(nullptr);
-        if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armCt)) {
+        if (!armCt) {
+          if (arm->hasBinding())
+            declarePoisoned(CurrentScope, arm->getBinding());
+        } else if (arm->hasBinding() &&
+                   !bindArmName(arm, node->getSubject(), armCt, written)) {
           ok = false;
         } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armCt)) {
@@ -7238,10 +7372,9 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
     } else {
       auto *resolvedArmTy =
           resolveType(arm->getArmType(), arm->getLocation(), "match arm");
-      // A qualifier written on the arm's type (not part of an arm's binding
-      // yet: it takes the subject's form) must not reach the next
-      // declaration resolved.
-      (void)takeQualifier();
+      // A qualifier written on the arm's type is the binding's, which must
+      // be the subject's form (bindArmName).
+      const ast::Qualifier written = takeQualifier();
       arm->setArmType(resolvedArmTy); // write canonical pointer back
       ast::Type *bindTy = nullptr;
       if (!resolvedArmTy) {
@@ -7271,8 +7404,15 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
           if (armCt != innerCt && armCt->isAbstract()) {
             reportAbstractArm(arm, armCt);
             ok = false;
+            bindTy = armCt;
+          } else if (armCt != innerCt &&
+                     !checkNotLocked(node->getSubject(), arm->getLocation())) {
+            // The test reads a cell's contents (#368); the binding is
+            // poisoned below.
+            ok = false;
+          } else {
+            bindTy = armCt;
           }
-          bindTy = armCt;
         }
       } else if (ast::isa<ast::BuiltinType>(inner) ||
                  ast::isa<ast::FunctionType>(inner) ||
@@ -7306,8 +7446,12 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       // An arm in error still binds its name in the body, poisoned.
       if (arm->hasBinding() && !bindTy)
         declarePoisoned(CurrentScope, arm->getBinding());
+      if (!arm->hasBinding() && bindTy && !written.FromArgument &&
+          !checkArmForm(node->getSubject(), bindTy, written, "the arm matches",
+                        arm->getLocation()))
+        ok = false;
       if (arm->hasBinding() && bindTy &&
-          !bindArmName(arm, node->getSubject(), bindTy)) {
+          !bindArmName(arm, node->getSubject(), bindTy, written)) {
         ok = false;
       } else if (arm->hasBinding() && bindTy) {
         if (!CurrentScope->declare(arm->getBinding(), bindTy)) {

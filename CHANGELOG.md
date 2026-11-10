@@ -256,6 +256,31 @@ samples/concurrency/README.md.
   - A function value of a named function has its parameters' and result's qualifiers in its
     type, and a call through a function value converts each argument into its parameter's
     form (a `shared` argument to a unique parameter was accepted there).
+- A `match` binding holds its subject's form (#368; docs/language/08-match.md, "A qualified
+  subject"): a downcast of a `shared Animal` binds a `shared Dog`, Copyable and read-only,
+  and one of a `shared mut Animal` writes the object. A qualifier written on the arm, which
+  was dropped, is optional and must be that form, `mut` included (`'d' binds part of a
+  'shared Animal': its type is 'shared Dog', not 'shared mut Dog'`); a `view` or `inout` arm
+  takes none (`'view' arm 'd' takes no qualifier ('shared mut'): a borrow binds the subject
+  whatever its form`).
+  - An `inout` arm of a `shared mut` subject names `shared mut` storage: `mem::replace`
+    through it gave the object back as a unique one.
+  - In a template's code a binding keeps the form a type argument gave, so the `clone()` of
+    `v: T` on a `view T?` subject with T = `shared mut Node` is the same object.
+  - An arm without a binding takes a qualifier only in the subject's form too (`the arm
+    matches part of a 'shared Base': its type is 'shared Node', not 'atomic shared Node'`).
+  - A conditional subject's branches each have the binding's form, a `None` or a new
+    object becoming `shared` aside (`'n' binds part of a conditional whose branches have
+    two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one`). The
+    binding took the true branch's form, so a frozen object was written through a `shared
+    mut` binding and a unique place's object bound `shared`.
+  - A binding of a move-only part of a call's `inout` result, or of a conditional with a
+    branch that is a place, is a borrow, as one of a variable is: it was a copy, a second
+    owner of a unique object that `move` could take.
+  - An arm's `view` of `self`, or of a `view` parameter, local or binding, is another name
+    for the subject's variable. It no longer counts what it binds, and it is lent on as the
+    subject is. A binding that is a copy, such as a `shared fn`'s `self`,
+    is counted, so the arm may assign it, move it or pass it `inout`.
 - **Breaking:** an enum variant's arguments (`Shape::Named(move t)`) and an imported function's
   or constructor's arguments go through the copy rule, as every other owning slot does: an
   imported call took a move-only place as it was, so a helper in another module that only
@@ -288,6 +313,15 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A cell's contents were reached outside a `lock` block in three ways. A type arm on a
+  `locked` subject tested the cell's class, not its contents', so `n: Node` on a `locked mut
+  Base` holding a `Node` did not match. A value-mode `match` on a `locked Str` ran the
+  string comparison on the cell. A field write through a `locked` reference (`c.w = 8`)
+wrote into the cell, which then aborted the next `lock`. All three are now `'c' is
+  'locked': reach its contents in 'lock c as c: view { }' (or 'inout')`, as a read is. A
+  conditional with a `locked` branch other than its first (`(if c then w else lw).b`)
+  passed the check, which saw only the first branch's form, and read the cell as an
+  object.
 - A new value assigned to an existing `locked mut` or `atomic shared` variable or parameter
   was stored as a plain object, with no cell made or nothing frozen (a field's store made
   them); and a `None` flowing into a `locked mut T?` slot through a conditional or a result

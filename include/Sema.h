@@ -1193,10 +1193,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// checkBinderName for a match arm's binding (of type @p bindTy), and its
   /// kind: `n: view T` is a `view` local, `n: inout T` the storage of
-  /// @p subject, which must be a place.  A rejected binding is bound
-  /// poisoned in the arm's scope.
+  /// @p subject, which must be a place.  The binding holds the subject's
+  /// form (#368), which a qualifier @p written on the arm must be.  A
+  /// rejected binding is bound poisoned in the arm's scope.
   bool bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
-                   ast::Type *bindTy);
+                   ast::Type *bindTy, ast::Qualifier written = {});
+  /// Whether a qualifier @p written on a type arm of type @p bindTy is the
+  /// form of @p subject (#368), `mut` included, else an error at @p loc
+  /// that @p who ("'n' binds", "the arm matches") part of the subject.
+  bool checkArmForm(const ast::Expr *subject, ast::Type *bindTy,
+                    ast::Qualifier written, const std::string &who,
+                    ast::SourceLocation loc);
 
   // Check that a variable is declared. Returns its type,
   // or nullptr (with error emitted) on failure.  A poisoned variable yields

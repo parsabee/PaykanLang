@@ -269,12 +269,21 @@ private:
     /// (of type `weak`) is released with weak.release at scope exit.
     void declareWeak(const std::string &name, pir::LocalId local,
                      ast::Type *astTy);
-    /// A borrowed, never-released raw-object binding.  Only `self` is
-    /// declared this way: the caller owns the object for the whole call, and
-    /// Sema rejects assignments to `self`.  Match-arm bindings are ordinary
-    /// owned variables (see emitTypeArmBody in LoweringMatch.cpp).
+    /// A borrowed, never-released raw-object binding: `self` (the caller
+    /// owns the object for the whole call, and Sema rejects assignments to
+    /// `self`).  Match-arm bindings are ordinary owned variables, or names
+    /// for their subject's (declareAlias; see emitTypeArmBody in
+    /// LoweringMatch.cpp).
     void declareUnowned(const std::string &name, pir::LocalId local,
                         ast::Type *astTy);
+    /// @p name, of type @p astTy, for the variable @p of: its local, owned
+    /// or not, stable or not, an address of storage or not (a `lock`
+    /// block's binding), as @p of is, and released only as @p of is.
+    /// A match arm's `view` of a subject that is a borrow itself
+    /// (ast::MatchArm::bindsUncounted): it counts what the subject counts,
+    /// and is lent where the subject is.
+    void declareAlias(const std::string &name, const std::string &of,
+                      ast::Type *astTy);
     /// An `inout` parameter of type @p astTy, whose local holds the address
     /// of a @p pointee: the caller's storage, never owned here.
     void declareInout(const std::string &name, pir::LocalId local,
