@@ -250,10 +250,12 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
   }
   TraitRef tr{&it->second, {}};
   ast::ASTCloner cloner(Ctx, subst);
+  // A trait's type argument keeps its form (#368), as a template's does:
+  // `Src<shared Node>` is not `Src<Node>`.
   for (size_t i = 0; i < argAnns.size(); ++i) {
-    auto *t = resolveType(cloner.cloneType(argAnns[i]), loc,
-                          "type argument " + std::to_string(i + 1) +
-                              " of trait '" + name + "'");
+    auto *t = resolveTypeArgument(cloner.cloneType(argAnns[i]), loc,
+                                  "type argument " + std::to_string(i + 1) +
+                                      " of trait '" + name + "'");
     if (!t)
       return std::nullopt;
     tr.Args.push_back(t);
@@ -307,6 +309,18 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
   };
+  // A qualified type argument (#368): Copyable and Cloneable by its form
+  // (a `shared Node` copies), never a ValueType, and any other trait as its
+  // type has it.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    if (isBuiltinTrait(names::kTraitCopyable))
+      return isCopyable(ty) ? ty : nullptr;
+    if (isBuiltinTrait(names::kTraitCloneable))
+      return isCloneable(ty) ? ty : nullptr;
+    if (isBuiltinTrait(names::kTraitValueType))
+      return nullptr;
+    return traitImplOwner(qt->getInnerType(), tr);
+  }
   // Copyable by structure (the concurrency prototype).
   if (isBuiltinTrait(names::kTraitCopyable))
     return isCopyable(ty) ? ty : nullptr;

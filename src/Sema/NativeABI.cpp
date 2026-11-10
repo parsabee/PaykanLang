@@ -8,6 +8,10 @@ namespace paykan::sema {
 using pir::Type;
 
 pir::Type pirType(const ast::ASTContext &ctx, ast::Type *ty) {
+  // A qualified type argument (#368) is held as its type is.
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return qt->getInnerType() ? pirType(ctx, qt->getInnerType())
+                              : pir::Type::Void;
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     // Every integer type is held sign- or zero-extended in an i64 and every
     // floating-point type as the f64 it is (docs/design/sized-types.md).

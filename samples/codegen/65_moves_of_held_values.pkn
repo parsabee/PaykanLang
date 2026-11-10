@@ -10,8 +10,9 @@
 // The nodes are `shared`, so a value holding them is Copyable and its moves
 // are the compiler's own; a unique reference, and a value holding one, would
 // leave a variable only by `move`.  A function value is never Copyable, so it
-// is moved explicitly.  A tuple's or an array's element takes no qualifier, so
-// the tuples and the array hold `Pair`s, structs whose field holds the node.
+// is moved explicitly.  The tuples and the array hold `Pair`s, structs whose
+// field holds the node (a tuple's or an array's element can be `shared`
+// itself since #368; the sample keeps the structs).
 // expect-stdout: tuple: alive | replaced: gone
 // expect-stdout: struct: alive | replaced: gone
 // expect-stdout: enum: alive | replaced: gone

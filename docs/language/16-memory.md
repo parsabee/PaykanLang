@@ -33,8 +33,8 @@ In detail:
 | Category | Types | Storage | On assignment / passing |
 |----------|-------|---------|--------------------------|
 | **Value** | `int`, `float`, `bool`, `char`, the sized numeric types (`u8`, `f32`, …, each in an 8-byte slot), `enum`, and their optionals `int?`, `float?`, `bool?`, `char?`, `u8?` | Stack / register (inline in a field) | Copied bit-for-bit; independent thereafter |
-| **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied when Copyable (the `shared` references their structs hold retained); moved otherwise |
-| **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied when Copyable (the `shared` references their structs hold retained); moved otherwise |
+| **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied when Copyable (`shared` elements, and the `shared` references their structs hold, retained); moved otherwise |
+| **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied when Copyable (`shared` elements, and the `shared` references their structs hold, retained); moved otherwise |
 | **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied when Copyable (`shared` references retained); moved otherwise |
 | **Function value** | `(T1, T2) -> R`: a lambda or a named function | Inline, 16 bytes: the code's address and a reference to its closure, a heap object holding the captured variables (copied when the lambda is made; none when nothing is captured) | Moved: the code and the closure go together; the captures are released with the closure |
 | **Reference** | class instances (an `io::File` among them), `Str`, optionals `T?` of these | Heap | Moved (`move`), cloned (`clone()`) or lent to a borrow; a `shared` reference copied, its count adjusted |
@@ -609,12 +609,12 @@ returns a `clone()`, or a `view` of the field (`view fn name() -> view Str`,
 for each of its elements: `return (left, right);` of two `Str` locals writes `return (move
 left, move right);`.
 
-A literal's element holds no `shared` reference, frozen object or cell: an element's type
-keeps no qualifier, so the reference would come back out of it unique, and `(1, s)` or `[s,
-s]` with `s` a `shared Node` is `cannot store a 'shared Node' in an element of the tuple, a
-'Node': a 'shared' reference, a frozen object and a cell convert only as they are`. A
-struct with a `shared` field holds one in its place ([Parts of a type take no
-qualifier](19-concurrency.md#parts-of-a-type-take-no-qualifier)).
+A literal's element takes its slot's form, or with none its own `shared` one: `(1, s)` with
+`s` a `shared Node` is an `(int, shared Node)` and `[s; 3]` a `shared Node[3]`, while into
+a `Node` element it is `cannot store a 'shared Node' in an element of the tuple, a 'Node': a
+'shared' reference, a frozen object and a cell convert only as they are`. A frozen object or
+a cell goes in a struct's field, not an element ([Qualifiers in a
+type](19-concurrency.md#qualifiers-in-a-type)).
 
 ### Fields and elements: `mem::replace`, `mem::take` and `mem::swap`
 
@@ -924,21 +924,20 @@ where its variable or field does, inline in the stack frame or in the object. Ho
   all its elements when its variable goes out of scope or the object holding it is destroyed.
 
 Assigning an array, or passing it to a plain parameter, copies it when its elements are
-Copyable: a copy of an array of structs holding `shared` references retains each one's
-object, which the two arrays then share. An element's type takes no qualifier, so an array
-holds a `shared` reference only through a struct's qualified field
-([Parts of a type take no qualifier](19-concurrency.md#parts-of-a-type-take-no-qualifier)).
-An array of move-only elements is moved instead, its references with it, and copied only by
-`clone()` ([Ownership transfers](#ownership-transfers)). See [Arrays](09-arrays.md).
+Copyable: a copy of an array of `shared` references (`shared Node[4]`), or of structs
+holding them, retains each one's object, which the two arrays then share
+([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)). An array of move-only
+elements is moved instead, its references with it, and copied only by `clone()`
+([Ownership transfers](#ownership-transfers)). See [Arrays](09-arrays.md).
 
 A tuple is a value in the same way: it has no box and no count, and its elements are laid out
 in place, one after another like a C struct's fields, in its variable, its field or the array
 element that holds it. A tuple of value types (`(int, float)`) allocates nothing; a reference
 element (`Str`, a class, `Node?`) is a reference to the object, which the tuple holds. A
 tuple of Copyable elements is copied (an assignment, a plain parameter, a result, an array
-element), and each copy retains the `shared` references its structs hold once more; one
-holding a move-only element moves, its references with it, and the variable it leaves
-releases none.
+element), and each copy retains the `shared` references it and its structs hold once more
+(`(int, shared Node)`); one holding a move-only element moves, its references with it, and
+the variable it leaves releases none.
 A variable's references are released when it goes out of scope, a field's when its object
 is destroyed, an array element's with its array (see
 [Ownership transfers](#ownership-transfers)). See [Tuples](10-tuples.md).

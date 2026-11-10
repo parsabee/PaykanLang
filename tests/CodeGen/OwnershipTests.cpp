@@ -1536,8 +1536,9 @@ TEST(Ownership, AContainersStateNeedsNoHoldAcrossItsOwnMethods) {
 // made, `v` is handed on to `offer`, and the Pet dies when `offer` returns,
 // before `push` asks, as it did while `self.sink` was held across the call
 // (docs/pir.md §7, §12).  The Pet is `shared`, so a `weak` reference can
-// name it, and a unique `Tag` holds it (a `T` parameter takes no `shared`
-// reference): the Tag dies when `offer` returns, and lets the Pet go.
+// name it, and a unique `Tag` holds it (a `T` parameter takes the `shared`
+// Pet itself since #368; the test keeps the Tag): the Tag dies when `offer`
+// returns, and lets the Pet go.
 TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
   LeakGuard g;
   auto r = compileMoveAndRun(R"(import ::io;
@@ -1587,7 +1588,8 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
 // in place across put and remove, and every replaced Dog dies when it is let
 // go of.  The Item and the Dogs are `shared` (`shared mut` where a call
 // replaces one), since a `weak` reference names only a `shared` object, and
-// a map's value takes no qualifier, so a struct holds the `shared` Dog.
+// a struct holds the `shared` Dog (a map's value can be `shared` itself
+// since #368; the test keeps the struct).
 TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;

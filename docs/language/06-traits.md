@@ -356,9 +356,11 @@ fn main() -> int {
   let p = twice(Point(1, 2));
   let n = twice(3);
   let s: shared mut Node = Node(7);
+  let both = twice(s);                // twice<shared mut Node>: a shared reference
   let pair = twice(Ref(s));           // a struct of a shared reference is Copyable
-  s.id = 8;                           // the one node, seen through both copies
-  io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1) + " " + Str(pair.1.n.id));
+  s.id = 8;                           // the one node, seen through every copy
+  io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1));
+  io::println(Str(both.1.id) + " " + Str(pair.1.n.id));
   return 0;
 }
 ```
@@ -366,7 +368,8 @@ fn main() -> int {
 Output:
 
 ```
-3 6 8
+3 6
+8 8
 ```
 
 `impl Copyable for X` is an error for any `X`, and a move-only type argument fails the
@@ -396,10 +399,11 @@ Error:
 'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
 ```
 
-A qualifier is not part of a type argument in this version (`twice(s)` with `s: shared Node`
-is checked as a `Node`, and rejected), so a `shared` reference reaches a template inside a
-struct, as `Ref` above. A value that is not Copyable flows into an owning slot only by
-`move`, by `clone()` or to a borrow ([Ownership transfers](16-memory.md#ownership-transfers)).
+A qualifier is part of a type argument ([Qualifiers in a
+type](19-concurrency.md#qualifiers-in-a-type)), so `twice(s)` with `s: shared mut Node`
+binds `T` to `shared mut Node`, which is Copyable: its copies are the same node, as the
+copies of `Ref` are. A value that is not Copyable flows into an owning slot only by `move`,
+by `clone()` or to a borrow ([Ownership transfers](16-memory.md#ownership-transfers)).
 
 ## Cloneable
 
@@ -414,7 +418,10 @@ one, a `shared` one, a frozen `atomic shared` one and a `view`. It returns a new
 one owner, which a `mut` variable takes as it takes a temporary (`m: mut = n.clone();`).
 
 - Every Copyable type is Cloneable: its clone is the copy. So a template bounded by
-  `T: Cloneable` takes numbers and `shared` references as well as `Str`.
+  `T: Cloneable` takes numbers and `shared` references as well as `Str`: a `T` whose
+  argument is `shared Node` clones to the same node. A variable declared `shared Node` is
+  cloned by its class, into a new unique object
+  ([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)).
 - `Str` is Cloneable: `s.clone()` is a new string with the same text.
 - A struct, a tuple, a fixed-size array and an optional are Cloneable when every part is,
   and the clone clones each part (a struct's `shared` or `weak` field is the same object

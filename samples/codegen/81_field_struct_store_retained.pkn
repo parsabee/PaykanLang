@@ -22,7 +22,9 @@
 // (retained): the copies that were taken from an `inout` parameter are taken
 // from a `shared mut` one, and an `inout` result, which cannot be copied, is
 // written through.  The array parameter holds unique references and is moved.
-// A tuple's element takes no qualifier, so the tuple holds an `S`.
+// The tuple holds an `S`, whose field is the `shared mut` reference (a
+// tuple's element can be `shared mut` itself since #368; the sample keeps
+// the struct).
 // expect-stdout: field: 8
 // expect-stdout: capture: 8 8
 // expect-stdout: loop: 2

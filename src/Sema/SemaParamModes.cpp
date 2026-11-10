@@ -251,6 +251,14 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
       return "an element of an array that is not a variable or a field (a "
              "temporary, which dies with the statement) cannot be " +
              use;
+    // An element declared `shared` (#368) is its object's form: an
+    // immutable one is never changed, nor a frozen one.
+    if (const ast::Qualifier q =
+            ast::cast<ast::FixedArrayType>(arrTy)->getElemQual();
+        !q.isUnique() && !(q.Form == ast::QualForm::Shared && q.Mut))
+      return "element '" + placeText(place) + "' is a '" +
+             qualifiedName(q, se->getResolvedType()) +
+             "', which nothing changes, so it cannot be " + use;
     return inoutPlaceError(arr, use);
   }
   const auto *id = ast::dyn_cast<ast::Identifier>(root);
@@ -287,6 +295,16 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
         ct && ct->isWeakField(ma->getFieldName()))
       return "field '" + ma->getFieldName() + "' of class '" + ct->getName() +
              "' is a 'weak' reference and cannot be " + use;
+  // Replacing what an object's field holds changes the object, as an
+  // assignment to the field does: its holder is written, whatever the
+  // field's own form (a `shared mut` field of an immutable object, #368).
+  // (A unique field is immutable under an immutable holder already.)
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(place);
+      ma && qualifierOf(ma).Form != ast::QualForm::Unique &&
+      ast::isa<ast::ClassType>(ast::stripOptional(
+          const_cast<ast::Expr *>(ma->getReceiver())->getResolvedType())))
+    if (std::string why = frozenPlace(ma->getReceiver()); !why.empty())
+      return why + "; its field '" + ma->getFieldName() + "' cannot be " + use;
   std::string why = frozenPlace(place);
   if (!why.empty())
     why += "; it cannot be " + use;

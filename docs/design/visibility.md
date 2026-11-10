@@ -122,7 +122,7 @@ public method's parameter or result naming a private type (`_Node`,
 `_Node?`, `List<_Node>`, `(int) -> _Node`).  A private function, a private
 field, a private method and the members of a private type may name private
 types freely, which is how the standard library's `HashMap<K, V>` holds a
-`Buffer<_Entry<K, V>?>`.
+`_Table<K, V>`, whose buckets are a `mem::Buffer<shared mut _Entry<K, V>?>`.
 
 ## What the exporter does
 

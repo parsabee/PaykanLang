@@ -67,8 +67,8 @@ What the modules have in common:
   so is a program's own `List<int>` next to `collections::List<int>`: give a generic type
   of your own a name of its own.
 - **Reserved private names.** `::collections` declares the private templates `_Node`
-  (of `LinkedList`, `Stack` and `Queue`), `_Entry`, `_Bucket` and `_Table` (of `HashMap`
-  and `HashSet`) and `_Heap` (of the priority queues), and the private struct `_Pieces`. A
+  (of `LinkedList`, `Stack` and `Queue`), `_Entry` and `_Table` (of `HashMap` and
+  `HashSet`) and `_Heap` (of the priority queues), and the private struct `_Pieces`. A
   program that imports it cannot declare a `_Pieces`, and its own `_Node<int>` conflicts
   with the one a `Stack<int>` uses: `instantiation '_Node<int>' of '_Node' conflicts with
   the instantiation '_Node<int>' of '::collections::_Node'`, reported at the program's

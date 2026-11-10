@@ -27,7 +27,9 @@ element that holds it, and nothing writes the object through it. `mut T` adds th
 through the owner the fields are assigned and any method is called. `shared T` is a
 reference that may be copied freely, so several variables alias one object on one thread,
 and none of them writes it; `shared mut T` is the aliased form with the writes. The
-qualifier is part of the type of a variable, a parameter, a field or a result:
+qualifier is part of the type of a variable, a parameter, a field or a result, and a part
+of a type takes one too, as `List<shared Node>` ([Qualifiers in a
+type](#qualifiers-in-a-type)):
 
 ```pkn
 import ::io;
@@ -253,9 +255,10 @@ assignment when its parts are Copyable, and moved when one is move-only
 there is no object for a qualifier to describe, and `shared Point` is an error. `mut` never
 goes on a value either, a number, a `bool` or a `char` included: `let` alone decides whether
 a value's storage is rewritten. What a value holds keeps its own qualifiers: a struct with a
-`shared Node` field is copied, and the copies alias the node; an object it holds through a
-unique field or element is reached through the value, whose `let` fixes its own storage (no
-field or element of it is assigned), not the object's fields.
+`shared Node` field, or a tuple or an array of `shared Node` elements ([Qualifiers in a
+type](#qualifiers-in-a-type)), is copied, and the copies alias the node; an object it holds
+through a unique field or element is reached through the value, whose `let` fixes its own
+storage (no field or element of it is assigned), not the object's fields.
 
 ```pkn
 struct Point {
@@ -335,52 +338,34 @@ Error:
 'ro' is immutable (a 'Box<Point>'; write 'mut Box<Point>' to change it); 'get' is not a 'view fn'
 ```
 
-### Parts of a type take no qualifier
+### Qualifiers in a type
 
-A qualifier qualifies a whole variable, field, parameter or result, not a part of a type: a
-tuple's element, a type argument, an array's element or a function type's parameter or
-result takes none in this version (#368). So `(Str, shared Node)`, `List<shared Node>`,
-`mem::Box<shared mut Node>` and `(shared Node) -> int` are errors, and a tuple or an array
-literal does not hold a `shared` reference, a frozen object or a cell either: its element's
-type has no qualifier, so the reference would come back out of it unique.
-
-```pkn
-class Node { id: int; }
-
-fn first(p: (Str, shared Node)) -> int { return p.1.id; }
-
-fn main() -> int {
-  let s: shared Node = Node(1);
-  let t = ("a", s);
-  return 0;
-}
-```
-
-Error:
-
-```
-'shared' cannot qualify a part of a type yet (a tuple's element, a type argument, an array's element or a function type's parameter or result): only a whole variable, field, parameter or result takes one; hold the reference in a struct field to qualify it
-cannot store a 'shared Node' in an element of the tuple, a 'Node': a 'shared' reference, a frozen object and a cell convert only as they are
-```
-
-A struct's field takes a qualifier, so a struct holds the reference instead, and a tuple,
-an array or a container holds the struct:
+A part of a type takes a qualifier too (#368): a type argument (`List<shared Node>`), a
+tuple's element (`(Str, shared Node)`), an array's elements (`shared Node[4]`) and a
+function type's parameter or result (`(shared Node) -> shared mut Node`). The qualifier is
+part of the type, so `List<shared Node>` is an instance of its own beside `List<Node>`, a
+tuple of `shared` references is Copyable, and `(Node) -> int` is not `(shared Node) -> int`.
+`shared` and `shared mut` bind to the primary type: `shared Node[4]` is four shared
+references.
 
 ```pkn
 import ::io;
+import ::collections as cl;
 
 class Node { id: int; }
 
-struct Pair {
-  n: shared Node;
-  k: int;
-}
+fn twice<T: Copyable>(x: T) -> (T, T) { return (x, x); }
 
 fn main() -> int {
-  let s: shared Node = Node(1);
-  let ps = [Pair(s, 1), Pair(s, 2)];      // two elements, one node
-  let t = (ps[1], "b");                   // a Copyable struct is copied in
-  io::println(Str(ps[0].n.id + t.0.n.id + t.0.k));
+  let s: shared mut Node = Node(1);
+  let pair = ("a", s);                    // a (Str, shared mut Node)
+  let ends: shared mut Node[2] = [s, Node(2)];
+  l = cl::List<shared mut Node>();
+  l.push(s);
+  l.get(0).id = 5;                        // the list's element is `s`
+  let both = twice(s);                    // twice<shared mut Node>
+  let copy = ends;                        // two elements, the same nodes
+  io::println(Str(pair.1.id + copy[0].id + both.1.id) + " " + Str(copy[1].id));
   return 0;
 }
 ```
@@ -388,7 +373,87 @@ fn main() -> int {
 Output:
 
 ```
-4
+15 2
+```
+
+- **What a part takes.** A type argument takes every form but `locked`, whose contents are
+  reached in a `lock` block, which a template's code does not write. A tuple's or an
+  array's element takes `shared` or `shared mut`: it is written as its variable is, so it
+  takes no `mut`, and a frozen object or a cell as an element is not in this version (a
+  struct's field holds one). A function type's parameter or result takes `mut`, `shared` or
+  `shared mut`, and the type is what a caller sees: the `shared` forms of a by-value
+  parameter and of the result. `mut` is the function's own, so `fn grow(n: mut Node) -> int`
+  is a `(Node) -> int`, and a `view` or `inout` parameter takes none, as a function's does.
+- **Values** of the same type but for their parts' forms are distinct types: a tuple's or an
+  array's unique elements convert into `shared` ones only out of a fresh value (a literal, a
+  result by value, `move t`), never under a borrow or from a place, and nothing converts
+  back; they still compare (`(1, s) == (1, Node(1))`).
+- **A qualifier written on `T`** in a template joins T's own, as `T?` joins T's None: `mut T`
+  with T = `shared mut Node` is `shared mut Node`, `T?` with T = `shared Node` is `shared
+  Node?`, and a written one with a unique T is itself (`mut T` with T = `Node` is `mut
+  Node`). A join that is no form is an error (`mut T` with T = `shared Node`: a `shared`
+  reference is never written through; `shared T` with T = `shared mut Node`). A value
+  argument stays the value.
+- **Inference** binds a by-value or `inout` `T` (or `T?`) parameter to a `shared`
+  argument's form: `twice(s)` above is `twice<shared mut Node>`, a unique argument beside it
+  joins that form (`pick(s, Node(2))`), and `mem::replace(m, Node(4))` with `m: shared mut
+  Node` gives back a `shared mut Node`. A `view` parameter binds the plain type, but in a
+  template's code a type argument's form, which the template passes on as its `T`. Through a
+  slice, a tuple or a function type, a part's form is the part's: `view T[]` against a
+  `shared Node[2]` binds `T` to `shared Node`. A tuple or an array literal's elements take
+  its slot's forms, or with none their own `shared` one: `("a", s)` is a `(Str, shared mut
+  Node)`, and an array literal's elements agree on it. An inferred result is held as its
+  value is (`fn(n: shared Node) => n` gives a `shared Node`), and a constructor's type
+  arguments also come from the slot's type (`h: Box<shared Node> = Box(Node(1))`).
+- **A borrow of a type argument's form** (`view T`, `inout T` with T = `shared Node`) reads as
+  that form, so the template's code may keep a copy of it (its clone is the copy) or trade it
+  for another (`mem::replace`): it takes a reference of exactly that form, through each
+  branch of a conditional, or, for a `view`, a fresh unique value (`Node(1)`, a unique
+  result, `move u`), which becomes that form, frozen for `atomic shared`. A local borrow
+  (`v: view T = n`) takes it as a parameter does. An `inout` result names storage of exactly
+  its own form, or for a plain `-> inout C` a unique or `shared mut` slot, as an `inout`
+  parameter takes. `cl::HashSet<shared Key>.contains(b)` with `b:
+  shared mut Key` is `cannot pass 'b' (a 'shared mut Key') to parameter 'k' of 'contains', a
+  'view shared Key': a borrow of a type argument's form takes that form, which the callee may
+  keep a copy of`.
+- **In a template's code, a reference whose Copyable form a type argument gave** (a `T` with
+  T = `shared Node`, an element of a `T[]`) is cloned and moved as its copy, the same object,
+  as a Copyable value is: `List<shared mut Node>.get(i)` gives the element itself, and a
+  `LinkedList<shared Node>` moves its values out of its nodes, which keep them until they go.
+  A form written in the code, the template's own or the program's (`s: shared Node`, `item:
+  shared T`), is cloned by its class, into a new unique object
+  ([Cloneable](06-traits.md#cloneable)), and a `shared` field is not moved out of. A
+  lambda's borrow takes no form (its function type has none), so in a template its `view T`
+  is a view of the plain type.
+- **An override** takes and gives the forms its base does, its borrows' included: a call
+  through the base hands its arguments and holds its result as the base declares them (`fn
+  make() -> shared mut Node` cannot override `fn make() -> Node`, nor `view T` with T =
+  `shared mut Node` a `view Node`).
+- **An element declared `shared`** is its object's own form through any root, as a `shared`
+  field is: an element of a `shared Node[2]` is read-only, one of a `shared mut Node[2]` is
+  written through, and what a call gives held `shared` is read-only too. Changing what an
+  object's field holds, by an assignment or an `inout`, writes the object, whatever the
+  field's own form.
+- A `shared` part never crosses to another task ([What crosses to a task: the send
+  check](#what-crosses-to-a-task-the-send-check)).
+
+```pkn
+class Node { id: int; }
+
+fn main() -> int {
+  let s: shared Node = Node(1);
+  let xs: shared Node[2] = [s, s];
+  xs[0].id = 2;
+  let t: (int, Node) = (1, s);
+  return 0;
+}
+```
+
+Error:
+
+```
+element 'xs[0]' is immutable (a 'shared Node'; write 'shared mut Node' to change it); cannot assign to 'xs[0].id'
+cannot store a 'shared Node' in an element of the tuple, a 'Node': a 'shared' reference, a frozen object and a cell convert only as they are
 ```
 
 ## `move`: an explicit transfer
@@ -1291,9 +1356,11 @@ fn main() -> int {
   let p = twice(Point(1, 2));
   let n = twice(3);
   let s: shared mut Node = Node(7);
+  let both = twice(s);                // twice<shared mut Node>: a shared reference
   let pair = twice(Ref(s));           // a struct of a shared reference is Copyable
   s.id = 8;                           // the copies alias the node
-  io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1) + " " + Str(pair.1.n.id));
+  io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1));
+  io::println(Str(both.1.id) + " " + Str(pair.1.n.id));
   return 0;
 }
 ```
@@ -1301,7 +1368,8 @@ fn main() -> int {
 Output:
 
 ```
-3 6 8
+3 6
+8 8
 ```
 
 ```pkn
@@ -1328,11 +1396,11 @@ Error:
 'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
 ```
 
-A qualifier is not part of a type argument in this version (`twice(s)` with `s: shared Node`
-is checked as a `Node`, and rejected), so a `shared` reference reaches a template inside a
-struct, as `Ref` above. A value that is not Copyable reaches another owner by `move`, a
-`clone()` or a borrow: the copy rule is the memory model, in every module
-([Ownership transfers](16-memory.md#ownership-transfers)), and
+A qualifier is part of a type argument ([Qualifiers in a type](#qualifiers-in-a-type)), so
+`twice(s)` with `s: shared mut Node` binds `T` to `shared mut Node`, which is Copyable: its
+copies are the same node, as the copies of `Ref` are. A value that is not Copyable reaches
+another owner by `move`, a `clone()` or a borrow: the copy rule is the memory model, in
+every module ([Ownership transfers](16-memory.md#ownership-transfers)), and
 [`Cloneable`](06-traits.md#cloneable) is the trait of the values that have a `clone()`.
 
 ## Runtime
@@ -1358,9 +1426,11 @@ that the finished feature needs; what `parallel for` costs, and why, is in
   write), `atomic T` (a cell holding a number, `bool` or `char`), `locked mut T` (a cell
   holding an object written under its mutex; `locked T` alone is a warning), `atomic shared
   T` (a frozen object). A struct, a tuple or an array takes none, and so does a number;
-  `mem::Box<T>` does. A part of a type (a tuple's element, a type argument, an array's
-  element, a function type's parameter or result) takes none either: a struct with a
-  qualified field holds the reference in its place.
+  `mem::Box<T>` does. A part of a type takes one, as part of the type: a type argument
+  (`List<shared Node>`, every form but `locked`), a tuple's or an array's element (`shared`
+  or `shared mut`: `shared Node[4]` is four shared references) and a function type's
+  parameter or result (`mut`, `shared`, `shared mut`). A `shared` argument binds a by-value
+  or `inout` `T` to its form, which is Copyable.
 - A unique reference converts into every form; `mut T` flows into `T` freely, and `T` gains
   `mut` only by `move` or as a temporary; a `shared` reference, a frozen object and a cell
   convert only as they are (`shared T` and `shared mut T` never into each other). Nothing
@@ -1419,8 +1489,10 @@ that the finished feature needs; what `parallel for` costs, and why, is in
 
 A qualifier is written before the type of a variable (`let n: mut Node = ...`, or alone,
 `let n: mut = ...`), a parameter (`cfg: atomic shared Config`), a field (`hits: atomic
-int`, `cache: shared Cache`, `next: shared mut Node`) and a result (`-> mut Node`), never
-inside a type ([Parts of a type take no qualifier](#parts-of-a-type-take-no-qualifier)). Each
+int`, `cache: shared Cache`, `next: shared mut Node`) and a result (`-> mut Node`), and
+before a part of a type: a type argument, a tuple's element, an array's elements and a
+function type's parameter or result (`List<shared Node>`, `(int, shared Node)`, `shared
+Node[4]`, `(shared Node) -> int`, [Qualifiers in a type](#qualifiers-in-a-type)). Each
 word buys one thing: `mut`, the writes through the owner; `shared`, several owners;
 `atomic shared`, an object frozen for every thread (`atomic`, the reference crosses threads;
 `shared`, the object has several owners, one on each thread at least); `locked mut`, an
@@ -1621,12 +1693,11 @@ one.
   module that declares an `async fn` cannot be imported. Its parameters are numbers,
   references and handles, not a struct, a tuple, an array or a function value, and its result
   a number, a `bool`, a `char`, a reference or nothing.
-- A qualifier is not part of a type (#368): on a tuple's element, a type argument, an
-  array's element or a function type's parameter or result (`(Str, shared Node)`,
-  `List<shared Node>`) it is an error, and a literal's element is no `shared` reference; a
-  struct with a qualified field holds one ([Parts of a type take no
-  qualifier](#parts-of-a-type-take-no-qualifier)). A `shared Node` argument meets a
-  template's `T` as a `Node`, so it does not satisfy `T: Copyable`.
+- A part of a type takes some forms only ([Qualifiers in a type](#qualifiers-in-a-type)):
+  a `locked` type argument, an `atomic shared` or `locked` element of a tuple or an array,
+  and an `atomic shared` or `locked` parameter or result of a function type are errors
+  (`'atomic shared' cannot qualify an element yet`); a struct's field holds a frozen object
+  or a cell.
 - `atomic` holds one number, `bool` or `char`: no atomic arrays, no `atomic` field in a
   struct, and `compareExchange` does not write the value found back into `expected`.
 - `locked` holds an object, not a value: wrap a value in a class.
@@ -1647,7 +1718,7 @@ one.
 |-------|---------|
 | Conversion refused | `let u: Node = s` with `s: shared Node`; `let m: mut Node = a` with `a` a `Node` read from a place (`a reference gains 'mut' only by 'move'`); a `shared mut` into a `shared` slot or back; a `shared` into an `atomic shared` slot; an `atomic shared` into anything but `atomic shared`; a `locked` into a `locked mut` slot |
 | Qualifier on a value | `shared int`, `shared mut Point`, `shared int[2]`, `atomic shared Pair`; `mut int`, `mut (int, int)` (`'mut' applies to objects; ... which 'let' fixes`) |
-| Qualifier on a part of a type | `(Str, shared Node)`, `List<shared Node>`, `mem::Box<shared mut Node>`, `(shared Node) -> int`; a `shared` reference, frozen object or cell as a tuple's or an array literal's element |
+| Qualifier on a part of a type | `(int, mut Node)` (`an element takes no 'mut'`); `(int, atomic shared Node)`, `List<locked mut Node>`, `(atomic shared Node) -> int`; `(view shared Node) -> int` (a borrow); `mut T` with T = `shared Node`, `shared T` with T = `shared mut Node`; a `shared Node` into a `Node` element (`let t: (int, Node) = (1, s)`); an array literal of `shared` and `shared mut` elements |
 | Qualifier on a borrow | `n: view mut Node`, `n: inout shared Node` |
 | Spelling (syntax errors) | `atomic shared mut N`; `mut shared N`, `mut locked N`; `atomic mut int`, `mut atomic int`; `shared mut shared N` and any second qualifier; `atomic N` with `N` a class (Sema's) |
 | Write through an immutable reference | `cfg.name = "x"` with `cfg` a `Config` (`'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its field 'name'`); `c.xs[0] = 1` (`cannot assign to its elements`); through a `shared` field (`field 'cache' is immutable (a 'shared Cache'; write 'shared mut Cache' to change it)`), a frozen object (`'cfg' is frozen (an 'atomic shared Config')`); `mark(cfg)` to an `inout` parameter (`it cannot be passed to 'inout' parameter 'n'`); a `match` binding |

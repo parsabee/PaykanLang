@@ -197,17 +197,65 @@ samples/concurrency/README.md.
   value passed to the lambda as an argument, or what the lambda needs read into a Copyable
   local first (docs/language/14-function-types.md, "Captures").
 - **Breaking:** an array or a tuple literal's element is an owning slot (`[move a, b.clone()]`),
-  and it holds no `shared` reference, frozen object or cell: an element's type keeps no
-  qualifier, so the reference would come back out unique (`cannot store a 'shared Node' in an
-  element of the tuple, a 'Node': a 'shared' reference, a frozen object and a cell convert
-  only as they are`). A struct with a qualified field holds one in its place.
-- **Breaking:** a qualifier on a part of a type is an error: a tuple's element, a type
-  argument, an array's element and a function type's parameter or result take none
-  (`(Str, shared Node)`, `List<shared Node>`, `mem::Box<shared mut Node>`, `(shared Node) ->
-  int`: `'shared' cannot qualify a part of a type yet (...): only a whole variable, field,
-  parameter or result takes one; hold the reference in a struct field to qualify it`;
-  qualifiers inside types are #368; docs/language/19-concurrency.md, "Parts of a type take no
-  qualifier").
+  and it converts into its element's form: a `shared` reference into an element held `shared`
+  (`cannot store a 'shared Node' in an element of the tuple, a 'Node': a 'shared' reference, a
+  frozen object and a cell convert only as they are`).
+- Qualifiers on the parts of a type (#368; docs/language/19-concurrency.md, "Qualifiers in a
+  type"): a type argument (`List<shared Node>`), a tuple's element (`(Str, shared Node)`), an
+  array's elements (`shared Node[4]`, four shared references: `shared` and `shared mut` bind
+  to the primary type) and a function type's parameter or result (`(shared Node) -> shared mut
+  Node`). The qualifier is part of the type: `List<shared Node>` is an instance of its own, a
+  tuple or an array of `shared` references is Copyable, and function types match exactly.
+  - A type argument takes every form but `locked`; an element takes `shared` or `shared mut`
+    (`an element takes no 'mut': it is written as its variable is`; `atomic shared` and
+    `locked` are not yet); a function type's part takes `mut`, `shared` or `shared mut`.
+  - A qualifier written on `T` joins T's own: `mut T` with T = `shared mut Node` is `shared
+    mut Node`, `T?` with T = `shared Node` is `shared Node?`, and `mut T` with T = `shared
+    Node` is `'mut' cannot qualify the type argument 'shared Node': a 'shared' reference is
+    never written through`.
+  - A by-value or `inout` `T` parameter binds T to a `shared` argument's form (`twice(s)` with
+    `s: shared Node` is `twice<shared Node>`, which meets `T: Copyable`), and so does a part
+    of a slice, a tuple or a function type; a literal's elements take their own `shared` form
+    when no slot gives one (`(1, s)` is an `(int, shared Node)`), and an inferred result its
+    value's.
+  - A `view T` or `inout T` with T = `shared Node` takes a reference of exactly that form (a
+    `view` also a fresh unique value, which becomes it, frozen for `atomic shared`): the
+    template's code may keep a copy of it. An `inout` result names storage of its own form.
+  - In a template's code, a reference whose Copyable form a type argument gave is cloned and
+    moved as its copy, the same object, as a Copyable value is (and a `view` passes the form
+    on to the templates it calls); a form written in the code, the template's or the
+    program's, is still cloned by its class.
+  - A tuple or an array of unique references converts into one of `shared` ones only out of a
+    fresh value (a literal, a result by value, `move`), never under a borrow; values that
+    differ only in their parts' forms still compare.
+  - A function type holds only the forms its callers see: `fn grow(n: mut Node)` is a `(Node)
+    -> int`, and a borrow carries none.
+  - A trait's type arguments keep their forms (`Src<shared Node>` is not `Src<Node>`), and a
+    constructor's come from the slot's type too (`h: Box<shared Node> = Box(Node(1))`).
+  - An `inout` of an object's `shared mut` field writes the object, so it needs the object
+    writable: `mem::replace(h.n, v)` of an immutable `h` was accepted.
+  - An override takes and gives the forms its base does, its borrows' included (`fn make()
+    -> shared mut Node` overrode `fn make() -> Node`, so a call through the base handed out
+    a shared object as a new unique one). A local borrow `v: view T` takes T's form as a
+    parameter does, and `move` takes only what it owns: never a borrowed result or a
+    conditional as a whole.
+  - A copy of what an `-> inout` result names is another owner, under the copy rule; a
+    conditional made a cell or frozen as a whole has every branch of one kind, a `None`
+    aside; a `parallel for` body reads no enum whose variants hold references (`E<shared mut
+    Node>`), and reads one whose variants hold only values.
+  - `mem::replace`, `mem::take` and `mem::swap` of a `shared mut` place give back and trade
+    `shared mut` references: they gave the object back as a unique one.
+  - An element held `shared` is read-only through any root, as a `shared` field is, and so
+    is what a call gives held `shared` (`'l.get(...)' is immutable (a 'shared Node'; ...)`):
+    such a write was accepted before.
+  - A destructuring's targets are held as their elements are, so a `weak` variable is
+    assigned from an element held in its form; a `shared` part never crosses to a task.
+  - Module interfaces spell qualified parts as the source does, and mark a member's
+    qualifier that a type argument gave (`@shared Node`), so an imported instance's members
+    keep it.
+  - A function value of a named function has its parameters' and result's qualifiers in its
+    type, and a call through a function value converts each argument into its parameter's
+    form (a `shared` argument to a unique parameter was accepted there).
 - **Breaking:** an enum variant's arguments (`Shape::Named(move t)`) and an imported function's
   or constructor's arguments go through the copy rule, as every other owning slot does: an
   imported call took a move-only place as it was, so a helper in another module that only
@@ -227,7 +275,8 @@ samples/concurrency/README.md.
   class `Node` that is not); they are `view fn`s now. `LinkedList` keeps node objects, now
   `shared mut`: each owns the next, and the next one's `prev` and the list's tail reach it by
   `weak mut` references, so either end is O(1) and a node is changed through any link. The
-  hash tables chain `shared mut` entries from their buckets the same way. Every element is
+  hash tables chain `shared mut` entries the same way, each from a bucket of a
+  `mem::Buffer<shared mut _Entry<K, V>?>`. Every element is
   still the container's alone, in its private nodes, but the shared parts keep a
   `LinkedList`, a `Stack`, a `Queue` and a hash table from crossing to another task
   (docs/stdlib/collections.md).
@@ -239,6 +288,17 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A new value assigned to an existing `locked mut` or `atomic shared` variable or parameter
+  was stored as a plain object, with no cell made or nothing frozen (a field's store made
+  them); and a `None` flowing into a `locked mut T?` slot through a conditional or a result
+  was wrapped in a cell, so it read as present.
+- A template's `parallel for` was a sequential `for` in its instances, which none of the
+  loop's checks saw.
+- A lambda's `return` was checked against the enclosing function's result qualifier, not the
+  lambda's own, and a lambda's result now takes one (`fn() -> shared Node { ... }`): its
+  function type carries it (#368).
+- A qualifier written on an annotation that no declaration took (an error's, a cast's)
+  stayed for the next declaration's to take; each annotation now starts with none.
 - `--track-heap` counted from several threads at once: a task's worker and a parallel loop's
   threads allocate and free while the main thread does, and the counters' plain `+= 1` lost
   updates, so an async program that freed everything could report hundreds of live blocks.

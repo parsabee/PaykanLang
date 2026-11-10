@@ -60,7 +60,9 @@ makeImportList(ASTContext &C, SourceLocation loc, const std::string &base,
 /// The levels of nesting the type @p ty spans as its AST shows them
 /// (docs/grammar.md section 9): one for a type application's arguments, a
 /// tuple type's elements, a function type's parameters and its result, and
-/// one for each type suffix around the type it wraps.  Recursion over a type
+/// one for each type suffix around the type it wraps.  A qualifier, `atomic`
+/// and a task's type are no level of their own: the levels are the type's
+/// they qualify (`List<shared B<int>>` is two deep).  Recursion over a type
 /// the parser built within the nesting limit.
 unsigned typeLevels(const Type *ty) {
   auto deepest = [](const std::vector<Type *> &types) {
@@ -82,6 +84,12 @@ unsigned typeLevels(const Type *ty) {
   if (auto *f = dyn_cast<FunctionType>(ty))
     return 1 + std::max(deepest(f->getParamTypes()),
                         typeLevels(f->getReturnType()));
+  if (auto *q = dyn_cast<QualifiedType>(ty))
+    return q->getInnerType() ? typeLevels(q->getInnerType()) : 0;
+  if (auto *a = dyn_cast<AtomicType>(ty))
+    return typeLevels(a->getInnerType());
+  if (auto *t = dyn_cast<TaskType>(ty))
+    return typeLevels(t->getInnerType());
   return 0;
 }
 

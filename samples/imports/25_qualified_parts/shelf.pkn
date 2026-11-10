@@ -1,0 +1,41 @@
+// Module: shelf — signatures whose parts carry a qualifier (#368), which an
+// importer reads back from the module's interface: a tuple's element, an
+// array's elements, a function type's parameter and result, and a type
+// argument, the instance `List<shared mut Item>` this module made itself.
+import ::collections as cl;
+
+class Item {
+  n: int;
+}
+
+class Shelf {
+  items: cl::List<shared mut Item>;
+  ends: shared mut Item?[2];
+}
+
+// The item's count, and the item itself, the caller's object.
+fn count(i: shared mut Item) -> (int, shared mut Item) {
+  return (i.n, i);
+}
+
+// Applies `f` to `i`, handing back what `f` gives.
+fn apply(f: (shared mut Item) -> shared mut Item, i: shared mut Item)
+         -> shared mut Item {
+  return f(i);
+}
+
+// The total of the items' counts.
+fn total(xs: view shared mut Item[]) -> int {
+  t = 0;
+  for k in 0..xs.len() {
+    t += xs[k].n;
+  }
+  return t;
+}
+
+// A shelf holding `i` twice: in its list and at its first end.
+fn stock(i: shared mut Item) -> Shelf {
+  l = cl::List<shared mut Item>();
+  l.push(i);
+  return Shelf(move l, [i, None]);
+}

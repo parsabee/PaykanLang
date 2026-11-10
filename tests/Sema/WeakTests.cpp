@@ -300,8 +300,8 @@ TEST(Weak, MatchedPartOfSelfReturnsAsAView) {
 // matched, passed by value or as a `view`, returned, stored, captured and
 // shadowed; `y: weak = x` infers `T?` from a `shared T` or a `shared T?`.
 // It reads as the `shared` reference it names, so what reads it may keep a
-// strong reference.  A tuple holds no `shared` reference, so no
-// destructuring assigns a weak variable.
+// strong reference.  A destructuring assigns one from an element held as
+// it names (#368), and no other.
 TEST(Weak, IsOtherwiseAnOptional) {
   auto r = semaCheck(R"(
     class Point { x: int; }
@@ -338,29 +338,46 @@ TEST(Weak, IsOtherwiseAnOptional) {
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
-  // A tuple's element holds no `shared` reference, so a destructuring
-  // stores none in a weak variable.
+  // An element held `shared` is one a destructuring stores in a weak
+  // variable; a unique one or a `shared mut` one is not.
+  auto good = semaCheck(R"(
+    class Point { x: int; }
+    fn pair(p: shared Point) -> (shared Point?, int) { return (p, 2); }
+    fn main() -> int {
+      x: shared Point = Point(1);
+      w: weak = x;
+      n = 0;
+      w, n = (x, 1);
+      w, n = pair(x);
+      return n;
+    }
+  )");
+  EXPECT_TRUE(good.Ok) << good.Diagnostics;
   auto bad = semaCheck(R"(
     class Point { x: int; }
     fn pair() -> (Point?, int) { return (Point(1), 2); }
     fn main() -> int {
       x: shared Point = Point(1);
+      m: shared mut Point = Point(3);
       w: weak = x;
       n = 0;
       w, n = (Point(2), 1);
       w, n = pair();
+      w, n = (m, 1);
       return n;
     }
   )");
   EXPECT_FALSE(bad.Ok);
   for (const char *d :
-       {":8:7: error: cannot store element 0 of the tuple (a 'Point') in "
+       {":9:7: error: cannot store element 0 of the tuple (a 'Point') in "
         "variable 'w', a 'weak Point?': a 'weak' reference names a 'shared' "
-        "object, which a tuple's element never is",
-        ":9:7: error: cannot store element 0 of the tuple (a 'Point?')"})
+        "object",
+        ":10:7: error: cannot store element 0 of the tuple (a 'Point?')",
+        ":11:7: error: cannot store element 0 of the tuple (a 'shared mut "
+        "Point')"})
     EXPECT_NE(bad.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                           << bad.Diagnostics;
-  EXPECT_EQ(bad.ErrorCount, 2u) << bad.Diagnostics;
+  EXPECT_EQ(bad.ErrorCount, 3u) << bad.Diagnostics;
 }
 
 // A local starts with a value, and only a `weak` one may leave out its

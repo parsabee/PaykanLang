@@ -1,0 +1,37 @@
+// OK: another module's signatures whose parts carry a qualifier (#368;
+// docs/language/19-concurrency.md, "Qualifiers in a type"): the tuple
+// `count` gives holds the caller's item, a function value and an array of
+// `shared mut` items pass it on as it is, and the list the module made, a
+// `List<shared mut Item>` of its own, lends it as a `shared mut` reference
+// (`get`'s clone of a `T` with T = `shared mut Item` is the copy).  Every
+// write reaches the one item, whose count is shown after each.
+// expect-stdout: 3 | 4 40 5 | 10 | 7 5 | 1 5
+import ::io;
+import shelf;
+
+fn main() -> int {
+  let i: shared mut shelf::Item = shelf::Item(3);
+  n, same = shelf::count(i);
+  same.n = 4;
+  io::print(Str(n) + " | " + Str(i.n));
+  let ten =
+      shelf::apply(fn(x: shared mut shelf::Item) -> shared mut shelf::Item {
+    x.n *= 10;
+    return x;
+  }, i);
+  io::print(" " + Str(i.n));
+  ten.n -= 35;
+  io::print(" " + Str(i.n));
+  let xs = [i, i];
+  io::print(" | " + Str(shelf::total(xs)));
+  let s = shelf::stock(i);
+  s.items.get(0).n += 2;
+  io::print(" | " + Str(i.n));
+  match s.ends[0] {
+    e: shelf::Item { e.n -= 2; }
+    None { }
+  }
+  io::println(" " + Str(i.n) + " | " + Str(s.items.len()) + " "
+      + Str(s.items.at(0).n));
+  return 0;
+}

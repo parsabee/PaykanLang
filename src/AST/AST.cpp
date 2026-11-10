@@ -528,7 +528,8 @@ Type *ASTCloner::cloneType(Type *ty) {
     Type *elem = cloneType(ft->getElementType());
     if (elem == ft->getElementType() && !Foreign)
       return ty;
-    return Ctx.make<FixedArrayType>(ft->getLocation(), elem, ft->getLength());
+    return Ctx.make<FixedArrayType>(ft->getLocation(), elem, ft->getLength(),
+                                    ft->getElemQual());
   }
   if (auto *gt = dyn_cast<GenericType>(ty)) {
     std::string name = Names ? Names->generic(gt->getName()) : gt->getName();
@@ -583,8 +584,13 @@ Type *ASTCloner::cloneType(Type *ty) {
     // `T?` of a type argument that is an optional already is that optional:
     // a template's `T?` adds a None only where T has none (a written `X??`
     // is still an error).
+    // So is a qualified one (#368): `T?` of `shared Node?` is `shared Node?`.
+    const auto *qualInner = dyn_cast<QualifiedType>(inner);
     if (auto *param = dyn_cast<ClassType>(ot->getInnerType());
-        param && Subst.count(param->getName()) && isa<OptionalType>(inner))
+        param && Subst.count(param->getName()) &&
+        (isa<OptionalType>(inner) ||
+         (qualInner && qualInner->getInnerType() &&
+          isa<OptionalType>(qualInner->getInnerType()))))
       return inner;
     if (inner == ot->getInnerType() && !Foreign)
       return ty;
@@ -601,7 +607,8 @@ Type *ASTCloner::cloneType(Type *ty) {
     }
     if (!changed)
       return ty;
-    return Ctx.make<TupleType>(tt->getLocation(), std::move(elems));
+    return Ctx.make<TupleType>(tt->getLocation(), std::move(elems),
+                               tt->getElemQuals());
   }
   if (auto *fnt = dyn_cast<FunctionType>(ty)) {
     bool changed = Foreign;
@@ -617,7 +624,8 @@ Type *ASTCloner::cloneType(Type *ty) {
     if (!changed)
       return ty;
     return Ctx.make<FunctionType>(fnt->getLocation(), std::move(params),
-                                  fnt->getModes(), ret);
+                                  fnt->getModes(), ret, fnt->getParamQuals(),
+                                  fnt->getResultQual());
   }
   // Nothing else is written in a template.
   return ty;
@@ -833,9 +841,12 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     VarDecl *v = f->getVar();
     auto *nv = Ctx.make<VarDecl>(v->getLocation(), in(v->getName()),
                                  cloneType(v->getType()), nullptr);
-    return Ctx.make<ForStmt>(loc, nv, cloneExpr(f->getStart()),
-                             cloneExpr(f->getEnd()), cloneExpr(f->getStep()),
-                             f->isInclusive(), cloneStmt(f->getBody()));
+    auto *copy = Ctx.make<ForStmt>(
+        loc, nv, cloneExpr(f->getStart()), cloneExpr(f->getEnd()),
+        cloneExpr(f->getStep()), f->isInclusive(), cloneStmt(f->getBody()));
+    // A template's `parallel for` is one in each instance.
+    copy->setParallel(f->isParallel());
+    return copy;
   }
   case ASTNode::NK_BreakStmt:
     return Ctx.make<BreakStmt>(loc);
@@ -865,11 +876,20 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
         // is the arm on `X`, the present case, as a `T?` of it is `X?`
         // itself: `v: T` unwraps a `T?` whatever T is, and binds a T.
         if (auto *param = dyn_cast<ClassType>(arm->getArmType());
-            param && Subst.count(param->getName()))
+            param && Subst.count(param->getName())) {
           if (auto *ot = dyn_cast<OptionalType>(armTy)) {
             bindTy = armTy;
             armTy = ot->getInnerType();
+          } else if (auto *qt = dyn_cast<QualifiedType>(armTy);
+                     qt && qt->getInnerType()) {
+            // A qualified one (#368): the arm is on the qualified `X`.
+            if (auto *qo = dyn_cast<OptionalType>(qt->getInnerType())) {
+              bindTy = armTy;
+              armTy =
+                  Ctx.getQualifiedType(qt->getQualifier(), qo->getInnerType());
+            }
           }
+        }
         arms.push_back(Ctx.make<MatchArm>(arm->getLocation(),
                                           in(arm->getBinding()), armTy, body));
         arms.back()->setBindType(bindTy);

@@ -45,7 +45,9 @@ answer = 42
 
 Each distinct list of type arguments makes a separate, ordinary class: `Pair<Str, int>` and
 `Pair<int, Str>` are different types, and so are `Box<Dog>` and `Box<Animal>` even when
-`Dog` extends `Animal` (there is no variance). When the type arguments can be worked out
+`Dog` extends `Animal` (there is no variance). A type argument's qualifier is part of it, so
+`List<shared Node>` is an instance of its own beside `List<Node>` ([Qualifiers in a
+type](19-concurrency.md#qualifiers-in-a-type)). When the type arguments can be worked out
 from the constructor's arguments, as in `Pair(2.5, True)`, you can leave them out.
 
 ## Generic functions
@@ -431,7 +433,10 @@ Inference looks through slices (`view T[]`, against an array's elements),
 tuples (`(A, B)`, element by element), optionals (`T?` against a `U?` or a
 plain `U`), function types (`(T) -> U`, parameter by parameter and the
 result, see [Function types and lambdas](14-function-types.md)) and instantiations
-(`Box<T>`, or a generic struct's `Pair<A, B>`). A bare `None` argument is typed `Obj` and
+(`Box<T>`, or a generic struct's `Pair<A, B>`). A by-value or `inout` `T` or `T?` parameter
+takes a `shared` argument's form (`twice(s)` with `s: shared Node` is `twice<shared Node>`),
+and a `view` one the plain type; a slice's, a tuple's or a function type's part takes the
+part's form ([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)). A bare `None` argument is typed `Obj` and
 carries no information about `T`: `unwrapOr(None, Node(3))` infers `T = Node` from the
 second argument, but `wrap(None)` alone cannot be inferred and needs
 `wrap<Node>(None)`. It is exact: a parameter that appears twice must be

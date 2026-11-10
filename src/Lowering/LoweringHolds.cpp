@@ -1462,13 +1462,13 @@ bool clonesAnObject(ast::Type *ty, const ast::Type *strTy,
     return false;
   }
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
-    for (ast::Type *e : tt->getElementTypes())
-      if (clonesAnObject(e, strTy))
+    for (size_t i = 0; i < tt->getArity(); ++i)
+      if (clonesAnObject(tt->getElementType(i), strTy, tt->getElemQual(i)))
         return true;
     return false;
   }
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
-    return clonesAnObject(ft->getElementType(), strTy);
+    return clonesAnObject(ft->getElementType(), strTy, ft->getElemQual());
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return clonesAnObject(ot->getInnerType(), strTy, q);
   // A number, a bool, a char, an enum (Cloneable only when Copyable): a copy.
@@ -1496,7 +1496,7 @@ void ModuleLowering::EffectScan::methodCall(ast::MethodCallExpr *mc) {
   // it shares and letting go of nothing.  A unique object's clone is its
   // class's, which may do anything.
   if (name == names::kMethodClone && L.isBuiltinClone(mc) &&
-      !clonesAnObject(rt, L.ASTCtx.getStrTy()))
+      (mc->cloneIsCopy() || !clonesAnObject(rt, L.ASTCtx.getStrTy())))
     return;
   if (ast::dyn_cast<ast::SliceType>(rt) ||
       ast::dyn_cast<ast::FixedArrayType>(rt))

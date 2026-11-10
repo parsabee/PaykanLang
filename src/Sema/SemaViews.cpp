@@ -49,6 +49,11 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
   // could not.  Past an object on the way to the conditional, what changes
   // is that object, which a copy of the branch would name as well.
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(placeBase(e))) {
+    // A part on the way held `shared` is immutable whichever branch it is
+    // of (#368: `(if c then t else u).1.n = 5` with a `(int, shared Node)`).
+    if (!copy)
+      if (std::string why = constPlace(e); !why.empty())
+        return why;
     for (const ast::Expr *p = e; p != te && !copy;) {
       ast::Type *t = p->getResolvedType();
       copy = t && ast::isa<ast::ClassType>(ast::stripOptional(t));
@@ -63,8 +68,10 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
     return why.empty() ? frozenPlace(te->getFalseExpr(), borrows, copy) : why;
   }
   const ast::Identifier *root = placeRoot(e);
+  // Rooted in a call: a temporary, changeable but for what its form
+  // forbids (a `shared` result, a template's `T` with T = `shared Node`).
   if (!root)
-    return "";
+    return copy ? "" : constPlace(e);
   const std::string &name = root->getName();
   if (name == names::kSelf && CurrentClassCtx &&
       !CurrentClassCtx->MethodName.empty()) {
@@ -238,6 +245,8 @@ bool Sema::sharesStorage(const ast::Type *ty) {
     return false;
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return sharesStorage(ot->getInnerType());
+  if (const auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return sharesStorage(qt->getInnerType());
   // A fixed-size array or a tuple is a value: a copy of it shares what its
   // elements do.
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))

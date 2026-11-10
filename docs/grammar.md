@@ -415,13 +415,18 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   is a `QualifiedType` node (the `Qualifier`, its form and its `mut`, and
   the inner type) around the whole annotation, suffixes included: `shared
   N?` and `atomic shared Str?` are a `QualifiedType` over an
-  `OptionalType`, and `shared N[3]` one over a `FixedArrayType`, which Sema
-  rejects as it does a qualifier on any value type (`'shared' qualifies a
-  reference; 'N[3]' is a value: box it ('mem::Box<N[3]>') to share what it
-  holds`, `'shared mut' qualifies a reference; 'int' is a value`, `'mut'
-  applies to objects; 'int' is a value: its storage is rewritten by
-  assignment, which 'let' fixes`).  A reference is immutable unless
-  written `mut`.  The writes come after the form: `mut shared N` is `'mut shared' is spelled
+  `OptionalType`, and `shared N[3]` one over a `FixedArrayType`.  `shared`
+  and `shared mut` bind to the primary type, so on an array of references
+  Sema reads them as its elements' (`shared N[3]` is three shared
+  references, `shared N?[2]` two optional ones), while `atomic shared` and
+  `locked` cover the whole type.  Sema rejects a qualifier on a value type,
+  an array of values and an `atomic shared` array included (`'atomic
+  shared' qualifies a reference; 'N[3]' is a value: box it
+  ('mem::Box<N[3]>') to share what it holds`, `'shared' qualifies a
+  reference; 'int[2]' is a value`, `'shared mut' qualifies a reference;
+  'int' is a value`, `'mut' applies to objects; 'int' is a value: its
+  storage is rewritten by assignment, which 'let' fixes`).  A reference is
+  immutable unless written `mut`.  The writes come after the form: `mut shared N` is `'mut shared' is spelled
   'shared mut': the form first, then the writes`, and `mut locked N` the
   same with `locked`.  What nothing writes takes no `mut`: `atomic shared
   mut N` is `'atomic shared mut T' would be written from several threads
@@ -437,9 +442,11 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   is the second: `atomic shared shared N` is `a type takes one qualifier:
   'atomic shared shared' is two`, at the second `shared`.  A qualifier
   parses wherever a type does, a parameter's, a field's, a result's, a
-  type argument and a `match` binding's included; which places take which
-  is Sema's (a borrow takes none, §4; the prototype reads `List<shared N>`
-  as `List<N>` and does not act on a `match` binding's).
+  type argument, a tuple's element, a function type's parameter and result
+  and a `match` binding's included; which places take which is Sema's (a
+  borrow takes none, §4; a part of a type takes some forms only,
+  [language/19-concurrency.md](language/19-concurrency.md#qualifiers-in-a-type);
+  the prototype does not act on a `match` binding's).
 - `atomic T` is a cell holding a number, which the variable or field of
   that type names; a copy of it is another handle to the same cell.  It is
   an `AtomicType` node over `T`, which at parse time is any annotation

@@ -38,7 +38,9 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   = e` with the type inferred), and `lock cell as c: inout|view { }`.
 * **Qualifiers** (Sema): the bare type (unique, immutable), `mut`,
   `shared`, `shared mut`, `atomic`, `atomic shared` and `locked mut` on
-  variables, parameters, fields and results; `locked` alone is accepted
+  variables, parameters, fields and results, and on the parts of a type
+  (#368: `List<shared Node>`, `(int, shared Node)`, `shared Node[3]`,
+  `(shared Node) -> int`); `locked` alone is accepted
   with a warning, as it locks what nothing writes.  Every word added buys
   one thing, and the bare type costs nothing: a reference is immutable
   unless written `mut`, so through it there is no field assignment, no
@@ -88,12 +90,13 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic
   shared N' (frozen) or 'locked mut N'`.
   A struct, a tuple or an array is a value wherever it is and
-  takes no qualifier; to freeze one, box it: `let xs: atomic shared
-  mem::Box<mem::Buffer<float>> = mem::Box(move b)` freezes the box, the
-  buffer it holds (`mem::Buffer<T>` crosses when `T` does, the design's
-  table) and the elements, and a `parallel for` body reads it through
-  the box's `value()`, the prototype's way to data larger than a
-  fixed-size array (`benchmarks/sum_buf.pkn`).  A `parallel for` body
+  takes no qualifier of its own (`shared Node[3]` is three shared
+  references, its elements' form); to freeze one, box it: `let xs:
+  atomic shared mem::Box<mem::Buffer<float>> = mem::Box(move b)` freezes
+  the box, the buffer it holds (`mem::Buffer<T>` crosses when `T` does,
+  the design's table) and the elements, and a `parallel for` body reads
+  it through the box's `value()`, the prototype's way to data larger than
+  a fixed-size array (`benchmarks/sum_buf.pkn`).  A `parallel for` body
   also uses a `mem::Buffer<T>` of numbers that the enclosing function
   owns: read at any index (`at`, `get`, `len`), written at the loop's
   variable only (`set(i, v)`), never reshaped (`grow`, `reserve` are
@@ -147,6 +150,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   bare or `mut`, crosses by `move` or as a temporary; a value holding a
   unique part moves too, one of `shared` parts and handles copies.
 * **`Copyable`**: a built-in, structural trait: numbers, `bool`, `char`,
+  `shared` references (a `T` whose argument is `shared Node` too),
   `atomic` handles, and enums, tuples, structs, fixed arrays and optionals
   of Copyable parts (a struct's `shared` field counts; a unique reference,
   `Str`, a function value or a task does not).  `T: Copyable` bounds a
@@ -219,8 +223,9 @@ Channels, `task::spawnOn`, event loops pinned per thread, cancellation,
 task-handle typestate, the migration tool, holds across an `await`, atomic
 counts on cells and frozen objects (they are immortal: cells and frozen
 graphs leak), `atomic` fixed arrays, `compareExchange`'s `inout` write-back
-of `expected`, qualifiers as part of type arguments (`List<shared Node>`
-is `List<Node>`), the archetype check of templates (a copy of an unbounded
+of `expected`, `locked` type arguments and `atomic shared` or `locked`
+tuple and array elements (`List<shared Node>` and `(int, shared Node)`
+are there), the archetype check of templates (a copy of an unbounded
 `T` is caught per instance only), `match`
 bindings' qualifiers, the run-time check of a move out of borrowed
 storage, a value held in memory (a struct, tuple or array) as a task

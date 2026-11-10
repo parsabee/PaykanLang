@@ -102,7 +102,8 @@ fn names(x: view Node) -> Str {
 }
 
 /// An element that holds a `shared` node, which a `Watch` can name (an
-/// element's own type takes no qualifier).
+/// element's own type can be `shared Node?` since #368; the sample keeps the
+/// struct).
 struct Slot {
   node: shared Node?;
 }

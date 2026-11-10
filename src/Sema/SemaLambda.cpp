@@ -23,8 +23,13 @@ ast::FunctionType *Sema::functionTypeOf(const FunctionSig &sig) {
   modes.reserve(sig.ParamTypes.size());
   for (size_t i = 0; i < sig.ParamTypes.size(); ++i)
     modes.push_back(sig.Modes.mode(i));
+  // Its qualifiers are part of the type (#368): a caller through the value
+  // gives what the function takes and holds what it returns.
+  std::vector<ast::Qualifier> quals = sig.ParamQuals;
+  quals.resize(sig.ParamTypes.size());
   return Ctx.getFunctionType(sig.ParamTypes, std::move(modes),
-                             sig.ReturnType ? sig.ReturnType : Ctx.getVoidTy());
+                             sig.ReturnType ? sig.ReturnType : Ctx.getVoidTy(),
+                             std::move(quals), sig.ResultQual);
 }
 
 bool Sema::checkFunctionValue(const std::string &name, const FunctionSig &sig,
@@ -216,18 +221,24 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   // The signature, as a function's: canonical types written back.
   std::vector<ast::Type *> paramTys;
   std::vector<ast::ParamMode> modes;
+  std::vector<ast::Qualifier> paramQuals;
   bool ok = true;
   for (ast::Param &p : node->getMutableParams()) {
     FixedArrayAllowed = true;
     SliceAllowed = p.Mode != ast::ParamMode::Value;
     auto *pty =
         resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
-    // The prototype's qualifiers: taken here too, as a function's are.
+    // The prototype's qualifiers: taken here too, as a function's are.  A
+    // borrow's form a type argument gave (`view T` in a template's lambda,
+    // #368) is dropped: the lambda's function type carries none, so its
+    // callers may lend any form, which its body must not keep a copy of.
     if (ast::Qualifier q = takeQualifier(); !q.isUnique()) {
       if (!checkBorrowQualifier(q, p.Mode, "parameter '" + p.getName() + "'",
                                 p.Loc))
         ok = false;
-      p.Qual = q;
+      p.Qual = p.Mode != ast::ParamMode::Value && q.FromArgument
+                   ? ast::Qualifier{}
+                   : q;
     }
     if (pty)
       p.ParamType = pty;
@@ -235,25 +246,19 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
       ok = false;
     paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     modes.push_back(p.Mode);
+    paramQuals.push_back(p.Qual);
   }
   // `fn(x: int) => x * 2` has no result type yet: the body (one `return`)
   // is checked against none, and the result type is then its value's.
   const bool inferred = node->hasInferredResult();
   ast::Type *retTy = inferred ? nullptr : Ctx.getVoidTy();
+  ast::Qualifier resultQual;
   if (!inferred && node->getReturnType()) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "the lambda's result");
-    // A lambda's result carries no qualifier: a function type has none, so
-    // a caller would take a `shared` result for a unique one.
-    if (ast::Qualifier q = takeQualifier(); retTy && !q.isUnique()) {
-      error(node->getLocation(), "a lambda's result takes no qualifier yet ('" +
-                                     qualifiedName(q, retTy) +
-                                     "'): a function type carries none, "
-                                     "so its callers would hold a '" +
-                                     typeName(retTy) + "'");
-      return nullptr;
-    }
+    // Its qualifier is its function type's (#368).
+    resultQual = takeQualifier();
     if (!retTy)
       return nullptr;
     node->setReturnType(retTy);
@@ -290,6 +295,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   }
   CurrentClassCtx = savedClassCtx ? &lambdaCtx : nullptr;
   CurrentReturnType = retTy;
+  // What its `return`s flow into: the lambda's result, not the enclosing
+  // function's.
+  const ast::Qualifier savedResultQual =
+      std::exchange(CurrentResultQual, resultQual);
   LoopDepth = 0;
   CurrentMethodUse = nullptr;
   // Its moves are its own: a capture is a read-only copy (the prototype).
@@ -312,7 +321,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
         CurrentScope->Kinds[p.getName()] =
             p.Mode == ast::ParamMode::View ? VarKind::View : VarKind::Inout;
       ast::Qualifier q = p.Qual;
-      if (p.Mode == ast::ParamMode::Inout)
+      // (a shared form, a template argument\'s, is its own: #368)
+      if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
         q.Mut = true; // the borrow's writes
       CurrentScope->Quals[p.getName()] = q;
     }
@@ -337,6 +347,11 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   }
   CurrentReturnType = savedRetTy;
   CurrentResult = savedResult;
+  // An inferred result takes the form its `return` gave it
+  // (visitReturnStmt).
+  if (inferred)
+    resultQual = CurrentResultQual;
+  CurrentResultQual = savedResultQual;
   LoopDepth = savedLoopDepth;
   MovedVars = std::move(savedMoves);
   LoopMoveStack = std::move(savedLoopMoves);
@@ -345,7 +360,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   CurrentClassCtx = savedClassCtx;
   if (!bodyOk)
     return nullptr;
-  auto *fnt = Ctx.getFunctionType(paramTys, modes, retTy);
+  auto *fnt = Ctx.getFunctionType(paramTys, modes, retTy, std::move(paramQuals),
+                                  resultQual);
   node->setResolvedType(fnt);
   return fnt;
 }
@@ -395,13 +411,27 @@ ast::Type *Sema::checkFunctionValueCall(ast::FunctionType *fnt,
     return nullptr;
   checkInoutArgs(call, modes, fnt->getParamTypes(), args, what);
   checkViewArgs(modes, fnt->getParamTypes(), args, what);
-  // A by-value parameter owns what it is given: the copy rule (#369).
+  // A by-value parameter owns what it is given: it converts into the
+  // parameter's form (#368), under the copy rule (#369); a borrow takes the
+  // form its parameter says.
   for (size_t i = 0; i < args.size(); ++i)
     if (modes.mode(i) == ast::ParamMode::Value &&
-        !checkCopyRule(args[i], args[i]->getLocation()))
+        !checkQualifiedFlow(fnt->getParamQual(i), args[i],
+                            "parameter " + std::to_string(i + 1) + " of '" +
+                                what + "'",
+                            args[i]->getLocation()))
       ok = false;
+  // (A function type's borrow carries no qualifier: getFunctionType.)
+  if (ok && !checkBorrowQualifiers(modes, fnt->getParamQuals(), args, what))
+    ok = false;
   if (!ok)
     return nullptr;
+  // What the call gives is held as the function type says.
+  if (ast::Qualifier q = fnt->getResultQual(); !q.isUnique()) {
+    // A `() -> T` in a template's code gives a type argument's form.
+    q.FromArgument = isArgumentForm(q, fnt->getReturnType());
+    ValueCallResultQuals[call] = q;
+  }
   return fnt->getReturnType();
 }
 

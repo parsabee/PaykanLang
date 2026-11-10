@@ -192,9 +192,11 @@ assignment, the type inferred) and `n: mut Node = Node(1)` are mutable;
   optional reference (proposed; owner may change).  A mode and a
   qualifier never meet: a borrow is written `n: view Node` or `n: inout
   Node` (owner, 2026-11-02).  In the prototype a struct, tuple or fixed
-  array takes no qualifier at all, so `shared Node[3]` and `atomic shared
-  Node[3]` are both errors that point to `mem::Box<Node[3]>`
-  ([`const`](#const); prototype, 2026-11-03).
+  array takes no qualifier of its own: `shared Node[3]` is three shared
+  references, as above (#368), while `atomic shared Node[3]` is an error
+  that points to `mem::Box<Node[3]>`, and `shared int[3]` is `'shared'
+  qualifies a reference; 'int[3]' is a value` ([`const`](#const);
+  prototype, 2026-11-03).
 * `x: shared = e;` and `let x: const = e;` infer the type, as a borrow
   declaration does (docs/grammar.md:385) (decision 36 for `const`; proposed;
   owner may change).  There is no `const x = e;` (decision 36).  (The mut
@@ -391,8 +393,9 @@ change):
   fixed array holding references it makes them `const`, and the value is
   read only, though a variable not declared `let` may still be assigned
   whole (proposed; owner may change).  The prototype goes further: a
-  struct, tuple or array is a value wherever it is and takes no qualifier,
-  `const` included; one is shared or frozen through `mem::Box<T>`, an
+  struct, tuple or array is a value wherever it is and takes no qualifier
+  of its own, `const` included (`shared Node[3]` qualifies the elements,
+  #368); one is shared or frozen through `mem::Box<T>`, an
   object, and Sema says so: `'const' applies to objects; 'Pair' is a
   value: box it ('mem::Box<Pair>') to share what it holds` (prototype,
   2026-11-03).  (The mut model, owner 2026-11-03: `mut` never goes on a
@@ -689,9 +692,13 @@ const T` and `locked T` send-check `T` per instance (proposed; owner may
 change).  `Copyable` holds for `shared` and `atomic shared` references
 and not for `const T`, which stays move-only.  (The mut model, owner
 2026-11-03: `const` reads as the bare form and `mut` is the qualifier that
-joins, `List<Node>` and `List<mut Node>`; how `mut T` joins a `T` of
-`shared Node` is for the owner, as the prototype keeps qualifiers out of
-type arguments.)
+joins, `List<Node>` and `List<mut Node>`.  The prototype implements this
+(#368): `mut T` with `T` = `shared mut Node` is `shared mut Node`, `T?`
+with `T` = `shared Node` is `shared Node?`, and `mut T` with `T` =
+`shared Node` is an error, since a `shared` reference is never written
+through, as is `shared T` with `T` = `shared mut Node`; a by-value `T`
+binds to a `shared` argument's form, which meets `T: Copyable`, and a
+`locked` type argument is not taken yet.)
 
 Inside a template `T` is move-only unless declared `T: Copyable`, a
 structural built-in bound beside `ValueType`
@@ -860,7 +867,8 @@ is Copyable (the owner's decision of 2026-11-07, #369, replacing unique
 function values): a lambda captures only Copyable values and `weak` locals,
 read-only, so its closure never changes, and its copies share it and count
 it; one with no captures has no closure and is just the code's address.  A
-function type takes no qualifier.  Since a closure's count is a plain one,
+function type takes no qualifier of its own; its parameters and result may
+(`(shared Node) -> int`, #368).  Since a closure's count is a plain one,
 no function value crosses threads in v0.4; a callback for another thread is
 a class with a `view fn`, held as `atomic shared`.  A call may change the
 objects its `shared mut` captures share (docs/design/function-types.md:84-86),
@@ -2259,7 +2267,7 @@ themselves.
      alternative allows field reads with no calls.
 106. **What is `const` on a struct?**  **Answered by the prototype,
      2026-11-03.**  An error: a struct, tuple or array takes no qualifier
-     at all, and one is shared or frozen through `mem::Box<T>`, an object
+     of its own, and one is shared or frozen through `mem::Box<T>`, an object
      (the mut model, owner 2026-11-03: `mut` on one is `'mut' applies to
      objects; 'Pair' is a value: its storage is rewritten by assignment,
      which 'let' fixes`).
@@ -2299,7 +2307,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | `move` of a weak | `cannot move 'w': a 'weak' variable holds no strong reference` |
 | move while borrowed | `'l' is borrowed by 'view' local 'x' until 'x' is last used; it cannot be moved` |
 | qualified value | `'shared' qualifies a reference; 'int' is a value` |
-| qualified struct, tuple or array (prototype, 2026-11-03) | `'const' applies to objects; 'Pair' is a value: box it ('mem::Box<Pair>') to share what it holds` (also `'shared' qualifies a reference; 'Node[3]' is a value: box it ('mem::Box<Node[3]>') to share what it holds`, and `'atomic shared'`) (the mut model, owner 2026-11-03: `'mut' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
+| qualified struct, tuple or array (prototype, 2026-11-03) | `'const' applies to objects; 'Pair' is a value: box it ('mem::Box<Pair>') to share what it holds` (also `'atomic shared' qualifies a reference; 'Node[3]' is a value: box it ('mem::Box<Node[3]>') to share what it holds`; since #368 `shared Node[3]` is three shared references, and `shared int[3]` is `'shared' qualifies a reference; 'int[3]' is a value`) (the mut model, owner 2026-11-03: `'mut' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
 | two qualifiers | `a type takes one qualifier: 'locked atomic shared Config'`; `write 'shared', not 'const shared'` (the mut model: `a type takes one qualifier: 'shared mut shared' is two`; `'mut shared' is spelled 'shared mut': the form first, then the writes`) |
 | `locked view` | `there is no 'locked view': read 'x' in 'lock x as v: view { }'` |
 | `locked const` | `there is no 'locked const': a value that never changes needs no lock; share it as 'atomic shared'` (the mut model, owner 2026-11-03: the language has no `const`; `locked T` alone is the warning `'locked T' locks an object nothing writes; 'atomic shared T' is read from every thread with no lock`, and `lock x as v: inout` on it `'x' is 'locked T', whose contents are never written; declare it 'locked mut T' for a 'lock ... as v: inout' block`) |

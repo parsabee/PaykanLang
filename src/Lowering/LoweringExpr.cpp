@@ -378,6 +378,12 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
       if (!addr)
         return Val();
       Val box = L.B.ptrLoad(addr, Type::Box, "moved");
+      // A type argument's Copyable form (#368, Sema): the move is a copy,
+      // a reference of its own, and the field keeps its own.
+      if (node->moveIsCopy()) {
+        L.emitRetain(box, /*lend=*/false, ma->getResolvedType());
+        return box;
+      }
       L.B.ptrStore(addr, Val::null(Type::Box));
       return box;
     }

@@ -61,10 +61,16 @@ class ASTContext {
   // Canonical FixedArrayType per (element type, length), lazily created by
   // getFixedArrayType.  Keys are canonical within this ASTContext, so
   // identity holds at any nesting depth.
-  std::map<std::pair<Type *, int64_t>, FixedArrayType *> FixedArrayTypes;
+  // The elements' qualifier (#368) is part of the key.
+  std::map<std::tuple<Type *, int64_t, uint8_t>, FixedArrayType *>
+      FixedArrayTypes;
 
-  // Canonical SliceType per element type.
-  std::unordered_map<Type *, SliceType *> SliceTypes;
+  // Canonical SliceType per element type and its qualifier.
+  std::map<std::pair<Type *, uint8_t>, SliceType *> SliceTypes;
+
+  // Canonical QualifiedType per (qualifier, inner type): a template's type
+  // argument only (#368; see ast::QualifiedType).
+  std::map<std::pair<uint8_t, Type *>, QualifiedType *> QualifiedTypes;
 
   // Canonical OptionalType per inner type (lazily created by getOptionalType).
   // The inner Type* must be canonical, so `Node?`
@@ -78,13 +84,18 @@ class ASTContext {
   // Canonical TupleType per element-type list (lazily created by
   // getTupleType).  Key: the element Type* pointers, each canonical, so that
   // `(int, (Str, bool))` resolves to one node everywhere.
-  std::map<std::vector<Type *>, TupleType *> TupleTypes;
+  // The elements' qualifiers (#368) are part of the key, empty when every
+  // one is unique.
+  std::map<std::pair<std::vector<Type *>, std::vector<uint8_t>>, TupleType *>
+      TupleTypes;
 
   // -- Function types
   // Canonical FunctionType per (parameter types, modes, result type), lazily
   // created by getFunctionType; the parts are canonical, so a function type's
   // identity is pointer identity.
-  std::map<std::tuple<std::vector<Type *>, std::vector<ParamMode>, Type *>,
+  // The parameters' and the result's qualifiers (#368) are part of the key.
+  std::map<std::tuple<std::vector<Type *>, std::vector<ParamMode>, Type *,
+                      std::vector<uint8_t>, uint8_t>,
            FunctionType *>
       FunctionTypes;
 
@@ -179,9 +190,15 @@ public:
   /// @p elemTy (`int[3]`), creating it on first use.  @p elemTy must itself
   /// be canonical (a builtin singleton, a registered ClassType/EnumType, or
   /// another canonical type), so that type identity is pointer identity.
-  FixedArrayType *getFixedArrayType(Type *elemTy, int64_t length);
+  /// @p elemQual is the elements' qualifier (#368): `shared Node[4]`.
+  FixedArrayType *getFixedArrayType(Type *elemTy, int64_t length,
+                                    Qualifier elemQual = {});
   /// The canonical slice of @p elemTy (see ast::SliceType); Sema-internal.
-  SliceType *getSliceType(Type *elemTy);
+  SliceType *getSliceType(Type *elemTy, Qualifier elemQual = {});
+  /// The canonical `q T` of a template's type argument (#368; see
+  /// ast::QualifiedType): @p innerTy canonical and not itself qualified.
+  /// A unique @p q is no qualifier: @p innerTy itself.
+  Type *getQualifiedType(Qualifier q, Type *innerTy);
 
   /// Return the canonical OptionalType wrapping @p innerTy, creating it on
   /// first use.  @p innerTy must itself be canonical (see getFixedArrayType).
@@ -196,12 +213,21 @@ public:
   /// Return the canonical TupleType with the given element types, creating
   /// it on first use.  Each element must itself be canonical (see
   /// getFixedArrayType) so that tuple type identity is pointer identity.
-  TupleType *getTupleType(std::vector<Type *> elemTys);
+  /// @p elemQuals are the elements' qualifiers (#368), parallel to
+  /// @p elemTys or empty; all unique is the same as empty.
+  TupleType *getTupleType(std::vector<Type *> elemTys,
+                          std::vector<Qualifier> elemQuals = {});
 
   /// Return the canonical FunctionType of the given parameter types and
   /// modes and result type (each canonical), creating it on first use.
+  /// @p paramQuals and @p resultQual are the parts' qualifiers (#368):
+  /// only a by-value parameter's and the result's shared forms are kept,
+  /// `mut` and a borrow's being the function's own business; all unique is
+  /// the same as none.
   FunctionType *getFunctionType(std::vector<Type *> paramTys,
-                                std::vector<ParamMode> modes, Type *retTy);
+                                std::vector<ParamMode> modes, Type *retTy,
+                                std::vector<Qualifier> paramQuals = {},
+                                Qualifier resultQual = {});
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;

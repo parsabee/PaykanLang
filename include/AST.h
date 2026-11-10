@@ -217,16 +217,46 @@ enum class QualForm : uint8_t { Unique, Shared, AtomicShared, Locked };
 struct Qualifier {
   QualForm Form = QualForm::Unique;
   bool Mut = false; // `mut T`, `shared mut T`, `locked mut T`
+  /// Sema's mark on a declaration's qualifier that a template's type
+  /// argument gave (#368: a `T` with T = `shared Node`), not one written on
+  /// it: a borrow keeps it, and the clone of such a value is its copy (T's
+  /// own clone).  No part of the form: equality, codes and spellings ignore
+  /// it, and the composite types drop it.
+  bool FromArgument = false;
 
   /// The bare type: unique, immutable.
   bool isUnique() const { return Form == QualForm::Unique && !Mut; }
   /// Read-only through this reference: every form without `mut`.
   bool isConst() const { return !Mut; }
-  bool operator==(const Qualifier &) const = default;
+  bool operator==(const Qualifier &o) const {
+    return Form == o.Form && Mut == o.Mut;
+  }
+  /// The form alone, without Sema's mark.
+  Qualifier form() const { return {Form, Mut}; }
   /// The spelling: "", "mut", "shared", "shared mut", "atomic shared",
   /// "locked" or "locked mut".
   const char *spelling() const;
+  /// A small number naming the form, for the keys that intern the types a
+  /// qualified part belongs to (ASTContext).
+  uint8_t code() const {
+    return static_cast<uint8_t>(static_cast<uint8_t>(Form) << 1 | Mut);
+  }
+  /// `shared`, `shared mut` or `atomic shared`: a reference that several
+  /// owners hold, so its copy is another owner (Copyable).
+  bool isSharedForm() const {
+    return Form == QualForm::Shared || Form == QualForm::AtomicShared;
+  }
 };
+
+/// The codes of @p quals (Qualifier::code), for interning keys.
+inline std::vector<uint8_t>
+qualifierCodes(const std::vector<Qualifier> &quals) {
+  std::vector<uint8_t> out;
+  out.reserve(quals.size());
+  for (const Qualifier &q : quals)
+    out.push_back(q.code());
+  return out;
+}
 
 // Base for all expressions
 class Expr : public ASTNode {
@@ -1092,6 +1122,10 @@ class UnaryExpr : public Expr {
 private:
   UnaryOpcode Op;
   Expr *Operand;
+  // Set by Sema on `move x.f` in a template's code whose field holds a type
+  // argument's Copyable form (#368: `f: T` with T = `shared Node`): the move
+  // is the copy, and leaves the field as it is.
+  bool MoveIsCopy = false;
 
 public:
   UnaryExpr(SourceLocation loc, UnaryOpcode op, Expr *operand)
@@ -1099,6 +1133,8 @@ public:
 
   UnaryOpcode getOpcode() const { return Op; }
   Expr *getOperand() const { return Operand; }
+  void setMoveIsCopy(bool v) { MoveIsCopy = v; }
+  bool moveIsCopy() const { return MoveIsCopy; }
 
   const char *getOpcodeStr() const;
 
@@ -1277,6 +1313,10 @@ private:
   // Set by Sema when the name is a field of function type, not a method
   // (`obj.cb(1)` with `cb: (int) -> int`): a call through the field's value.
   bool FieldCall = false;
+  // Set by Sema on `x.clone()` of a `T` whose type argument is a reference
+  // held `shared`, `atomic shared` or `locked` (#368): Copyable, so its clone
+  // is the copy, the same object.
+  bool CloneIsCopy = false;
 
 public:
   MethodCallExpr(SourceLocation loc, Expr *receiver,
@@ -1290,6 +1330,8 @@ public:
   size_t getNumArguments() const { return Arguments.size(); }
   void setFieldCall(bool v) { FieldCall = v; }
   bool isFieldCall() const { return FieldCall; }
+  void setCloneIsCopy(bool v) { CloneIsCopy = v; }
+  bool cloneIsCopy() const { return CloneIsCopy; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodCallExpr;
@@ -1945,18 +1987,24 @@ public:
 class FixedArrayType : public Type {
   Type *ElementType;
   int64_t Length;
+  /// The elements' qualifier (#368): `shared Node[4]` is four `shared`
+  /// references.  Unique unless the canonical type says otherwise.
+  Qualifier ElemQual;
 
 public:
   /// The length of `T[_]`, which a variable declaration infers from its
   /// initializer (Sema replaces it with the initializer's).
   static constexpr int64_t kInferredLength = -1;
 
-  FixedArrayType(SourceLocation loc, Type *elemTy, int64_t length)
-      : Type(NK_FixedArrayType, loc), ElementType(elemTy), Length(length) {}
+  FixedArrayType(SourceLocation loc, Type *elemTy, int64_t length,
+                 Qualifier elemQual = {})
+      : Type(NK_FixedArrayType, loc), ElementType(elemTy), Length(length),
+        ElemQual(elemQual) {}
 
   Type *getElementType() const { return ElementType; }
   int64_t getLength() const { return Length; }
   bool isInferred() const { return Length == kInferredLength; }
+  const Qualifier &getElemQual() const { return ElemQual; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_FixedArrayType;
@@ -2052,20 +2100,32 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_TaskType; }
 };
 
-/// A qualified type as written (the concurrency prototype): `const T`,
-/// `shared T`, `shared T`, `atomic shared T`, `locked T`, or, in a
+/// A qualified type as written (the concurrency prototype): `mut T`,
+/// `shared T`, `shared mut T`, `atomic shared T`, `locked T`, or, in a
 /// declaration, the qualifier alone (`x: shared = e;`, Inner null).  Sema
-/// resolves it to the inner type and records the qualifier on the place.
+/// resolves it to the inner type and records the qualifier on the place, or
+/// on the part of a type it is (#368: a tuple's element, an array's
+/// elements, a function type's parameter or result).
+///
+/// The canonical one (ASTContext::getQualifiedType, no location) is a
+/// template's type argument only (`List<shared Node>`'s argument, a Subst
+/// value, what the cloner substitutes for `T`): a resolved type never is
+/// one, so the lowering never sees it.
 class QualifiedType : public Type {
   Qualifier Qual;
   Type *InnerType; // may be null: the type is inferred
+  bool Canonical = false;
 
 public:
-  QualifiedType(SourceLocation loc, Qualifier qual, Type *inner)
-      : Type(NK_QualifiedType, loc), Qual(qual), InnerType(inner) {}
+  QualifiedType(SourceLocation loc, Qualifier qual, Type *inner,
+                bool canonical = false)
+      : Type(NK_QualifiedType, loc), Qual(qual), InnerType(inner),
+        Canonical(canonical) {}
 
   const Qualifier &getQualifier() const { return Qual; }
   Type *getInnerType() const { return InnerType; }
+  /// A type argument's (ASTContext::getQualifiedType), not one written.
+  bool isCanonical() const { return Canonical; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_QualifiedType;
@@ -2354,6 +2414,9 @@ public:
 // it has methods -- Sema checks isa<StructType> first.
 class TupleType : public Type {
   std::vector<Type *> ElementTypes;
+  /// The elements' qualifiers (#368), parallel to ElementTypes, or empty
+  /// when every one is unique.  A struct's are its FieldQuals instead.
+  std::vector<Qualifier> ElemQuals;
 
 protected:
   TupleType(NodeKind kind, SourceLocation loc, std::vector<Type *> elemTys)
@@ -2368,12 +2431,20 @@ protected:
   void addElementType(Type *ty) { ElementTypes.push_back(ty); }
 
 public:
-  TupleType(SourceLocation loc, std::vector<Type *> elemTys)
-      : TupleType(NK_TupleType, loc, std::move(elemTys)) {}
+  TupleType(SourceLocation loc, std::vector<Type *> elemTys,
+            std::vector<Qualifier> elemQuals = {})
+      : TupleType(NK_TupleType, loc, std::move(elemTys)) {
+    ElemQuals = std::move(elemQuals);
+  }
 
   const std::vector<Type *> &getElementTypes() const { return ElementTypes; }
   size_t getArity() const { return ElementTypes.size(); }
   Type *getElementType(size_t i) const { return ElementTypes[i]; }
+  /// Element @p i's qualifier: unique unless the canonical type says so.
+  Qualifier getElemQual(size_t i) const {
+    return i < ElemQuals.size() ? ElemQuals[i] : Qualifier{};
+  }
+  const std::vector<Qualifier> &getElemQuals() const { return ElemQuals; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TupleType || N->getKind() == NK_StructType;
@@ -2509,12 +2580,19 @@ class FunctionType : public Type {
   std::vector<Type *> ParamTypes;
   std::vector<ParamMode> Modes; // parallel to ParamTypes
   Type *ReturnType;             // never null: the builtin void for none
+  /// The parameters' qualifiers (#368), parallel to ParamTypes or empty
+  /// when every one is unique, and the result's.
+  std::vector<Qualifier> ParamQuals;
+  Qualifier ResultQual;
 
 public:
   FunctionType(SourceLocation loc, std::vector<Type *> params,
-               std::vector<ParamMode> modes, Type *retTy)
+               std::vector<ParamMode> modes, Type *retTy,
+               std::vector<Qualifier> paramQuals = {},
+               Qualifier resultQual = {})
       : Type(NK_FunctionType, loc), ParamTypes(std::move(params)),
-        Modes(std::move(modes)), ReturnType(retTy) {
+        Modes(std::move(modes)), ReturnType(retTy),
+        ParamQuals(std::move(paramQuals)), ResultQual(resultQual) {
     // == / != compare closures by identity, as objects without an `equals`
     // of their own do (so a function value is a `List<T>` element).
     addBinaryOp(BinaryOpcode::Eq);
@@ -2527,6 +2605,12 @@ public:
   Type *getParamType(size_t i) const { return ParamTypes[i]; }
   ParamMode getMode(size_t i) const { return Modes[i]; }
   Type *getReturnType() const { return ReturnType; }
+  /// Parameter @p i's qualifier: unique unless the canonical type says so.
+  Qualifier getParamQual(size_t i) const {
+    return i < ParamQuals.size() ? ParamQuals[i] : Qualifier{};
+  }
+  const std::vector<Qualifier> &getParamQuals() const { return ParamQuals; }
+  const Qualifier &getResultQual() const { return ResultQual; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_FunctionType;
@@ -2535,12 +2619,14 @@ public:
 
 class SliceType : public Type {
   Type *ElementType;
+  Qualifier ElemQual; // the elements' (#368), as a FixedArrayType's
 
 public:
-  SliceType(SourceLocation loc, Type *elemTy)
-      : Type(NK_SliceType, loc), ElementType(elemTy) {}
+  SliceType(SourceLocation loc, Type *elemTy, Qualifier elemQual = {})
+      : Type(NK_SliceType, loc), ElementType(elemTy), ElemQual(elemQual) {}
 
   Type *getElementType() const { return ElementType; }
+  const Qualifier &getElemQual() const { return ElemQual; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_SliceType; }
 };

@@ -70,6 +70,7 @@ add_executable(sema_tests
     Sema/ConcurrencyTests.cpp
     Sema/MoveTests.cpp
     Sema/QualifierTests.cpp
+    Sema/QualifiedPartTests.cpp
     Sema/FuncTests.cpp
     Sema/NativeTests.cpp
     Sema/ControlFlowTests.cpp
@@ -163,6 +164,7 @@ add_executable(codegen_tests
     CodeGen/ParamModeTests.cpp
     CodeGen/LetTests.cpp
     CodeGen/WeakTests.cpp
+    CodeGen/QualifiedPartTests.cpp
     CodeGen/ImplTests.cpp
     CodeGen/TraitTests.cpp
     CodeGen/PureVirtualTests.cpp

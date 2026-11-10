@@ -1391,12 +1391,21 @@ private:
                         "\" (mut, shared, shared mut, atomic shared, locked, "
                         "locked mut)"),
                nullptr;
+      // No level of its own, as the parser counts none (docs/grammar.md
+      // section 9): the type it qualifies is never another qualified one.
       Type *inner = nullptr;
       if (!f.atEnd()) {
-        Nested level(*this, e);
-        inner = level.ok() ? type(f, "the qualified type") : nullptr;
+        inner = type(f, "the qualified type");
         if (!inner)
           return nullptr;
+        // As the parser refuses `shared shared N` and `shared atomic int`.
+        if (isa<QualifiedType>(inner) || isa<AtomicType>(inner))
+          return fail(e, "a type takes one qualifier: \"" + *spelling +
+                             "\" qualifies " +
+                             (isa<AtomicType>(inner) ? "an atomic"
+                                                     : "a qualified") +
+                             " type"),
+                 nullptr;
       }
       if (!f.done())
         return nullptr;

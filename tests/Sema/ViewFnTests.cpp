@@ -273,11 +273,11 @@ fn twiceOf(n: int) -> int { return 2 * n; }
 // returns a copy of `self.v`, is not warned about: a copy of a type
 // argument's value is a `view fn`'s to hand out only while the argument is a
 // value (`int`, `Pt`); a move-only one (`Str`) cannot be copied at all, and
-// an argument that is a shared reference (#368) could be changed through
-// the copy.  So it is not warned about with `Box<int>` alone either, which
-// another file, an importer of the module, may instantiate otherwise; nor is
-// `first`, which calls it.  A method every instance could make a `view fn`
-// is, once.
+// an argument that is a `shared mut` reference (`Box<shared mut Node>`,
+// #368) could be changed through the copy.  So it is not warned about with
+// `Box<int>` alone either, which another file, an importer of the module, may
+// instantiate otherwise; nor is `first`, which calls it.  A method every
+// instance could make a `view fn` is, once.
 TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   const std::string boxes =
       "import ::io;\n"

@@ -71,24 +71,40 @@ void ASTContext::buildStringType() {
 // One FixedArrayType per (canonical) element type and length.  The parser
 // allocates a source-located node for every annotation, but Sema resolves
 // each one to the instance returned here, so these types compare by pointer.
-FixedArrayType *ASTContext::getFixedArrayType(Type *elemTy, int64_t length) {
-  auto key = std::make_pair(elemTy, length);
+FixedArrayType *ASTContext::getFixedArrayType(Type *elemTy, int64_t length,
+                                              Qualifier elemQual) {
+  auto key = std::make_tuple(elemTy, length, elemQual.code());
   auto it = FixedArrayTypes.find(key);
   if (it != FixedArrayTypes.end())
     return it->second;
-  auto *at = make<FixedArrayType>(SourceLocation(), elemTy, length);
+  auto *at =
+      make<FixedArrayType>(SourceLocation(), elemTy, length, elemQual.form());
   FixedArrayTypes[key] = at;
   return at;
 }
 
 // One SliceType per (canonical) element type, as for getFixedArrayType.
-SliceType *ASTContext::getSliceType(Type *elemTy) {
-  auto it = SliceTypes.find(elemTy);
+SliceType *ASTContext::getSliceType(Type *elemTy, Qualifier elemQual) {
+  auto key = std::make_pair(elemTy, elemQual.code());
+  auto it = SliceTypes.find(key);
   if (it != SliceTypes.end())
     return it->second;
-  auto *st = make<SliceType>(SourceLocation(), elemTy);
-  SliceTypes[elemTy] = st;
+  auto *st = make<SliceType>(SourceLocation(), elemTy, elemQual.form());
+  SliceTypes[key] = st;
   return st;
+}
+
+Type *ASTContext::getQualifiedType(Qualifier q, Type *innerTy) {
+  if (q.isUnique())
+    return innerTy;
+  auto key = std::make_pair(q.code(), innerTy);
+  auto it = QualifiedTypes.find(key);
+  if (it != QualifiedTypes.end())
+    return it->second;
+  auto *qt = make<QualifiedType>(SourceLocation(), q.form(), innerTy,
+                                 /*canonical=*/true);
+  QualifiedTypes[key] = qt;
+  return qt;
 }
 
 // -- Canonical optional types
@@ -132,24 +148,65 @@ TaskType *ASTContext::getTaskType(Type *innerTy) {
 // annotation, Sema resolves each to the instance returned here, and nested
 // tuples share their inner nodes, so resolved tuple types compare by pointer.
 //
-TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys) {
-  auto it = TupleTypes.find(elemTys);
+namespace {
+
+/// @p quals as forms (Sema's mark dropped), or none when every one is
+/// unique (the same canonical type).
+std::vector<Qualifier> normalQuals(std::vector<Qualifier> quals) {
+  bool any = false;
+  for (Qualifier &q : quals) {
+    q = q.form();
+    any |= !q.isUnique();
+  }
+  if (!any)
+    quals.clear();
+  return quals;
+}
+
+} // namespace
+
+TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys,
+                                    std::vector<Qualifier> elemQuals) {
+  elemQuals = normalQuals(std::move(elemQuals));
+  if (!elemQuals.empty())
+    elemQuals.resize(elemTys.size());
+  auto key = std::make_pair(elemTys, qualifierCodes(elemQuals));
+  auto it = TupleTypes.find(key);
   if (it != TupleTypes.end())
     return it->second;
-  auto *tt = make<TupleType>(SourceLocation(), elemTys);
-  TupleTypes[std::move(elemTys)] = tt;
+  auto *tt = make<TupleType>(SourceLocation(), std::move(elemTys),
+                             std::move(elemQuals));
+  TupleTypes[std::move(key)] = tt;
   return tt;
 }
 
 FunctionType *ASTContext::getFunctionType(std::vector<Type *> paramTys,
                                           std::vector<ParamMode> modes,
-                                          Type *retTy) {
-  auto key = std::make_tuple(paramTys, modes, retTy);
+                                          Type *retTy,
+                                          std::vector<Qualifier> paramQuals,
+                                          Qualifier resultQual) {
+  // A part's qualifier is the type's only when a caller sees it (#368): the
+  // shared forms of a by-value parameter and of the result.  `mut` is the
+  // function's own business (a unique value gains it by `move`, and `mut T`
+  // flows into `T`), and a borrow takes the object whatever its form.
+  paramQuals.resize(paramTys.size());
+  for (size_t i = 0; i < paramQuals.size(); ++i)
+    if (paramQuals[i].Form == QualForm::Unique ||
+        (i < modes.size() && modes[i] != ParamMode::Value))
+      paramQuals[i] = {};
+  if (resultQual.Form == QualForm::Unique)
+    resultQual = {};
+  paramQuals = normalQuals(std::move(paramQuals));
+  if (!paramQuals.empty())
+    paramQuals.resize(paramTys.size());
+  auto key = std::make_tuple(paramTys, modes, retTy, qualifierCodes(paramQuals),
+                             resultQual.code());
   auto it = FunctionTypes.find(key);
   if (it != FunctionTypes.end())
     return it->second;
   auto *ft = make<FunctionType>(SourceLocation(), std::move(paramTys),
-                                std::move(modes), retTy);
+                                std::move(modes), retTy, std::move(paramQuals),
+                                resultQual.form());
   FunctionTypes[std::move(key)] = ft;
   return ft;
 }
@@ -290,6 +347,11 @@ std::string typeName(Type *ty) {
     std::string s = typeName(inner);
     return isa<FunctionType>(inner) ? "(" + s + ")" : s;
   };
+  // A part's qualifier (#368) is written before it: `(int, shared Node)`.
+  auto qualified = [](const Qualifier &q, Type *part) {
+    std::string s = q.spelling();
+    return (s.empty() ? s : s + " ") + typeName(part);
+  };
   if (auto *fnt = dyn_cast<FunctionType>(ty)) {
     // "(int, view Str) -> bool", as the parser accepts it, so the serialised
     // form round-trips through module export.
@@ -301,25 +363,29 @@ std::string typeName(Type *ty) {
         s += paramModeName(fnt->getMode(i));
         s += " ";
       }
-      s += typeName(fnt->getParamType(i));
+      s += qualified(fnt->getParamQual(i), fnt->getParamType(i));
     }
-    return s + ") -> " + typeName(fnt->getReturnType());
+    return s + ") -> " + qualified(fnt->getResultQual(), fnt->getReturnType());
   }
   if (auto *at = dyn_cast<ArrayType>(ty))
     return suffixed(at->getElementType()) + "[]";
   if (auto *ft = dyn_cast<FixedArrayType>(ty)) {
     // An array of arrays is written with its first index's length first, as
-    // it is parsed: two `int[3]`s are `int[2][3]`.
+    // it is parsed: two `int[3]`s are `int[2][3]`.  The elements' qualifier
+    // (#368) binds to the primary type, so it goes first: `shared Node[4]`.
     std::string lengths;
     Type *elem = ft;
+    Qualifier elemQual;
     for (auto *f = ft; f; f = dyn_cast<FixedArrayType>(f->getElementType())) {
       lengths += "[" +
                  (f->isInferred() ? std::string("_")
                                   : std::to_string(f->getLength())) +
                  "]";
       elem = f->getElementType();
+      elemQual = f->getElemQual();
     }
-    return suffixed(elem) + lengths;
+    std::string q = elemQual.spelling();
+    return (q.empty() ? q : q + " ") + suffixed(elem) + lengths;
   }
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return suffixed(ot->getInnerType()) + "?";
@@ -334,8 +400,10 @@ std::string typeName(Type *ty) {
     return s;
   }
   // A slice is spelled as its parameter's type is, its mode aside.
-  if (auto *st = dyn_cast<SliceType>(ty))
-    return suffixed(st->getElementType()) + "[]";
+  if (auto *st = dyn_cast<SliceType>(ty)) {
+    std::string q = st->getElemQual().spelling();
+    return (q.empty() ? q : q + " ") + suffixed(st->getElementType()) + "[]";
+  }
   if (auto *gt = dyn_cast<GenericType>(ty)) {
     // An annotation not resolved yet: `Box<int>`, a bound `Into<int>`.
     std::string s = gt->getName() + "<";
@@ -354,7 +422,7 @@ std::string typeName(Type *ty) {
     for (size_t i = 0; i < tt->getArity(); ++i) {
       if (i)
         s += ", ";
-      s += typeName(tt->getElementType(i));
+      s += qualified(tt->getElemQual(i), tt->getElementType(i));
     }
     return s + ")";
   }

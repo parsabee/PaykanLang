@@ -482,7 +482,8 @@ fn main() -> int {
 // a struct method, a function value, a generic function and `__super__`.
 // The read stays held; the variables are lent.  The node and the holder are
 // `shared`, so the caller keeps them while it passes them; the generic
-// function borrows its argument (a `T` parameter takes no `shared` one).
+// function borrows its argument, a `view T` (a by-value `T` takes the
+// `shared` one since #368; the test keeps the borrow).
 TEST(BorrowedParams, EveryCallKindKeepsWhatItsCalleeReplaces) {
   LeakGuard g;
   pir::Statistics stats;

@@ -314,8 +314,9 @@ TEST(Tuple, TupleFieldInClass) {
   g.expectNoLeaks("TupleFieldInClass");
 }
 
-// A tuple element takes no qualifier, so the `shared mut` Point is held in a
-// struct's field.
+// The `shared mut` Point is held in a struct's field, which the tuple holds
+// (a tuple element can be `shared mut` itself since #368; the test keeps the
+// struct, and so its printing).
 TEST(Tuple, ClassInstanceElements) {
   LeakGuard g;
   // Delimited raw string: the Paykan source contains `")"`.
@@ -515,9 +516,9 @@ const char *const kNode = R"(
 } // namespace
 
 // An array of tuples holds each one's elements in place: a read copies one
-// out (retaining its references), a store releases the old element's.  A
-// tuple element takes no qualifier, so each `shared mut` Node is held in a
-// struct's field.
+// out (retaining its references), a store releases the old element's.  Each
+// `shared mut` Node is held in a struct's field (a tuple element can be
+// `shared mut` itself since #368; the test keeps the struct).
 TEST(Tuple, ArrayOfTuplesWithReferenceElements) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"(import ::io;
@@ -608,8 +609,9 @@ TEST(Tuple, TupleFieldIsReleasedWithItsObject) {
   g.expectNoLeaks("TupleFieldIsReleasedWithItsObject");
 }
 
-// Copies of nested tuples share the Nodes they hold.  A tuple element takes
-// no qualifier, so each `shared mut` Node is held in a struct's field.
+// Copies of nested tuples share the Nodes they hold.  Each `shared mut` Node
+// is held in a struct's field (a tuple element can be `shared mut` itself
+// since #368; the test keeps the struct).
 TEST(Tuple, NestedTuplesHoldingReferences) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"(import ::io;
