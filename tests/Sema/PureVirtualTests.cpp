@@ -30,7 +30,7 @@ class Shape {
 }
 
 impl Shape {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = move name; }
   view fn report() -> Str { return self.label() + " " + Str(self.area()); }
   static fn unit() -> Shape { return Square("unit", 1.0); }
 }
@@ -43,7 +43,7 @@ class Polygon : Shape {
 
 impl Polygon {
   fn __init__(name: Str, sides: int, side: float) {
-    __super__(name);
+    __super__(move name);
     self.sides = sides;
     self.side = side;
   }
@@ -55,7 +55,7 @@ class Square : Polygon {
 }
 
 impl Square {
-  fn __init__(name: Str, side: float) { __super__(name, 4, side); }
+  fn __init__(name: Str, side: float) { __super__(move name, 4, side); }
 }
 )";
 
@@ -163,7 +163,7 @@ fn main() -> int {
   t = (Polygon("tuple", 3, 1.0), 1);
   o: Shape? = Polygon("optional", 3, 1.0);
   p = Pair(Polygon("struct", 3, 1.0), 2);
-  c = if f > 1.0 then Polygon("cond", 3, 1.0) else b;
+  c = if f > 1.0 then Polygon("cond", 3, 1.0) else move b;
   n = Polygon("receiver", 3, 1.0).perimeter();
   io::println(Polygon("print", 3, 1.0));
   Polygon("statement", 3, 1.0);
@@ -262,7 +262,7 @@ fn total(shapes: view Shape[]) -> float {
   return sum;
 }
 fn pick(a: Shape, b: Shape) -> Shape { return if a.area() > b.area() then a else b; }
-fn describe(o: Obj) -> Str {
+fn describe(o: view Obj) -> Str {
   match o {
     s: Square { return s.report(); }
     _ { return "other"; }
@@ -271,12 +271,12 @@ fn describe(o: Obj) -> Str {
 fn main() -> int {
   a: Shape = Square("a", 1.0);
   b: Polygon = Square("b", 2.0);
-  xs: Shape[2] = [a, b];
-  scene = Scene(a, None, xs);
-  box = Box<Shape>(pick(a, b));
-  o: Obj = box.item;
-  t: (Shape, int) = (b, 1);
-  m: Shape? = scene.extra;
+  xs: Shape[2] = [Square("x", 1.0), Square("y", 2.0)];
+  scene = Scene(Square("s", 1.0), None, move xs);
+  box = Box<Shape>(pick(Square("p", 1.0), Square("q", 2.0)));
+  o: Obj = move box.item;
+  t: (Shape, int) = (move b, 1);
+  m: view Shape? = scene.extra;
   match m {
     s: Shape { io::println(s.report()); }
     None { io::println(describe(o)); }
@@ -613,7 +613,7 @@ class Shape {
   view fn kind() -> Str;
 }
 impl Shape {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = move name; }
   view fn report() -> Str { return self.kind() + " " + Str(self.area()); }
 }
 class Polygon : Shape {

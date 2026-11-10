@@ -6,7 +6,8 @@
 // object-header backpointer.  These tests pin down the raw-alias double-free
 // family that motivated the invariant:
 //
-//   A1  `self` used as a value (return / argument / assignment)
+//   A1  `self` used as a value in a `shared fn` (return / argument /
+//       assignment)
 //   A2  match-arm bindings used with ownership-taking consumers
 //   A4  array-typed class fields holding references to their elements
 //   A5  len() on receivers that are not bare identifiers
@@ -30,24 +31,45 @@ extern "C" {
 using namespace paykan::test;
 
 // -- A1 — `self` used as a value
+//
+// A plain method borrows its receiver, so handing `self` on there is an
+// error; a `shared fn`'s `self` is a `shared mut` reference, which it may
+// return, pass and copy.
 
-// Returning `self` from a method must hand out a +1 on the object's existing
-// box, not wrap the raw receiver in a second box (double free on scope exit).
+namespace {
+
+/// @p source, whose plain method hands `self` (an object of class @p cls) on,
+/// does not compile: a method borrows its receiver.
+void expectSelfIsBorrowed(const std::string &source, const std::string &cls) {
+  auto r = compileAndRun(source);
+  EXPECT_FALSE(r.CompileOk) << source;
+  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mut " + cls +
+                          "'); a method borrows its receiver (a 'shared fn' "
+                          "hands on a shared one)"),
+            std::string::npos)
+      << r.StdErr;
+}
+
+} // namespace
+
+// Returning `self` from a `shared fn` must hand out a +1 on the object's
+// existing box, not wrap the raw receiver in a second box (double free on
+// scope exit).
 TEST(Ownership, ReturnSelf) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
-      fn me() -> B { return self; }
+      shared fn me() -> shared mut B { return self; }
     }
 
     impl B {
       fn __init__() { self.x = 1; }
     }
     fn main() -> int {
-      b: mut B = B();
-      c: B = b.me();
-      io::println(Str<int>(c.x));
+      b: shared mut = B();
+      c = b.me();
+      io::println(Str(c.x));
       return 0;
     }
   )");
@@ -55,24 +77,33 @@ TEST(Ownership, ReturnSelf) {
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "1\n");
   g.expectNoLeaks("ReturnSelf");
+  expectSelfIsBorrowed(R"(
+    class B {
+      x: int;
+      fn me() -> B { return self; }
+    }
+    fn main() -> int { b: mut = B(1); c = b.me(); return c.x; }
+  )",
+                       "B");
 }
 
-// Chained self-returns: each hop retains the same unique box.
+// Chained self-returns from a `shared fn`, each call after the first on the
+// one before's result: each hop retains the same unique box.
 TEST(Ownership, ReturnSelfChained) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
-      fn bump() -> B { self.x = self.x + 1; return self; }
+      shared fn bump() -> shared mut B { self.x = self.x + 1; return self; }
     }
 
     impl B {
       fn __init__() { self.x = 0; }
     }
     fn main() -> int {
-      b: mut B = B();
-      c: B = b.bump().bump().bump();
-      io::println(Str<int>(c.x));
+      b: shared mut = B();
+      c = b.bump().bump().bump();
+      io::println(Str(c.x));
       return 0;
     }
   )");
@@ -80,23 +111,32 @@ TEST(Ownership, ReturnSelfChained) {
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "3\n");
   g.expectNoLeaks("ReturnSelfChained");
+  expectSelfIsBorrowed(R"(
+    class B {
+      x: int;
+      fn bump() -> B { self.x = self.x + 1; return self; }
+    }
+    fn main() -> int { b: mut = B(0); c = b.bump().bump(); return c.x; }
+  )",
+                       "B");
 }
 
-// Passing `self` to a function whose class-typed parameter consumes a +1 box.
+// Passing a `shared fn`'s `self` to a function whose `shared mut` parameter
+// consumes a +1 box.
 TEST(Ownership, PassSelfAsArgument) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
-      fn send() { probe(self); }
+      shared fn send() { probe(self); }
     }
 
     impl B {
       fn __init__() { self.x = 1; }
     }
-    fn probe(b: B) { io::println(Str<int>(b.x)); }
+    fn probe(b: shared mut B) { io::println(Str(b.x)); }
     fn main() -> int {
-      b: mut B = B();
+      b: shared mut = B();
       b.send();
       return 0;
     }
@@ -105,15 +145,24 @@ TEST(Ownership, PassSelfAsArgument) {
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "1\n");
   g.expectNoLeaks("PassSelfAsArgument");
+  expectSelfIsBorrowed(R"(
+    class B {
+      x: int;
+      fn send() { probe(self); }
+    }
+    fn probe(b: B) { }
+    fn main() -> int { b: mut = B(1); b.send(); return 0; }
+  )",
+                       "B");
 }
 
-// `y = self` inside a method: the local owner shares the caller's box.
+// `y = self` inside a `shared fn`: the local owner shares the caller's box.
 TEST(Ownership, AssignSelfToLocal) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
-      fn grab() -> int {
+      shared fn grab() -> int {
         y = self;
         return y.x;
       }
@@ -123,10 +172,10 @@ TEST(Ownership, AssignSelfToLocal) {
       fn __init__() { self.x = 7; }
     }
     fn main() -> int {
-      a: mut A = A();
-      n: int = a.grab();
-      io::println(Str<int>(n));
-      io::println(Str<int>(a.x));
+      a: shared mut = A();
+      n = a.grab();
+      io::println(Str(n));
+      io::println(Str(a.x));
       return 0;
     }
   )");
@@ -134,12 +183,24 @@ TEST(Ownership, AssignSelfToLocal) {
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "7\n7\n");
   g.expectNoLeaks("AssignSelfToLocal");
+  expectSelfIsBorrowed(R"(
+    class A {
+      x: int;
+      fn grab() -> int {
+        y = self;
+        return y.x;
+      }
+    }
+    fn main() -> int { a: mut = A(7); return a.grab(); }
+  )",
+                       "A");
 }
 
 // -- A2 — match-arm bindings with ownership-taking consumers
 
 // Binding whose subject is a plain owned variable (no recorded backing box):
-// passing it to a consuming callee must recover the subject's box.
+// passing it to a consuming callee (`match move`, then `move b`) must
+// recover the subject's box.
 TEST(Ownership, MatchBindingPassedOwnedSubject) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -153,8 +214,8 @@ TEST(Ownership, MatchBindingPassedOwnedSubject) {
     fn probe(a: A) { io::println(Str<int>(a.x)); }
     fn main() -> int {
       o: Obj = A();
-      match o {
-        b: A { probe(b); }
+      match move o {
+        b: A { probe(move b); }
         _ { io::println("no"); }
       }
       return 0;
@@ -166,7 +227,8 @@ TEST(Ownership, MatchBindingPassedOwnedSubject) {
   g.expectNoLeaks("MatchBindingPassedOwnedSubject");
 }
 
-// Binding consumed by explicit and implicit variable declarations.
+// Binding copied by explicit and implicit variable declarations: the subject
+// is `shared`, so each declaration is another owner of its box.
 TEST(Ownership, MatchBindingVarDecls) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -178,10 +240,10 @@ TEST(Ownership, MatchBindingVarDecls) {
       fn __init__() { self.x = 5; }
     }
     fn main() -> int {
-      o: Obj = A();
+      o: shared Obj = A();
       match o {
         b: A {
-          c: A = b;
+          c: shared A = b;
           d = b;
           io::println(Str<int>(c.x + d.x));
         }
@@ -212,7 +274,7 @@ TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
     fn main() -> int {
       match make() {
         b: A {
-          c = b;
+          c = move b;
           io::println(Str<int>(c.x));
         }
         _ { io::println("no"); }
@@ -226,8 +288,9 @@ TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
   g.expectNoLeaks("MatchBindingCallSubjectImplicitDecl");
 }
 
-// Binding stored into a class field: the field slot must end up sharing the
-// subject's box (retained), and the nested read h.a.x must unwrap it.
+// Binding stored into a class field (`match move`, then `move b`): the field
+// slot must end up with the subject's box, and the nested read h.a.x must
+// unwrap it.
 TEST(Ownership, MatchBindingMemberAssign) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -243,13 +306,13 @@ TEST(Ownership, MatchBindingMemberAssign) {
     }
 
     impl Holder {
-      fn __init__(a0: A) { self.a = a0; }
+      fn __init__(a0: A) { self.a = move a0; }
     }
     fn main() -> int {
       o: Obj = A();
       h: mut Holder = Holder(A());
-      match o {
-        b: A { h.a = b; }
+      match move o {
+        b: A { h.a = move b; }
         _ { io::println("no"); }
       }
       io::println(Str<int>(h.a.x));
@@ -262,8 +325,8 @@ TEST(Ownership, MatchBindingMemberAssign) {
   g.expectNoLeaks("MatchBindingMemberAssign");
 }
 
-// Copying an unowned binding retains the subject's box — never a fresh box
-// around the raw alias.
+// Copying an unowned binding (of a `shared` subject) retains the subject's
+// box — never a fresh box around the raw alias.
 TEST(Ownership, MatchBindingCopied) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -275,7 +338,7 @@ TEST(Ownership, MatchBindingCopied) {
       fn __init__() { self.x = 5; }
     }
     fn main() -> int {
-      o: Obj = A();
+      o: shared Obj = A();
       match o {
         b: A {
           c = b;
@@ -308,7 +371,7 @@ TEST(Ownership, MatchBindingBackedControl) {
     fn main() -> int {
       match make() {
         b: A {
-          c: A = b;
+          c: A = move b;
           io::println(Str<int>(c.x));
         }
         _ { io::println("no"); }
@@ -324,9 +387,9 @@ TEST(Ownership, MatchBindingBackedControl) {
 
 // -- A4 — array-typed class fields
 
-// An array field holds its elements in the object: storing one must retain
-// the strings it copies, as the destructor releases them, so a raw store would
-// be a use-after-free / double free.
+// An array field holds its elements in the object: storing one must take
+// the strings it moves in, as the destructor releases them, so a raw store
+// would be a use-after-free / double free.
 TEST(Ownership, ArrayFieldStoreAndRead) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -335,7 +398,7 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
     }
 
     impl H {
-      fn __init__(a: Str[3]) { self.arr = a; }
+      fn __init__(a: Str[3]) { self.arr = move a; }
     }
     fn main() -> int {
       h: H = H([Str(1), Str(2), Str(3)]);
@@ -350,8 +413,8 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
   g.expectNoLeaks("ArrayFieldStoreAndRead");
 }
 
-// Re-assigning an array field releases the elements it replaces and retains
-// the new ones, also one the new value takes from the old.
+// Re-assigning an array field releases the elements it replaces and takes
+// the new ones, also a copy the new value takes of an old one.
 TEST(Ownership, ArrayFieldReassign) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -360,11 +423,11 @@ TEST(Ownership, ArrayFieldReassign) {
     }
 
     impl H {
-      fn __init__(a: Str[2]) { self.arr = a; }
+      fn __init__(a: Str[2]) { self.arr = move a; }
     }
     fn main() -> int {
       h: mut H = H([Str(1), Str(2)]);
-      h.arr = [Str(7), h.arr[0]];
+      h.arr = [Str(7), h.arr[0].clone()];
       io::println(h.arr[0] + h.arr[1] + Str<int>(h.arr.len()));
       return 0;
     }
@@ -394,9 +457,9 @@ TEST(Ownership, LenOnCallResult) {
   g.expectNoLeaks("LenOnCallResult");
 }
 
-// Implicit declaration from an object-array element: `y = arr[i]` must type
-// `y` from the subscript's resolved type (not fall back to Obj) and share the
-// element's box instead of double-boxing the raw element pointer.
+// Implicit declaration from an object-array element: `y: view = arr[i]` must
+// type `y` from the subscript's resolved type (not fall back to Obj) and read
+// the element where it is instead of double-boxing the raw element pointer.
 TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -409,7 +472,7 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
     }
     fn main() -> int {
       arr: A[2] = [A(1), A(2)];
-      y = arr[1];
+      y: view = arr[1];
       io::println(Str<int>(y.x));
       return 0;
     }
@@ -439,7 +502,7 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
     }
 
     impl H {
-      fn __init__(a0: A) { self.a = a0; }
+      fn __init__(a0: A) { self.a = move a0; }
     }
     fn main() -> int {
       h: mut H = H(A());
@@ -480,7 +543,7 @@ TEST(Ownership, AssignNarrowsBaseVar) {
     fn main() -> int {
       d: mut Dog = Dog();
       a: Animal = Animal();
-      a = d;
+      a = move d;
       io::println(a.speak());
       return 0;
     }
@@ -497,7 +560,8 @@ TEST(Ownership, AssignNarrowsBaseVar) {
 // (or the field of the object that holds it), and makes objects of the same
 // size, which take the freed memory over: what the statement uses is what
 // it read, alive until it is used (docs/pir.md §7, "Reads a call may
-// replace").
+// replace").  The objects the call is given are `shared mut`: the call
+// replaces what the statement reads through another name for it.
 
 // A method's receiver, the operands of `+` and `==`, the object a field
 // assignment writes to, the storage an element is read from or assigned in.
@@ -508,36 +572,36 @@ TEST(Ownership, ReadsThroughObjectsACallReplacesStayAlive) {
       s: Str;
       a: int[3];
       names: Str[2];
-      fn m(h: mut H) -> Str {
+      fn m(h: shared mut H) -> Str {
         swap(h);
-        return self.s;
+        return self.s.clone();
       }
     }
     class H { b: B; }
-    fn swap(h: mut H) {
+    fn swap(h: shared mut H) {
       h.b = B("other" + Str(9), [7, 8, 9], ["p" + Str(0), "q"]);
       y = B("reused" + Str(1), [4, 5, 6], ["r" + Str(1), "t"]);
     }
-    fn g(h: mut H) -> Str {
+    fn g(h: shared mut H) -> Str {
       swap(h);
       return "!";
     }
-    fn same(h: mut H) -> Str {
+    fn same(h: shared mut H) -> Str {
       swap(h);
       return "first" + Str(1);
     }
-    fn gi(h: mut H) -> int {
+    fn gi(h: shared mut H) -> int {
       swap(h);
       return 1;
     }
-    fn made(h: mut H) -> Str {
+    fn made(h: shared mut H) -> Str {
       s = "x" + Str(5);
       swap(h);
       return s;
     }
     fn mk() -> H { return H(B("first" + Str(1), [1, 2, 3], ["n" + Str(1), "o"])); }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       io::println("receiver: " + h.b.m(h));
       h = mk();
       io::println("operand: " + (h.b.s + g(h)));
@@ -578,7 +642,7 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
   auto r = compileAndRun(R"(import ::io;
     class Node {
       name: Str;
-      parent: Holder?;
+      parent: shared mut Holder?;
       fire: () -> void;
       fn drop() -> Str {
         match self.parent {
@@ -586,7 +650,7 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
           None { }
         }
         y = Node("y" + Str(9), None, fn() {});
-        return self.name;
+        return self.name.clone();
       }
       view fn call() -> Str {
         self.fire();
@@ -595,11 +659,11 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
     }
     class Holder { node: Node; }
     fn main() -> int {
-      h: mut = Holder(Node("first" + Str(1), None, fn() {}));
+      h: shared mut = Holder(Node("first" + Str(1), None, fn() {}));
       h.node.parent = h;
       io::println("method: " + h.node.drop());
       h.node.parent = None;
-      w: mut = Holder(Node("one" + Str(1), None, fn() {}));
+      w: shared mut = Holder(Node("one" + Str(1), None, fn() {}));
       v = w;
       w.node = Node("two" + Str(2), None, fn() {
         v.node = Node("three" + Str(3), None, fn() {});
@@ -616,16 +680,16 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
 }
 
 // The storage of a value held in an object's field, used where it is while
-// a call replaces the object: passed to a `view` slice or by value, a
-// struct method's `self`, an `inout` argument, an `inout` result (a
-// function's or a method's), an `inout` local of either.  A write lands in
-// the object it was read from, which nothing else keeps.
+// a call replaces the object: passed to a `view` slice or by value (its
+// clone), a struct method's `self`, an `inout` argument, an `inout` result
+// (a function's or a method's), an `inout` local of either.  A write lands
+// in the object it was read from, which nothing else keeps.
 TEST(Ownership, StorageInAnObjectACallReplacesStaysAlive) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     struct S { v: Str; }
     impl S {
-      view fn take(h: mut H) -> Str {
+      view fn take(h: shared mut H) -> Str {
         swap(h);
         return self.v + "";
       }
@@ -634,37 +698,37 @@ TEST(Ownership, StorageInAnObjectACallReplacesStaysAlive) {
       arr: Str[2];
       s: S;
       k: Str;
-      fn slot(h: mut H) -> inout Str {
+      fn slot(h: shared mut H) -> inout Str {
         swap(h);
         return self.k;
       }
       fn key() -> inout Str { return self.k; }
     }
     class H { a: A; }
-    fn swap(h: mut H) {
+    fn swap(h: shared mut H) {
       h.a = A(["p" + Str(0), "q"], S("zero" + Str(0)), "zk" + Str(0));
       y = A(["r" + Str(1), "t"], S("three" + Str(3)), "tk" + Str(3));
     }
-    fn first(xs: view Str[], h: mut H) -> Str {
+    fn first(xs: view Str[], h: shared mut H) -> Str {
       swap(h);
       return xs[0] + "";
     }
     fn copied(s: S, t: Str) -> Str { return s.v + t; }
-    fn bang(h: mut H) -> Str {
+    fn bang(h: shared mut H) -> Str {
       swap(h);
       return "!";
     }
-    fn put(x: inout Str, h: mut H) {
+    fn put(x: inout Str, h: shared mut H) {
       swap(h);
       x = "five" + Str(5);
     }
     fn pick(x: inout Str) -> inout Str { return x; }
     fn mk() -> H { return H(A(["one" + Str(1), "two"], S("one" + Str(1)), "k" + Str(1))); }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       io::println("slice: " + first(h.a.arr, h));
       h = mk();
-      io::println("by value: " + copied(h.a.s, bang(h)));
+      io::println("by value: " + copied(h.a.s.clone(), bang(h)));
       h = mk();
       io::println("self: " + h.a.s.take(h));
       h = mk();
@@ -716,19 +780,19 @@ TEST(Ownership, MatchedAndComparedStorageACallReplacesStaysAlive) {
       arr: Str[2];
     }
     class D { c: C; }
-    fn swap(d: mut D) -> (Str, int) {
+    fn swap(d: shared mut D) -> (Str, int) {
       d.c = C(T(Box("zero" + Str(0))), ("zp" + Str(0), 0), ["za" + Str(0), "zb"]);
       y = C(T(Box("three" + Str(3))), ("tp" + Str(3), 3), ["ta" + Str(3), "tb"]);
       return ("one" + Str(1), 1);
     }
-    fn fresh(d: mut D) -> Str[2] {
+    fn fresh(d: shared mut D) -> Str[2] {
       xs = ["new" + Str(1), "x"];
       swap(d);
       return xs;
     }
     fn mk() -> D { return D(C(T(Box("one" + Str(1))), ("one" + Str(1), 1), ["a" + Str(1), "b"])); }
     fn main() -> int {
-      d: mut = mk();
+      d: shared mut = mk();
       e = d;
       match d.c.t.b {
         n: inout Box {
@@ -763,7 +827,7 @@ TEST(Ownership, CallersStorageACallReplacesStaysAlive) {
     class A {
       k: Str;
       arr: Str[2];
-      fn slot(h: mut H) -> inout Str {
+      fn slot(h: shared mut H) -> inout Str {
         h.a = A("zk" + Str(0), ["p" + Str(0), "q"]);
         y = A("tk" + Str(3), ["r" + Str(1), "t"]);
         return self.k;
@@ -777,33 +841,33 @@ TEST(Ownership, CallersStorageACallReplacesStaysAlive) {
     struct S { v: Str; }
     class G { s: S; }
     impl S {
-      view fn both(g: mut G) -> Str { return self.v + reset(g); }
+      view fn both(g: shared mut G) -> Str { return self.v + reset(g); }
     }
-    fn reset(g: mut G) -> Str {
+    fn reset(g: shared mut G) -> Str {
       g.s = S("zero" + Str(0));
       y = S("three" + Str(3));
       return "!";
     }
-    fn bump(h: mut H) -> Str {
+    fn bump(h: shared mut H) -> Str {
       h.a.k = "zk" + Str(0);
       h.a.arr[0] = "p" + Str(0);
       h.s = "zs" + Str(0);
       y = "tk" + Str(3);
       return "!";
     }
-    fn index(h: mut H) -> int {
+    fn index(h: shared mut H) -> int {
       bump(h);
       return 1;
     }
-    fn param(x: inout Str, h: mut H) -> Str { return x + bump(h); }
-    fn slice(xs: view Str[], h: mut H) -> Str { return xs[0] + bump(h); }
+    fn param(x: inout Str, h: shared mut H) -> Str { return x + bump(h); }
+    fn slice(xs: view Str[], h: shared mut H) -> Str { return xs[0] + bump(h); }
     fn mk() -> H { return H(A("k" + Str(1), ["one" + Str(1), "two"]), "ab" + Str(1)); }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       io::println("inout parameter: " + param(h.a.k, h));
       h = mk();
       io::println("slice: " + slice(h.a.arr, h));
-      g: mut = G(S("one" + Str(1)));
+      g: shared mut = G(S("one" + Str(1)));
       io::println("struct self: " + g.s.both(g));
       h = mk();
       io::println("native: " + Str(charAt(h.s, index(h))));
@@ -829,16 +893,16 @@ TEST(Ownership, AFieldOfWhatALastUseHandedOnStaysAlive) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { name: Str; }
-    class Holder { node: Node; }
-    fn take(n: Node) -> Str { return "took"; }
-    fn replace(h: mut Holder) -> Str {
+    class Holder { node: shared Node; }
+    fn take(n: shared Node) -> Str { return "took"; }
+    fn replace(h: shared mut Holder) -> Str {
       h.node = Node("other");
       return "!";
     }
-    fn use(h: mut Holder) -> Str { return h.node.name + replace(h); }
+    fn use(h: shared mut Holder) -> Str { return h.node.name + replace(h); }
     fn main() -> int {
-      a = Node("first" + Str(1));
-      h: mut = Holder(a);
+      a: shared = Node("first" + Str(1));
+      h: shared mut = Holder(a);
       t = take(a);
       io::println(t + " " + use(h));
       return 0;
@@ -871,13 +935,13 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
       fn pick(b: inout B) -> inout Str { return b.k; }
     }
     fn pick(b: inout B) -> inout Str { return b.k; }
-    fn put(x: inout Str, h: mut H) -> Str {
+    fn put(x: inout Str, h: shared mut H) -> Str {
       h.b = B("zero" + Str(0));
       y = B("three" + Str(3));
       x = "five" + Str(5);
-      return y.k;
+      return move y.k;
     }
-    fn passOn(b: inout B, c: mut H) -> Str {
+    fn passOn(b: inout B, c: shared mut H) -> Str {
       x: inout = pick(b);
       c.b = B("zero" + Str(0));
       y = B("three" + Str(3));
@@ -886,8 +950,8 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
     }
     fn mk() -> H { return H(B("one" + Str(1)), X(B("two" + Str(2)))); }
     fn main() -> int {
-      h: mut = mk();
-      c: mut = h;
+      h: shared mut = mk();
+      c: shared mut = h;
       x: inout = pick(h.b);
       c.b = B("zero" + Str(0));
       y = B("three" + Str(3));
@@ -947,18 +1011,18 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
     fn pick(s: inout S) -> inout Str { return s.b.k; }
     fn first(t: inout (B, int)) -> inout Str { return t.0.k; }
     fn last(a: inout B[6]) -> inout Str { return a[5].k; }
-    fn put(x: inout Str, h: mut H) -> Str {
+    fn put(x: inout Str, h: shared mut H) -> Str {
       h.s = S(B("zero" + Str(0)), 0);
       y = B("three" + Str(3));
       x = "five" + Str(5);
-      return y.k;
+      return move y.k;
     }
-    fn six(t: Str) -> B[6] { return [B("1"), B("2"), B("3"), B("4"), B("5"), B(t)]; }
+    fn six(t: Str) -> B[6] { return [B("1"), B("2"), B("3"), B("4"), B("5"), B(move t)]; }
     fn mk() -> H {
       return H(S(B("one" + Str(1)), 1), (B("one" + Str(1)), 1), six("one" + Str(1)));
     }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       c = h;
       x: inout = pick(h.s);
       c.s = S(B("zero" + Str(0)), 0);
@@ -1091,24 +1155,24 @@ TEST(Ownership, AnAccessorOfTheObjectItselfKeepsItAlive) {
     }
     fn pick(c: inout C) -> inout Str { return c.slot(); }
     fn viaS(s: inout S) -> inout Str { return s.slot(); }
-    fn swap(h: mut H) -> Str {
+    fn swap(h: shared mut H) -> Str {
       h.c = C("zero" + Str(0));
       h.s = S(C("zero" + Str(0)), 0);
       y = C("three" + Str(3));
-      return y.k;
+      return move y.k;
     }
-    fn put(x: inout Str, h: mut H) -> Str {
+    fn put(x: inout Str, h: shared mut H) -> Str {
       t = swap(h);
       x = "five" + Str(5);
       return t;
     }
-    fn show(s: view Str, h: mut H) -> Str {
+    fn show(s: view Str, h: shared mut H) -> Str {
       t = swap(h);
       return s + " " + t;
     }
     fn mk() -> H { return H(C("one" + Str(1)), "k" + Str(1), S(C("one" + Str(1)), 1)); }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       io::println("accessor: " + put(h.c.slot(), h) + " " + h.c.k);
       h = mk();
       c = h;
@@ -1181,28 +1245,28 @@ TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
       fn get() -> inout C { return self.w.get(); }
     }
     fn key(s: inout S) -> inout Str { return s.ref().k; }
-    fn swap(h: mut H) -> Str {
+    fn swap(h: shared mut H) -> Str {
       h.s = S(C("zero" + Str(0), 0), 0);
       h.w = W<C>(C("zero" + Str(0), 0));
       y = C("three" + Str(3), 3);
-      return y.k;
+      return move y.k;
     }
-    fn putN(x: inout int, h: mut H) -> Str {
+    fn putN(x: inout int, h: shared mut H) -> Str {
       t = swap(h);
       x = 5;
       return t;
     }
-    fn putS(x: inout S, h: mut H) -> Str {
+    fn putS(x: inout S, h: shared mut H) -> Str {
       t = swap(h);
       x = S(C("five" + Str(5), 5), 5);
       return t;
     }
-    fn putC(x: inout C, h: mut H) -> Str {
+    fn putC(x: inout C, h: shared mut H) -> Str {
       t = swap(h);
       x = C("five" + Str(5), 5);
       return t;
     }
-    fn putK(x: inout Str, h: mut H) -> Str {
+    fn putK(x: inout Str, h: shared mut H) -> Str {
       t = swap(h);
       x = "five" + Str(5);
       return t;
@@ -1211,7 +1275,7 @@ TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
       return H(S(C("one" + Str(1), 1), 1), W<C>(C("one" + Str(1), 1)));
     }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       io::println("struct's field: " + putN(h.num(), h) + " " + Str(h.s.n));
       h = mk();
       io::println("struct: " + putS(h.whole(), h) + " " + h.s.c.k);
@@ -1254,10 +1318,10 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
     class B {
       s: Str;
       n: int;
-      fn virt(h: H) -> Str { return self.s; }
+      fn virt(h: shared mut H) -> Str { return self.s.clone(); }
     }
     class D : B {
-      fn virt(h: mut H) -> Str { return clear(h) + self.s; }
+      fn virt(h: shared mut H) -> Str { return clear(h) + self.s; }
     }
     impl B {
       view fn count() -> int { return self.n; }
@@ -1265,19 +1329,19 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
         self.n = self.n + 1;
         return self.count();
       }
-      view fn viaFree(h: mut H) -> Str {
+      view fn viaFree(h: shared mut H) -> Str {
         t = clear(h);
         return t + self.s;
       }
-      view fn ping(k: int, h: mut H) -> Str {
+      view fn ping(k: int, h: shared mut H) -> Str {
         if k == 0 {
           t = clear(h);
           return t + self.s;
         }
         return self.pong(k - 1, h);
       }
-      view fn pong(k: int, h: mut H) -> Str { return self.ping(k, h); }
-      view fn rec(k: int, h: mut H) -> Str {
+      view fn pong(k: int, h: shared mut H) -> Str { return self.ping(k, h); }
+      view fn rec(k: int, h: shared mut H) -> Str {
         if k == 0 {
           h.b = B("other" + Str(9), 9);
           y = B("reuse" + Str(1), 1);
@@ -1290,7 +1354,7 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
         y = B("QQQQQ" + Str(8), 8);
         return "!";
       }
-      fn viaVirt(h: H) -> Str { return self.virt(h); }
+      fn viaVirt(h: shared mut H) -> Str { return self.virt(h); }
     }
     struct S {
       b: B;
@@ -1307,14 +1371,14 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
       c: B;
     }
     class W { s: S; }
-    fn clear(h: mut H) -> Str {
+    fn clear(h: shared mut H) -> Str {
       h.b = B("other" + Str(9), 9);
       y = B("reuse" + Str(1), 1);
       return "!";
     }
     fn mk() -> H { return H(B("first" + Str(1), 1), B("c", 3)); }
     fn main() -> int {
-      h: mut = mk();
+      h: shared mut = mk();
       io::println("free: " + h.b.viaFree(h));
       h = mk();
       io::println("mutual: " + h.b.ping(3, h));
@@ -1346,13 +1410,14 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
 
 // The counterexamples of the analysis that lets a call keep reads it cannot
 // replace in place (docs/pir.md §7): a call that replaces a field through a
-// narrowed `inout` arm (`d: inout Derived<int>` on a `Base` field) frees
-// the object a read of the field holds, though the object's class is exact
-// and holds no `Base`; one given only a Wrap replaces the field an `inout`
-// parameter names (its slot is of the parameter's superclass); a call
-// given a parameter the function may hand on replaces a field of its
-// object.  Each method runs on, and each string is the one of, the object
-// that was there.
+// narrowed `inout` arm (`d: inout Derived<int>` on a `shared mut Base`
+// field, which a `weak mut` one watches) frees the object a read of the
+// field holds, though the object's class is exact and holds no `Base`; one
+// given only a Wrap replaces the field an `inout` parameter names (its slot
+// is of the parameter's superclass); a call given a parameter the function
+// may hand on replaces a field of its object.  Each method runs on, and each
+// string is the one of, the object that was there.  (`run` is a function of
+// an `inout` Holder: a method cannot hand its `self` on.)
 TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -1370,12 +1435,11 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
       view fn m(x: int) -> int { return self.n + x + self.tag.len(); }
     }
     impl Plain {
-      fn __init__(n: int, t: Str) { __super__(n); self.tag = t; }
+      fn __init__(n: int, t: Str) { __super__(n); self.tag = move t; }
     }
-    class Holder { b: Base; weak w: Base?; }
+    class Holder { b: shared mut Base; w: weak mut Base?; }
     impl Holder {
       fn __init__() { self.b = Derived<int>(100, 9); self.w = self.b; }
-      fn run() -> int { return self.b.m(reset(self)); }
       fn state() -> Str {
         match self.w {
           Base { return "alive"; }
@@ -1383,31 +1447,32 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
         }
       }
     }
-    fn reset(h: mut Holder) -> int {
+    fn reset(h: inout Holder) -> int {
       match h.b {
         d: inout Derived<int> { d = Derived<int>(1, 9); }
         _ { }
       }
       return 7;
     }
-    class Wrap { h: Holder; }
-    fn clobber(w: mut Wrap) -> int {
+    fn run(h: inout Holder) -> int { return h.b.m(reset(h)); }
+    class Wrap { h: shared mut Holder; }
+    fn clobber(w: inout Wrap) -> int {
       w.h.b = Base(100);
       return 5;
     }
-    fn use(x: inout Plain, w: mut Wrap) -> int { return x.m(clobber(w)); }
+    fn use(x: inout Plain, w: inout Wrap) -> int { return x.m(clobber(w)); }
     class Node { name: Str; }
     class Pair { node: Node; }
-    fn replace(p: mut Pair) -> Str {
+    fn replace(p: inout Pair) -> Str {
       p.node = Node("o" + Str(2));
       return "!";
     }
     fn local(p: mut Pair) -> Str { return p.node.name + replace(p); }
     fn main() -> int {
       h: mut = Holder();
-      r = h.run();
+      r = run(h);
       io::println("arm: " + Str(r) + " " + h.state());
-      h2: mut = Holder();
+      h2: shared mut = Holder();
       h2.b = Plain(1, "abc");
       w: mut = Wrap(h2);
       match h2.b {
@@ -1470,12 +1535,14 @@ TEST(Ownership, AContainersStateNeedsNoHoldAcrossItsOwnMethods) {
 // load, which keeps the hand-off its hold made: with the moves at last use
 // made, `v` is handed on to `offer`, and the Pet dies when `offer` returns,
 // before `push` asks, as it did while `self.sink` was held across the call
-// (docs/pir.md §7, §12).
+// (docs/pir.md §7, §12).  The Pet is `shared`, so a `weak` reference can
+// name it, and a unique `Tag` holds it (a `T` parameter takes no `shared`
+// reference): the Tag dies when `offer` returns, and lets the Pet go.
 TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
   LeakGuard g;
   auto r = compileMoveAndRun(R"(import ::io;
     class Pet<X> { name: Str; }
-    class Probe { weak p: Pet<int>?; }
+    class Probe { p: weak Pet<int>?; }
     impl Probe {
       view fn state() -> Str {
         match self.p {
@@ -1484,22 +1551,23 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
         }
       }
     }
+    class Tag { p: shared Pet<int>; }
     class Sink<T> { last: Str; }
     impl Sink<T> {
       fn offer(v: T) { self.last = "seen"; }
     }
-    struct Pile { sink: Sink<Pet<int>>; }
+    struct Pile { sink: Sink<Tag>; }
     impl Pile {
-      fn push(v: Pet<int>, probe: Probe) -> Str {
-        self.sink.offer(v);
+      fn push(v: Tag, probe: view Probe) -> Str {
+        self.sink.offer(move v);
         return probe.state();
       }
     }
     fn main() -> int {
-      p = Pile(Sink<Pet<int>>("none"));
-      x = Pet<int>("rex");
+      p = Pile(Sink<Tag>("none"));
+      x: shared = Pet<int>("rex");
       probe = Probe(x);
-      io::println(p.push(x, probe) + " " + probe.state());
+      io::println(p.push(Tag(move x), probe) + " " + probe.state());
       return 0;
     }
   )");
@@ -1513,16 +1581,19 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
 // methods (docs/pir.md §7): `self.item.name` needs no hold across a call
 // whose overrides let go of nothing (`Hush.run`, the pure `Shape.area`'s
 // `Square` one), and keeps one across `Shout.run`, which replaces the Item
-// it is in: the string read is the one of the Item that was there, which
-// dies when the call replaces it.  A map of Dogs, whose death lets go of a
-// string only, reads its table in place across put and remove, and every
-// replaced Dog dies when it is let go of.
+// it is in (its `inout` parameter): the string read is the one of the Item
+// that was there, which dies when the call replaces it.  A map of Kennels,
+// each holding a Dog whose death lets go of a string only, reads its table
+// in place across put and remove, and every replaced Dog dies when it is let
+// go of.  The Item and the Dogs are `shared` (`shared mut` where a call
+// replaces one), since a `weak` reference names only a `shared` object, and
+// a map's value takes no qualifier, so a struct holds the `shared` Dog.
 TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     import ::collections as c;
     class Item { name: Str; }
-    class Probe { weak it: Item?; }
+    class Probe { it: weak mut Item?; }
     impl Probe {
       view fn state() -> Str {
         match self.it {
@@ -1531,21 +1602,21 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
         }
       }
     }
-    class Quiet { fn run(h: Holder) -> int { return 1; } }
-    class Hush : Quiet { fn run(h: Holder) -> int { return 2; } }
-    class Loud { fn run(h: mut Holder) -> int; }
+    class Quiet { view fn run(h: view Holder) -> int { return 1; } }
+    class Hush : Quiet { view fn run(h: view Holder) -> int { return 2; } }
+    class Loud { fn run(it: inout Item) -> int; }
     class Shout : Loud {
-      fn run(h: mut Holder) -> int {
-        h.item = Item("new" + Str(1));
+      fn run(it: inout Item) -> int {
+        it = Item("new" + Str(1));
         return 3;
       }
     }
     class Holder {
-      item: Item;
+      item: shared mut Item;
       quiet: Quiet;
       loud: Loud;
       fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
-      fn viaLoud() -> Str { return self.item.name + Str(self.loud.run(self)); }
+      fn viaLoud() -> Str { return self.item.name + Str(self.loud.run(self.item)); }
     }
     class Shape { view fn area() -> int; }
     class Square : Shape {
@@ -1558,7 +1629,8 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       return t;
     }
     class Dog { name: Str; }
-    class Watch { weak d: Dog?; }
+    struct Kennel { dog: shared Dog; }
+    class Watch { d: weak Dog?; }
     impl Watch {
       view fn state() -> Str {
         match self.d {
@@ -1574,14 +1646,14 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       io::println(h.viaLoud() + " " + p.state() + " " + h.item.name);
       shapes: Shape[2] = [Square(2), Square(3)];
       io::println(Str(total(shapes)));
-      m = c::HashMap<Str, Dog>();
-      rex = Dog("rex" + Str(1));
+      m = c::HashMap<Str, Kennel>();
+      rex: shared = Dog("rex" + Str(1));
       w = Watch(rex);
-      m.put("d", rex);
+      m.put("d", Kennel(move rex));
       rex = Dog("max");
       io::println(w.state());
-      m.put("d", rex);
-      io::println(w.state() + " " + m.get("d").name);
+      m.put("d", Kennel(move rex));
+      io::println(w.state() + " " + m.at("d").dog.name);
       m.remove("d");
       io::println(Str(m.len()));
       return 0;
@@ -1598,12 +1670,12 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
 // whose overrides let go of nothing of its class is read by a stable load,
 // which keeps the hand-off its hold made: `v` is handed on to `offer`, and
 // the Pet dies when `offer` returns, before `push` asks (docs/pir.md §7,
-// §12).
+// §12).  The Pet is `shared`, so a `weak` reference can name it.
 TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
   LeakGuard g;
   auto r = compileMoveAndRun(R"(import ::io;
     class Pet { name: Str; }
-    class Probe { weak p: Pet?; }
+    class Probe { p: weak Pet?; }
     impl Probe {
       view fn state() -> Str {
         match self.p {
@@ -1612,20 +1684,20 @@ TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
         }
       }
     }
-    class Sink { last: Str; fn offer(v: Pet) { self.last = "seen"; } }
-    class Loud : Sink { fn offer(v: Pet) { self.last = v.name; } }
+    class Sink { last: Str; fn offer(v: shared Pet) { self.last = "seen"; } }
+    class Loud : Sink { fn offer(v: shared Pet) { self.last = v.name.clone(); } }
     struct Pile { sink: Sink; }
     impl Pile {
-      fn push(v: Pet, probe: Probe) -> Str {
-        self.sink.offer(v);
+      fn push(v: shared Pet, probe: view Probe) -> Str {
+        self.sink.offer(move v);
         return probe.state();
       }
     }
     fn main() -> int {
       p = Pile(Loud("none"));
-      x = Pet("rex" + Str(1));
+      x: shared = Pet("rex" + Str(1));
       probe = Probe(x);
-      io::println(p.push(x, probe) + " " + probe.state() + " " + p.sink.last);
+      io::println(p.push(move x, probe) + " " + probe.state() + " " + p.sink.last);
       return 0;
     }
   )");
@@ -1640,12 +1712,13 @@ TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
 // read in place across a closure that replaces `moving` and, through an
 // `inout` argument, `byArg`.  Their reads keep a reference of their own:
 // each is the string of the Item that was there, which dies once the
-// statement has used it.
+// statement has used it.  The Items are `shared mut`, so a `weak mut`
+// reference can name each.
 TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Item { name: Str; }
-    class Probe { weak it: Item?; }
+    class Probe { it: weak mut Item?; }
     impl Probe {
       view fn state() -> Str {
         match self.it {
@@ -1656,12 +1729,12 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
     }
     fn bump(s: inout Item) { s = Item("arg" + Str(3)); }
     class Holder {
-      fixed: Item;
-      moving: Item;
-      byArg: Item;
-      view fn viaFixed(f: () -> int) -> Str { return self.fixed.name + Str(f()); }
-      view fn viaMoving(f: () -> int) -> Str { return self.moving.name + Str(f()); }
-      view fn viaArg(f: () -> int) -> Str { return self.byArg.name + Str(f()); }
+      fixed: shared mut Item;
+      moving: shared mut Item;
+      byArg: shared mut Item;
+      view fn viaFixed(f: view () -> int) -> Str { return self.fixed.name + Str(f()); }
+      view fn viaMoving(f: view () -> int) -> Str { return self.moving.name + Str(f()); }
+      view fn viaArg(f: view () -> int) -> Str { return self.byArg.name + Str(f()); }
     }
     impl Holder {
       fn __init__() {
@@ -1671,7 +1744,7 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
       }
     }
     fn main() -> int {
-      h = Holder();
+      h: shared mut = Holder();
       fixed = Probe(h.fixed);
       moving = Probe(h.moving);
       f = fn() -> int {
@@ -1695,36 +1768,37 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
 }
 
 // An `__init__`'s store into another object of its class is no
-// construction: `self.f` keeps a reference of its own across `remake`,
-// whose `__init__` replaces the `f` of the object it is given, and `tag`
-// runs on the Item that was there, which dies once the statement has used
-// it.  (A binding cannot be named `self` there: Sema rejects it.)
+// construction: `a.f` keeps a reference of its own across `remake`, whose
+// `__init__` replaces the `f` of the object it is given (the same `shared
+// mut` A), and `tag` runs on the Item that was there, which dies once the
+// statement has used it.  (A binding cannot be named `self` there: Sema
+// rejects it.)
 TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Item { s: Str; }
     impl Item {
-      fn __init__(s: Str) { self.s = s; }
+      fn __init__(s: Str) { self.s = move s; }
       view fn tag(x: int) -> Str { return self.s + Str(x); }
     }
     class A { f: Item; }
     impl A {
-      fn __init__(other: mut A?) {
+      fn __init__(other: shared mut A?) {
         self.f = Item("original" + Str(100));
         match other {
           o: inout A { o.f = Item("replaced" + Str(2)); }
           None { }
         }
       }
-      fn run() -> Str { return self.f.tag(remake(self)); }
     }
-    fn remake(a: mut A) -> int {
+    fn run(a: shared mut A) -> Str { return a.f.tag(remake(a)); }
+    fn remake(a: shared mut A) -> int {
       b = A(a);
       return 1;
     }
     fn main() -> int {
-      a: mut = A(None);
-      io::println(a.run());
+      a: shared mut = A(None);
+      io::println(run(a));
       io::println(a.f.s);
       return 0;
     }
@@ -1737,70 +1811,72 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
 
 // An `__init__`'s first assignment of a field releases no old value (the
 // object is new, docs/pir.md §7); every other one does, so what it
-// replaces dies there: a field assigned a second time, a field `fill`
-// assigns once `self` is given to it, and a superclass's field, which
+// replaces dies there: a field assigned a second time, a field the method
+// `fill` assigns once `self` is given to it, and a superclass's field, which
 // `__super__(...)` assigned.  Each replaced node is reported gone right
 // after its replacement, and nothing leaks, through every pass the driver
-// runs.
+// runs.  The nodes are `shared`, so a `weak` reference can name each.
 TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
   LeakGuard g;
   paykan::pir::Statistics stats;
   auto r = compilePassesAndRun(R"(import ::io;
     class Node { name: Str; }
-    class Watcher { weak target: Node?; }
+    impl Cloneable for Node {}
+    class Watcher { target: weak Node?; }
     fn report(w: view Watcher, tag: view Str) {
       match w.target {
         t: Node { io::println(tag + ": alive"); }
         None { io::println(tag + ": gone"); }
       }
     }
-    class Pair { a: Node; b: Node?; weak c: Node?; }
-    class Twice { n: Node; }
+    class Pair { a: shared Node; b: shared Node?; c: weak Node?; }
+    class Twice { n: shared Node; }
     impl Twice {
-      fn __init__(first: Node, second: Node, w: view Watcher) {
-        self.n = first;
-        self.n = second;
+      fn __init__(first: shared Node, second: shared Node, w: view Watcher) {
+        self.n = move first;
+        self.n = move second;
         report(w, "twice");
       }
     }
-    class Late { a: int; o: Node?; }
-    fn fill(l: mut Late, n: Node) -> Node { l.o = n; return Node("result"); }
+    class Late { a: int; o: shared Node?; }
     impl Late {
-      fn __init__(n: Node, w: view Watcher) {
+      fn fill(n: shared Node) -> Node { self.o = move n; return Node("result"); }
+      fn __init__(n: shared Node, w: view Watcher) {
         self.a = 1;
-        self.o = fill(self, n);
+        self.o = self.fill(move n);
         report(w, "late");
       }
     }
-    class Base { s: Node; }
-    class Kid : Base { t: Node; }
+    class Base { s: shared Node; }
+    class Kid : Base { t: shared Node; }
     impl Kid {
-      fn __init__(a: Node, b: Node, w: view Watcher) {
-        __super__(a);
-        self.t = b;
-        self.s = b;
+      fn __init__(a: shared Node, b: shared Node, w: view Watcher) {
+        __super__(move a);
+        self.t = b.clone();
+        self.s = move b;
         report(w, "kid");
       }
     }
     fn main() -> int {
-      x = Node("x");
+      x: shared = Node("x");
       wx = Watcher(x);
-      p = Pair(x, Node("y"), x);
+      wk: weak = x;
+      p = Pair(move x, Node("y"), wk);
       match p.c {
         c: Node { io::println(p.a.name + " " + c.name); }
         None { io::println("no c"); }
       }
       p = Pair(Node("z"), None, None);
       report(wx, "pair");
-      f = Node("first");
+      f: shared = Node("first");
       wf = Watcher(f);
-      t = Twice(f, Node("second"), wf);
-      m = Node("m");
+      t = Twice(move f, Node("second"), wf);
+      m: shared = Node("m");
       wm = Watcher(m);
-      l = Late(m, wm);
-      a = Node("a");
+      l = Late(move m, wm);
+      a: shared = Node("a");
       wa = Watcher(a);
-      k = Kid(a, Node("b"), wa);
+      k = Kid(move a, Node("b"), wa);
       io::println(t.n.name + " " + k.s.name + " " + k.t.name);
       match l.o {
         o: Node { io::println(o.name); }
@@ -1828,7 +1904,7 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
       a: Str[2];
     }
     class H { b: B; }
-    fn g(h: mut H) -> int {
+    fn g(h: shared mut H) -> int {
       h.b = B("XY" + Str(9), ["X" + Str(9), "Y"]);
       y = "QQ" + Str(8);
       return 0;
@@ -1839,8 +1915,8 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
       return 0;
     }
     fn main() -> int {
-      h: mut = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
-      c1 = h.b.a[g(h)];
+      h: shared mut = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
+      c1 = h.b.a[g(h)].clone();
       h.b = B("ab" + Str(1), ["a" + Str(1), "b"]);
       c2 = h.b.s[g(h)];
       t: mut = "ab" + Str(1);
@@ -1864,14 +1940,15 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
 // hands it on with its bit.  Kept in a field, it lives as long as the field
 // after the caller let go of it; handed on through a method to the field of
 // another object, the same; handed over at the caller's last use, the
-// object dies with its last keeper.  A read the callee's call replaces
-// (`self.a.b.name` while `g` assigns `x.a`) stays alive for the read.
+// object dies with its last keeper (the Nodes are `shared`: the caller and
+// its callees' fields keep one together).  A read the callee's call
+// replaces (`x.a.b.name` while `g` assigns `x.a`) stays alive for the read.
 TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
   LeakGuard g;
   paykan::pir::Statistics stats;
   auto r = compilePassesAndRun(R"(import ::io;
     class Node { name: Str; }
-    class Probe { weak p: Node?; }
+    class Probe { p: weak Node?; }
     impl Probe {
       view fn state() -> Str {
         match self.p {
@@ -1880,25 +1957,25 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
         }
       }
     }
-    class Holder { n: Node?; }
+    class Holder { n: shared Node?; }
     impl Holder {
-      fn take(n: Node) { self.n = n; }
-      view fn relay(n: Node, other: mut Holder) { other.take(n); }
+      fn take(n: shared Node) { self.n = n; }
+      view fn relay(n: shared Node, other: inout Holder) { other.take(n); }
     }
     class B { name: Str; }
     class A { b: B; }
     class X {
       a: A;
-      fn m() -> Str { return self.a.b.name + g(self); }
     }
-    fn g(x: mut X) -> Str {
+    fn m(x: shared mut X) -> Str { return x.a.b.name + g(x); }
+    fn g(x: shared mut X) -> Str {
       x.a = A(B("new"));
       return "!";
     }
     fn main() -> int {
       h: mut = Holder(None);
       k: mut = Holder(None);
-      n = Node("n");
+      n: shared = Node("n");
       probe = Probe(n);
       h.take(n);
       h.relay(n, k);
@@ -1909,13 +1986,13 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
       io::println("h let go: " + probe.state());
       k.n = None;
       io::println("k let go: " + probe.state());
-      last = Node("last");
+      last: shared = Node("last");
       lastProbe = Probe(last);
       h.take(last);
       h.n = None;
       io::println("handed over: " + lastProbe.state() + " " + n.name);
-      x: mut = X(A(B("old" + "name")));
-      io::println(x.m() + " now " + x.a.b.name);
+      x: shared mut = X(A(B("old" + "name")));
+      io::println(m(x) + " now " + x.a.b.name);
       return 0;
     }
   )",

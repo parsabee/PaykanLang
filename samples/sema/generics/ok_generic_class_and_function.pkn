@@ -10,7 +10,7 @@ class Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
 class Pair<K, V> {
@@ -20,7 +20,7 @@ class Pair<K, V> {
 }
 
 impl Pair<K, V> {
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
+  fn __init__(k: K, v: V) { self.k = move k; self.v = move v; }
 }
 
 class Holder {
@@ -59,6 +59,6 @@ fn main() -> int {
   s: view Str = first(["x"]);
   let i: int = first<int>([3]);
   let inferred = Box(5);
-  io::println(describe(inferred));
+  io::println(describe(move inferred));
   return n + m + i;
 }

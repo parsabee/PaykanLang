@@ -98,7 +98,7 @@ impl Counter {
 fn f(o: view int?, xs: inout int[], t: view (int, int), b: view Obj) { }
 fn reset(c: inout Counter, s: inout Str) { c = Counter(s); s = "new"; }
 fn first<T>(x: view T) -> T { return x; }
-fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
+fn swap<T>(a: inout T, b: inout T) { t = a.clone(); a = b.clone(); b = move t; }
 class Box<T> { n: int; }
 impl Box<T> { fn __init__(v: view T) { self.n = 1; } }
 fn main() -> int {
@@ -161,23 +161,24 @@ fn main() -> int { return 0; })");
 // holds: it cannot change where either branch's could not, through an
 // assignment, a compound one, an `inout` argument or a call of a method that
 // is not a `view fn` (a `view` parameter, a `view` local, `self` in a `view
-// fn`, nested conditionals too), and a reference it holds is not stored,
-// passed to a parameter that is not `view` or returned where a `view`'s
-// could not be.  It used to change the object the `view` holds.  Where both
-// branches can change, it can, through a captured copy's object as well; and
-// a method that changes `self` so is not told to be a `view fn`.
+// fn`, nested conditionals too), and a reference it holds (a `shared` one,
+// which copies) is not stored, passed to a parameter that is not `view` or
+// returned where a `view`'s could not be.  It used to change the object the
+// `view` holds.  Where both branches can change, it can, through a captured
+// copy's (`shared mut`) object as well; and a method that changes `self` so
+// is not told to be a `view fn`.
 TEST(ParamMode, AConditionalsObjectIsEachBranchs) {
   auto r = semaCheck(R"(class Node {
   n: int;
-  next: Node?;
+  next: shared Node?;
   fn inc() { self.n = self.n + 1; }
   view fn peek(o: Node, k: int) -> int { (if k == 0 then self else o).n = 9; return self.n; }
   fn setBoth(o: mut Node, k: int) { (if k == 0 then self else o).n = 1; }
 }
-struct S { o: Node; }
+struct S { o: shared mut Node; }
 fn bump(x: inout int) { x = x + 1; }
-fn keep(x: Node?) -> int { return 0; }
-fn out(a: view Node, b: mut Node, k: int) -> Node? {
+fn keep(x: shared Node?) -> int { return 0; }
+fn out(a: view Node, b: mut Node, k: int) -> shared Node? {
   b.next = (if k == 0 then a else b).next;
   keep((if k == 0 then b else a).next);
   return (if k == 0 then a else b).next;
@@ -320,34 +321,33 @@ fn take(v: view int, p: int, q: inout int) {
 }
 fn main() -> int { return 0; })");
   expectErrors(
-      r,
-      {":15:8: error: 'v' is a 'view' parameter; it cannot be passed to "
-       "'inout' parameter 'n'",
-       ":16:8: error: 'k' is declared with 'let' and cannot be passed to "
-       "'inout' parameter 'n'",
-       ":17:8: error: argument 1 of 'bump' must be a variable or a field: "
-       "parameter 'n' is 'inout'",
-       ":18:8: error: argument 1 of 'bump' must be a variable or a field: "
-       "parameter 'n' is 'inout'",
-       ":19:9: error: argument 1 of 'add' has type 'int', but 'inout' "
-       "parameter 'to' has type 'float'",
-       ":21:8: error: an array element cannot be passed to 'inout' parameter "
-       "'n' yet",
-       ":23:7: error: a character of a string cannot be passed to 'inout' "
-       "parameter 'c'",
-       ":28:10: error: 'k' is declared with 'let' and cannot be passed to "
-       "'inout' parameter 'n'",
-       ":29:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
-  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
-  // Plain and `inout` parameters, variables and fields are accepted.
-  for (const char *line : {":24:", ":25:", ":26:", ":27:"})
+      r, {":15:8: error: 'v' is a 'view' parameter; it cannot be passed to "
+          "'inout' parameter 'n'",
+          ":16:8: error: 'k' is declared with 'let' and cannot be passed to "
+          "'inout' parameter 'n'",
+          ":17:8: error: argument 1 of 'bump' must be a variable or a field: "
+          "parameter 'n' is 'inout'",
+          ":18:8: error: argument 1 of 'bump' must be a variable or a field: "
+          "parameter 'n' is 'inout'",
+          ":19:9: error: argument 1 of 'add' has type 'int', but 'inout' "
+          "parameter 'to' has type 'float'",
+          ":23:7: error: a character of a string cannot be passed to 'inout' "
+          "parameter 'c'",
+          ":28:10: error: 'k' is declared with 'let' and cannot be passed to "
+          "'inout' parameter 'n'",
+          ":29:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  // Plain and `inout` parameters, variables, fields and an element of a
+  // fixed-size array are accepted.
+  for (const char *line : {":21:", ":24:", ":25:", ":26:", ":27:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
 
 // Exclusivity: one call cannot pass the same variable, or the same chain of
 // fields on one, to two `inout` parameters.  Other places, which might be the
-// same storage at run time, are accepted.
+// same storage at run time (two `shared mut` references to one object), are
+// accepted.
 TEST(ParamMode, InoutArgumentsAreExclusive) {
   auto r = semaCheck(R"(class P {
   x: int; y: int; next: P?;
@@ -367,8 +367,8 @@ fn main() -> int {
   j = 2;
   swap(k, k);
   three(k, j, k);
-  p: mut = P();
-  q: mut = p;
+  p: shared mut = P();
+  q: shared mut = p;
   b: mut = Box();
   swap(p.x, p.x);
   swap(b.p.x, b.p.x);
@@ -450,8 +450,8 @@ fn main() -> int {
           "look'; it cannot also be passed to 'inout' parameter 'm'",
           ":30:11: error: 'p' is the receiver of 'merge' (not a 'view fn'); "
           "it cannot also be passed to 'view' parameter 'o'",
-          ":31:15: error: 'xs' is passed to 'view' parameter 'a'; it cannot "
-          "also be passed to 'inout' parameter 'b'",
+          ":31:15: error: 'xs' contains 'xs[0]', passed to 'view' parameter "
+          "'a'; it cannot also be passed to 'inout' parameter 'b'",
           ":32:12: error: 'q.p.y' is part of 'q.p', the receiver of 'take' "
           "(not a 'view fn'); it cannot also be passed to 'inout' parameter "
           "'m'"});
@@ -694,19 +694,19 @@ fn main() -> int {
 
 // What the rule does not see stays accepted, the caller copying what a later
 // argument may write (docs/language/02-basics.md, "Evaluation order"): a
-// plain parameter, a write through an object (by a function, a function
-// value, a virtual method) or by a lambda's body, a borrow after the write
-// or in a call that has returned, another variable or another field, and
-// `==`'s operands.
+// plain parameter, a write through a `shared mut` object (by a function, a
+// function value, a virtual method) or by a lambda's body, a borrow after
+// the write or in a call that has returned, another variable or another
+// field, and `==`'s operands.
 TEST(ParamMode, ALaterArgumentMayWriteWhatNoBorrowNames) {
   auto r = semaCheck(R"(struct P { a: int; }
 impl P { view fn show(x: int) -> int => self.a; }
 struct Two { x: P; y: P; }
 class C { p: P; xs: int[3]; }
-class V { n: int; view fn write(c: mut C) -> int => 0; }
+class V { n: int; view fn write(c: shared mut C) -> int => 0; }
 class W : V {
   n2: int;
-  view fn write(c: mut C) -> int { c.xs = [9, 9, 9]; return 0; }
+  view fn write(c: shared mut C) -> int { c.xs = [9, 9, 9]; return 0; }
 }
 fn sum(xs: view int[], k: int) -> int => xs[0] + k;
 fn bumpP(p: inout P) -> int { p = P(9); return 0; }
@@ -714,16 +714,16 @@ fn look(p: view P, x: int) -> int => p.a;
 fn look2(x: int, p: view P) -> int => p.a;
 fn first(p: P, x: int) -> int => p.a;
 fn add(a: int, b: int) -> int => a + b;
-fn resetC(c: mut C) -> int { c.p = P(9); c.xs = [9, 9, 9]; return 0; }
+fn resetC(c: shared mut C) -> int { c.p = P(9); c.xs = [9, 9, 9]; return 0; }
 fn applyP(f: (inout P) -> int) -> int { q = P(0); return f(q); }
 fn gs(xs: view int[], f: () -> int) -> int => sum(xs, f());
-fn gv(p: view P, c: mut C) -> int => look(p, resetC(c));
-fn gw(xs: view int[], v: V, c: mut C) -> int => sum(xs, v.write(c));
+fn gv(p: view P, c: shared mut C) -> int => look(p, resetC(c));
+fn gw(xs: view int[], v: V, c: shared mut C) -> int => sum(xs, v.write(c));
 fn main() -> int {
   p = P(1);
   q = P(2);
   two = Two(P(1), P(2));
-  c: mut = C(P(1), [1, 2, 3]);
+  c: shared mut = C(P(1), [1, 2, 3]);
   f = fn() -> int => resetC(c);
   n = first(p, bumpP(p));
   n = first(c.p, resetC(c));
@@ -731,7 +731,7 @@ fn main() -> int {
   n = sum(c.xs, resetC(c));
   n = c.p.show(resetC(c));
   n = look(c.p, f());
-  n = gs(c.xs, f) + gv(c.p, c) + gw(c.xs, W(0, 0), c);
+  n = gs(c.xs, move f) + gv(c.p, c) + gw(c.xs, W(0, 0), c);
   n = look2(bumpP(p), p);
   n = add(look(p, 0), bumpP(p));
   n = look(p, applyP(fn(p: inout P) -> int => bumpP(p)));
@@ -964,13 +964,11 @@ fn main() -> int {
   bump(i);
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
   expectErrors(
       r, {":3:24: error: 'self' cannot be named by 'inout' local 'm': the "
           "method would no longer know its object",
           ":14:14: error: 'inout' local 'a' must name a variable or a field",
-          ":16:14: error: an array element cannot be named by 'inout' local "
-          "'b' yet",
           ":18:14: error: a character of a string cannot be named by 'inout' "
           "local 'c'",
           ":20:14: error: 'l' is declared with 'let' and cannot be named by "
@@ -1032,13 +1030,14 @@ fn main() -> int {
 // A `view` stays one: it can only be passed on to a `view` parameter,
 // whatever its type, and one that shares what it holds (an object, string,
 // array, tuple or optional) is never stored (assigned, put in an array or
-// tuple) nor returned.  The builtin functions only read, but
-// `Str(s)` returns `s` itself; a value type is copied when it is assigned.
+// tuple) nor returned.  The builtin functions only read (`Str(s)` of a
+// view makes a new string, #369); a value type is copied when it is
+// assigned.
 TEST(LocalBorrow, AViewStaysAView) {
   auto r = semaCheck(R"(import ::io; class Counter { n: int; }
 impl Counter { fn __init__() { self.n = 0; } }
 class Holder { c: Counter; }
-impl Holder { fn __init__(c: Counter) { self.c = c; } }
+impl Holder { fn __init__(c: Counter) { self.c = move c; } }
 fn report(c: Counter) { }
 fn twice(n: int) -> int { return 2 * n; }
 fn look(n: view int) -> int { return n; }
@@ -1083,11 +1082,10 @@ fn main() -> int {
         ":18:9: error: " + kStore, ":19:8: error: " + kStore,
         ":21:11: error: " + kStore,
         ":22:19: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
-        ":23:9: error: " + kStore, ":25:7: error: " + kStore,
-        ":29:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
+        ":23:9: error: " + kStore, ":25:7: error: " + kStore})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
   // An `int` read through a `view` (`k`, `v.n`) is passed to a by-value
   // parameter as a copy, and a literal holds one of it.
   for (const char *line :
@@ -1186,7 +1184,7 @@ struct P { x: int; y: int; }
 struct Q { x: int; name: Str; }
 class C {
   n: int; p: P; q: Q; name: Str;
-  view fn twiceN(f: (int) -> int) -> int { return f(self.n); }
+  view fn twiceN(f: view (int) -> int) -> int { return f(self.n); }
   view fn twiceP(g: (P) -> int) -> int { return g(self.p); }
   view fn num() -> view int { return self.n; }
   view fn bad(h: (Str) -> int, k: (Q) -> int) -> int { return h(self.name) + k(self.q); }
@@ -1194,7 +1192,7 @@ class C {
 fn twice(n: int) -> int { return 2 * n; }
 fn sumP(p: P) -> int { return p.x + p.y; }
 fn sumQ(q: Q) -> int { return q.x; }
-fn total(xs: view int[], f: (int) -> int) -> int {
+fn total(xs: view int[], f: view (int) -> int) -> int {
   t = 0; i = 0;
   while i < xs.len() { t = t + f(xs[i]); i = i + 1; }
   return t;
@@ -1238,7 +1236,7 @@ impl Counter {
   fn __init__() { self.n = 0; }
 }
 fn twice(n: int) -> int { return 2 * n; }
-fn report(c: Counter) { }
+fn report(c: shared mut Counter) { }
 fn main() -> int {
   k = 1;
   x: inout = k;
@@ -1246,7 +1244,7 @@ fn main() -> int {
   y = k;
   x = 3;
   z = k;
-  c: mut = Counter();
+  c: shared mut = Counter();
   v: view = c;
   c.tick();
   c.n = 4;
@@ -1513,7 +1511,7 @@ fn main() -> int {
     }
     _ { }
   }
-  o: Animal? = a;
+  o: Animal? = move a;
   match o {
     x: view Animal { x = Animal(); }
     None { }

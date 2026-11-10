@@ -863,10 +863,11 @@ CodeGen enforced, now in one place.
   exit releases a variable's (one by one, or in a `while` past four).  A
   call's result or a literal owns its elements: they move into the place it
   initialises, and are released after any other use (an element read from
-  it is retained first).  A `[v; n]` literal stores `v` in slot 0 and
-  copies it into the others (one by one for up to four more, else in a
-  `while`), retaining a reference once per extra slot and a nested array's
-  references after its `mem.copy`; a zero `v` (`0`, `0.0`, `False`, `'\0'`)
+  it is retained first).  A `[v; n]` literal of a Copyable `v` stores `v`
+  in slot 0 and copies it into the others (one by one for up to four more,
+  else in a `while`), retaining a reference once per extra slot and a nested
+  array's references after its `mem.copy`; of any other `v`, it evaluates
+  `v` into each slot the same way; a zero `v` (`0`, `0.0`, `False`, `'\0'`)
   of a scalar element type is one `mem.zero` instead.  A field is a `mem`
   field reached with `field.addr`, and `C.destroy` releases its references
   too.

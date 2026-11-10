@@ -1,7 +1,9 @@
-// Isolates: `self` used as a value: returned (and chained) out of a method.
-// Each ownership-taking use of `self` retains the object (Paykan_retain), so
-// every chained `return self` hop and the extra owner `c` share the one
-// object, which is destroyed once, when the last of them lets go.
+// Isolates: `self` used as a value: returned (and chained) out of a
+// `shared fn`, where `self` is a `shared mut Counter`, so the receiver `a` is
+// declared `shared mut` too.  Each ownership-taking use of `self` retains the
+// object (Paykan_retain), so every chained `return self` hop and the extra
+// owner `c` share the one object, which is destroyed once, when the last of
+// them lets go.
 //
 // Runtime allocation site: one object.
 //
@@ -11,7 +13,7 @@ import ::io;
 
 class Counter {
   n: int;
-  fn bump() -> Counter { self.n = self.n + 1; return self; }
+  shared fn bump() -> shared mut Counter { self.n = self.n + 1; return self; }
 }
 
 impl Counter {
@@ -19,8 +21,8 @@ impl Counter {
 }
 
 fn main() -> int {
-  let a: mut = Counter();
-  let c = a.bump().bump().bump();  // each hop retains the same box
+  let a: shared mut = Counter();
+  let c = a.bump().bump().bump();  // each hop retains the same object
   io::println(Str(c.n));                 // 3
   return 0;
 }

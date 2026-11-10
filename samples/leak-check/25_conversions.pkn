@@ -25,7 +25,7 @@ impl Cell {
   fn __init__() { self.label = Str<int>(0); }
 }
 
-fn parseOr(s: Str, d: int) -> int {
+fn parseOr(s: view Str, d: int) -> int {
   match s.toInt() {
     n: int { return n; }
     None { return d; }

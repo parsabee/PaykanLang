@@ -103,7 +103,8 @@ are in [Multiple Return and Destructuring](#multiple-return-and-destructuring)).
 ## Storing and comparing tuples
 
 A tuple is a value, like an `int` or an array: it can be stored in a variable, a field or an
-array, and passed to and returned from functions, and each of these copies it. Its elements
+array, and passed to and returned from functions, and each of these copies it (or moves it,
+when it holds a `Str` or an object: [Tuples as Values](#tuples-as-values)). Its elements
 are held right where the tuple is, so a tuple of numbers costs no allocation at all. A tuple
 is not an `Obj`, though: `o: Obj = (1, 2)` is an error. `==` and `!=` compare tuples element
 by element, with each element compared the way `==` compares it on its own (strings by
@@ -116,8 +117,7 @@ fn main() -> int {
   let scores: (Str, int)[3] = [("ada", 92), ("alan", 85), ("grace", 97)];
   i = 0;
   while i < scores.len() {
-    name, score = scores[i];
-    io::println(name + ": " + Str(score));
+    io::println(scores[i].0 + ": " + Str(scores[i].1));
     i = i + 1;
   }
   io::println(Str(scores[0] == ("ada", 92)) + " " + Str(scores[0] == ("ada", 91)));
@@ -152,11 +152,11 @@ class Task {
 }
 
 impl Task {
-  fn __init__(title: Str, done: bool) { self.title = title; self.done = done; }
+  fn __init__(title: Str, done: bool) { self.title = move title; self.done = done; }
 }
 
 // Splits `s` at the first `sep`: ("a", "b") for "a|b", (s, "") when there is none.
-fn splitOnce(s: Str, sep: char) -> (Str, Str) {
+fn splitOnce(s: view Str, sep: char) -> (Str, Str) {
   left = "";
   i = 0;
   while i < s.len() && s[i] != sep {
@@ -169,7 +169,7 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
     right = right + Str(s[i]);
     i = i + 1;
   }
-  return (left, right);
+  return (move left, move right);
 }
 
 // (done, pending)
@@ -219,7 +219,7 @@ title 'fix the leak', priority 'high'
   skips an element; `q: int, r: int = ...` annotates the targets.
 - Tuples are **values held in place**, like arrays: a tuple's elements sit in the
   variable, field or array element that holds it, and assigning or passing a tuple
-  copies it.  A tuple is not an `Obj`.
+  copies it, or moves it when it holds a move-only element.  A tuple is not an `Obj`.
 - `==` / `!=` compare **element-wise**; `toString()` (and `io::println`) renders `(1, a)`.
 
 ---
@@ -294,11 +294,13 @@ several targets on the left of `=` takes it apart, as in
 
 A tuple is a value, like an `int` or an array: it is held in place, in the
 variable, the field or the array element that holds it, and assigning it,
-passing it to a parameter without a mode or returning it copies it.  The copy
-holds the same elements: a copy of a tuple holding an object names that same
-object, as a copy of an array of objects does.  Assigning a new tuple to the
-original leaves the copy as it was.  A tuple goes anywhere a type does — a
-field, a parameter, a result, an array element (`(int, Str)[3]`, `[(0, "k");
+passing it to a parameter without a mode or returning it copies it when its
+elements are Copyable.  A tuple holding a `Str` or an object is move-only, as
+what it holds is: it moves (`let m = move t;`), and `let m = t;` is an error
+that says so; `t.clone()` copies it when its elements are
+[Cloneable](06-traits.md#cloneable), as a `Str` is.  Assigning a new tuple to
+the original leaves the copy as it was.  A tuple goes anywhere a type does — a
+field, a parameter, a result, an array element (`(int, Str)[3]`, `[(0, 'k');
 3]`), a type argument (`Box<(Str, int)>`), a branch of a ternary:
 
 ```pkn
@@ -319,20 +321,20 @@ class Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 
-fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }  // parameter + return
+fn swap(p: view (int, Str)) -> (Str, int) { return (p.1.clone(), p.0); }  // parameter + return
 
 fn main() -> int {
   let r = Range(10, 25);
   lo, hi = r.get();
   t = (1, "one");
-  let m = t;                                 // a copy of t
+  let m = t.clone();                         // a copy of t
   t = (2, "two");                            // m is still (1, one)
-  let keys: (int, Str)[3] = [(0, "k"); 3];   // three copies of (0, k)
+  let keys: (int, char)[3] = [(0, 'k'); 3];  // three copies of (0, 'k')
   let b = Box<(Str, int)>(swap(m));          // a tuple type argument
-  io::println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + keys[2].1);
+  io::println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + Str(keys[2].1));
   io::println(b.get());
   return 0;
 }

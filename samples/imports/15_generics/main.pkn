@@ -15,11 +15,11 @@ class Holder<T> {
 }
 
 impl Holder<T> {
-  fn __init__(x: T) { self.b = box::Box<T>(x); }
+  fn __init__(x: T) { self.b = box::Box<T>(move x); }
 }
 
 fn wrap<T>(x: T) -> box::Box<T> {
-  return box::Box<T>(x);
+  return box::Box<T>(move x);
 }
 
 fn main() -> int {

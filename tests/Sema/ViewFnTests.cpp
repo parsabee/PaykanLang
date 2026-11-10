@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
-// Sema tests: `view fn` methods.  A method may change `self` unless it is a
-// `view fn`, where `self` is read-only; only a `view fn` may be called on a
-// `view`, and a method that never changes `self` but is not one gets a
-// warning.
+// Sema tests: `view fn` and `shared fn` methods.  A method may change `self`
+// unless it is a `view fn`, where `self` is read-only; only a `view fn` may be
+// called on a `view`, and a method that never changes `self` but is not one
+// gets a warning.  A method borrows `self` unless it is a `shared fn`, which
+// may hand it on and is called on a shared receiver.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -211,8 +212,8 @@ fn main() -> int { return show(Counter(), Fast()); }
 // compile; a method with an override that changes `self` does not, nor one
 // passing part of `self` to a parameter that is not `view`, and a generic
 // class's method gets one warning, not one per instance, when every
-// instance could make it a `view fn` (`count`; `Box<Str>`'s `get` returns
-// a `Str` of `self` its caller could change, see
+// instance could make it a `view fn` (`count`; `get` copies part of `self`
+// holding a type argument, which is not warned about in any instance, see
 // AGenericMethodIsWarnedAboutForEveryInstance).
 TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   auto r = semaCheck(R"(class Shape {
@@ -236,11 +237,11 @@ impl Square {
   fn __init__() { __super__(); }
 }
 class Box<T> { v: T; n: int; fn get() -> T { return self.v; } fn count() -> int { return self.n; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; self.n = 1; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; self.n = 1; } }
 fn main() -> int {
   b: mut = Box<int>(1);
-  c: mut = Box<Str>("a");
-  return Shape().twice() + b.get() + c.get().len() + b.count() + c.count();
+  c: mut = Box<bool>(True);
+  return Shape().twice() + b.get() + (if c.get() then 1 else 0) + b.count() + c.count();
 }
 fn twiceOf(n: int) -> int { return 2 * n; }
 )");
@@ -269,13 +270,14 @@ fn twiceOf(n: int) -> int { return 2 * n; }
 
 // A generic type's method is one declaration for all its instances: it is
 // warned about only when it could be a `view fn` in every one.  `get`, which
-// returns `self.v`, could in `Box<int>` but not in `Box<Str>`, whose `Str`
-// its caller could change: following the warning `Box<int>` gave was "'self'
-// is read-only in 'view fn get', so part of it can only be returned as a
-// 'view'" for `Box<Str>`.  So it is not warned about with `Box<int>` alone
-// either, which another file, an importer of the module, may make a
-// `Box<Str>` of; nor is `first`, which calls it.  A method every instance
-// could make a `view fn` is, once.
+// returns a copy of `self.v`, is not warned about: a copy of a type
+// argument's value is a `view fn`'s to hand out only while the argument is a
+// value (`int`, `Pt`); a move-only one (`Str`) cannot be copied at all, and
+// an argument that is a shared reference (#368) could be changed through
+// the copy.  So it is not warned about with `Box<int>` alone either, which
+// another file, an importer of the module, may instantiate otherwise; nor is
+// `first`, which calls it.  A method every instance could make a `view fn`
+// is, once.
 TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   const std::string boxes =
       "import ::io;\n"
@@ -283,14 +285,15 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
       "impl Box<T> { fn get() -> T => self.v; fn count() -> int => self.n; "
       "fn first() -> T => self.get(); }\n"
       "class Cell<T> { v: T; fn get() -> T { return self.v; } }\n"
-      "impl Cell<T> { fn __init__(v: T) { self.v = v; } }\n";
+      "impl Cell<T> { fn __init__(v: T) { self.v = move v; } }\n"
+      "struct Pt { x: int; }\n";
   const std::string warning = "never changes 'self': make it a 'view fn'";
   auto both =
       semaCheck(boxes + "fn main() -> int {\n"
-                        "  a = Box<int>(1, 2); b = Box<Str>(\"x\", 3);\n"
-                        "  c: mut = Cell<int>(4); d: mut = Cell<Str>(\"y\");\n"
+                        "  a = Box<int>(1, 2); b = Box<Pt>(Pt(5), 3);\n"
+                        "  c: mut = Cell<int>(4); d: mut = Cell<Pt>(Pt(6));\n"
                         "  io::println(Str(a.get() + a.count() + b.count() + "
-                        "c.get()) + b.get() + d.get());\n"
+                        "c.get() + b.get().x + d.get().x));\n"
                         "  return 0;\n"
                         "}\n");
   EXPECT_TRUE(both.Ok) << both.Diagnostics;
@@ -315,8 +318,8 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
             std::string::npos)
       << ints.Diagnostics;
   // Nor when it keeps that part in a local, an array or a tuple, which a
-  // `view fn` of a `Box<Str>` cannot ("'self' is read-only in 'view fn
-  // kept'; it cannot be stored").
+  // `view fn` could not for an argument that is a reference ("'self' is
+  // read-only in 'view fn kept'; it cannot be stored").
   auto stores = semaCheck(
       "struct Box<T> { v: T; n: int; }\n"
       "impl Box<T> {\n"
@@ -343,8 +346,8 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
             std::string::npos)
       << stores.Diagnostics;
 
-  // A module's own instances are all it sees: its importer's `Box<Str>`
-  // broke on `view fn get`, now in the module's file.
+  // A module's own instances are all it sees: its importer's `Box<Pt>` is
+  // one it has not checked.
   auto dir = tempDir() / "view_fn_template_modules";
   std::filesystem::remove_all(dir);
   writeModule(dir, "box.pkn",
@@ -356,9 +359,10 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   auto r = semaCheckPath(
       writeModule(dir, "main.pkn",
                   "import ::io;\nimport box;\n"
+                  "struct Pt { x: int; }\n"
                   "fn main() -> int {\n"
-                  "  s = box::Box<Str>(\"x\", 1);\n"
-                  "  io::println(s.get() + Str(box::useIt() + s.count()));\n"
+                  "  s = box::Box<Pt>(Pt(5), 1);\n"
+                  "  io::println(Str(s.get().x + box::useIt() + s.count()));\n"
                   "  return 0;\n"
                   "}\n"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -372,13 +376,15 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
               "struct Box<T> { v: T; }\n"
               "impl Box<T> { fn get() -> T { let x = self.v; return x; } }\n"
               "fn useIt() -> int { b = Box<int>(1); return b.get(); }\n");
-  r = semaCheckPath(writeModule(dir, "main2.pkn",
-                                "import ::io;\nimport kept;\n"
-                                "fn main() -> int {\n"
-                                "  s = kept::Box<Str>(\"x\");\n"
-                                "  io::println(s.get() + Str(kept::useIt()));\n"
-                                "  return 0;\n"
-                                "}\n"));
+  r = semaCheckPath(
+      writeModule(dir, "main2.pkn",
+                  "import ::io;\nimport kept;\n"
+                  "struct Pt { x: int; }\n"
+                  "fn main() -> int {\n"
+                  "  s = kept::Box<Pt>(Pt(5));\n"
+                  "  io::println(Str(s.get().x + kept::useIt()));\n"
+                  "  return 0;\n"
+                  "}\n"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics.find("'get' " + warning), std::string::npos)
       << r.Diagnostics;
@@ -406,5 +412,133 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   expectAll(r, {":2:21: error: override of 'get' must be a 'view fn', like "
                 "the method it overrides"});
+  std::filesystem::remove_all(dir);
+}
+
+// -- `shared fn` (#369): a method that hands on `self`
+//
+// A method borrows its receiver, so it cannot return, pass, store or capture
+// `self`.  A `shared fn`'s `self` is a `shared mut` reference (a `shared view
+// fn`'s a `shared` one), Copyable: the body hands it on, and it is called on
+// a receiver held in that form, or on a temporary nothing else holds.
+TEST(ViewFn, ASharedFnHandsOnSelf) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  shared fn add(by: int) -> shared mut Counter { self.n = self.n + by; return self; }
+  shared view fn same() -> shared Counter { return self; }
+  shared view fn kept() -> int { let me = self; return look(me) + me.n; }
+  shared fn twice() -> shared mut Counter { return self.add(1).add(1); }
+  shared fn later() -> () -> int { return fn() -> int => self.n; }
+  shared fn post(b: inout Board) { b.keep(self); }
+  view fn value() -> int { return self.n; }
+}
+class Board { last: shared mut Counter?; fn keep(c: shared mut Counter) { self.last = c; } }
+fn look(c: shared Counter) -> int { return c.n; }
+trait Giver { shared fn give() -> shared mut Counter; }
+impl Giver for Counter { shared fn give() -> shared mut Counter { return self; } }
+class Fast : Counter { shared fn add(by: int) -> shared mut Counter { self.n = self.n + 2 * by; return self; } }
+fn main() -> int {
+  let c: shared mut = Counter(1);
+  c.add(2).twice();
+  let t = Counter(10).add(5);
+  b: mut = Board(None);
+  c.post(b);
+  let f = c.later();
+  let k: shared = Counter(3);
+  let k2 = k.same();
+  return c.value() + t.value() + f() + k2.value() + c.give().value() + k.kept();
+})");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("warning"), std::string::npos) << r.Diagnostics;
+}
+
+TEST(ViewFn, ASharedFnTakesASharedReceiver) {
+  auto calls = semaCheck(R"(class Counter {
+  n: int;
+  shared fn add() -> shared mut Counter { self.n = self.n + 1; return self; }
+  shared view fn same() -> shared Counter { return self; }
+  fn plain() -> Counter { return self; }
+  fn reset() { self.add(); }
+  shared fn wrong() -> Counter { return self; }
+  fn keepIt() -> () -> int { return fn() -> int => self.n; }
+}
+fn main() -> int {
+  let u: mut = Counter(1);
+  u.add();
+  let m: shared mut = Counter(2);
+  m.same();
+  return 0;
+})");
+  EXPECT_FALSE(calls.Ok);
+  expectAll(calls,
+            {":5:27: error: cannot copy 'self' (a unique 'mut Counter'); a "
+             "method borrows its receiver (a 'shared fn' hands on a shared "
+             "one)",
+             ":6:16: error: 'add' is a 'shared fn', which takes its receiver "
+             "as a 'shared mut Counter'; 'self' is borrowed in 'reset': make "
+             "it a 'shared fn' too",
+             ":7:34: error: cannot store a 'shared mut Counter' in the result, "
+             "a 'Counter'",
+             ":8:52: error: cannot capture 'self': a method borrows its "
+             "receiver",
+             ":12:3: error: 'add' is a 'shared fn', which takes its receiver "
+             "as a 'shared mut Counter'; 'u' is a 'mut Counter': declare it "
+             "'shared mut Counter'",
+             ":14:3: error: 'same' is a 'shared view fn', which takes its "
+             "receiver as a 'shared Counter'; 'm' is a 'shared mut Counter': "
+             "declare it 'shared Counter'"});
+  EXPECT_EQ(calls.ErrorCount, 6u) << calls.Diagnostics;
+
+  // Where a `shared fn` cannot be: an initializer, an override of a method
+  // that is not one (or the reverse), a struct's method, a free function.
+  auto decls = semaCheck(
+      R"(class C { n: int; shared fn give() -> shared mut C { return self; } fn plain() {} }
+class D : C { fn give() -> shared mut C { return C(1); } shared fn plain() {} }
+impl C { shared fn __init__(n: int) { self.n = n; } }
+struct P { x: int; }
+impl P { shared fn s() {} }
+shared fn free() {}
+fn main() -> int { return 0; })");
+  EXPECT_FALSE(decls.Ok);
+  expectAll(decls,
+            {"only a method can be a 'shared fn': 'free' is a free function, "
+             "with no 'self'",
+             "'__init__' cannot be a 'shared fn': the new object is the "
+             "constructor's result",
+             "override of 'give' must be a 'shared fn', like the method it "
+             "overrides",
+             "override of 'plain' cannot be a 'shared fn', like the method it "
+             "overrides"});
+  auto strct = semaCheck("struct P { x: int; }\nimpl P { shared fn s() {} }\n"
+                         "fn main() -> int { return 0; }");
+  EXPECT_FALSE(strct.Ok);
+  expectAll(strct, {"a struct's method cannot be a 'shared fn': its 'self' is "
+                    "the receiver's storage, a value, which is never shared"});
+}
+
+// A module's `shared fn` markers are part of its interface: its importer's
+// calls are checked against them, and so are its overrides.
+TEST(ViewFn, SharedFnMarkersAcrossModules) {
+  auto dir = tempDir() / "shared_fn_modules";
+  std::filesystem::remove_all(dir);
+  writeModule(dir, "counter.pkn",
+              "class Counter { n: int;\n"
+              "  shared fn add(by: int) -> shared mut Counter { self.n = "
+              "self.n + by; return self; }\n"
+              "  view fn value() -> int { return self.n; } }\n");
+  auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import counter;
+class Slow : counter::Counter { fn add(by: int) -> shared mut counter::Counter { return counter::Counter(by); } }
+fn main() -> int {
+  let c: shared mut = counter::Counter(1);
+  c.add(2).add(3);
+  let u: mut = counter::Counter(1);
+  u.add(1);
+  return c.value();
+})"));
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {":2:33: error: override of 'add' must be a 'shared fn'",
+                ":7:3: error: 'add' is a 'shared fn', which takes its receiver "
+                "as a 'shared mut Counter'; 'u' is a 'mut Counter'"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }

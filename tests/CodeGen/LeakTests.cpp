@@ -115,7 +115,7 @@ TEST(Leak, ClassStrField) {
     }
 
     impl Person {
-      fn __init__(n: Str) { self.name = n; }
+      fn __init__(n: Str) { self.name = move n; }
     }
     fn main() -> int {
       p: Person = Person("Alice");
@@ -136,12 +136,12 @@ TEST(Leak, ClassInherit) {
     }
 
     impl Animal {
-      fn __init__(n: Str) { self.name = n; }
+      fn __init__(n: Str) { self.name = move n; }
     }
     class Dog : Animal {}
 
     impl Dog {
-      fn __init__(n: Str) { __super__(n); }
+      fn __init__(n: Str) { __super__(move n); }
     }
     fn main() -> int {
       d: Dog = Dog("Rex");
@@ -213,7 +213,7 @@ TEST(Leak, StringTransfer) {
   auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: Str = "Hello world";
-      t = s;
+      t = move s;
       io::println(t);
       return 0;
     }
@@ -229,11 +229,11 @@ TEST(Leak, ClassObjectTransfer) {
     }
 
     impl Box {
-      fn __init__(s: Str) { self.v = s; }
+      fn __init__(s: Str) { self.v = move s; }
     }
     fn main() -> int {
       b: Box = Box("payload");
-      c = b;
+      c = move b;
       io::println(c.v);
       return 0;
     }
@@ -247,7 +247,7 @@ TEST(Leak, TransferThenReassign) {
   auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: Str = "first";
-      t = s;
+      t = move s;
       s = "second";
       io::println(t);
       io::println(s);
@@ -264,7 +264,7 @@ TEST(Leak, ConditionalTransfer) {
     fn main() -> int {
       s: Str = "cond";
       if True {
-        t = s;
+        t = move s;
         io::println(t);
       }
       return 0;
@@ -455,12 +455,13 @@ TEST(Leak, CallRootedNestedMemberChain) {
 
 // Acquiring a BORROWED field box for a new owner must retain it, not steal
 // it: the field slot keeps its own reference, and stealing used to release
-// the same box one time too many (heap corruption).
+// the same box one time too many (heap corruption).  The fields are
+// `shared Str`, so a read of one is a copy of the reference.
 
 TEST(Leak, MemberReadIntoImplicitVarRetains) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class H { a: Str;
+    class H { a: shared Str;
     }
 
     impl H {
@@ -481,16 +482,16 @@ TEST(Leak, MemberReadIntoImplicitVarRetains) {
 TEST(Leak, MemberReadRebindAndFieldToField) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class H { a: Str;
+    class H { a: shared Str;
     }
 
     impl H {
-      fn __init__(s: Str) { self.a = s; }
+      fn __init__(s: Str) { self.a = move s; }
     }
     fn main() -> int {
       h: H = H("one");
       h2: mut H = H("two");
-      x: Str = "seed";
+      x: shared Str = "seed";
       x = h.a;      // rebind an owned var to a borrowed field box
       h2.a = h.a;   // field-to-field assignment (borrowed RHS)
       io::println(x);
@@ -560,7 +561,7 @@ TEST(Leak, RefTypedArgsToUserMethods) {
       xs: int[2];
       view fn sum(ys: view int[]) -> int { return ys[0] + ys[1]; }
       view fn names(ns: Str[2]) -> int { ns[1] = "m"; return ns.len(); }
-      view fn first(t: (int, Str)) -> Str { return t.1; }
+      view fn first(t: (int, Str)) -> Str { return t.1.clone(); }
       view fn own() -> int { return self.sum(self.xs); }     // field argument
     }
 
@@ -579,8 +580,8 @@ TEST(Leak, RefTypedArgsToUserMethods) {
       io::println(Str<int>(b.names(["a", "b"])));
       io::println(b.first((1, "t")));                        // tuple literal
       t: (int, Str) = (2, "u");
-      io::println(b.first(t));                               // tuple local
-      io::println(b.first(t));                               // still alive
+      io::println(b.first(t.clone()));                       // tuple local, copied
+      io::println(b.first(move t));                          // still alive, moved
       return 0;
     }
   )");
@@ -602,7 +603,7 @@ TEST(Leak, ForLoopBodyLocals) {
       for i in 0..10 step 2 {
         d = Dog("dog " + Str(i));
         if i == 2 { continue; }
-        if i == 6 { kept = d; break; }
+        if i == 6 { kept = move d; break; }
         s = d.name + "!";
         io::println(s);
       }

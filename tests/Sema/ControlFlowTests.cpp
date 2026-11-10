@@ -106,7 +106,7 @@ TEST(ControlFlow, ForBoundsSeeTheOuterScope) {
   auto r = semaCheck(wrapMain(R"(
     i: Str = "outer";
     for i in 0..3 { n: int = i; }
-    s: Str = i;
+    s: Str = move i;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   auto bad = semaCheck(wrapMain("for i in 0..i { }"));

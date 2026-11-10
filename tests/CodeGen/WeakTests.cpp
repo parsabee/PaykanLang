@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Codegen tests: weak references (docs/language/16-memory.md, "Weak
 // references"): `weak` locals and fields read as None once their object is
-// gone, break reference cycles, and are released like any reference.
+// gone, break reference cycles, and are released like any reference.  A
+// weak reference is a `shared` reference that owns nothing: `weak` names a
+// `shared` object, `weak mut` a `shared mut` one.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -12,20 +14,20 @@ using namespace paykan::test;
 // A `weak` local refers to its object without keeping it alive: it reads as
 // the object while something else holds it and as None afterwards, is
 // assigned like any `T?` variable, and a strong copy taken from it keeps
-// the object.
+// the object (which is `shared`, so it can have that second owner).
 TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { value: int; }
     impl Node { fn __init__(v: int) { self.value = v; } }
-    fn show(w: Node?) -> Str {
+    fn show(w: view Node?) -> Str {
       match w { p: Node { return Str(p.value); } None { return "gone"; } }
     }
     fn main() -> int {
-      a = Node(1);
-      weak w: Node? = a;
-      weak u = a;
-      weak e: Node?;
+      a: shared = Node(1);
+      w: weak Node? = a;
+      u: weak = a;
+      e: weak Node?;
       io::println(show(w) + " " + show(u) + " " + show(e) + " " + Str(w == None) +
               " " + Str(e == None));
       a = Node(2);
@@ -33,7 +35,7 @@ TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
       w = a;
       u = None;
       io::println(show(w) + " " + show(u));
-      s: Node? = w;
+      s: shared Node? = w;
       a = Node(3);
       io::println(show(w) + " " + show(s));
       s = None;
@@ -52,21 +54,23 @@ TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
 
 // A `weak` field is the back link of a tree: the children hold their parent
 // weakly, so the tree is freed when its root is dropped, and a child whose
-// parent is gone sees None.
+// parent is gone sees None.  The nodes are `shared mut`: the tree and the
+// locals both hold them, the back link is `weak mut`, and `add`, which
+// stores `self` there, is a `shared fn` (its `self` is `shared mut`).
 TEST(Weak, FieldsBreakCycles) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node {
       name: Str;
-      weak parent: Node?;
-      first: Node?;
-      next: Node?;
+      parent: weak mut Node?;
+      first: shared mut Node?;
+      next: shared mut Node?;
     }
     impl Node {
       fn __init__(name: Str) {
-        self.name = name; self.parent = None; self.first = None; self.next = None;
+        self.name = move name; self.parent = None; self.first = None; self.next = None;
       }
-      fn add(child: mut Node) {
+      shared fn add(child: shared mut Node) {
         child.parent = self;
         child.next = self.first;
         self.first = child;
@@ -79,13 +83,13 @@ TEST(Weak, FieldsBreakCycles) {
       }
     }
     fn main() -> int {
-      root: mut = Node("root");
-      a: mut = Node("a");
-      b: mut = Node("b");
+      root: shared mut = Node("root");
+      a: shared mut = Node("a");
+      b: shared mut = Node("b");
       root.add(a);
       a.add(b);
       io::println(b.path());
-      weak w = root;
+      w: weak mut = root;
       root = Node("other");
       io::println(b.path());
       match w { n: Node { io::println(n.name); } None { io::println("root gone"); } }
@@ -99,21 +103,24 @@ TEST(Weak, FieldsBreakCycles) {
 
 // A lambda captures a `weak` variable weakly: a closure stored in the object
 // it refers to forms no cycle, and a call after the object is gone sees
-// None.
+// None.  The button is `shared mut` and `wire` a `shared fn`, so `self` can
+// be named by a `weak mut` local.  The closure is taken out of the button
+// (`mem::replace`) before the button goes.
 TEST(Weak, LambdasCaptureWeakly) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
     class Button {
       label: Str;
       onClick: () -> Str;
     }
     impl Button {
       fn __init__(label: Str) {
-        self.label = label;
+        self.label = move label;
         self.onClick = fn() -> Str { return "unwired"; };
       }
-      fn wire() {
-        weak me: Button? = self;
+      shared fn wire() {
+        me: weak mut Button? = self;
         self.onClick = fn() -> Str {
           match me {
             b: Button { return "clicked " + b.label; }
@@ -124,11 +131,11 @@ TEST(Weak, LambdasCaptureWeakly) {
       view fn click() -> Str { return self.onClick(); }
     }
     fn main() -> int {
-      b: mut = Button("ok");
+      b: shared mut = Button("ok");
       io::println(b.click());
       b.wire();
       io::println(b.click());
-      f = b.onClick;
+      f = mem::replace(b.onClick, fn() -> Str { return "taken"; });
       b = Button("other");
       io::println(f());
       return 0;
@@ -141,16 +148,17 @@ TEST(Weak, LambdasCaptureWeakly) {
 
 // A lambda inside a lambda captures a `weak` variable weakly too, however
 // deep it is: the closure an outer one returns sees None once the object is
-// gone, and one stored in the object forms no cycle.  (Each inner closure
-// held the object strongly: `alive`, and two blocks leaked.)
+// gone, and one stored in the object (a `shared mut` one, named by a `weak
+// mut` local) forms no cycle.  (Each inner closure held the object strongly:
+// `alive`, and two blocks leaked.)
 TEST(Weak, NestedLambdasCaptureWeakly) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class B { n: int; f: (() -> Str)?; }
-    fn state(w: B?) -> Str => if w == None then "gone" else "alive";
+    fn state(w: view B?) -> Str => if w == None then "gone" else "alive";
     fn main() -> int {
-      b: mut = B(1, None);
-      weak me = b;
+      b: shared mut = B(1, None);
+      me: weak mut = b;
       let outer = fn() -> () -> Str { return fn() -> Str => state(me); };
       let three = fn() -> () -> () -> Str {
         return fn() -> () -> Str { return fn() -> Str => state(me); };
@@ -170,21 +178,23 @@ TEST(Weak, NestedLambdasCaptureWeakly) {
 }
 
 // A weak reference goes everywhere a `T?` goes: passed by value and as a
-// `view`, returned, stored in a strong or a weak field, taken from a weak
-// field, and assigned by destructuring.
+// `view`, returned, stored in a strong or a weak field, and taken from a
+// weak field.  The object is `shared`, as a weak reference's always is, so
+// what a weak reference gives can be another owner of it.  A tuple holds no
+// `shared` reference, so no destructuring assigns a weak variable.
 TEST(Weak, PassedReturnedAndStored) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class P { v: int; }
     impl P { fn __init__(v: int) { self.v = v; } }
-    fn take(p: P?) -> Str { match p { q: P { return Str(q.v); } None { return "none"; } } }
+    fn take(p: shared P?) -> Str { match p { q: P { return Str(q.v); } None { return "none"; } } }
     fn look(p: view P?) -> Str { match p { q: P { return Str(q.v); } None { return "none"; } } }
-    fn pass(p: P?) -> P? { return p; }
-    class Holder { item: P?; weak peek: P?; }
+    fn pass(p: shared P?) -> shared P? { return p; }
+    class Holder { item: shared P?; peek: weak P?; }
     impl Holder { fn __init__() { self.item = None; self.peek = None; } }
     fn main() -> int {
-      x = P(5);
-      weak w = x;
+      x: shared = P(5);
+      w: weak = x;
       h: mut = Holder();
       h.item = w;
       h.peek = x;
@@ -196,35 +206,37 @@ TEST(Weak, PassedReturnedAndStored) {
       io::println(take(w) + " " + take(h2.peek));
       h.item = None;
       io::println(take(w) + " " + take(h.peek) + " " + take(h2.peek));
-      w, n = (x, 1);
+      w = None;
+      n = 1;
       io::println(take(w) + " " + Str(n));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "5 5 5 5 5 5\n5 5\nnone none none\n6 1\n");
+  EXPECT_EQ(r.StdOut, "5 5 5 5 5 5\n5 5\nnone none none\nnone 1\n");
   g.expectNoLeaks("weak values");
 }
 
-// A `weak` field is inherited, and a generic class may have one.
+// A `weak` field is inherited, and a generic class may have one; the objects
+// they name are `shared`.
 TEST(Weak, InheritedAndGenericFields) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class Base { weak owner: Base?; }
+    class Base { owner: weak Base?; }
     impl Base { fn __init__() { self.owner = None; } }
     class Derived : Base { tag: Str; }
-    impl Derived { fn __init__(t: Str) { __super__(); self.tag = t; } }
-    class Cell<T> { value: T; weak next: Cell<T>?; }
+    impl Derived { fn __init__(t: Str) { __super__(); self.tag = move t; } }
+    class Cell<T> { value: T; next: weak Cell<T>?; }
     impl Cell<T> { fn __init__(v: T) { self.value = v; self.next = None; } }
     fn main() -> int {
       d: mut = Derived("d");
-      e = Derived("e");
+      e: shared = Derived("e");
       d.owner = e;
       match d.owner { o: Derived { io::println(o.tag); } _ { io::println("other"); } }
       e = Derived("f");
       match d.owner { o: Base { io::println("alive"); } None { io::println("gone"); } }
       c1: mut = Cell<int>(1);
-      c2 = Cell<int>(2);
+      c2: shared = Cell<int>(2);
       c1.next = c2;
       match c1.next { n: Cell<int> { io::println(Str(n.value)); } None { io::println("none"); } }
       c2 = Cell<int>(3);
@@ -239,17 +251,18 @@ TEST(Weak, InheritedAndGenericFields) {
 
 // Weak locals declared in loops are released on every exit (`continue`,
 // `break`, `return`), and a returned weak reference is loaded before the
-// locals that keep its object go.
+// locals that keep its object go (the object is `shared`, so the result is
+// another owner of it).
 TEST(Weak, LoopsAndEarlyExits) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class P { v: int; }
     impl P { fn __init__(v: int) { self.v = v; } }
-    fn find(limit: int) -> P? {
+    fn find(limit: int) -> shared P? {
       i = 0;
       while i < 10 {
-        p = P(i);
-        weak w = p;
+        p: shared = P(i);
+        w: weak = p;
         if i == limit { return w; }
         if i % 2 == 0 { i = i + 1; continue; }
         if i > 7 { break; }
@@ -271,18 +284,19 @@ TEST(Weak, LoopsAndEarlyExits) {
 // A `view fn` walks a chain of nodes through a `weak` cursor: the cursor
 // takes no reference to `self`'s nodes, and each read of it is a `view` the
 // method may bind and read.  A method that may change `self` walks one as
-// well and returns what it finds.
+// well and returns what it finds, which outlives the chain: the nodes are
+// `shared`.
 TEST(Weak, CursorInAViewMethod) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class Node { v: int; next: Node?; }
-    class Chain { head: Node?; }
+    class Node { v: int; next: shared Node?; }
+    class Chain { head: shared Node?; }
     impl Chain {
       fn __init__() { self.head = None; }
       fn push(v: int) { self.head = Node(v, self.head); }
       view fn sum() -> int {
         total = 0;
-        weak cur = self.head;
+        cur: weak = self.head;
         while cur != None {
           match cur {
             n: Node { total = total + n.v; cur = n.next; }
@@ -291,8 +305,8 @@ TEST(Weak, CursorInAViewMethod) {
         }
         return total;
       }
-      fn find(v: int) -> Node? {
-        weak cur = self.head;
+      fn find(v: int) -> shared Node? {
+        cur: weak = self.head;
         while cur != None {
           match cur {
             n: Node {
@@ -305,7 +319,7 @@ TEST(Weak, CursorInAViewMethod) {
         return None;
       }
     }
-    fn show(c: mut Chain) -> Str {
+    fn show(c: inout Chain) -> Str {
       match c.find(2) {
         n: Node { return Str(c.sum()) + " found " + Str(n.v); }
         None { return Str(c.sum()) + " none"; }
@@ -318,7 +332,7 @@ TEST(Weak, CursorInAViewMethod) {
       c.push(2);
       c.push(3);
       io::println(show(c));
-      kept: Node? = c.find(2);
+      kept: shared Node? = c.find(2);
       c = Chain();
       match kept { n: Node { io::println(Str(n.v)); } None { io::println("gone"); } }
       return 0;
@@ -329,16 +343,16 @@ TEST(Weak, CursorInAViewMethod) {
   g.expectNoLeaks("weak cursor");
 }
 
-// The runtime's classes are classes: a `Str` or an `Obj` can be referred to
-// weakly, and the immortal `None` object stays.
+// The runtime's classes are classes: a `shared Str` or `shared Obj` can be
+// referred to weakly, and the immortal `None` object stays.
 TEST(Weak, StringsAndObjects) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
-      s = "abc";
-      weak ws: Str? = s;
-      o: Obj = None;
-      weak wo: Obj? = o;
+      s: shared = "abc";
+      ws: weak Str? = s;
+      o: shared Obj = None;
+      wo: weak Obj? = o;
       match ws { t: Str { io::println(t); } None { io::println("gone"); } }
       s = "x";
       match ws { t: Str { io::println(t); } None { io::println("gone"); } }

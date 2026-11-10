@@ -16,7 +16,7 @@ import ::io;
 fn double(x) => x * 2;
 fn add(a, b) => a + b;
 fn quadruple(x) => double(double(x));
-fn swapped(p) => (p.1, p.0);
+fn swapped(p) => (p.1.clone(), p.0.clone());
 
 /// @p s repeated @p n times, as text.
 fn repeat(s, n: int) -> Str {

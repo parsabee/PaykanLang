@@ -809,6 +809,9 @@ void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
 void PaykanBuffer_reserve(void *t, void *b, int64_t n);
 void PaykanBuffer_grow(void *t, void *b, int64_t by);
 void PaykanBuffer_shrink(void *t, void *b, int64_t by);
+/// `mem::swap<T>`: the values of type @p t at @p a and @p b trade places,
+/// each with the references it owns (none is retained or released).
+void Paykan_mem_swap(void *t, void *a, void *b);
 /// PaykanBuffer_grow and PaykanBuffer_reserve that report a failure
 /// instead of panicking: 0, or ENOMEM (the memory, or the size, is not
 /// there) with the buffer unchanged.  The standard library's memory::Buffer

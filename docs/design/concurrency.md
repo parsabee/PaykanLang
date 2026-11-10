@@ -370,8 +370,8 @@ change):
 
 * **Deep.**  Everything reached through a `const` root follows `view`'s
   rules (src/Sema/SemaViews.cpp:3-16): nothing is assigned, moved out or
-  lent `inout`, only `view fn`s are called, and no unique function value is
-  called ([Lambdas](#lambdas)).  `atomic` and `locked` fields, channels and
+  lent `inout`, only `view fn`s are called, and no function value is called
+  ([Lambdas](#lambdas)).  `atomic` and `locked` fields, channels and
   the objects behind `shared` references stay usable: the reference is
   fixed, what it names may change.  Decision 36 states the `shared`
   exception for `shared`; a `const T` may hold `shared` references
@@ -726,14 +726,15 @@ nodes.get(0);   // nodes: List<Node> -- error: 'get' needs 'T: Copyable', and 'N
 ### Weak references
 
 A weak reference refers only to a `shared` object and never crosses threads
-(decisions 33 and 37, revising 25).  A `shared` object is a `shared`
-one on one thread, and a cycle can pass through the `shared` references it
-holds, so it may be a weak target too (proposed; owner may change).
-checkWeakType (src/Sema/Sema.cpp:5288) accepts `shared T?` and `shared
-T?`; `weak u = s` takes `s`'s qualifier, and a read gives it back.
+(decisions 33 and 37, revising 25).  It is the `shared` reference that owns
+nothing (the owner's decision of 2026-11-07, #369): `weak` is a qualifier,
+`u: weak Node?` naming a `shared` object and reading as a `shared Node?`,
+`u: weak mut Node?` naming a `shared mut` one and reading as a `shared mut
+Node?`.  A store takes exactly that form (Sema's checkWeakStore), and the
+generated `__init__`'s parameter of a weak field too.
 
 ```pkn
-weak w = a;   // a: Node -- error: a weak reference refers to a 'shared' or 'shared' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)
+w: weak = a;   // a: Node -- error: cannot store 'a' (a 'Node') in variable 'w', a 'weak Node?': a 'weak' reference names a 'shared' object; declare 'a' 'shared Node'
 ```
 
 Handles can form cycles: a `locked Registry` holding an `atomic shared
@@ -781,8 +782,11 @@ classes (proposed; owner may change):
   one unique Buffer, an allocation more than today, to be measured.
 * `HashMap`, `HashSet` and the priority queues become the classes they wrap
   (stdlib/collections.pkn:563-566, 898-903).
-* `Stack` and `Queue` move to a Buffer: LinkedList's weak links
-  (stdlib/collections.pkn:268-281) make its nodes shared and uncrossable.
+* `LinkedList` keeps node objects, `shared mut`, linked by a `shared mut`
+  `next` and `weak mut` `prev` and tail, and the hash table chains
+  `shared mut` entries (the owner's decision, 2026-11-07): their shared
+  parts make them uncrossable, and `Stack` and `Queue`, on a LinkedList,
+  with them.
 * Stores take ownership (`push(v: T)`); the eleven copying getters move to
   `impl X<T: Copyable>` blocks; `at(i) -> view T` borrows; `pop`, `removeAt`
   and `take(i)` move.
@@ -817,8 +821,11 @@ unsound: a method could move a field out and send it.
 ### Values that hold unique references
 
 A struct, tuple, array or optional holding a unique reference is moved whole,
-never copied (decision 21).  `[Node(); 3]` is `'[v; n]' copies its value:
-'Node' is not Copyable`.  The lowering's hidden copies for evaluation order
+never copied (decision 21).  `[Node(); 3]` evaluates `Node()` for each
+element, so it holds three nodes (the owner's decision of 2026-11-07, #369):
+a non-Copyable value in `[v; n]` is no copy, and `[n; 3]` of a variable `n`
+is `'[v; n]' evaluates its value for each of its 3 elements, and 'n' (a
+'Node') is not Copyable`.  The lowering's hidden copies for evaluation order
 (docs/language/16-memory.md:663-682) never copy a move-only value: on owned
 paths they become the exclusivity errors above, elsewhere holds released
 after the call.  `err::Error.msg` (stdlib/error.pkn:49-52) becomes `atomic shared
@@ -848,15 +855,17 @@ parameter) is `'job' is captured by the lambda: each call borrows it, so it
 cannot be moved out`.
 
 A function type does not record its captures, so decision 21's "function
-values that capture objects" cannot be told by type: every unqualified
-function value is unique, named functions and non-capturing lambdas
-included.  Callbacks are `view` parameters; `shared (A) -> R` is today's
-copyable function value.  For the same reason no function value crosses
-threads in v0.4; a callback for another thread is a class with a `view fn`,
-held as `atomic shared`.  A call may change what a unique function value's
-captures own (docs/design/function-types.md:84-86), so one reached through
-a `const` root is not called, as a method other than a `view fn` is not; a
-`shared` one, outside the region, is.  `const` on a function type is an
+values that capture objects" cannot be told by type.  Every function value
+is Copyable (the owner's decision of 2026-11-07, #369, replacing unique
+function values): a lambda captures only Copyable values and `weak` locals,
+read-only, so its closure never changes, and its copies share it and count
+it; one with no captures has no closure and is just the code's address.  A
+function type takes no qualifier.  Since a closure's count is a plain one,
+no function value crosses threads in v0.4; a callback for another thread is
+a class with a `view fn`, held as `atomic shared`.  A call may change the
+objects its `shared mut` captures share (docs/design/function-types.md:84-86),
+so one reached through a `const` root is not called, as a method other than
+a `view fn` is not.  `const` on a function type is an
 error for the same reason (proposed; owner may change).  (The mut model,
 owner 2026-11-03: the root is an immutable one, a bare `T`; in the
 prototype `mut` on a function type is `'mut' applies to objects; '() ->
@@ -880,7 +889,7 @@ they keep modes (src/Sema/SemaParamModes.cpp:301): `'add' overrides a
 'shared fn'; it must be 'shared fn'` (proposed; owner may change).
 
 ```pkn
-class Node { weak parent: shared Node?; first: shared Node?; next: shared Node?; }
+class Node { parent: weak Node?; first: shared Node?; next: shared Node?; }
 impl Node {
   fn adopt(c: shared Node) { c.next = self; }   // error: cannot copy 'self': a method borrows its receiver; declare the method 'shared fn' to keep a reference to it
   shared fn add(child: shared Node) {
@@ -1857,8 +1866,8 @@ programs need `shared` as well as `move`.
 Follow-ons: plain parameters take ownership instead of being lent
 (docs/language/16-memory.md:135-141, 540-555); the `concat` example
 (docs/language/04-strings-and-conversions.md:103-120) needs `shared Str`;
-function values are no longer copied, and callbacks become `view`
-parameters; lambdas capture `self` only in a `shared fn`
+function values stay Copyable, their closures shared (decision 28); lambdas
+capture `self` only in a `shared fn`
 (docs/design/function-types.md:89-94); `Str(s)` always copies
 (docs/language/03-functions.md:283-284); the `let` rule
 (docs/language/02-basics.md:149-154) points to `const` for an object that
@@ -2038,8 +2047,10 @@ themselves.
 27. **How does a native return an alias?**  A `shared` or borrowed result,
     only the latter aliasing a `view` argument, or a runtime object that
     locks itself, as Stdin.
-28. **Are function values unique?**  Yes, as types cannot show captures;
-    callbacks `view`; none crosses threads (question 86).
+28. **Are function values unique?**  No (the owner, 2026-11-07): every
+    function value is Copyable, its closure shared by its copies and a
+    non-capturing one just a function's address; none crosses threads
+    (question 86).
 29. **Can a lambda pass its `move` capture on?**  No, each call borrows it.
     The alternative, a once-callable lambda with a run-time check, could.
 30. **Can a lambda capture `self`?**  Only in a `shared fn`, reversing
@@ -2276,7 +2287,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | copy of a non-Copyable value | `cannot copy 't': 'task::Task<err::Error>' is not Copyable` |
 | copy of a holder | `cannot copy 'p': 'Person' holds unique field 'name' ('Str')` |
 | copy of a borrow | `cannot copy 'n': it is a 'view' parameter, a borrow` (`an 'inout' parameter`, `a 'view' local`) |
-| `[v; n]` | `'[v; n]' copies its value: 'Node' is not Copyable` |
+| `[v; n]` of a place | `'[v; n]' evaluates its value for each of its 3 elements, and 'n' (a 'Node') is not Copyable: write a value made for each` |
 | read after `move` | `'a' was moved at 12:9; it cannot be read after the move` |
 | after a branch | `'a' may have been moved (by the 'if' at 10:3)` |
 | move in a loop | `'job' is moved in the loop at 4:3 and not assigned again before the next iteration` |

@@ -227,7 +227,7 @@ fn main() -> int {
   let to = "new";
   let x: mut = c::replace("old", "old", to);
   x.concat("*");
-  let one = c::listOf([to]);
+  let one = c::listOf([to.clone()]);
   let y: mut = c::join(one, "-");
   y.concat("@");
   io::println(to + " " + one.at(0) + " " + x + " " + y);

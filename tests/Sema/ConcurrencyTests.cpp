@@ -154,7 +154,7 @@ class Job { name: Str; cache: shared Cache; }
 class Holder { job: Job; }
 class Fun { f: () -> int; }
 class Any { o: Obj; }
-class Weak { weak w: Cache?; }
+class Weak { w: weak Cache?; }
 class Node { id: int; }
 async fn consume(n: Node) -> int { return n.id; }
 async fn name(s: Str) -> int { return s.len(); }
@@ -181,7 +181,8 @@ fn main() -> int {
   let t7 = fun(move f);
   let an = Any(Node(4));
   let t8 = any(move an);
-  let w = Weak(Cache(2));
+  let c: shared = Cache(2);
+  let w = Weak(c);
   let t9 = wk(move w);
   let o = Node(5);
   let t10 = opt(o);
@@ -213,11 +214,11 @@ fn main() -> int {
        "value, whose captures are not known",
        ":32:16: error: cannot send 'an' (a 'Any'): field 'o' is an 'Obj', "
        "which may be any class",
-       ":34:15: error: cannot send 'w' (a 'Weak'): field 'w' is 'weak': a "
+       ":35:15: error: cannot send 'w' (a 'Weak'): field 'w' is 'weak': a "
        "weak load is a plain retain",
-       ":36:17: error: cannot copy 'o' (a unique 'Node') into a task: write "
+       ":37:17: error: cannot copy 'o' (a unique 'Node') into a task: write "
        "'move o' to transfer it",
-       ":37:36: error: a task cannot be started in a 'parallel for' body"});
+       ":38:36: error: a task cannot be started in a 'parallel for' body"});
 }
 
 // What crosses: a moved unique reference, a temporary (`move` before one
@@ -311,10 +312,11 @@ fn main() -> int {
 // -- `Copyable`
 
 // `Copyable` is structural: numbers, `bool`, `char`, an `atomic` handle's
-// value, and an enum, tuple or struct of Copyable parts (a struct's
-// `shared` field counts) meet a `T: Copyable` bound.  A unique class, a
-// `Str`, a function value, and a struct holding a unique reference do not,
-// with the reason; and `impl Copyable for X` is an error.
+// value, a function value (its copies share its closure), and an enum,
+// tuple or struct of Copyable parts (a struct's `shared` field counts) meet
+// a `T: Copyable` bound.  A unique class, a `Str`, and a struct holding a
+// unique reference do not, with the reason; and `impl Copyable for X` is an
+// error.
 TEST(Concurrency, CopyableIsAStructuralBound) {
   auto ok = semaCheck(R"(class Node { id: int; }
 struct Point { x: int; y: int; }
@@ -332,6 +334,7 @@ fn main() -> int {
   let g = twice(m);
   let h = twice(True);
   let i = twice('c');
+  let k = twice(fn() => 1);
   return a.0 + b.1.x + c.0.n + c.1.s.id;
 })");
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
@@ -346,14 +349,12 @@ fn main() -> int {
   let d = twice(Named("d", 2));
   let e = twice(Pair(Node(2), 1));
   let g = twice("s");
-  let k = twice(fn() => 1);
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
   const std::string needs =
       "' does not implement trait 'Copyable', which 'twice' requires of 'T': ";
-  const std::string moveOnly =
-      "a reference, a 'Str', a function value or a task is move-only";
+  const std::string moveOnly = "a reference, a 'Str' or a task is move-only";
   // NOLINTBEGIN(bugprone-suspicious-missing-comma)
   expectErrors(r, {":5:1: error: 'Copyable' is built in: a type is Copyable by "
                    "what it "
@@ -362,8 +363,7 @@ fn main() -> int {
                    (":8:11: error: 'Pair" + needs +
                     "it holds move-only field 'left' ('Node')")
                        .c_str(),
-                   (":9:11: error: 'Str" + needs + moveOnly).c_str(),
-                   (":10:11: error: '() -> int" + needs + moveOnly).c_str()});
+                   (":9:11: error: 'Str" + needs + moveOnly).c_str()});
   // NOLINTEND(bugprone-suspicious-missing-comma)
 }
 
@@ -555,7 +555,7 @@ TEST(Concurrency, AtomicPlaces) {
       R"(class Stats { name: Str; served: atomic int; bytes: atomic float; done: atomic bool; }
 impl Stats {
   fn __init__(name: Str, served: atomic int) {
-    self.name = name; self.served = served; self.bytes = 0.0; self.done = False;
+    self.name = move name; self.served = served; self.bytes = 0.0; self.done = False;
   }
 }
 class Box { n: atomic int; }

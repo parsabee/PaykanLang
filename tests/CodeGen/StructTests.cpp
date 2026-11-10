@@ -66,23 +66,23 @@ TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
-    struct Rec { name: Str; node: Node; maybe: Node?; t: (int, Str); oi: int?; }
+    struct Rec { name: Str; node: shared Node; maybe: shared Node?; t: (int, Str); oi: int?; }
     struct Outer { r: Rec; k: int; }
     class Holder { r: Rec; rs: Rec[2]; }
     fn mk(i: int) -> Rec { return Rec("r" + Str(i), Node(i), None, (i, "t"), None); }
     fn first(xs: view Rec[]) -> view Rec { return xs[0]; }
     fn label(r: view Rec) -> view Str { return r.name; }
-    fn bump(r: inout Rec) { r.name = r.name + "!"; r.t = (r.t.0 + 1, r.t.1); }
+    fn bump(r: inout Rec) { r.name = r.name + "!"; r.t = (r.t.0 + 1, r.t.1.clone()); }
     fn main() -> int {
       r = mk(1);
-      s = r;                      // a copy: shares the objects
+      s = r.clone();              // a copy: shares the objects
       s.name = "s";
       s.node = Node(2);
       s.maybe = Node(3);
       s.oi = 7;
       io::println(r);
       io::println(s);
-      o = Outer(r, 5);
+      o = Outer(r.clone(), 5);
       o.r.name = "o";
       io::println(o.r.name + " " + r.name + " " + Str(o.r.node == r.node));
       h: mut = Holder(mk(4), [mk(5), mk(6)]);
@@ -90,16 +90,16 @@ TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
       h.rs[1].name = "h6";
       io::println(h.r.name + " " + h.rs[0].name + " " + h.rs[1].name);
       io::println(mk(7).name + " " + Str(mk(8).node.n) + " " + mk(9).t.1);
-      xs: Rec[2] = [r, s];
+      xs: Rec[2] = [r.clone(), s.clone()];
       io::println(first(xs).name + " " + label(xs[1]));
       bump(r);
       bump(s);
       io::println(r.name + " " + Str(r.t.0) + " " + xs[0].name);
-      t = (r, 1);
+      t = (r.clone(), 1);
       io::println(t);
-      u = t;
+      u = t.clone();
       io::println(Str(u == t) + " " + Str(r == s) + " " + Str(r == r));
-      r2 = r;
+      r2 = r.clone();
       r2.node = Node(1);          // another object: unequal by identity
       io::println(Str(r2 == r));
       return 0;
@@ -130,7 +130,7 @@ TEST(Struct, NestedStructsAndTuplesPrintAndCompareInPlace) {
     fn main() -> int {
       l = Line(Point(1, 2), Point(3, 4), "l");
       l.a.x = 9;
-      m = l;
+      m = l.clone();
       m.b.y = 0;
       io::println(l);
       io::println(m);
@@ -159,14 +159,14 @@ TEST(Struct, MethodsChangeTheReceiverInPlace) {
   auto r = compileAndRun(R"(import ::io;
     struct Counter { n: int; name: Str; }
     impl Counter {
-      fn __init__(name: Str) { self.n = 0; self.name = name; }
+      fn __init__(name: Str) { self.n = 0; self.name = move name; }
       fn tick() { self.n = self.n + 1; }
       view fn get() -> int { return self.n; }
       view fn label() -> view Str { return self.name; }
-      fn rename(s: Str) { self.name = s; }
+      fn rename(s: Str) { self.name = move s; }
       view fn copyWith(n: int) -> Counter { c = Counter("copy"); c.n = n; return c; }
       fn slot() -> inout int { return self.n; }
-      static fn named(s: Str) -> Counter { return Counter(s); }
+      static fn named(s: Str) -> Counter { return Counter(move s); }
       view fn same(other: view Counter) -> bool { return self.n == other.n; }
       fn tickTwice() { self.tick(); self.tick(); }
     }
@@ -177,9 +177,9 @@ TEST(Struct, MethodsChangeTheReceiverInPlace) {
       c = Counter::named("a");
       c.tick();
       c.tickTwice();
-      b: mut = Box(c);            // a copy in the field
+      b: mut = Box(c.clone());    // a copy in the field
       b.c.tick();
-      cs: Counter[2] = [c, c];
+      cs: Counter[2] = [c.clone(), c.clone()];
       cs[1].tick();
       cs[1].rename("second");
       addOne(c.slot());
@@ -259,7 +259,7 @@ TEST(Struct, ParameterModesAndLet) {
     fn main() -> int {
       p = P(1, "a");
       let k = P(7, "k");
-      a = byValue(p);
+      a = byValue(p.clone());
       b = byView(p);
       byInout(p);
       io::println(Str(a) + " " + Str(b) + " " + p.s + Str(p.x) + " " + k.s);
@@ -279,6 +279,7 @@ TEST(Struct, FieldsOfTemporariesAndElementsAreReleased) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Node { n: int; }
+    impl Cloneable for Node {}
     struct P { node: Node; name: Str; }
     fn mk(i: int) -> P { return P(Node(i), "p" + Str(i)); }
     fn main() -> int {
@@ -287,7 +288,7 @@ TEST(Struct, FieldsOfTemporariesAndElementsAreReleased) {
       while i < 3 {
         total = total + mk(i).node.n + mk(i).name.len();
         xs: P[2] = [mk(i), mk(i + 1)];
-        xs[0] = xs[1];
+        xs[0] = xs[1].clone();
         total = total + xs[0].node.n;
         i = i + 1;
       }
@@ -304,26 +305,27 @@ TEST(Struct, FieldsOfTemporariesAndElementsAreReleased) {
 TEST(Struct, GenericStructsInstantiateLikeClasses) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
     struct Pair<A, B> { a: A; b: B; }
     impl Pair<A, B> {
       view fn first() -> view A { return self.a; }
-      fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
-      fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+      fn swapWith(other: inout Pair<A, B>) { mem::swap(self.a, other.a); }
+      fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b.clone(), self.a.clone()); }
     }
     struct Box<T> { v: T; }
     impl Box<T> {
-      fn __init__(v: T) { self.v = v; }
-      fn set(v: T) { self.v = v; }
+      fn __init__(v: T) { self.v = move v; }
+      fn set(v: T) { self.v = move v; }
       view fn get() -> view T { return self.v; }
     }
     impl Hashable for Box<T> { view fn hash() -> int { return 7; } }
     trait Named { view fn name() -> Str; }
     impl Named for Pair<A, B> { view fn name() -> Str { return "pair"; } }
     class Holder<T> { p: Pair<T, Str>; }
-    impl Holder<T> { fn __init__(x: T) { self.p = Pair<T, Str>(x, "h"); } }
+    impl Holder<T> { fn __init__(x: T) { self.p = Pair<T, Str>(move x, "h"); } }
     fn sumInts(p: view Pair<int, int>) -> int { return p.a + p.b; }
     fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }
-    fn mkBox<T>(v: T) -> Box<T> { return Box(v); }
+    fn mkBox<T>(v: T) -> Box<T> { return Box(move v); }
     fn greet<T: Named>(x: view T) -> Str { return x.name(); }
     fn show<T: Show>(x: view T) -> Str { return x.toString(); }
     fn main() -> int {
@@ -362,19 +364,20 @@ TEST(Struct, GenericStructsHoldingReferencesAreReleased) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
+    impl Cloneable for Node {}
     struct Slot<T> { v: T; label: Str; }
-    impl Slot<T> { fn put(v: T) { self.v = v; } }
+    impl Slot<T> { fn put(v: T) { self.v = move v; } }
     struct Two<A, B> { a: Slot<A>; b: Slot<B>; }
     fn mk(i: int) -> Slot<Node> { return Slot<Node>(Node(i), "s" + Str(i)); }
     fn main() -> int {
       s = mk(1);
-      t = s;                               // the same Node
+      t = s.clone();                       // a copy of the Node
       t.put(Node(2));                      // t's own
-      two = Two<Node, Str>(s, Slot<Str>("x", "y"));
+      two = Two<Node, Str>(s.clone(), Slot<Str>("x", "y"));
       two.a.label = "two";
       two.b.put("z");
       xs: Slot<Node>[2] = [mk(3), mk(4)];
-      xs[0] = xs[1];
+      xs[0] = xs[1].clone();
       io::println(s);
       io::println(t);
       io::println(two);
@@ -401,12 +404,12 @@ TEST(Struct, GenericStructsImportedFromAnotherModule) {
 struct Pair<A, B> { a: A; b: B; }
 impl Pair<A, B> {
   view fn first() -> view A { return self.a; }
-  fn bump(d: int) { self.a = self.a; }
+  fn bump(d: int) { self.a = self.a.clone(); }
 }
 struct Box<T> { v: T; }
-impl Box<T> { fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } view fn get() -> view T { return self.v; } }
 fn mk() -> Pair<int, Str> { return Pair<int, Str>(41, "x"); }
-fn boxed<T>(v: T) -> Box<T> { return Box<T>(v); }
+fn boxed<T>(v: T) -> Box<T> { return Box<T>(move v); }
 )");
   auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(import ::io;
 import lib::gen;
@@ -416,7 +419,7 @@ fn main() -> int {
   r = gen::Pair("s", 2.5);            // a new instantiation, here
   p.a = p.a + q.a;
   b: gen::Box<Str> = gen::boxed("b"); // an instantiation of a function
-  c = gen::Box(r);
+  c = gen::Box(r.clone());
   io::println(p.toString() + " " + r.first() + " " + b.get() + " " + c.get().b.toString() + " " + Str(p == q));
   return p.a;
 }

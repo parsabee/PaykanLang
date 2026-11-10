@@ -18,11 +18,11 @@ class Box {
 }
 
 impl Box {
-  fn __init__(p: point::Point) { self.origin = p; }
+  fn __init__(p: point::Point) { self.origin = move p; }
 }
 
-// Qualified type as a parameter type.
-fn describe(p: point::Point) -> int {
+// Qualified type as a parameter type (a borrow: describe only reads it).
+fn describe(p: view point::Point) -> int {
   io::println(p.toString());
   return p.sum();
 }
@@ -35,8 +35,9 @@ fn origin() -> geometry::point::Point {
 fn main() -> int {
   // Qualified type as a variable annotation.
   let p = point::Point(15, 27);
-  let b = Box(p);
   let o = origin();
   io::println(o.toString());
-  return describe(p) + b.total();  // 42 + 42 = 84
+  let d = describe(p);
+  let b = Box(move p);
+  return d + b.total();  // 42 + 42 = 84
 }

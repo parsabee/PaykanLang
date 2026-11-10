@@ -2,15 +2,17 @@
 // Exercises: the `(T1, T2) -> R` type with `view` and `inout` parameter
 //            modes and a tuple or function result; named functions (free,
 //            `static fn`) as values; lambdas `fn(x: int) -> int { ... }`
-//            that capture variables by copy (values copied, objects shared);
+//            that capture Copyable variables by copy (a number is copied, a
+//            `shared` object or a closure is shared);
 //            function values held in variables, fields of classes and
 //            structs, array and tuple elements, optionals and generics;
 //            calls through each of them (`f(x)`, `obj.cb(x)`, `fs[0](x)`,
 //            `make()(x)`); closures returned from functions and methods (a
-//            method's lambda shares `self`); equality of function values.
-// A function value is held in place, its code and its closure: copying one
-// shares the closure, which is released when the last copy goes, together
-// with the captures it owns.
+//            `shared fn`'s lambda shares `self`); equality of function
+//            values.
+// A function value is held in place, its code and its closure, and is
+// Copyable: copying one shares the closure, which is released when the last
+// copy goes, together with the captures it owns.
 
 import ::io;
 
@@ -55,14 +57,16 @@ fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U {
 
 class Button {
   label: Str;
-  onClick: (Str) -> Str;
-  fn click() -> Str { return self.onClick(self.label); }
+  onClick: (view Str) -> Str;
+  view fn click() -> Str { return self.onClick(self.label); }
 }
 
 class Counter {
   n: int;
-  fn make() -> () -> int      { return fn() -> int { return self.n; }; }  // shares self
-  fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
+  // In a `shared fn`, `self` is a `shared mut Counter`, which a lambda can
+  // capture: each closure shares the object.
+  shared fn make() -> () -> int      { return fn() -> int { return self.n; }; }
+  shared fn adder() -> (int) -> void { return fn(d: int) { self.n += d; }; }
 }
 
 struct Op {
@@ -99,15 +103,15 @@ fn main() -> int {
   })));
 
   // Fields of a class and of a struct; elements of an array and a tuple.
-  let btn: mut = Button("ok", fn(l: Str) -> Str { return l + "!"; });
+  let btn = Button("ok", fn(l: view Str) -> Str { return l + "!"; });
   let op = Op("plus", plus);
   let fs: ((int) -> int)[2] = [sq, h];
   let t: ((int, int) -> int, Str) = (plus, "t");
   io::println(btn.click() + " " + Str(op.run(2, 3)) + " " + Str(fs[1](1)) + " "
       + Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
 
-  // A method's lambda shares its object.
-  let c: mut = Counter(1);
+  // A `shared fn`'s lambda shares its object, so the receiver is shared too.
+  let c: shared mut = Counter(1);
   let get = c.make();
   let add = c.adder();
   add(41);

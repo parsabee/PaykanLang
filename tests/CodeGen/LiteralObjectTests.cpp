@@ -95,7 +95,7 @@ TEST(LiteralObject, MethodReceiver) {
 
 TEST(LiteralObject, TupleArrayAndOptionalElements) {
   expectRunsOnEveryFrontend("Elements", R"(import ::io;
-    fn first(t: (Str, int)) -> Str { return t.0; }
+    fn first(t: (Str, int)) -> Str { return t.0.clone(); }
     fn opt(b: bool) -> Str? {
       if b { return "some"; }
       return None;

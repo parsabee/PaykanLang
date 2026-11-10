@@ -189,8 +189,8 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
-              | "view"? "fn" IDENT "(" paramList? ")"
+classMember ::= fieldDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
+              | "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
@@ -202,7 +202,7 @@ variant     ::= IDENT ( "(" varDecl ( "," varDecl )* ")" )?   -- its fields
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
                 "{" traitMember* "}"
-traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
+traitMember ::= "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
@@ -212,7 +212,7 @@ implMember  ::= funcDecl                          -- funcDecl without typeParams
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 
-funcDecl    ::= ( "async" | "view" )? "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= ( "async" | "shared"? "view"? ) "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
@@ -222,7 +222,21 @@ param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
               | IDENT                                   -- a free function's only
 
 varDecl     ::= IDENT ":" typeAnnotation
+fieldDecl   ::= varDecl | IDENT ":" weakType   -- a class's field
+weakType    ::= "weak" "mut"? typeAnnotation   -- a weak reference
 ```
+
+`weak` qualifies the type of a class field or a local (§6): `parent: weak
+Node?` is a weak reference to a `shared` object, `prev: weak mut Node?` to
+a `shared mut` one ([language/16-memory.md](language/16-memory.md#weak-references)).
+The parser gives the `VarDecl` its weak mark and its type the `shared`
+(`shared mut`) form, a `QualifiedType` around the written type.  Only `mut`
+follows `weak` (`'weak' takes 'mut' or nothing: ...`), and a struct's field
+is never weak (`a struct field cannot be 'weak': ...`).  The spelling
+before the qualifier, `weak parent: Node?;` (and `weak w = x;` for a
+local), is a syntax error that writes the declaration as it is spelled now
+(`'weak' goes after the colon, before the type: write 'parent: weak
+Node?'`).
 
 An enum needs at least one variant; a single trailing comma is permitted.
 A variant's fields, when it has any, are at least one `name: Type` in
@@ -231,6 +245,10 @@ without parentheses: 'B'`; `a variant's field is a value: write 'x: T'` for
 a mode); a variant is made with a call of its qualified name, `E::B(1, s)`,
 and bound by a `match` arm, `b: B { ... }`
 ([language/07-enums.md](language/07-enums.md#variants-with-fields)).
+`view fn` and `shared fn` (`shared view fn` both) mark a method: one that
+does not change `self`, and one whose `self` is a shared reference
+([language/05-classes.md](language/05-classes.md#methods-that-hand-on-self-shared-fn));
+on a free function either parses and is a semantic error.
 A struct body holds fields only, at least one: a method goes in an `impl`
 block, and a struct has no superclass
 ([language/11-structs.md](language/11-structs.md)); both are syntax errors
@@ -474,7 +492,7 @@ statement ::= ";"
 assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
             | ">" ">="                   -- the two adjacent: ">>="
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
-weakDecl  ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
+weakDecl  ::= IDENT ":" "weak" "mut"? typeAnnotation? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
 ifStmt    ::= "if" expression block elseTail?
@@ -519,7 +537,8 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   subscript`, and `f(x >>= 1)` is `unexpected '>>='; expected ')' to close
   the argument list`.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
-  `x: int;` is not a statement.  Only a `weakDecl` may leave out its
+  `x: int;` is not a statement.  Only a `weakDecl` (`w: weak Node?;`) may
+  leave out its
   initializer, and Sema rejects a `DeclStmt` of any other `VarDecl` without
   one, whichever frontend built it (`variable 'x' needs an initial value
   ...`).
@@ -529,10 +548,13 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
   `let` without an initializer is a syntax error.
 - `weakDecl` declares one local holding a weak reference
-  (`VarDecl::isWeak`); its type, when not written, is its initializer's, and
-  without an initializer it starts as `None`.  It needs a type or an
-  initializer (`a 'weak' declaration needs a type or an initial value`), and
-  is neither a borrow (`weak x: view = e;`) nor a destructuring.
+  (`VarDecl::isWeak`, its type the `shared` or, with `mut`, the `shared mut`
+  form): `w: weak = x;`, `w: weak mut Node? = x;`.  Its type, when not
+  written, is its initializer's, and without an initializer it starts as
+  `None`.  It needs a type or an initializer (`a 'weak' declaration needs a
+  type or an initial value`), and is neither `let` (`a 'weak' local cannot
+  be 'let'`), a borrow, nor a destructuring (`'weak' declares one
+  variable`).
 - `borrowDecl` declares a local borrow (`VarDecl::getMode`); its type, when
   not written, is its initializer's.  It needs an initializer, is never
   `let` (`let x: view = e;`) and is not a destructuring target.  With the
@@ -718,13 +740,15 @@ return, a field), `T` is the slot's element type, and into a slice it is a
 their nearest common ancestor. `[]` parses, but Sema rejects it (`an empty
 array literal has no type: an array has at least one element`).
 
-`[v; n]` is `n` copies of `v`. `n` is an `INT` of at least 1: `[0; 0]` is a
+`[v; n]` is `n` elements of value `v`. `n` is an `INT` of at least 1: `[0; 0]` is a
 syntax error (`an array has at least one element: the count must be 1 or
 more`), and so is any other token after the `;` (`[0; n]`: `expected the
 number of copies, an integer literal`). It types as the literal `[v, ...,
 v]` of `n` elements would, so `[0; 4]` flowing into a `float[4]` is four
-`0.0`s and `[[0; 3]; 2]` is an `int[2][3]`. `v` is evaluated once and every
-element is a copy of its value: `[Node(); 3]` holds one object three times.
+`0.0`s and `[[0; 3]; 2]` is an `int[2][3]`. A Copyable `v` is evaluated once
+and every element is a copy of its value; any other is evaluated for each
+element, first to last, so `[Node(); 3]` holds three objects
+([language/09-arrays.md](language/09-arrays.md#repeated-values)).
 
 ### Generic call versus comparison
 

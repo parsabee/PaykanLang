@@ -1,4 +1,5 @@
-// Isolates: box parameters a caller lends (#98 part 2).  A caller that
+// Isolates: box parameters a caller lends (#98 part 2).  The references are
+// `shared`, as only a shared reference has a second owner: a caller that
 // keeps a reference of its own for the whole call lends it, and a callee
 // that never writes the parameter asks its ownership mask instead of
 // retaining it on entry: it releases the parameter only when it was handed
@@ -28,44 +29,44 @@ class Node {
 }
 
 class Holder {
-  n: Node?;
+  n: shared Node?;
 }
 
-fn keep(h: mut Holder, n: Node) {
+fn keep(h: shared mut Holder, n: shared Node) {
   h.n = n;
 }
 
-fn handOn(h: mut Holder, n: Node) {
+fn handOn(h: shared mut Holder, n: shared Node) {
   keep(h, n);
 }
 
-fn read(n: Node) -> Str {
-  return n.name;
+fn read(n: shared Node) -> Str {
+  return n.name.clone();
 }
 
-fn same(n: Node) -> Node {
+fn same(n: shared Node) -> shared Node {
   return n;
 }
 
-fn name(h: Holder) -> Str {
+fn name(h: view Holder) -> Str {
   match h.n {
-    n: Node { return n.name; }
+    n: Node { return n.name.clone(); }
     None { return "none"; }
   }
 }
 
 fn main() -> int {
-  let h: mut = Holder(None);
-  let a = Node("a");
+  let h: shared mut = Holder(None);
+  let a: shared = Node("a");
   keep(h, a);
   io::println("kept: " + a.name + " " + name(h));
-  let b = Node("b");
+  let b: shared = Node("b");
   handOn(h, b);
   io::println("handed on: " + b.name + " " + name(h));
-  let c = Node("c");
+  let c: shared = Node("c");
   let r = read(c);
   io::println("read: " + c.name + " " + r);
-  let d = Node("d");
+  let d: shared = Node("d");
   let e = same(d);
   io::println("returned: " + d.name + " " + e.name);
   keep(h, Node("t1"));

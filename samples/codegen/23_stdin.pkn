@@ -18,7 +18,7 @@ fn main() -> int {
   while True {
     match io::stdin().readln() {
       read: Ok {
-        let line = read.value;
+        let line = move read.value;
         // strip trailing newline for display
         let n = line.len();
         display = "";

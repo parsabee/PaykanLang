@@ -53,7 +53,7 @@ fn main() -> int {
   let c: mut = Counter();
   c.tick();
   c.tick();
-  let done = c;
+  let done = move c;
   done.tick();
   report(done);
 

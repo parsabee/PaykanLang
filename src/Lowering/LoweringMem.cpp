@@ -201,8 +201,11 @@ ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
   // is, as emitMemAddress reads it; Sema has ended `v`, whose teardown
   // still drops its own references (a copy of the bytes retains the
   // references among them).
+  // (A `move` made the present value of its optional is wrapped below: the
+  // coercion is the `move`'s, not its operand's.)
   if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
-      u && u->getOpcode() == ast::UnaryOpcode::Move)
+      u && u->getOpcode() == ast::UnaryOpcode::Move &&
+      !(isMemOptionalWrap(e) && e != UnwrappedExpr))
     return emitMemRead(u->getOperand());
   // A tuple or a struct made the present value of its optional: the
   // optional, in a temporary.
@@ -352,7 +355,8 @@ Val ModuleLowering::emitMemAddress(ast::Expr *e) {
   // is; Sema has ended `v`, whose teardown still drops its own references
   // (a copy of the bytes retains the references among them).
   if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
-      u && u->getOpcode() == ast::UnaryOpcode::Move)
+      u && u->getOpcode() == ast::UnaryOpcode::Move &&
+      !(isMemOptionalWrap(e) && e != UnwrappedExpr))
     return emitMemAddress(u->getOperand());
   MemValue v = emitMemValue(e);
   // The temporary is what emitMemValue built: a tuple or a struct made the
@@ -637,13 +641,13 @@ Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
 void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
   // `move v` of a value held in memory (the prototype): the value as it
   // is; Sema has ended `v`.
-  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
-      u && u->getOpcode() == ast::UnaryOpcode::Move)
-    e = u->getOperand();
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
     emitMemOptionalWrap(e, dst);
     return;
   }
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    e = u->getOperand();
   ast::Type *ty = e == UnwrappedExpr ? e->getResolvedType() : memTypeOf(e);
   // A tagged union's variant: its tag, then its fields, in place.
   if (auto *call = ast::dyn_cast<ast::CallExpr>(e);
@@ -684,7 +688,7 @@ void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
   ast::Type *elemTy = ft->getElementType();
   int64_t elemSize = memLayout(elemTy).Size;
   if (lit->isRepeat()) {
-    emitFixedRepeat(lit->getElements().front(), ft, dst);
+    emitFixedRepeat(lit, ft, dst);
     return;
   }
   for (size_t i = 0; i < lit->getNumElements(); ++i)
@@ -710,10 +714,17 @@ void ModuleLowering::emitElementInit(ast::Expr *e, ast::Type *ty,
     B.ptrStore(dst, coerceTo(v, toPIRType(ty)));
 }
 
-void ModuleLowering::emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
-                                     const Val &dst) {
+void ModuleLowering::emitFixedRepeat(ast::ArrayLiteralExpr *lit,
+                                     ast::FixedArrayType *ft, const Val &dst) {
+  ast::Expr *elem = lit->getElements().front();
   ast::Type *elemTy = ft->getElementType();
   const int64_t elemSize = memLayout(elemTy).Size;
+  // A value that is not Copyable: evaluated for each element, in order.
+  if (lit->isEachElement()) {
+    forEachSlot(dst, 0, ft->getLength(), elemSize,
+                [&](const Val &at) { emitElementInit(elem, elemTy, at); });
+    return;
+  }
   if (ast::isa<ast::BuiltinType>(elemTy) && isZeroLiteral(elem)) {
     B.memZero(dst, Val::i64(memLayout(ft).Size));
     return;

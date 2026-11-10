@@ -2,8 +2,9 @@
 // Exercises: `struct` declarations, the constructor `Point(1, 2)` (the
 //            fields in order, or an `__init__` from an `impl` block), field
 //            reads `p.x` and assignments `p.x = 5` in place, copies (`q = p`
-//            copies the fields; a copy of a struct holding an object names
-//            the same object), structs as fields / parameters / results /
+//            copies the fields; `item.clone()` copies a struct holding a
+//            `Str`, and the clone's `shared mut` field names the same
+//            object), structs as fields / parameters / results /
 //            array elements / tuple elements / type arguments, `impl` blocks
 //            (methods whose `self` is the receiver's storage, `view fn`,
 //            `static fn`, an `inout` result), `impl Trait for`, field-wise
@@ -44,7 +45,7 @@ class Node {
 // fields in order.
 struct Item {
   name: Str;
-  node: Node;
+  node: shared mut Node;
   pos: (int, int);
 }
 
@@ -130,7 +131,7 @@ fn main() -> int {
   io::println(s.at.moved(1, 1));
 
   let item = Item("it", Node(1), (7, 8));
-  copy = item;
+  copy = item.clone();
   copy.name = "copy";                      // copy's own field
   copy.node.n = 2;                         // the shared object
   io::println(item);

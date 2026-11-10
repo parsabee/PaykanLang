@@ -48,7 +48,9 @@ True Ok
 
 ## Using an error
 
-`Error` is a [struct](../language/11-structs.md), a value copied on assignment. Its `code`
+`Error` is a [struct](../language/11-structs.md), a value held in place. It holds its
+message, a `Str?`, so it is move-only, as a struct holding a `Str` is: assigning one moves it,
+and `e.clone()` copies it ([Cloneable](../language/06-traits.md#cloneable)). Its `code`
 is an enum, so one code is tested by comparing it, `e.code == err::ErrorCode::NotFound`, or
 several with `match e.code { NotFound { ... } PermissionDenied { ... } _ { ... } }`.
 `message()` is the text meant for people: the message, or the code's name when there is

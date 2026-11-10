@@ -16,10 +16,11 @@ implementation takes.
 
 | Topic | Decision |
 |-------|----------|
-| Syntax | `weak y: Point? = x;` declares a local, `weak parent: Node?;` a class field; `weak u = x;` infers `Point?` from `x: Point` or `x: Point?`; `weak e: Point?;` starts as None |
+| Syntax | `weak` is a qualifier: `y: weak Point? = x;` declares a local, `parent: weak Node?;` a class field, `prev: weak mut Node?;` one that changes its object; `u: weak = x;` infers `Point?` from `x: shared Point` or `x: shared Point?`; `e: weak Point?;` starts as None.  The spelling before #369's qualifier, `weak y: Point? = x;`, is a syntax error naming the new one |
+| Form | a weak reference is a `shared` reference that owns nothing (the owner's decision, 2026-11-07): `weak T` names a `shared` object, `weak mut T` a `shared mut` one, and its type is that form, marked weak.  A unique object has one reference, its owner's, so it is never weakly referenced: a back link to an object needs the object shared (`shared fn`'s `self`, a `shared mut` node) |
 | Type | `T?` of a class `T` (a user class, `Str`, `Obj`), always optional: a weak reference reads as None once its object is destroyed.  Not a plain class, a value, a struct, an enum or a function type |
-| Reading | a `weak` variable or field reads as a `T?`: a strong reference to the object while it is alive (one the expression owns for its own duration), None otherwise; it goes everywhere a `T?` goes (`match`, `== None`, an argument, a result, a strong variable or field) |
-| Writing | assigning a `T` or a `T?` to a `weak` variable or field stores a weak reference to its object (none for None) and drops the one it held; the object's strong count is untouched |
+| Reading | a `weak` variable or field reads as a `shared T?` (`weak mut`: a `shared mut T?`): a strong reference to the object while it is alive (one the expression owns for its own duration), None otherwise; it goes everywhere such a `T?` goes (`match`, `== None`, an argument, a result, a strong variable or field of that form) |
+| Writing | assigning a `shared T` or `shared T?` (`weak mut`: `shared mut`) to a `weak` variable or field stores a weak reference to its object (none for None) and drops the one it held; the object's strong count is untouched.  Any other form is an error (`cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object`), and so is passing one to a generated `__init__`'s parameter of a weak field |
 | Lifetime | a weak reference never keeps its object alive; the object is destroyed with its last strong reference, and from then on every weak reference to it reads as None |
 | Places | a weak reference is not a place a strong reference could be written to: no `inout` parameter, local or `match` arm names a `weak` variable or field (`view` is fine: it reads a copy) |
 | Lambdas | a lambda captures a `weak` variable weakly: the closure holds a weak reference, and a call reads it as the variable reads (held strongly for the call's duration) |
@@ -31,14 +32,16 @@ implementation takes.
 
 ```
 statement   ::= ... | weakDecl
-weakDecl    ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
-classMember ::= "weak"? varDecl ";" | funcDecl
+weakDecl    ::= IDENT ":" "weak" "mut"? typeAnnotation? ( "=" expression )? ";"
+classMember ::= fieldDecl ";" | funcDecl
+fieldDecl   ::= varDecl | IDENT ":" "weak" "mut"? typeAnnotation
 ```
 
-`weak` is a keyword.  A local needs a type or an initializer (both are
-allowed); it cannot be a borrow (`weak y: view Point? = x` is an error) and
-`let` and `weak` are not combined (`let` fixes a variable; a weak variable is
-assigned when its object changes).  A struct body rejects `weak` (`a struct
+`weak` is a keyword, and a qualifier after the colon: only `mut` follows it
+(`'weak' takes 'mut' or nothing`).  A local needs a type or an initializer
+(both are allowed); it cannot be a borrow (`y: weak view Point? = x` is an
+error) and `let` and `weak` are not combined (`a 'weak' local cannot be
+'let'`: a weak variable is assigned as its object changes).  A struct body rejects `weak` (`a struct
 field cannot be 'weak'`): a struct is a value, copied with its fields, and
 the runtime's type descriptors, which copy and drop a struct's references,
 describe strong references only.
@@ -211,15 +214,15 @@ had no flags byte and is rejected or misread, which the cache check and
 
 | Situation | Message |
 |-----------|---------|
-| `weak w: Point = p;` | `'weak' variable 'w' must be optional: a weak reference reads as None once its object is destroyed; write 'Point?'` |
-| `weak n: int? = 1;` | `'weak' variable 'n' has type 'int?'; a weak reference is an optional class type ('Node?'): only an object is referred to weakly` |
+| `w: weak Point = p;` | `'weak' variable 'w' must be optional: a weak reference reads as None once its object is destroyed; write 'Point?'` |
+| `n: weak int? = 1;` | `'weak' variable 'n' has type 'int?'; a weak reference is an optional class type ('Node?'): only an object is referred to weakly` |
 | `f(w)` with `p: inout Point?` | `'w' is a 'weak' reference and cannot be passed to 'inout' parameter 'p'` |
 | `f(h.peek)` with a weak field | `field 'peek' of class 'Holder' is a 'weak' reference and cannot be passed to 'inout' parameter 'p'` |
 | `v: inout Point? = w;` | `'w' is a 'weak' reference and cannot be named by 'inout' local 'v'` |
 | `match w { n: inout Point {} ... }` | `'w' is a 'weak' reference and cannot be bound by 'inout' arm 'n'` |
-| `weak n;` | `a 'weak' declaration needs a type or an initial value: 'weak n: Point? = x;'` |
-| `weak n: view Point? = x;` | `a 'weak' local is not a borrow: it holds a weak reference of its own, so it cannot be 'view'` |
-| `struct S { weak p: P?; }` | `a struct field cannot be 'weak': a weak reference is a field of a class or a local (a struct is a value, copied with its fields)` |
+| `weak n;` | `a 'weak' declaration needs a type or an initial value: 'n: weak Point? = x;'` |
+| `n: weak view Point? = x;` | `a 'weak' local is not a borrow: it holds a weak reference of its own, so it cannot be 'view'` |
+| `struct S { p: weak P?; }` | `a struct field cannot be 'weak': a weak reference is a field of a class or a local (a struct is a value, copied with its fields)` |
 
 ## Costs
 

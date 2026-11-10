@@ -36,7 +36,7 @@ impl Circle {
 
 enum Kind { Round, Square }
 
-fn area(c: Circle) -> float {
+fn area(c: view Circle) -> float {
   return 3.14159 * c.r * c.r;
 }
 ```
@@ -361,7 +361,7 @@ fn priorityName(p: Priority) -> Str {
   }
 }
 
-fn parsePriority(word: Str) -> Priority {
+fn parsePriority(word: view Str) -> Priority {
   match word {
     "low"  { return Priority::Low; }
     "high" { return Priority::High; }
@@ -383,7 +383,7 @@ class Task {
 
 impl Task {
   fn __init__(title: Str, priority: Priority) {
-    self.title = title;
+    self.title = move title;
     self.done = False;
     self.priority = priority;
   }
@@ -398,7 +398,7 @@ fn isSpace(c: char) -> bool {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-fn slice(s: Str, from: int, to: int) -> Str {
+fn slice(s: view Str, from: int, to: int) -> Str {
   out = "";
   i = from;
   while i < to {
@@ -408,7 +408,7 @@ fn slice(s: Str, from: int, to: int) -> Str {
   return out;
 }
 
-fn trim(s: Str) -> Str {
+fn trim(s: view Str) -> Str {
   start = 0;
   end = s.len();
   while start < end && isSpace(s[start]) { start = start + 1; }
@@ -417,10 +417,10 @@ fn trim(s: Str) -> Str {
 }
 
 // Splits at the first `sep`: (s, "") when there is none.
-fn splitOnce(s: Str, sep: char) -> (Str, Str) {
+fn splitOnce(s: view Str, sep: char) -> (Str, Str) {
   i = 0;
   while i < s.len() && s[i] != sep { i = i + 1; }
-  if i == s.len() { return (s, ""); }
+  if i == s.len() { return (s.clone(), ""); }
   return (slice(s, 0, i), slice(s, i + 1, s.len()));
 }
 ```
@@ -439,7 +439,7 @@ class TaskList {
   // Adds a task; False if the list is full.
   fn add(title: Str, priority: task::Priority) -> bool {
     if self.count == self.tasks.len() { return False; }
-    self.tasks[self.count] = task::Task(title, priority);
+    self.tasks[self.count] = task::Task(move title, priority);
     self.count = self.count + 1;
     return True;
   }
@@ -472,7 +472,10 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    self.tasks = [task::Task("", task::Priority::Normal); 8];
+    let blank = task::Priority::Normal;
+    self.tasks = [task::Task("", blank), task::Task("", blank), task::Task("", blank),
+                  task::Task("", blank), task::Task("", blank), task::Task("", blank),
+                  task::Task("", blank), task::Task("", blank)];
     self.count = 0;
   }
 }
@@ -481,19 +484,20 @@ impl TaskList {
 Finally `main.pkn` imports all three, the list module under the alias `tl`. It runs a few
 commands of the form `add <title>|<priority>` and `done <number>`; in [`::io`](../stdlib/io.md) they
 come from the command line and standard input instead. `run` adds to the list and completes
-its tasks, so it takes a `mut tl::TaskList`:
+its tasks in place, so it takes the list as an `inout tl::TaskList`, which `main` lends it
+on each call, and it only reads its line, a `view Str`:
 
 ```pkn
 // file: main.pkn
 import ::io;
 import tasks::{task, text, list as tl};
 
-fn run(tasks: mut tl::TaskList, line: Str) {
+fn run(tasks: inout tl::TaskList, line: view Str) {
   command, rest = text::splitOnce(text::trim(line), ' ');
   match command {
     "add" {
       title, priority = text::splitOnce(rest, '|');
-      if !tasks.add(title, task::parsePriority(priority)) { io::println("the list is full"); }
+      if !tasks.add(move title, task::parsePriority(priority)) { io::println("the list is full"); }
     }
     "done" {
       match rest.toInt() {
@@ -507,7 +511,7 @@ fn run(tasks: mut tl::TaskList, line: Str) {
 }
 
 fn main() -> int {
-  let tasks: mut = tl::TaskList();
+  tasks: mut = tl::TaskList();
   let script = ["add buy milk", "add fix the leak|high", "add call mum|low",
             "done 1", "done 9", "list"];
   i = 0;

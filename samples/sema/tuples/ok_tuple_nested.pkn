@@ -2,9 +2,9 @@
 // tuples.
 fn main() -> int {
   let t: (int, (Str, bool)) = (1, ("x", True));
-  let inner: (Str, bool) = t.1;
+  inner: view (Str, bool) = t.1;
   let flag: bool = t.1.1;
   let pairs: (int, Str)[2] = [(1, "a"), (2, "b")];
-  let second: Str = pairs[1].1;
+  second: view Str = pairs[1].1;
   return t.0 + pairs[0].0;
 }

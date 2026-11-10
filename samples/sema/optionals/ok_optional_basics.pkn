@@ -22,17 +22,17 @@ fn main() -> int {
   a: Node? = None;
   let b: Node? = Node(1);
   let n = Node(2);
-  let c: Node? = n;            // Node widens to Node?
-  a = b;
+  let c: Node? = move n;       // Node widens to Node?
+  a = move b;
   a = None;
   s: Str? = "text";
   s = None;
-  let d: Node? = wrap(n);
+  let d: Node? = wrap(Node(4));
   let e: Node? = pass(None);
   let f = pass(Node(3));       // inferred Node?
   match f {
     // an optional is not an Obj: unwrap it
-    x: Node { let o: Obj = x; }
+    x: Node { o: view Obj = x; }
     None { }
   }
   io::println(f);                  // print takes an optional: None or the value

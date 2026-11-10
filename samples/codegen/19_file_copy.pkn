@@ -20,14 +20,14 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
   return "/tmp/" + name;
 }
 
-fn writeSource(path: Str) -> int {
+fn writeSource(path: view Str) -> int {
   match io::open(path, "w") {
     e: Err {
       io::printerrln("writeSource: " + e.error.message());
       return 1;
     }
     w: Ok {
-      let f = w.value;
+      let f = move w.value;
       f.write("first line\n");
       f.write("second line\n");
       f.write("third line\n");
@@ -37,7 +37,7 @@ fn writeSource(path: Str) -> int {
   // the File destroyed when the match ends -> fclose -> data flushed
 }
 
-fn copy(inFile: io::File, outFile: io::File) {
+fn copy(inFile: view io::File, outFile: view io::File) {
   while True {
     match inFile.readln() {
       line: Ok {
@@ -48,7 +48,7 @@ fn copy(inFile: io::File, outFile: io::File) {
   }
 }
 
-fn copyFile(src: Str, dst: Str) -> int {
+fn copyFile(src: view Str, dst: view Str) -> int {
   match io::open(src, "r") {
     e: Err {
       io::printerrln("copyFile: cannot open src: " + e.error.message());
@@ -70,7 +70,7 @@ fn copyFile(src: Str, dst: Str) -> int {
   // both File handles destroyed when the matches end -> fclose
 }
 
-fn printFile(path: Str) -> int {
+fn printFile(path: view Str) -> int {
   match io::open(path, "r") {
     e: Err {
       io::printerrln("printFile: " + e.error.message());

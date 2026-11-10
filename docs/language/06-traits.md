@@ -98,21 +98,27 @@ You use a built-in trait every time you print: `io::println` is declared
   `s.toString()` is an error), nor is `(1, f)` or an enum with such a variant. The
   standard library's print functions (`io::println<T: Show>`) take any `Show` value, and
   `Str(x)` gives the text `x.toString()` gives for every `Show` value `x` (see
-  [To a string](04-strings-and-conversions.md#to-a-string): `Str(s)` of a `Str` is `s`
-  itself, so it takes no `view` of one).
+  [To a string](04-strings-and-conversions.md#to-a-string): `Str(s)` of a `Str` is a new
+  string with `s`'s text, and takes no `view` of one).
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, every sized integer type, and by a class or a struct with an
   `impl Hashable for` block. The standard library's hash tables take `Hashable` keys (see
   [Hashable](#hashable)).
 - The built-in trait `ValueType` has no methods. It is implemented by the types held in
-  place and copied whole: `int`, `float`, `bool`, `char`, every sized numeric type, every
-  enum, every tuple, every struct and every function type (see [ValueType](#valuetype)).
+  place rather than on the heap: `int`, `float`, `bool`, `char`, every sized numeric type,
+  every enum, every tuple, every struct and every function type (see
+  [ValueType](#valuetype)).
 - The built-in trait `Copyable` has no methods and is never implemented: a type is
-  Copyable by what it holds. A number, `bool`, `char`, an enum, a `shared` reference
-  (`shared T` or `shared mut T`) and an `atomic`, `atomic shared` or `locked` handle are,
-  and so are a struct, a tuple, a
-  fixed-size array and an optional of such parts; a unique reference, a `Str`, a function
-  value and a task are not. `T: Copyable` bounds a template (see [Copyable](#copyable)).
+  Copyable by what it holds. A number, `bool`, `char`, a `shared` reference (`shared T` or
+  `shared mut T`) and an `atomic`, `atomic shared` or `locked` handle are, and so are a
+  struct, a tuple, a fixed-size array, an optional and an enum of such parts, and a
+  function value (its copies share its closure); a unique reference, a `Str`, a container
+  and a task are not. `T: Copyable`
+  bounds a template (see [Copyable](#copyable)).
+- The built-in trait `Cloneable` (`view fn clone() -> Self`) is the explicit copy of a
+  value. Every Copyable type implements it, and so do `Str`, a struct, a tuple, a
+  fixed-size array and an optional of Cloneable parts, and a class with an `impl Cloneable
+  for` block, which may leave the method to the compiler (see [Cloneable](#cloneable)).
 - `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
   rules (see [Structs](11-structs.md)).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
@@ -278,9 +284,12 @@ with its template, so every instantiation is `Hashable`, also one an importer ma
 ## ValueType
 
 `ValueType` is a built-in trait with no methods. It is implemented by the types whose
-values are held in place and copied whole by an assignment: `int`, `float`, `bool`,
-`char`, the sized numeric types (`u8`, `i32`, `unsigned`, `f32`, …), every enum, every
-tuple, every struct and every function type (see [Memory](16-memory.md)).
+values are held in place rather than on the heap: `int`, `float`, `bool`, `char`, the
+sized numeric types (`u8`, `i32`, `unsigned`, `f32`, …), every enum, every tuple, every
+struct and every function type (see [Memory](16-memory.md)). It says where a value lives,
+not that it copies: a tuple holding a `Str` is a `ValueType` and is move-only, so a
+template that copies its value bounds it by [`Copyable`](#copyable) or, as `twice` below,
+copies it with `clone()`.
 A fixed-size array is one too, though it cannot be a type argument yet. A class, `Str` and
 an optional are not, and `impl ValueType for` a class is an error: a class is shared by
 reference. A struct implements it already, so `impl ValueType for` a struct is an error
@@ -291,7 +300,7 @@ import ::io;
 
 enum Suit { Hearts, Spades }
 
-fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+fn twice<T: ValueType + Cloneable>(x: T) -> (T, T) { return (x.clone(), move x); }
 
 fn main() -> int {
   let p = twice((1, "one"));
@@ -313,14 +322,17 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 ## Copyable
 
 `Copyable` is a built-in trait with no methods, of the types a program may copy freely
-([Concurrency](19-concurrency.md#copyable)). It is structural: a type is Copyable by what it
-holds, and no `impl` block gives it. A number, `bool`, `char`, an enum, a `shared` reference
-(`shared T` or `shared mut T`) and an `atomic`, `atomic shared` or `locked` handle are
-Copyable, and so are a struct, a
-tuple, a fixed-size array and an optional whose every part is (a struct's `shared` field
-counts). A unique reference, a `Str`, a function value and a task are not: they are
-move-only, and reach another owner by [`move`](19-concurrency.md#move-an-explicit-transfer).
-`T: Copyable` bounds a type parameter that copies its value:
+([Ownership transfers](16-memory.md#ownership-transfers)). It is structural: a type is
+Copyable by what it holds, and no `impl` block gives it. A number, `bool`, `char`, a
+`shared` reference (`shared T` or `shared mut T`) and an `atomic`, `atomic shared` or
+`locked` handle are Copyable, and so are a struct, a tuple, a fixed-size array and an
+optional whose every part is (a struct's `shared` field counts), and an enum whose every
+variant's fields are (`enum Color { Red, Green }` is; `enum Shape { Named(s: Str), Empty }`
+is not, `it holds move-only field 's' ('Str')`), and a function value is, its copies
+sharing its closure. A unique reference, a `Str`, a container and a task are not: they are
+move-only, and reach another owner by
+[`move`](19-concurrency.md#move-an-explicit-transfer), or a copy of them is made with
+[`clone()`](#cloneable). `T: Copyable` bounds a type parameter that copies its value:
 
 ```pkn
 import ::io;
@@ -380,27 +392,149 @@ Error:
 
 ```
 'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented
-'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str', a function value or a task is move-only
-'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str', a function value or a task is move-only
+'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
+'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
 ```
 
 A qualifier is not part of a type argument in this version (`twice(s)` with `s: shared Node`
 is checked as a `Node`, and rejected), so a `shared` reference reaches a template inside a
-struct, as `Ref` above. Under `--strict-ownership`
-([Concurrency](19-concurrency.md#the-copy-rule---strict-ownership)) a value that is not
-Copyable flows into an owning slot only by `move`.
+struct, as `Ref` above. A value that is not Copyable flows into an owning slot only by
+`move`, by `clone()` or to a borrow ([Ownership transfers](16-memory.md#ownership-transfers)).
+
+## Cloneable
+
+`Cloneable` is a built-in trait, the explicit copy of a value that does not copy by itself:
+
+```pkn
+trait Cloneable { view fn clone() -> Self; }
+```
+
+`clone` is a `view fn`, so it is called through every form of a value: a plain or `mut`
+one, a `shared` one, a frozen `atomic shared` one and a `view`. It returns a new value with
+one owner, which a `mut` variable takes as it takes a temporary (`m: mut = n.clone();`).
+
+- Every Copyable type is Cloneable: its clone is the copy. So a template bounded by
+  `T: Cloneable` takes numbers and `shared` references as well as `Str`.
+- `Str` is Cloneable: `s.clone()` is a new string with the same text.
+- A struct, a tuple, a fixed-size array and an optional are Cloneable when every part is,
+  and the clone clones each part (a struct's `shared` or `weak` field is the same object
+  in the clone). One that holds a part that is not is `'Pair' is not Cloneable: its field
+  'a' ('Node') is not Cloneable`. Such a struct may write its own, `impl Cloneable for Pair
+  { view fn clone() -> Pair { ... } }`; one whose every field is Cloneable has its clone
+  built in, and the block is an error (`struct 'Q' already implements 'Cloneable': each of
+  its fields is Cloneable, so its 'clone' is built in`).
+- An enum is Cloneable when it is Copyable. One whose payloads are not is not Cloneable yet
+  (`'Item' is not Cloneable: an enum whose payloads are not Copyable is not Cloneable yet`).
+- A function value is Cloneable, being Copyable: its clone is a copy, sharing its closure.
+  A task is never Cloneable.
+- A class is Cloneable only when it says so, with an `impl Cloneable for` block, since an
+  object may have an identity or hold a resource that a copy should not have. An empty
+  block, `impl Cloneable for Note {}`, has the compiler write `clone`: a new object whose
+  unique fields are clones of the original's, whose Copyable fields are copies, whose
+  `shared` and `weak` fields refer to the same objects, and whose `atomic` fields are new
+  cells holding the original's current values. A block may write `clone` instead,
+  `impl Cloneable for C { view fn clone() -> C { ... } }`, with that signature.
+
+```pkn
+import ::io;
+
+class Tag {
+  label: Str;
+}
+
+impl Cloneable for Tag {}
+
+class Note {
+  text: Str;
+  tag: Tag;
+  owner: shared mut Tag;
+}
+
+impl Cloneable for Note {}
+
+fn twoOf<T: Cloneable>(v: view T) -> (T, T) { return (v.clone(), v.clone()); }
+
+fn main() -> int {
+  let s = "text";
+  let t = s.clone();                      // a new string: s is still s
+  let pair = twoOf((1, "one"));           // a tuple of Cloneable parts
+  let owner: shared mut Tag = Tag("me");
+  let a: mut = Note("a", Tag("todo"), owner);
+  let b = a.clone();                      // the derived clone
+  a.tag.label = "done";                   // b's tag is its own
+  owner.label = "us";                     // b's owner is a's
+  io::println(s + " " + t + " " + pair.1.1);
+  io::println(a.tag.label + " " + b.tag.label + " " + b.owner.label);
+  return 0;
+}
+```
+
+Output:
+
+```
+text text one
+done todo us
+```
+
+A derived `clone` clones every unique field, so each field's type must be Cloneable, a class
+field's by a block of its own. `clone` is virtual: called through a reference to a
+superclass, it runs the clone of the object's own class. So a subclass of a Cloneable class
+has a clone of its own, derived by an empty block of its own or written there, and returns
+its own class (`view fn clone() -> Circle`); one without is an error, rather than a clone
+that would make an object of the superclass. The error that rejects a copy of a Cloneable
+value offers the clone (`cannot copy 's' (a unique 'Str'); write 'move s' to transfer it,
+'s.clone()' to copy it, or declare it 'shared Str'`).
+
+```pkn
+class Node {
+  id: int;
+}
+
+class Holder {
+  node: Node;
+}
+
+impl Cloneable for Holder {}
+
+class Shape {
+  name: Str;
+}
+
+impl Cloneable for Shape {}
+
+class Circle : Shape {
+  r: int;
+}
+
+fn main() -> int {
+  let n = Node(1);
+  let m = n.clone();
+  return 0;
+}
+```
+
+Error:
+
+```
+'impl Cloneable for Holder {}' cannot derive 'clone': its field 'node' ('Node') has no clone: a class is Cloneable only with an 'impl Cloneable for Node' block; write the 'clone' instead
+class 'Circle' inherits 'Cloneable' from 'Shape', whose 'clone' makes a 'Shape': write 'impl Cloneable for Circle {}' to derive its own, or a 'clone' of its own
+class 'Node' is not Cloneable: write 'impl Cloneable for Node {}' to derive its 'clone', or write one
+```
 
 ## Semantic Checks
 
 | Error | Trigger |
 |-------|---------|
-| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`, `Copyable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
+| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`, `Copyable`, `Cloneable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
 | Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | `impl Copyable` | `impl Copyable for X`, for a class or a struct: `'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented` (see [Copyable](#copyable)) |
+| Not Cloneable | `x.clone()` of a class with no `impl Cloneable for` block, of a struct, tuple or array with a part that is not Cloneable, or of an enum whose payloads are not Copyable; a type argument that fails `T: Cloneable` (see [Cloneable](#cloneable)) |
+| `clone` not derived | `impl Cloneable for C {}` for a class with a unique field whose type is not Cloneable: `'impl Cloneable for C {}' cannot derive 'clone': its field ...` |
+| Inherited `clone` | A subclass of a Cloneable class with no `impl Cloneable for` block of its own: `class 'D' inherits 'Cloneable' from 'C', whose 'clone' makes a 'C': ...`; a `clone` returning another class: `'view fn clone() -> C' of class 'D' does not match 'view fn clone() -> D' of trait 'Cloneable'` |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by; the instantiation's body, the bounds of the templates it uses and the bodies of the instantiations only it uses are not checked, so it is the one error |
 | Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |

@@ -6,7 +6,7 @@ import ::memory;
 enum Light { Red, Yellow, Green }
 
 class Counter {
-  hits: memory::Box<int>;
+  hits: shared mut memory::Box<int>;
 }
 
 fn bump(n: inout int) {
@@ -23,8 +23,8 @@ fn next(l: Light) -> Light {
 
 fn main() -> int {
   // Two names, one box: a change through either shows through both.
-  total: mut = memory::Box(0);
-  alias: mut = total;
+  total: shared mut = memory::Box(0);
+  alias: shared mut = total;
   bump(total.get());
   bump(alias.get());
   n: inout int = alias.get();
@@ -58,8 +58,8 @@ fn main() -> int {
   io::println(Str(light.get() == Light::Green));
 
   // A tuple: read in place, replaced whole.
-  pair: mut = memory::Box((1, "one"));
-  pairAlias: mut = pair;
+  pair: shared mut = memory::Box((1, "one"));
+  pairAlias: shared mut = pair;
   io::println(Str(pair.get().0) + pair.get().1);
   p: inout (int, Str) = pairAlias.get();
   p = (2, "two");

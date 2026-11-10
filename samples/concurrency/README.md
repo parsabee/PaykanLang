@@ -18,7 +18,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
 | `10_buffers.pkn` | heap buffers in a `parallel for`: one of the enclosing function read at any index and written at the loop's variable, and one frozen in a box read by every thread |
 | `errors/err_qualifiers.pkn` | the conversions a qualifier refuses (`shared` into unique, `mut` gained without `move`, `shared mut` into `shared`), writes through an immutable reference and an immutable field, `mut` on a value |
-| `errors/err_strict_copies.pkn` | the copy rule under `--strict-ownership`: a unique value read from a place moves, `[v; n]` copies |
+| `errors/err_strict_copies.pkn` | the copy rule: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
 | `errors/err_atomic_shared_const.pkn` | writing through a frozen `atomic shared` object, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
@@ -45,8 +45,9 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   method that is not a `view fn` and no passing to `inout`, and what it
   holds reads immutable (a unique field follows its root and is never
   written `mut`; a `shared mut` field keeps its writes through any root).
-  `self` is mutable in every method but a `view fn`; a `match` binding is
-  a copy of its subject in the subject's form; an object held in a struct,
+  `self` is mutable in every method but a `view fn`; a `match` binding of
+  a place is a borrow of it (a `view`, or an `inout` arm), and `match move
+  x` owns the parts; an object held in a struct,
   tuple or array follows the variable's `let`.  `mut T` flows into `T`;
   `T` gains `mut` only by `move` or straight from a temporary; `T` or
   `mut T` moves into `atomic shared T`, frozen then; `shared` and `shared
@@ -57,10 +58,11 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   A borrow is written with no qualifier: a `view` parameter takes every
   form of the object, an `inout` a `mut` or `shared mut` one, neither
   counting it, and no borrow reaches a `locked`
-  cell.  Under `--strict-ownership` the copy rule holds: a move-only value
-  read from a place (a unique reference, or a struct, tuple or array
-  holding one) flows into an owning slot only by `move`; a `shared`
-  reference, a handle and a value of such parts are Copyable.
+  cell.  The copy rule holds: a move-only value read from a place (a
+  unique reference, a `Str`, a container, or a struct, tuple or array
+  holding one) flows into an owning slot only by `move` (or as a
+  `.clone()`); a `shared` reference, a handle and a value of such parts
+  are Copyable.
 * **`locked mut T`**: a cell holding an object behind a mutex, made where a
   unique value flows into a `locked mut` slot; its handle copies into tasks
   and parallel bodies; its contents are reached only in a `lock` block,
@@ -200,7 +202,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 build/bin/paykan run samples/concurrency/01_parallel_for.pkn
 build/bin/paykan run samples/concurrency/07_atomic.pkn
 build/bin/paykan --check-only samples/concurrency/errors/err_moves.pkn
-build/bin/paykan --check-only --strict-ownership samples/concurrency/errors/err_strict_copies.pkn
+build/bin/paykan --check-only samples/concurrency/errors/err_strict_copies.pkn
 build/bin/paykan --emit-pir samples/concurrency/05_locked.pkn
 build/bin/paykan --emit-mlir=scf samples/concurrency/02_async_await.pkn
 build/bin/paykan --emit-mlir=llvm samples/concurrency/01_parallel_for.pkn
@@ -219,7 +221,7 @@ counts on cells and frozen objects (they are immortal: cells and frozen
 graphs leak), `atomic` fixed arrays, `compareExchange`'s `inout` write-back
 of `expected`, qualifiers as part of type arguments (`List<shared Node>`
 is `List<Node>`), the archetype check of templates (a copy of an unbounded
-`T` is caught per instance under `--strict-ownership` only), `match`
+`T` is caught per instance only), `match`
 bindings' qualifiers, the run-time check of a move out of borrowed
 storage, a value held in memory (a struct, tuple or array) as a task
 parameter, async methods, importing a module that declares an `async fn`

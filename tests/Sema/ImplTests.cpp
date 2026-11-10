@@ -146,10 +146,10 @@ fn main() -> int { return 0; }
 // made for a field type, before the module's `impl` blocks are checked.
 TEST(Impl, GenericBlocksJoinEachInstantiation) {
   auto r = semaCheck(R"(import ::io; class Box<T> { v: T; }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 impl Box<U> {
   view fn get() -> view U { return self.v; }
-  fn set(v: U) { self.v = v; }
+  fn set(v: U) { self.v = move v; }
 }
 trait Named { view fn name() -> Str; }
 impl Named for Box<T> { view fn name() -> Str { return self.v.toString(); } }

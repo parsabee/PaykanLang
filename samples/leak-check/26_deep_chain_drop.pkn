@@ -56,7 +56,7 @@ class Chain {
 }
 
 impl Chain {
-  fn __init__(link: (int, (Chain?, Obj))) { self.link = link; }
+  fn __init__(link: (int, (Chain?, Obj))) { self.link = move link; }
 }
 
 fn leaf() -> Tree {
@@ -70,8 +70,8 @@ fn list(n: int) -> int {
   i = 0;
   while i < n {
     let node: mut = Node(i);
-    node.next = head;
-    head = node;
+    node.next = move head;
+    head = move node;
     i = i + 1;
   }
   return i;                    // head goes out of scope: the whole list drops
@@ -85,10 +85,10 @@ fn tree(depth: int) -> int {
     let side: mut = Tree();
     side.left = leaf();
     side.right = leaf();
-    t.left = side;
-    t.right = root;
+    t.left = move side;
+    t.right = move root;
     t.leaves = Node(i);
-    root = t;
+    root = move t;
     i = i + 1;
   }
   return i;
@@ -98,7 +98,7 @@ fn arrays(n: int) -> int {
   prev: Obj = None;
   i = 0;
   while i < n {
-    prev = Link([prev, Str(i), Node(i)]);
+    prev = Link([move prev, Str(i), Node(i)]);
     i = i + 1;
   }
   return i;
@@ -120,7 +120,7 @@ fn tuples(n: int) -> int {
     if i % 10000 == 0 {
       e = openError();
     }
-    prev = Chain((i, (prev, e)));
+    prev = Chain((i, (move prev, move e)));
     i = i + 1;
   }
   return i;

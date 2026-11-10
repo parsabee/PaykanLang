@@ -1,10 +1,12 @@
 // ::memory: Buffer<T>, a run of slots whose storage is the runtime's
 // (Runtime.h, "Buffer"), reached through generic native functions, and
-// Box<T>, one value held in a shared object.
+// Box<T>, one value in an object of its own.
 //
-// A Buffer is a struct: a handle to its storage, which the runtime holds.
-// Copying a Buffer copies the handle, so every copy sees the same slots (as a
-// slice header does); the storage goes with the last copy.
+// A Buffer is a struct over its storage, which the runtime holds, and it
+// owns the values in its slots.  It is move-only: assigning or passing a
+// buffer moves it (`c = move b`), a `view` or `inout` parameter borrows it,
+// and clone() makes a new buffer of clones of its values, when they are
+// Cloneable (docs/language/06-traits.md).  The storage goes with the buffer.
 //
 // A buffer has len() slots.  Every index and count is an `unsigned`.  It
 // grows and shrinks only when asked to, and growing a slot at a time is
@@ -19,14 +21,17 @@
 // an index past the end is `OutOfRange`, reading an unset slot is
 // `NotFound`, and shrinking by more than len() is `InvalidArgument`.  So a
 // buffer starts empty, `Buffer<T>()`, which allocates no slots, and grows by
-// grow(), reserve() or push(), each saying whether it could.  The one exception is
-// at() and get(), the reads for code that has checked its index already
-// (at() returns the slot itself, a `view`, nothing copied; get() a copy to
-// keep): they panic on a bad index, as reading a fixed-size array out of
-// bounds does.  copy() is the checked read.
+// grow(), reserve() or push(), each saying whether it could.  The
+// exceptions are at(), get() and pop(), for code that has checked its index
+// already: they panic on a bad index or an unset slot, as reading a
+// fixed-size array out of bounds does.  copy() is the checked read.
 //
-// The buffer holds its own reference to each value it stores and drops it
-// when the slot is overwritten or shrunk away, or the buffer dies.
+// A value goes into the buffer by a move: set() and push() take the one
+// they are given.  It comes out lent, by at() (the slot itself, a `view`,
+// nothing copied), moved, by pop(), or as a clone the caller keeps, by get()
+// and copy(), which only a buffer of Cloneable values has (they are in an
+// `impl Buffer<T: Cloneable>` block).  A value is dropped when its slot is
+// overwritten or shrunk away, or the buffer dies.
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): the `_` native functions are the module's own,
@@ -35,10 +40,13 @@
 import ::error as err;
 import ::result as res;
 
+native fn _panic(message: view Str) = "Paykan_panic_message";
 native fn _new<T>(n: unsigned) -> Obj = "PaykanBuffer_new";
 native fn _len<T>(b: view Obj) -> unsigned = "PaykanBuffer_len";
 native fn _isSet<T>(b: view Obj, i: unsigned) -> int = "PaykanBuffer_isSet";
 native fn _get<T>(b: view Obj, i: unsigned) -> view T = "PaykanBuffer_get";
+// The runtime's copy of slot `i`: a second reference to what the slot
+// holds, which only a move out of the slot (pop, swap) may make.
 native fn _copy<T>(b: view Obj, i: unsigned) -> T = "PaykanBuffer_copy";
 native fn _set<T>(b: inout Obj, i: unsigned, v: view T) = "PaykanBuffer_set";
 native fn _reserve<T>(b: inout Obj, n: unsigned)
@@ -66,26 +74,10 @@ impl Buffer<T> {
   // index or an unset slot (copy() reports them instead).
   view fn at(i: unsigned) -> view T { return _get<T>(self.__data, i); }
 
-  // A copy of slot `i`, to keep, for i < len(): panicking on a bad index or
-  // an unset slot, as at() does (copy() reports them instead).  A copy of
-  // an object shares it with the buffer, so it is not taken through a
-  // `view` of the buffer: a `view` reads with at().
-  fn get(i: unsigned) -> T          { return _copy<T>(self.__data, i); }
-
-  // A copy of slot `i`, to keep: `OutOfRange` past the end, `NotFound` for
-  // a slot never set.  As get(), not through a `view`.
-  fn copy(i: unsigned) -> res::Result<T, err::Error> {
-    if i >= _len<T>(self.__data) {
-      return res::fail(_errorOf(err::ErrorCode::OutOfRange));
-    }
-    if _isSet<T>(self.__data, i) == 0 {
-      return res::fail(_errorOf(err::ErrorCode::NotFound));
-    }
-    return res::ok(_copy<T>(self.__data, i));
-  }
-
-  // Store `v` in slot `i`: `OutOfRange` past the end.
-  fn set(i: unsigned, v: view T) -> err::Error {
+  // Store `v` in slot `i`, dropping the value there: `OutOfRange` past the
+  // end (and `v` is dropped).  The slot takes its own reference to what `v`
+  // holds, and `v`'s goes when the call returns: `v` moves in.
+  fn set(i: unsigned, v: T) -> err::Error {
     if i >= _len<T>(self.__data) {
       return _errorOf(err::ErrorCode::OutOfRange);
     }
@@ -114,8 +106,9 @@ impl Buffer<T> {
     return err::none();
   }
 
-  // Append `v` in a new slot: `OutOfMemory` when it cannot be allocated.
-  fn push(v: view T) -> err::Error {
+  // Append `v` in a new slot, a move as in set(): `OutOfMemory` when the
+  // slot cannot be allocated (and `v` is dropped).
+  fn push(v: T) -> err::Error {
     let errno = _grow<T>(self.__data, 1);
     if errno != 0 {
       return err::fromErrno(errno);
@@ -124,8 +117,21 @@ impl Buffer<T> {
     return err::none();
   }
 
+  // Remove the last slot and return its value, which moves out: _copy takes
+  // a reference of its own to what the slot holds, and the shrink drops the
+  // slot's.  It panics on an empty buffer or an unset slot, as at() does.
+  fn pop() -> T {
+    if _len<T>(self.__data) == 0 {
+      _panic("pop from an empty Buffer");
+    }
+    let v = _copy<T>(self.__data, _len<T>(self.__data) - 1);
+    _shrink<T>(self.__data, 1);
+    return v;
+  }
+
   // Exchange slots `i` and `j`: `OutOfRange` when either is past the end,
-  // `NotFound` when either was never set.
+  // `NotFound` when either was never set.  Each value moves to the other's
+  // slot.
   fn swap(i: unsigned, j: unsigned) -> err::Error {
     let n = _len<T>(self.__data);
     if i >= n || j >= n {
@@ -142,11 +148,76 @@ impl Buffer<T> {
   }
 }
 
-// One value of a ValueType (int, float, bool, char, an enum or a tuple) in an
-// object, so that the value can be shared: assigning a box shares it, and a
-// change through one name shows through every other.  get() is the value's
-// storage, which the caller reads, assigns through an `inout` local or
-// passes to an `inout` parameter.
+// The copying reads, of a buffer whose values are Cloneable.
+impl Buffer<T: Cloneable> {
+  // A clone of slot `i`'s value, to keep, for i < len(): panicking on a bad
+  // index or an unset slot, as at() does (copy() reports them instead).
+  view fn get(i: unsigned) -> T { return _get<T>(self.__data, i).clone(); }
+
+  // A clone of slot `i`'s value, to keep: `OutOfRange` past the end,
+  // `NotFound` for a slot never set.
+  view fn copy(i: unsigned) -> res::Result<T, err::Error> {
+    if i >= _len<T>(self.__data) {
+      return res::fail(_errorOf(err::ErrorCode::OutOfRange));
+    }
+    if _isSet<T>(self.__data, i) == 0 {
+      return res::fail(_errorOf(err::ErrorCode::NotFound));
+    }
+    return res::ok(_get<T>(self.__data, i).clone());
+  }
+}
+
+impl Cloneable for Buffer<T: Cloneable> {
+  // A new buffer of as many slots, each holding a clone of this one's value
+  // (an unset slot stays unset).  Running out of memory for its slots
+  // panics: a clone has no error to report it with.
+  view fn clone() -> Buffer<T> {
+    let n = _len<T>(self.__data);
+    out = Buffer<T>();
+    if _grow<T>(out.__data, n) != 0 {
+      _panic("out of memory: no slots for a clone of a Buffer");
+    }
+    i: unsigned = 0;
+    while i < n {
+      if _isSet<T>(self.__data, i) != 0 {
+        _set(out.__data, i, _get<T>(self.__data, i).clone());
+      }
+      i = i + 1;
+    }
+    return out;
+  }
+}
+
+// -- Moving values out of places (#369)
+//
+// A move-only value reached through a field or an element cannot leave by
+// `move`, which takes a variable: it trades places with another value.
+
+/// Swaps the values of @p a and @p b: each takes the other's, with what it
+/// owns, and nothing is copied.
+native fn swap<T>(a: inout T, b: inout T) = "Paykan_mem_swap";
+
+/// The value of @p slot, which takes @p v in its place.
+fn replace<T>(slot: inout T, v: T) -> T {
+  out: mut T = move v;
+  swap(slot, out);
+  return out;
+}
+
+/// The value of @p slot, which becomes None.
+fn take<T>(slot: inout T?) -> T? {
+  out: mut T? = None;
+  swap(slot, out);
+  return out;
+}
+
+// One value of a ValueType (int, float, bool, char, an enum or a tuple) in
+// an object of its own.  A Box is a unique object: assigning or passing one
+// moves it (`c = move b`).  To share one, declare it `shared` (`b: shared
+// mut = mem::Box(0)`): then every name of it is the same box, and a change
+// through one shows through every other.  get() is the value's storage,
+// which the caller reads, assigns through an `inout` local or passes to an
+// `inout` parameter.
 class Box<T: ValueType> {
   __data: T;
 }

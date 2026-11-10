@@ -14,12 +14,12 @@ namespace {
 const char *kBox = R"(
   class Box<T> {
     v: T;
-    fn get() -> T { return self.v; }
-    fn set(v: T) { self.v = v; }
+    view fn get() -> view T { return self.v; }
+    fn set(v: T) { self.v = move v; }
   }
 
   impl Box<T> {
-    fn __init__(v: T) { self.v = v; }
+    fn __init__(v: T) { self.v = move v; }
   }
 )";
 
@@ -63,12 +63,13 @@ CheckedProgram check(const std::string &source) {
 // Two uses of `Box<int>` resolve to one ClassType (cached per canonical
 // argument tuple), and the annotation slots are rewritten to it.
 TEST(Generics, SameInstantiationIsSameClassType) {
-  auto r = check(withMain(std::string(kBox) + R"(
+  auto r =
+      check(withMain(std::string(kBox) + R"(
     class Holder { b: Box<int>; }
     impl Holder { fn __init__() { self.b = Box<int>(1); } }
     fn take(a: Box<int>, b: Box<int>) -> Box<int> { return a; }
   )",
-                          "x: Box<int> = Box<int>(2); take(x, x);"));
+                     "x: Box<int> = Box<int>(2); take(move x, Box<int>(3));"));
   ASSERT_TRUE(r.Ok) << r.Diagnostics;
   auto &ctx = r.Driver->getASTContext();
   ClassType *inst = ctx.lookupClassType("Box<int>");
@@ -140,18 +141,19 @@ TEST(Generics, BoxIntNotAssignableToBoxStr) {
 
 TEST(Generics, InstantiationAsFieldParamReturnAndArray) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
+    impl Cloneable for Box<T> {}
     class Pair<K, V> {
       k: K; v: V;
-      fn key() -> K { return self.k; }
+      fn key() -> K { return self.k.clone(); }
     }
 
     impl Pair<K, V> {
-      fn __init__(k: K, v: V) { self.k = k; self.v = v; }
+      fn __init__(k: K, v: V) { self.k = move k; self.v = move v; }
     }
     class Holder {
       b: Box<int>;
       ps: Pair<Str, int>[2];
-      fn get() -> Box<int> { return self.b; }
+      fn get() -> Box<int> { return self.b.clone(); }
     }
 
     impl Holder {
@@ -198,7 +200,7 @@ TEST(Generics, MatchOnInstantiationArms) {
 TEST(Generics, ArmNamingAnOptionalTypeArgument) {
   auto ok = semaCheck(withMain(R"(
     class Node { n: int; }
-    fn same<T>(x: T?, d: T) -> bool {
+    fn same<T>(x: view T?, d: T) -> bool {
       match x { v: T { return v == d; } None { return False; } }
     }
     fn put<T>(x: inout T?, d: T) {
@@ -236,7 +238,7 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
     class Node<T> {
       v: T;
       next: Obj;
-      fn link(n: Node<T>) { self.next = n; }
+      fn link(n: Node<T>) { self.next = move n; }
     }
 
     impl Node<T> {
@@ -253,15 +255,15 @@ TEST(Generics, GenericClassWithConcreteSuperclass) {
     impl Base { fn __init__(n: int) { self.n = n; } }
     class Wrap<T> : Base {
       v: T;
-      fn get() -> T { return self.v; }
+      view fn get() -> view T { return self.v; }
     }
 
     impl Wrap<T> {
-      fn __init__(v: T, n: int) { __super__(n); self.v = v; }
+      fn __init__(v: T, n: int) { __super__(n); self.v = move v; }
     }
   )",
                               "w: Wrap<Str> = Wrap<Str>(\"a\", 5); "
-                              "x: int = w.num(); b: Base = w;"));
+                              "x: int = w.num(); b: Base = move w;"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
@@ -751,7 +753,7 @@ TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
 TEST(Generics, InferenceFromSliceAndBoxParams) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
     fn first<T>(xs: view T[]) -> view T { return xs[0]; }
-    fn unbox<T>(b: mut Box<T>) -> T { return b.get(); }
+    fn unbox<T>(b: mut Box<T>) -> T { return b.get().clone(); }
     fn pick<A, B>(a: A, b: B) -> B { return b; }
   )",
                               R"(
@@ -866,7 +868,7 @@ SemaResult semaCheckFile(const std::string &path) {
 
 const char *kGenLib = R"(
 class Box<T> { v: T; view fn get() -> view T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn mk() -> Box<int> { return Box<int>(41); }
 fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 )";
@@ -898,12 +900,12 @@ TEST(Generics, ImportedTemplates) {
              "return b.get(); }"},
       // Inside this module's own templates.
       {"t5", "import lib::gen;\n"
-             "fn wrap<T>(x: T) -> gen::Box<T> { return gen::Box<T>(x); }\n"
+             "fn wrap<T>(x: T) -> gen::Box<T> { return gen::Box<T>(move x); }\n"
              "fn head<T>(xs: view T[]) -> view T { "
              "return gen::first<T>(xs); }\n"
              "class W<T> { b: gen::Box<T>; }\n"
              "impl W<T> { fn __init__(x: T) { "
-             "self.b = gen::Box<T>(x); } }\n"
+             "self.b = gen::Box<T>(move x); } }\n"
              "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
              "t: int = head([\"t\"]).len(); "
              "return wrap(2).get() + head([1]); }"},
@@ -933,7 +935,7 @@ class Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
 }
 fn _helper() -> int { return 1; }
 fn sum<T>(b: Box<T>) -> int { return b.total() + _helper(); }
@@ -943,7 +945,7 @@ fn sum<T>(b: Box<T>) -> int { return b.total() + _helper(); }
 import lib::gen;
 import other as u;
 fn _helper() -> Str { return u::ten(); }
-fn main() -> int { b = gen::Box(3); s: Str = _helper(); return gen::sum(b); }
+fn main() -> int { b = gen::Box(3); s: Str = _helper(); return gen::sum(move b); }
 )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics, "");
@@ -958,9 +960,9 @@ TEST(Generics, ImportedInstantiationsAreOneClass) {
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib/gen.pkn", R"(
 class Box<T> { v: T; view fn get() -> view T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn own() -> Box<int> { return Box<int>(1); }
-fn two<T>(b: Box<T>) -> T[2] { return [b.v, b.v]; }
+fn two<T>(b: Box<T>) -> T[2] { return [b.v.clone(), b.v.clone()]; }
 )");
   writeProjectFile(dir, "a.pkn",
                    "import lib::gen;\n"
@@ -1099,7 +1101,7 @@ fn main() -> int { b = Box<int>(1); return 0; }
         dir, "clash2.pkn",
         std::string("import ::io; import lib::gen;\n"
                     "class Box<T> { v: T; }\n"
-                    "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
+                    "impl Box<T> { fn __init__(v: T) { self.v = move v; } }\n"
                     "fn main() -> int { ") +
             body + " return 0; }\n"));
     EXPECT_FALSE(r3.Ok) << body;
@@ -1112,14 +1114,14 @@ fn main() -> int { b = Box<int>(1); return 0; }
   std::filesystem::remove_all(dir);
 }
 
-// Instantiation names are global (OD-9 b): a program's own `_Node<int>`
-// clashes with the one `::collections` makes of its private `_Node<T>`, and
+// Instantiation names are global (OD-9 b): a program's own `_Heap<int>`
+// clashes with the one `::collections` makes of its private `_Heap<T>`, and
 // its own `Result<Str, Error>` with the one `::io` brings in.  The clash is
 // one error, in the program's file, at its own instantiation, with notes at
 // the other template's declaration and at its instantiation and the
 // requests that led there (SW-28).  Base reported it in collections.pkn,
-// the library's file, once per use of `_Node<T>` in LinkedList<int>, when
-// the program's instantiation came first, and with no note at all.
+// the library's file, once per use of the library's template, when the
+// program's instantiation came first, and with no note at all.
 TEST(Generics, AnInstantiationNamedLikeAnotherTemplatesIsOneError) {
   auto dir = paykan::test::tempDir() / "pkn_sema_inst_clash";
   std::filesystem::remove_all(dir);
@@ -1152,39 +1154,38 @@ TEST(Generics, AnInstantiationNamedLikeAnotherTemplatesIsOneError) {
       }
     return s;
   };
-  const std::string node = "import ::io;\n"
+  const std::string heap = "import ::io;\n"
                            "import ::collections;\n"
-                           "class _Node<T> { value: T; }\n"
+                           "class _Heap<T> { value: T; }\n"
                            "fn main() -> int {\n";
   const std::string notes =
-      "collections.pkn: note: '::collections::_Node' is declared here\n"
-      "collections.pkn: note: '::collections::_Node' is instantiated as "
-      "'_Node<int>' here\n"
-      "collections.pkn: note: in instantiation of 'LinkedList<int>' requested "
-      "here\n";
+      "collections.pkn: note: '::collections::_Heap' is declared here\n"
+      "collections.pkn: note: '::collections::_Heap' is instantiated as "
+      "'_Heap<int>' here\n";
   const std::string clash =
-      ": error: instantiation '_Node<int>' of '_Node' conflicts with the "
-      "instantiation '_Node<int>' of '::collections::_Node' (type names are "
+      ": error: instantiation '_Heap<int>' of '_Heap' conflicts with the "
+      "instantiation '_Heap<int>' of '::collections::_Heap' (type names are "
       "global across imports)\n";
-  // Either order: the error at the program's `_Node<int>`, the request of
-  // the Stack<int> that led to the library's last.
+  // Either order: the error at the program's `_Heap<int>`, the request of
+  // the MinPriorityQueue<int> that led to the library's last.
   struct Order {
-    const char *Body, *Error, *Stack;
+    const char *Body, *Error, *Queue;
   };
-  for (const Order &o : {Order{"  let n = _Node<int>(1);\n"
-                               "  s = collections::Stack<int>();\n",
+  for (const Order &o : {Order{"  let n = _Heap<int>(1);\n"
+                               "  q = collections::MinPriorityQueue<int>();\n",
                                "input.pkn:5:11", "input.pkn:6:7"},
-                         Order{"  s = collections::Stack<int>();\n"
-                               "  let n = _Node<int>(1);\n",
+                         Order{"  q = collections::MinPriorityQueue<int>();\n"
+                               "  let n = _Heap<int>(1);\n",
                                "input.pkn:6:11", "input.pkn:5:7"}}) {
     std::string expected = o.Error;
     expected += clash;
     expected += notes;
-    expected += o.Stack;
-    expected += ": note: in instantiation of 'Stack<int>' requested here\n";
-    auto r = check(node + o.Body +
-                   "  s.push(n.value);\n"
-                   "  io::println(s.peek());\n"
+    expected += o.Queue;
+    expected += ": note: in instantiation of 'MinPriorityQueue<int>' "
+                "requested here\n";
+    auto r = check(heap + o.Body +
+                   "  q.push(n.value, 1);\n"
+                   "  io::println(q.peek());\n"
                    "  return 0;\n"
                    "}\n");
     EXPECT_FALSE(r.Ok);
@@ -1192,20 +1193,20 @@ TEST(Generics, AnInstantiationNamedLikeAnotherTemplatesIsOneError) {
     EXPECT_EQ(lineless(summary(r.Diagnostics)), expected) << r.Diagnostics;
   }
   // A struct template's instantiation against a class template's.
-  auto entry = check("import ::collections;\n"
-                     "struct _Entry<K, V> { k: K; v: V; }\n"
+  auto table = check("import ::collections;\n"
+                     "struct _Table<K, V> { k: K; v: V; }\n"
                      "fn main() -> int {\n"
                      "  m = collections::HashMap<int, int>();\n"
                      "  m.put(1, 2);\n"
-                     "  let e = _Entry<int, int>(1, 2);\n"
+                     "  let e = _Table<int, int>(1, 2);\n"
                      "  return e.k;\n"
                      "}\n");
-  EXPECT_EQ(entry.ErrorCount, 1u) << entry.Diagnostics;
-  EXPECT_TRUE(has(summary(entry.Diagnostics),
-                  "input.pkn:6:11: error: instantiation '_Entry<int, int>' of "
-                  "'_Entry' conflicts with the instantiation '_Entry<int, "
-                  "int>' of '::collections::_Entry'"))
-      << entry.Diagnostics;
+  EXPECT_EQ(table.ErrorCount, 1u) << table.Diagnostics;
+  EXPECT_TRUE(has(summary(table.Diagnostics),
+                  "input.pkn:6:11: error: instantiation '_Table<int, int>' of "
+                  "'_Table' conflicts with the instantiation '_Table<int, "
+                  "int>' of '::collections::_Table'"))
+      << table.Diagnostics;
   // An instantiation an import gives the program: the note is at the
   // import, and at the template when the program sees it.
   const std::string result =
@@ -1246,25 +1247,26 @@ TEST(GenericsTypes, TupleAndOptionalBodiesInstantiate) {
   auto r = semaCheck(R"(
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
+    impl Cloneable for Node {}
     class Pair<A, B> {
       p: (A, B);
-      fn first() -> A { x, _ = self.p; return x; }
-      fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+      fn first() -> A { x, _ = self.p.clone(); return x; }
+      fn swap() -> (B, A) { return (self.p.1.clone(), self.p.0.clone()); }
     }
 
     impl Pair<A, B> {
-      fn __init__(a: A, b: B) { self.p = (a, b); }
+      fn __init__(a: A, b: B) { self.p = (move a, move b); }
     }
     class Slot<T> {
       v: T?;
-      fn get() -> T? { return self.v; }
+      fn get() -> T? { return self.v.clone(); }
     }
 
     impl Slot<T> {
       fn __init__() { }
     }
     fn orElse<T>(x: T?, d: T) -> T {
-      match x {
+      match move x {
         v: T { return v; }
         None { return d; }
       }
@@ -1284,9 +1286,9 @@ TEST(GenericsTypes, InferenceThroughTuplesAndOptionals) {
   auto r = semaCheck(R"(
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
-    fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
+    fn firstOf<A, B>(p: (A, B)) -> A { return p.0.clone(); }
     fn unwrapOr<T>(x: T?, d: T) -> T {
-      match x {
+      match move x {
         v: T { return v; }
         _    { return d; }
       }
@@ -1295,7 +1297,7 @@ TEST(GenericsTypes, InferenceThroughTuplesAndOptionals) {
       i: int = firstOf((1, "x"));
       s: Str = firstOf(("s", 2.5));
       m: Node? = Node(1);
-      a: Node = unwrapOr(m, Node(2));       // T? against Node?
+      a: Node = unwrapOr(move m, Node(2));  // T? against Node?
       b: Node = unwrapOr(None, Node(3));    // None carries no information
       return 0;
     }
@@ -1376,9 +1378,9 @@ TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
                                   "impl Node { fn __init__() { } }\n",
                               R"(
     a: mut Box<(int, Str)> = Box<(int, Str)>((1, "a"));
-    t: (int, Str) = a.get();
+    t: (int, Str) = a.get().clone();
     n: Node? = None;
-    b: Box<Node?> = Box<Node?>(n);
+    b: Box<Node?> = Box<Node?>(move n);
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -1390,13 +1392,13 @@ TEST(GenericsTypes, ExportedInstantiationNamesWithCommas) {
   auto dir = paykan::test::tempDir() / "pkn_sema_generics_names";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib.pkn", R"(
-class Pair<A, B> { a: A; b: B; fn first() -> A { return self.a; } }
-impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = a; self.b = b; } }
-class Box<T> { v: T; fn get() -> T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+class Pair<A, B> { a: A; b: B; fn first() -> A { return self.a.clone(); } }
+impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = move a; self.b = move b; } }
+class Box<T> { v: T; view fn get() -> view T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
 fn mkBoxPair() -> Box<Pair<Str, int>> { return Box<Pair<Str, int>>(mkPair()); }
-fn mkBoxes() -> (Pair<Str, int>, Box<Pair<Str, int>>?) { b: Box<Pair<Str, int>>? = None; return (mkPair(), b); }
+fn mkBoxes() -> (Pair<Str, int>, Box<Pair<Str, int>>?) { b: Box<Pair<Str, int>>? = None; return (mkPair(), move b); }
 )");
   auto p = writeProjectFile(dir, "main.pkn", R"(
 import lib;
@@ -1404,7 +1406,7 @@ fn main() -> int {
   s: Str = lib::mkPair().first();
   n: int = lib::mkBoxPair().get().b;
   x, y = lib::mkBoxes();
-  k: Str = x.a;
+  k: Str = move x.a;
   return n;
 }
 )");
@@ -1418,14 +1420,15 @@ fn main() -> int {
 static const char *const kBoxWithStatics = R"(
   class Box<T> {
     __v: T;
-    fn get() -> T { return self.__v; }
+    view fn get() -> view T { return self.__v; }
   }
   impl Box<T> {
-    fn __init__(v: T) { self.__v = v; }
-    static fn of(v: T) -> Box<T> { return Box<T>(v); }
+    fn __init__(v: T) { self.__v = move v; }
+    static fn of(v: T) -> Box<T> { return Box<T>(move v); }
     static fn pair(v: T) -> (Box<T>, Box<T>) {
-      b = Box<T>(v);
-      return (b, Box<T>(b.__v)); // a static reaches the private members
+      b = Box<T>(move v);
+      c = Box<T>(b.__v.clone()); // a static reaches the private members
+      return (move b, move c);
     }
   }
 )";

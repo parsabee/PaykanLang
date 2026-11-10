@@ -1,5 +1,6 @@
 // Isolates: ownership-taking uses of a match-arm binding.
-// The binding names the subject without owning it; consuming it (as a
+// The subject is `shared`, so the binding is a `shared` reference too.  The
+// binding names the subject without owning it; consuming it (as a
 // function argument, a new owned variable, or a class field) retains the
 // subject's object (Paykan_retain), so the binding's consumers and the
 // subject's owner share it and it is destroyed once.
@@ -19,19 +20,19 @@ impl A {
 }
 
 class Holder {
-  a: A;
+  a: shared A;
 }
 
 impl Holder {
-  fn __init__(a0: A) { self.a = a0; }
+  fn __init__(a0: shared A) { self.a = a0; }
 }
 
-fn probe(a: A) {
+fn probe(a: shared A) {
   io::println(Str(a.x));
 }
 
 fn main() -> int {
-  let o: Obj = A();
+  let o: shared Obj = A();
   let h: mut = Holder(A());
   match o {
     b: A {

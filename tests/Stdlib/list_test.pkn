@@ -1,4 +1,4 @@
-// ::collections List<T>: growth, indexing, insert/remove, search, copies.
+// ::collections List<T>: growth, indexing, insert/remove, search, clones.
 import ::io;
 import ::collections;
 import ::memory;
@@ -37,36 +37,36 @@ class Hooked {
   }
 }
 
+// Each list below is in a box, which its elements' hooks share: a hook
+// changes the list it is in.
+
 // A list of two elements, 1 and 2, the first of which empties the list when
 // its `equals` is called.
-fn emptiedByEquals() -> collections::List<Hooked> {
-  xs = collections::List<Hooked>();
-  let alias = memory::Box(xs);
-  xs.push(Hooked(1, fn() -> int { alias.get().clear(); return 0; }));
-  xs.push(Hooked(2, None));
+fn emptiedByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
+  xs: shared mut = memory::Box(collections::List<Hooked>());
+  xs.get().push(Hooked(1, fn() -> int { xs.get().clear(); return 0; }));
+  xs.get().push(Hooked(2, None));
   return xs;
 }
 
 // A list of 1, 2 and 3, whose 2 removes the first element when its `equals`
-// is called.  Its hook holds the list: clear it when done, or the list holds
-// itself.
-fn shrunkByEquals() -> collections::List<Hooked> {
-  xs = collections::List<Hooked>();
-  let alias = memory::Box(xs);
-  xs.push(Hooked(1, None));
-  xs.push(Hooked(2, fn() -> int { alias.get().removeAt(0); return 0; }));
-  xs.push(Hooked(3, None));
+// is called.  Its hook holds the box: clear the list when done, or the list
+// holds itself.
+fn shrunkByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
+  xs: shared mut = memory::Box(collections::List<Hooked>());
+  xs.get().push(Hooked(1, None));
+  xs.get().push(Hooked(2, fn() -> int { xs.get().removeAt(0); return 0; }));
+  xs.get().push(Hooked(3, None));
   return xs;
 }
 
 // A list of 1, 2 and 3, whose 2 swaps itself with the 3 after it when its
-// `equals` is called.  Its hook holds the list: clear it when done.
-fn swappedByEquals() -> collections::List<Hooked> {
-  xs = collections::List<Hooked>();
-  let alias = memory::Box(xs);
-  xs.push(Hooked(1, None));
-  xs.push(Hooked(2, fn() -> int { alias.get().swap(1, 2); return 0; }));
-  xs.push(Hooked(3, None));
+// `equals` is called.  Its hook holds the box: clear the list when done.
+fn swappedByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
+  xs: shared mut = memory::Box(collections::List<Hooked>());
+  xs.get().push(Hooked(1, None));
+  xs.get().push(Hooked(2, fn() -> int { xs.get().swap(1, 2); return 0; }));
+  xs.get().push(Hooked(3, None));
   return xs;
 }
 
@@ -102,7 +102,7 @@ fn main() -> int {
   io::println(collections::listToString(xs));
 
   words = collections::listOf(["pear", "fig", "apple"]);
-  copy = words.copy();
+  copy = words.clone();
   copy.push("kiwi");
   words.set(1, "plum");
   io::println(collections::listToString(words) + " "
@@ -149,25 +149,26 @@ fn main() -> int {
   let a = emptiedByEquals();
   let b = emptiedByEquals();
   c = emptiedByEquals();
-  io::println(idx(a.indexOf(Hooked(0, None))) + " "
-      + Str(b.contains(Hooked(0, None))) + " " + Str(c.remove(Hooked(0, None)))
-      + " " + Str(a.len() + b.len() + c.len()));
+  io::println(idx(a.value().indexOf(Hooked(0, None))) + " "
+      + Str(b.value().contains(Hooked(0, None))) + " "
+      + Str(c.get().remove(Hooked(0, None))) + " "
+      + Str(a.value().len() + b.value().len() + c.value().len()));
 
   // remove removes nothing when the `equals` that found the element changed
   // the list's length: the index it was found at names 3 once 1 is gone,
   // and no element once the list is empty.
   d = shrunkByEquals();
   e = emptiedByEquals();
-  io::println(Str(d.remove(Hooked(2, None))) + " "
-      + collections::listToString(d) + " " + Str(e.remove(Hooked(1, None)))
-      + " " + collections::listToString(e));
-  d.clear();
+  io::println(Str(d.get().remove(Hooked(2, None))) + " " +
+      collections::listToString(d.value()) + " " + Str(e.get().remove(Hooked(1,
+      None))) + " " + collections::listToString(e.value()));
+  d.get().clear();
 
   // An `equals` that changes the list but not its length goes unseen:
   // remove takes out the element then at the index it was found at, the 3.
   f = swappedByEquals();
-  io::println(Str(f.remove(Hooked(2, None))) + " "
-      + collections::listToString(f));
-  f.clear();
+  io::println(Str(f.get().remove(Hooked(2, None))) + " "
+      + collections::listToString(f.value()));
+  f.get().clear();
   return 0;
 }

@@ -512,31 +512,32 @@ TEST(Concurrency, AtomicSharedBoxedBufferIsReadInAParallelFor) {
 
 // -- move
 
-// A moved object is released exactly once, where it went: a `weak` local
-// reads None once the callee has released the argument, and the caller's
-// ended variable releases nothing.  A partial move `move h.job` takes the
-// field out and ends the holder, whose teardown leaves the field alone; the
-// object goes when its new owner does.  A struct value moves into a
-// parameter and a unique field moves out of one.  Zero live blocks says
-// nothing was released twice or never.
+// A moved object is released exactly once, where it went: a `weak` local of
+// its name (a `shared` string the Job alone holds: a `weak` reference names
+// a `shared` object) reads None once the callee has released the argument,
+// and the caller's ended variable releases nothing.  A partial move `move
+// h.job` takes the field out and ends the holder, whose teardown leaves the
+// field alone; the object goes when its new owner does.  A struct value
+// moves into a parameter and a unique field moves out of one.  Zero live
+// blocks says nothing was released twice or never.
 TEST(Concurrency, MovesReleaseTheObjectOnce) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    class Job { name: Str; }
+    class Job { name: shared Str; }
     class Holder { job: Job; tag: Str; }
     struct Pair { left: Job; n: int; }
-    fn show(w: Job?) -> Str {
-      match w { j: Job { return j.name; } None { return "gone"; } }
+    fn show(w: view Str?) -> Str {
+      match w { s: Str { return s.clone(); } None { return "gone"; } }
     }
     fn keep(j: Job) -> int { return j.name.len(); }
     fn take(p: Pair) -> int { return p.left.name.len() + p.n; }
     fn main() -> int {
       let a = Job("abc");
-      weak wa = a;
+      wa: weak = a.name;
       let n = keep(move a);
       io::println(Str(n) + " " + show(wa));
       let h = Holder(Job("inner"), "t");
-      weak wj = h.job;
+      wj: weak = h.job.name;
       if True {
         let inner = move h.job;
         io::println(inner.name + " " + show(wj));
@@ -545,7 +546,7 @@ TEST(Concurrency, MovesReleaseTheObjectOnce) {
       let p = Pair(Job("left"), 1);
       io::println(Str(take(move p)));
       let r = Pair(Job("xy"), 2);
-      weak wr = r.left;
+      wr: weak = r.left.name;
       let l = move r.left;
       io::println(l.name + " " + show(wr));
       return 0;
@@ -582,7 +583,7 @@ TEST(Concurrency, QualifiersAtRunTime) {
       let c: Node = move a;
       v: view Node = c;
       io::println(describe(c) + " " + v.label() + " " + c.label());
-      let d: shared Node = c;
+      let d: shared Node = move c;
       io::println(describe(d));
       return 0;
     }

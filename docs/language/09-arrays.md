@@ -44,10 +44,10 @@ take it from the initializer, as `sizes` does. An array has at least one element
 an error. The elements of a literal must have a common type: `int`s and `float`s mix into
 `float`s, and objects of different classes give their nearest common ancestor.
 
-`[v; n]` is an array of `n` copies of `v`, where `n` is a number written out, at least 1
-(`[0; n]` with a variable `n` is an error). It is how you make an array that the program
-fills in afterwards, as the next section does: `[0; 6]` is six zeros, `[""; 3]` three empty
-strings, and `flags: bool[4] = [False; 4]` four `False`s. With a declared type, `v` takes
+`[v; n]` is an array of `n` elements of value `v`, where `n` is a number written out, at
+least 1 (`[0; n]` with a variable `n` is an error). It is how you make an array that the
+program fills in afterwards, as the next section does: `[0; 6]` is six zeros, `[""; 3]`
+three empty strings, and `flags: bool[4] = [False; 4]` four `False`s. With a declared type, `v` takes
 its element type, so `ratios: float[3] = [0; 3]` holds `0.0`s.
 
 ## Reading and writing
@@ -201,7 +201,7 @@ class City {
 }
 
 impl City {
-  fn __init__(name: Str, people: int) { self.name = name; self.people = people; }
+  fn __init__(name: Str, people: int) { self.name = move name; self.people = people; }
 }
 
 fn main() -> int {
@@ -210,13 +210,13 @@ fn main() -> int {
   io::println("row 1 has " + Str(grid[1].len()) + " cells, the last is " + Str(grid[1][2]));
 
   let cities = [City("Tehran", 9000000), City("Lyon", 520000), City("Oslo", 700000)];
-  biggest = cities[0];
+  biggest = 0;                      // the index of the largest so far
   i = 1;
   while i < cities.len() {
-    if cities[i].people > biggest.people { biggest = cities[i]; }
+    if cities[i].people > cities[biggest].people { biggest = i; }
     i = i + 1;
   }
-  io::println("largest: " + biggest.name);
+  io::println("largest: " + cities[biggest].name);
   return 0;
 }
 ```
@@ -229,7 +229,9 @@ largest: Tehran
 ```
 
 Every row of an array of arrays has the same length. An array of objects holds references
-to them, so copying the array copies the references: both arrays share the same objects.
+to them and owns the objects, as a variable would, so the program above remembers where the
+largest city is rather than taking it out of the array: `biggest = cities[i]` would be a
+copy of a unique reference, an error ([Arrays of references](#arrays-of-references)).
 
 Arrays are **invariant**: if `Dog` extends `Animal`, a `Dog[2]` is still not an
 `Animal[2]`. To keep different subclasses in one array, give it the base type, as in
@@ -245,6 +247,7 @@ than letting a bad one panic:
 
 ```pkn
 import ::io;
+import ::memory as mem;
 
 class Task {
   title: Str;
@@ -255,7 +258,7 @@ class Task {
 }
 
 impl Task {
-  fn __init__(title: Str) { self.title = title; self.done = False; }
+  fn __init__(title: Str) { self.title = move title; self.done = False; }
 }
 
 class TaskList {
@@ -265,7 +268,7 @@ class TaskList {
   // Adds a task; False if the list is full.
   fn add(title: Str) -> bool {
     if self.count == self.tasks.len() { return False; }
-    self.tasks[self.count] = Task(title);
+    self.tasks[self.count] = Task(move title);
     self.count = self.count + 1;
     return True;
   }
@@ -293,7 +296,7 @@ class TaskList {
     i = 0;
     while i < self.count {
       if !self.tasks[i].done {
-        self.tasks[kept] = self.tasks[i];
+        self.tasks[kept] = mem::replace(self.tasks[i], Task(""));
         kept = kept + 1;
       }
       i = i + 1;
@@ -348,12 +351,15 @@ cleared 1
 2 of 2 to do
 ```
 
-`[Task(""); 8]` calls `Task("")` once, and a class value is a reference to its object, so
-the eight slots hold the same blank task. That is fine here: `add` puts a new task in a slot
-before anything changes it, and `complete` only reaches the slots in use. An array whose
-elements each need their own object from the start is filled in a loop. `list` is declared
-`mut`, since `add`, `complete` and `clearDone` change the list; `show` and `pending` only
-read it and are `view fn`s ([Classes](05-classes.md#methods-that-only-read-view-fn)).
+The array owns its tasks, each slot one of its own: `[Task(""); 8]` makes a new blank task
+for each slot, since a task is not Copyable ([Repeated values](#repeated-values)). For the
+same reason `clearDone` cannot write `self.tasks[kept] = self.tasks[i]`, which would copy a
+task (`cannot copy 'self.tasks[i]'`): it moves a kept task down by
+[`mem::replace`](../stdlib/memory.md#moving-values-out-of-places-swap-replace-and-take),
+which takes the task out of its slot, an `inout` place, and leaves a blank one there.
+`list` is declared `mut`,
+since `add`, `complete` and `clearDone` change the list; `show` and `pending` only read it
+and are `view fn`s ([Classes](05-classes.md#methods-that-only-read-view-fn)).
 
 ---
 
@@ -363,11 +369,13 @@ read it and are `view fn`s ([Classes](05-classes.md#methods-that-only-read-view-
   `Point[4]`).
 - Arrays of arrays: `int[2][3]` is two `int[3]`s, indexed `grid[i][j]`.
 - Literals: `[e1, e2, e3]` is an array of its own length; `[1, 2, 3]` is an `int[3]`.
-- `[v; n]` is `n` copies of `v`, `n` an integer literal of at least 1: `[0; 8]` is an
-  `int[8]` of zeros. `v` is evaluated once, so `[Node(); 3]` holds one object three times.
+- `[v; n]` is `n` elements of `v`, `n` an integer literal of at least 1: `[0; 8]` is an
+  `int[8]` of zeros. A Copyable `v` is evaluated once and copied; any other is evaluated
+  for each element: `[Node(); 3]` is three nodes.
 - A length written `_` (`x: int[_] = …`) is the initializer's.
 - An array is a value: assigning it, or passing it to a plain parameter, copies its
-  elements. It is not an `Obj`.
+  elements, or moves them when they are move-only (an object, a `Str`). It is not an
+  `Obj`.
 - Its one method is `.len()`. `xs[i]` reads an element and `xs[i] = v` assigns one; every
   index is bounds-checked.
 - A `view T[]` or `inout T[]` parameter is a **slice**: it takes an array of any length.
@@ -466,12 +474,11 @@ Output:
 4 True 0 7
 ```
 
-`v` is evaluated once, and each element is a copy of its value. A value of a reference type
-(a class, `Str`) is a reference, so the elements all name one object: `[Counter(0);
-3]` holds a single counter three times, and a change made through one element shows through
-the others until an element is assigned another object. A tuple is copied into each element,
-and the copies share the objects it holds: `[(0, Counter(0)); 3]` is three tuples naming one
-counter.
+A [Copyable](06-traits.md#copyable) `v` (a number, a `bool`, a `char`, an enum, an
+optional, a tuple or a struct of such parts, a function value, or `None`) is evaluated
+once, and each element is a copy of its value. Any other `v`, a unique object, a `Str`, or
+a tuple holding one, is evaluated for each element, first to last, so each element holds a
+value of its own:
 
 ```pkn
 import ::io;
@@ -479,10 +486,10 @@ import ::io;
 class Counter { n: int; }
 
 fn main() -> int {
-  cs = [Counter(0); 3];    // one Counter, three times
-  cs[0].n = 5;
-  cs[1] = Counter(1);      // cs[1] now holds a second Counter
-  io::println(Str(cs[2].n) + " " + Str(cs[1].n));
+  cs: Counter[3] = [Counter(0); 3];   // three counters
+  cs[1].n = 5;
+  let ts = [(0, "zero"); 2];
+  io::println(Str(cs[0].n) + " " + Str(cs[1].n) + " " + ts[1].1);
   return 0;
 }
 ```
@@ -490,8 +497,14 @@ fn main() -> int {
 Output:
 
 ```
-5 1
+0 5 zero
 ```
+
+So `v` is a value made for each element: a variable or a field that is not Copyable is
+copied into none (`'[v; n]' evaluates its value for each of its 3 elements, and 's' (a
+'Str') is not Copyable: write a value made for each, such as '[s.clone(); 3]'`), and a
+`move` in it would move its variable once for each (`'[v; n]' evaluates its value for each
+of its 3 elements, so it cannot move 's' (that would move it 3 times)`).
 
 - The count is a literal: `[0; n]` is an error (`unexpected identifier 'n'; expected the
   number of copies, an integer literal`), and so are `[0; -1]` and `[0; 3.0]`.
@@ -555,10 +568,10 @@ Output:
 9 divisors, the largest 36
 ```
 
-For an array of objects the placeholder is one blank object (`tasks: Task[8] =
-[Task(""); 8]`, as in [the task list](#project-the-task-list)), which the unused slots
-share: a slot gets its own object when it is assigned one, before the program changes it.
-An optional element type (`Task?[8]`) can start as `[None; 8]` instead.
+For an array of objects the placeholder is a blank object in every slot, each written
+out (`[Task(""), Task(""), …]`, as in [the task list](#project-the-task-list)), since
+`[Task(""); 8]` would copy one object, a unique one, into every slot. An optional element
+type (`Task?[8]`) can start as `[None; 8]` instead: `None` holds nothing to copy.
 
 ---
 
@@ -592,7 +605,8 @@ aborts the program with `paykan: array index 3 out of bounds (len=3)`.
 ## Copying
 
 An array is a value: assigning one copies its elements, so the copy and the original change
-independently.
+independently. An array of move-only elements moves instead
+([Arrays of references](#arrays-of-references)).
 
 ```pkn
 import ::io;
@@ -639,9 +653,11 @@ An element can be a scalar (`int`, `float`, `bool`, `char`, a sized numeric type
 held inline, `None` when zeroed), an enum, a reference (a class, `Str`, an optional of one), a
 tuple or a struct (held inline, see [Tuples](10-tuples.md) and [Structs](11-structs.md)), a
 function value or another array. An element of a reference type is
-a reference, as a variable of that type is: copying the array copies the references, so the
-copy and the original share their elements' objects, and an element of a `view` array is a
-`view` too.
+a reference, as a variable of that type is, and the array owns what it refers to: an array
+of move-only elements is move-only itself, so it is not copied but moved, by `move`
+(`copy = cs;` is an error that says to write `move cs`), and an element of a `view` array
+is a `view` too. A copy of an element is its `clone()`, when its type is
+[Cloneable](06-traits.md#cloneable), as a `Str` is.
 
 ```pkn
 import ::io;
@@ -650,11 +666,11 @@ class Counter { n: int; }
 
 fn main() -> int {
   let cs: Counter[2] = [Counter(1), Counter(2)];
-  copy = cs;               // the same two counters
-  copy[0].n = 10;
+  moved = move cs;         // the two counters, now held by moved
+  moved[0].n = 10;
   names: Str[2] = ["ann", "bob"];
   names[1] = names[0] + "!";
-  io::println(Str(cs[0].n) + " " + names[1]);
+  io::println(Str(moved[0].n) + " " + names[1]);
   return 0;
 }
 ```
@@ -873,8 +889,9 @@ it does not convert to `Obj`; each is an error such as `tuple element 0: a fixed
 - An array is not printed and has no `toString`; print its elements.
 - `len()` is its only method (`'int[2]' has no method 'toString' with these arguments (a
   fixed-size array has 'len()')`).
-- An element cannot be named by an `inout` local or passed to an `inout` parameter yet (`an
-  array element cannot be passed to 'inout' parameter 'n' yet`).
+- A slice's element cannot be named by an `inout` local or passed to an `inout` parameter
+  yet (`an element of a slice cannot be passed to 'inout' parameter 'n' yet`); a fixed-size
+  array's can.
 
 ---
 

@@ -375,7 +375,7 @@ TEST(StrParse, EveryKindOfReceiver) {
       view fn parsed() -> int? { return self.text.toInt(); }
     }
     impl Holder {
-      fn __init__(t: Str) { self.text = t; }
+      fn __init__(t: Str) { self.text = move t; }
     }
     fn fromView(s: view Str) -> u8? { return s.toU8(); }
     fn digits() -> Str { return "4" + "2"; }

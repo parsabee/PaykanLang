@@ -8,13 +8,15 @@
 //
 // A `T?` is the same reference-counted box as a `T` with NULL meaning None, so
 // the whole list is released through the ordinary destructors (run this with
-// --track-heap to see zero live blocks).
+// --track-heap to see zero live blocks).  The list's nodes are `shared`: `find`
+// returns a node the list holds too, and a cursor walks the list by copying
+// the `next` references.
 
 import ::io;
 
 class Node {
   v: int;
-  next: Node?;                 // implicitly None — no assignment in __init__
+  next: shared Node?;          // implicitly None — no assignment in __init__
 }
 
 impl Node {
@@ -23,14 +25,14 @@ impl Node {
 
 // ---- List operations -------------------------------------------------------
 
-fn push_front(head: Node?, v: int) -> Node {
+fn push_front(head: shared Node?, v: int) -> shared Node {
   let n: mut = Node(v);
   n.next = head;               // Node? field accepts a Node? value
   return n;
 }
 
-fn find(head: Node?, key: int) -> Node? {
-  cur: Node? = head;
+fn find(head: shared Node?, key: int) -> shared Node? {
+  cur: shared Node? = head;
   while cur != None {
     match cur {
       n: Node {
@@ -43,9 +45,9 @@ fn find(head: Node?, key: int) -> Node? {
   return None;
 }
 
-fn render(head: Node?) -> Str {
+fn render(head: shared Node?) -> Str {
   out = "[";
-  cur: Node? = head;
+  cur: shared Node? = head;
   first = True;
   while cur != None {
     match cur {
@@ -61,7 +63,7 @@ fn render(head: Node?) -> Str {
   return out + "]";
 }
 
-fn describe(found: Node?) -> Str {
+fn describe(found: view Node?) -> Str {
   match found {
     n: Node {
       return "found " + Str(n.v);
@@ -74,7 +76,7 @@ fn describe(found: Node?) -> Str {
 
 fn main() -> int {
   io::println("=== build a list ===");
-  head: Node? = None;
+  head: shared Node? = None;
   head = push_front(head, 3);
   head = push_front(head, 2);
   head = push_front(head, 1);

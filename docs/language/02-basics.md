@@ -218,20 +218,24 @@ an object takes, `mut`, `shared`, `shared mut`, `atomic shared` or `locked mut`,
 something, writes, several owners or a crossing between threads
 ([Concurrency](19-concurrency.md)).
 
-A variable declared with `weak` refers to an object without keeping it alive. Its type is
-`T?` for a class `T`, inferred from the initializer when left off, and it reads as `None`
-once the object is gone:
+A variable whose type is qualified `weak` is a `shared` reference that owns nothing: it
+refers to a shared object without keeping it alive, and reads as `None` once the object is
+gone. `weak` names a `shared` object, `weak mut` a `shared mut` one, and a read gives that
+form back. Its type is `T?` for a class `T`, inferred from the initializer when left off:
 
 ```pkn
-p = Point(1, 2);
-weak w: Point? = p;      // p's object, while something holds it
-weak u = p;              // inferred Point?
-weak e: Point?;          // None until assigned
+let p: shared = Point(1, 2);
+w: weak Point? = p;      // p's object, while something holds it
+u: weak = p;             // inferred Point?
+e: weak Point?;          // None until assigned
+let q: shared mut = Point(3, 4);
+m: weak mut = q;         // a 'shared mut' object, changed through m
 ```
 
-`weak` also declares a class field (`weak parent: Node?;`). See
-[Weak references](16-memory.md#weak-references) for what a weak reference is for and how it
-is read.
+`weak` also qualifies a class field (`parent: weak mut Node?;`). A unique object (a `T` or
+`mut T`) has one reference, its owner's, and no weak reference names it. See [Weak
+references](16-memory.md#weak-references) for what a weak reference is for and how it is
+read.
 
 ### Local borrows
 
@@ -290,7 +294,7 @@ fn main() -> int {
   b = b + 10;
   names = ["x", "y"];
   n: inout = names;
-  n = [n[1], "z"];
+  n = [n[1].clone(), "z"];        // a string of n's, copied: the array owns its elements
   io::println(Str(a.balance) + " " + names[0] + names[1]);
   return 0;
 }
@@ -531,7 +535,8 @@ mat: int[2][2] = [[1, 2], [3, 4]];  // 2D
 
 `(T1, T2, ...)` groups a fixed number of values of possibly different types. Like an array,
 a tuple is a value held in its variable (or field, or array element) and copied on
-assignment; it is immutable and is not an `Obj`. See [Tuples](10-tuples.md).
+assignment, or moved when it holds a move-only value such as a `Str`; it is immutable and
+is not an `Obj`. See [Tuples](10-tuples.md).
 
 ```pkn
 p: (int, Str) = (1, "one");
@@ -542,8 +547,8 @@ first: int = p.0;                   // element access
 ### Structs
 
 `struct Name { field: Type; ... }` declares a value type with named fields. Like a tuple,
-a struct is held in its variable (or field, or array element) and copied on assignment;
-unlike a tuple's elements, its fields are named and can be assigned in place. A struct has
+a struct is held in its variable (or field, or array element) and copied on assignment
+(moved when it holds a move-only value); unlike a tuple's elements, its fields are named and can be assigned in place. A struct has
 no superclass and no vtable; its methods come from `impl` blocks. See
 [Structs](11-structs.md).
 
@@ -559,13 +564,14 @@ io::println(p);                     // Point(x: 5, y: 2)
 `(T1, T2) -> R` is the type of a function value: a lambda, `fn(x: int) -> int { return
 x + 1; }`, or a named function used without calling it. A function value is a value, held
 in place like a tuple: its code and its closure, the variables the lambda captured (by
-copy). It is called like a function. See [Function types and
+copy). It is move-only, as an object is: a variable holding one hands it on by `move`, or
+lends it to a `view` parameter. It is called like a function. See [Function types and
 lambdas](14-function-types.md).
 
 ```pkn
 square = fn(x: int) -> int { return x * x; };
-apply: ((int) -> int, int) -> int = fn(f: (int) -> int, x: int) -> int { return f(x); };
-n = apply(square, 3);               // 9
+apply: (view (int) -> int, int) -> int = fn(f: view (int) -> int, x: int) -> int { return f(x); };
+n = apply(square, 3);               // 9: apply borrows square
 ```
 
 ### Class Types (vtable-bearing, heap-allocated, reference-counted)
@@ -984,9 +990,11 @@ grade: B
 
 ### `move`
 
-`move x` is x's value, which `x` no longer holds: an explicit ownership transfer
-(docs/design/concurrency.md). Transfers at a last use are still inferred by the compiler;
-see [Ownership transfers](16-memory.md#ownership-transfers).
+`move x` is `x`'s value, which `x` no longer holds: the transfer of its value to a new
+owner. A move-only value (an object, a `Str`, a container, or a value holding one) read from a variable, a field or an element goes into another variable, a
+field, an argument or a literal only by `move`, by a `clone()` or to a borrow (a `view` or
+`inout` parameter); a number, a `shared` reference and the other Copyable values copy. See
+[Ownership transfers](16-memory.md#ownership-transfers).
 
 ### Operator Precedence (highest -> lowest)
 
@@ -1117,15 +1125,15 @@ class Counts {
 
 fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + x;
 
-fn reset(c: mut Counts) -> int {
+fn reset(c: shared mut Counts) -> int {
   c.xs = [0, 0, 0];
   return 0;
 }
 
-fn sum(xs: view int[], c: mut Counts) -> int => total(xs, reset(c)); // xs as passed
+fn sum(xs: view int[], c: shared mut Counts) -> int => total(xs, reset(c)); // xs as passed
 
 fn main() -> int {
-  let c: mut = Counts([1, 2, 3]);
+  let c: shared mut Counts = Counts([1, 2, 3]);
   io::println(Str(sum(c.xs, c)) + " " + Str(sum(c.xs, c)));
   return 0;
 }
@@ -1141,7 +1149,7 @@ Output:
 and the lines around it and a caret under `xs`, as for an error:
 
 ```
-counts.pkn:14:51: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
+counts.pkn:14:62: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
 ```
 
 The calls are named as an error names them: a function, a method or a constructor by its

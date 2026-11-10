@@ -6,7 +6,6 @@ fn main() -> int {
   b = memory::Buffer<() -> int>();
   b.push(fn() => 1);
   b.grow(1);
-  f = b.get(1);
-  io::println(f());
+  io::println(b.at(1)());
   return 0;
 }

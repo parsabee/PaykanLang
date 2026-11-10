@@ -597,10 +597,12 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
     FixedArrayAllowed = true; // a field may be a fixed-size array
+    ResolvingWeakDecl = field->isWeak();
     auto *fty =
         resolveValueType(field->getType(), field->getLocation(),
                          TypeContext({"field '", field->getName(),
                                       "' in class '", cd->getName(), "'"}));
+    ResolvingWeakDecl = false;
     if (!fty) {
       ok = false;
       continue;
@@ -781,12 +783,13 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
       const std::string &interned = Ctx.intern(name);
       params.push_back({&interned, superInit->getParamTypes()[i], modes.mode(i),
                         superInit->getParamQual(i), loc});
-      // A move-only argument is passed on by `move` (the prototype's copy
-      // rule, --strict-ownership); a Copyable one as it is (an `atomic`
-      // handle copies into the cell's handle, not a new cell).
+      // An argument is passed on by `move` (the copy rule; a Copyable one
+      // moves too, as the parameter ends here), but an `atomic` handle,
+      // which copies into the cell's handle, not a new cell.  Not decided
+      // by Copyable: a struct may not have its fields yet.
       ast::Expr *arg = Ctx.make<ast::Identifier>(loc, interned);
       if (modes.mode(i) == ast::ParamMode::Value &&
-          !isCopyable(superInit->getParamTypes()[i]))
+          !ast::isa<ast::AtomicType>(superInit->getParamTypes()[i]))
         arg = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, arg);
       args.push_back(arg);
     }
@@ -796,12 +799,16 @@ ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
   }
   for (auto &[name, type] : ct->getFields()) {
     const std::string &interned = Ctx.intern(name);
-    params.push_back({&interned, type, ast::ParamMode::Value,
+    // A `weak` field keeps no owner: its parameter borrows (#369).
+    const bool weak = ct->isWeakField(name);
+    params.push_back({&interned, type,
+                      weak ? ast::ParamMode::View : ast::ParamMode::Value,
                       ct->findFieldQualifier(name), loc});
-    // The field takes the parameter: a move-only one by `move` (the
-    // prototype's copy rule), a Copyable one as it is.
+    // The field takes the parameter by `move` (the copy rule), but an
+    // `atomic` handle, which copies into the cell's handle.  Not decided by
+    // Copyable: a struct may not have its fields yet.
     ast::Expr *value = Ctx.make<ast::Identifier>(loc, interned);
-    if (!isCopyable(type))
+    if (!ast::isa<ast::AtomicType>(type) && !weak)
       value = Ctx.make<ast::UnaryExpr>(loc, ast::UnaryOpcode::Move, value);
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
@@ -825,6 +832,15 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
   cd->addMethod(fn); // checked and lowered like a written one
   DefaultInits[cd->getName()] = fn;
   return ok;
+}
+
+/// Whether @p sub is the class @p super or one of its subclasses.
+static bool isSubclassType(const ast::Type *sub, const ast::Type *super) {
+  for (const auto *c = sub ? ast::dyn_cast<ast::ClassType>(sub) : nullptr; c;
+       c = c->getSuperClass())
+    if (c == super)
+      return true;
+  return false;
 }
 
 ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
@@ -937,7 +953,11 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     if (!checkOverrideModes(method, overridden))
       ok = false;
     const auto &baseParams = overridden->getParamTypes();
-    bool sigMatches = typesEqual(overridden->getReturnType(), retTy) &&
+    // `clone` alone returns its own class (#369): each class's clone
+    // makes an object of that class.
+    bool sigMatches = (typesEqual(overridden->getReturnType(), retTy) ||
+                       (method->getName() == names::kMethodClone &&
+                        isSubclassType(retTy, overridden->getReturnType()))) &&
                       baseParams.size() == paramTys.size();
     for (size_t i = 0; sigMatches && i < paramTys.size(); ++i)
       sigMatches = typesEqual(baseParams[i], paramTys[i]);
@@ -961,6 +981,8 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
 
   if (method->isView())
     flags |= ast::MethodDecl::View;
+  if (method->isShared())
+    flags |= ast::MethodDecl::Shared;
   auto *mdecl =
       Ctx.make<ast::MethodDecl>(method->getLocation(), method->getName(), retTy,
                                 std::move(paramTys), flags);
@@ -1032,11 +1054,21 @@ static const ast::ClassType *methodOwner(const ast::ClassType *ct,
 }
 
 bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
+  static const std::vector<ast::ImplDecl *> kNone;
   auto it = ImplsByClass.find(cd->getName());
-  if (it == ImplsByClass.end())
-    return true;
   bool ok = true;
-  for (auto *im : it->second)
+  for (auto *im : it == ImplsByClass.end() ? kNone : it->second) {
+    // A `Cloneable` block's `clone` is virtual, not final like the other
+    // methods of an `impl` block: each class clones as its own type, so a
+    // subclass's overrides its superclass's (#369).
+    const bool cloneable =
+        im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
+        traitAnnotationName(im->getTrait()) == names::kTraitCloneable;
+    const ast::MethodDecl *superClone =
+        cloneable && ct->getSuperClass()
+            ? ct->getSuperClass()->findMethod(names::kMethodClone)
+            : nullptr;
+    bool hasClone = false;
     for (auto *fn : im->getMethods()) {
       if (fn->isStatic())
         continue;
@@ -1048,7 +1080,10 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
       // __init__ is the same here as in the class body: the class's own,
       // never inherited or called through the vtable.
       const bool init = name == names::kMethodInit;
-      if (ct->findMethod(name)) {
+      const bool clone = cloneable && name == names::kMethodClone;
+      hasClone = hasClone || clone;
+      if (ct->findMethod(name) &&
+          !(clone && superClone && declaringClass(ct, name) != ct)) {
         const ast::ClassType *owner = init ? ct : methodOwner(ct, name);
         error(fn->getLocation(),
               "class '" + cd->getName() + "' already has a method '" + name +
@@ -1059,15 +1094,69 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
       std::optional<TypeParamScope> params;
       implTypeParamScope(params, fn);
-      if (auto *md = declareMethod(
-              fn, ct, nullptr,
-              init ? ast::MethodDecl::None : ast::MethodDecl::Impl, ok)) {
+      if (auto *md = declareMethod(fn, ct, clone ? superClone : nullptr,
+                                   init || clone ? ast::MethodDecl::None
+                                                 : ast::MethodDecl::Impl,
+                                   ok)) {
         ct->addMethod(md);
         cd->addMethod(fn); // checked and lowered with the class body
       } else {
         ok = false;
       }
     }
+    // An empty `impl Cloneable for C {}` derives `clone`: the lowering
+    // builds a new object from the class's fields (a unique one cloned, a
+    // Copyable, `shared` or `weak` one the same).
+    if (cloneable && !hasClone) {
+      // Every field, the superclasses' too, has a clone, or is the same
+      // object (`shared`, `weak`) or a value (an `atomic` field gets a
+      // cell of its own).
+      std::string why;
+      for (const ast::ClassType *c = ct; c && why.empty();
+           c = c->getSuperClass())
+        for (const auto &[fname, fty] : c->getFields())
+          if (!ct->isWeakField(fname) && !ast::isa<ast::AtomicType>(fty) &&
+              !isCloneablePart(fty, ct->findFieldQualifier(fname))) {
+            std::string inner;
+            isCloneable(fty, &inner);
+            why = "its field '" + fname + "' ('" +
+                  qualifiedName(ct->findFieldQualifier(fname), fty) +
+                  "') has no clone" + (inner.empty() ? "" : ": " + inner);
+            break;
+          }
+      // Reported, the method is still declared: its uses are not errors too.
+      if (!why.empty()) {
+        error(im->getLocation(), "'impl Cloneable for " + cd->getName() +
+                                     " {}' cannot derive 'clone': " + why +
+                                     "; write the 'clone' instead");
+        ok = false;
+      }
+      auto *fn = Ctx.make<ast::FuncDecl>(
+          im->getLocation(), Ctx.intern(names::kMethodClone),
+          std::vector<ast::Param>{}, ct, nullptr);
+      fn->setView(true);
+      fn->setDerivedClone(true);
+      if (auto *md =
+              declareMethod(fn, ct, superClone, ast::MethodDecl::None, ok)) {
+        ct->addMethod(md);
+        cd->addMethod(fn);
+      } else {
+        ok = false;
+      }
+    }
+  }
+  // A class that inherits `Cloneable` clones as its own type: a
+  // superclass's `clone` would make only that superclass's object.
+  if (ast::ClassType *from = declaringClass(ct, names::kMethodClone);
+      from && from != ct && ct->getSuperClass() &&
+      hasBuiltinTraitImpl(ct->getSuperClass(), names::kTraitCloneable)) {
+    error(cd->getLocation(),
+          "class '" + cd->getName() + "' inherits 'Cloneable' from '" +
+              from->getName() + "', whose 'clone' makes a '" + from->getName() +
+              "': write 'impl Cloneable for " + cd->getName() +
+              " {}' to derive its own, or a 'clone' of its own");
+    ok = false;
+  }
   return ok;
 }
 
@@ -1268,6 +1357,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
     classCtx.ViewMethod = method->isView();
+    classCtx.SharedMethod = method->isShared();
     std::optional<TypeParamScope> params;
     implTypeParamScope(params, method);
 
@@ -1321,9 +1411,11 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       ScopeGuard guard(*this);
       CurrentScope->declare(names::kSelf, ct);
       // `self` is written in every method but a `view fn` (`__init__`
-      // builds it); an `inout` parameter is the borrow's writes.
-      CurrentScope->Quals[names::kSelf] =
-          ast::Qualifier{ast::QualForm::Unique, !method->isView()};
+      // builds it); an `inout` parameter is the borrow's writes.  A
+      // `shared fn`'s is shared: a Copyable reference it may hand on.
+      CurrentScope->Quals[names::kSelf] = ast::Qualifier{
+          method->isShared() ? ast::QualForm::Shared : ast::QualForm::Unique,
+          !method->isView()};
       for (size_t i = 0; i < method->getParams().size(); ++i) {
         const ast::Param &p = method->getParams()[i];
         CurrentScope->declare(p.getName(), paramTys[i]);
@@ -1631,6 +1723,24 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       error(loc, why);
     if (!why.empty() ||
         !checkTypeParams(params, "'impl' block for", name, im->getLocation())) {
+      ok = false;
+      continue;
+    }
+    // A block's bounds (`impl List<T: Cloneable>`) name built-in traits: an
+    // instance is made before the module's own traits' blocks are known.
+    bool bounded = true;
+    for (const auto &bs : im->getTypeParamBounds())
+      for (ast::Type *b : bs)
+        if (!namesBuiltinTrait(b)) {
+          error(b->getLocation().isValid() ? b->getLocation()
+                                           : im->getLocation(),
+                "the bounds of an 'impl' block name built-in traits ('" +
+                    std::string(names::kTraitCloneable) + "', '" +
+                    names::kTraitCopyable + "', ...), not '" +
+                    traitAnnotationName(b) + "'");
+          bounded = false;
+        }
+    if (!bounded) {
       ok = false;
       continue;
     }
@@ -2115,6 +2225,10 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
   if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
     for (auto *im : it->second) {
+      // A block bounded on its parameters (`impl List<T: Cloneable>`) joins
+      // only the instances whose arguments meet the bounds (#369).
+      if (!implBoundsHold(im, args))
+        continue;
       Subst s;
       for (size_t i = 0; i < args.size(); ++i)
         s[*im->getTypeParams()[i]] = args[i];
@@ -2620,7 +2734,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   const ast::ASTNode *written = node->hasTypeArgs() ? node : nullptr;
   std::vector<ast::Type *> typeArgs;
   for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
-    auto *t = resolveType(node->getTypeArgs()[i], loc,
+    auto *t = resolvePart(node->getTypeArgs()[i], loc,
                           "type argument " + std::to_string(i + 1) + " of '" +
                               displayName(callee) + "'");
     if (!t)

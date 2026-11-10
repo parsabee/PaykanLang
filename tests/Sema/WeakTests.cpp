@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sema tests: weak references (docs/language/16-memory.md, "Weak
 // references"): the type of a `weak` declaration, and the places a weak
-// reference cannot be.
+// reference cannot be.  A weak reference is a `shared` reference that owns
+// nothing: `weak` names a `shared` object, `weak mut` a `shared mut` one.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -27,17 +28,17 @@ TEST(Weak, TypeIsAnOptionalClass) {
     struct S { v: int; }
     enum Color { Red }
     class C {
-      weak a: int?;
-      weak b: Point;
+      a: weak int?;
+      b: weak Point;
     }
     fn main() -> int {
-      p = Point(1);
-      weak w: Point = p;
-      weak n: int? = 1;
-      weak m = 5;
-      weak s = S(1);
-      weak f: (() -> int)? = None;
-      weak c = Color::Red;
+      p: shared = Point(1);
+      w: weak Point = p;
+      n: weak int? = 1;
+      m: weak = 5;
+      s: weak = S(1);
+      f: weak (() -> int)? = None;
+      c: weak = Color::Red;
       return 0;
     }
   )");
@@ -56,20 +57,22 @@ TEST(Weak, TypeIsAnOptionalClass) {
 }
 
 // A `weak` local's type comes from its initializer's class, and `None` has
-// none: `weak a = None;` (or a conditional of two Nones) is an error, once,
+// none: `a: weak = None;` (or a conditional of two Nones) is an error, once,
 // and the local is not reported again where it is used.  (It was a weak
 // reference to the None value itself, which never read None.)  With its
-// type written, it starts as None.
+// type written, it starts as None; a conditional of None and a `shared`
+// object infers that object's class.
 TEST(Weak, NoneInfersNoClass) {
   auto r = semaCheck(R"(
     class N { x: int; }
     fn main() -> int {
       c = True;
-      weak a = None;
-      weak b = if c then None else None;
-      weak d: N? = None;
-      weak e: Obj? = None;
-      weak f = if c then None else N(1);
+      s: shared = N(1);
+      a: weak = None;
+      b: weak = if c then None else None;
+      d: weak N? = None;
+      e: weak Obj? = None;
+      f: weak = if c then None else s;
       a = N(1);
       if a == None && b == None && d == None && e == None && f == None {
         return 1;
@@ -79,23 +82,24 @@ TEST(Weak, NoneInfersNoClass) {
   )");
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"cannot infer the class of weak local 'a' from None; write "
-                "'weak a: T? = None'",
+                "'a: weak T? = None'",
                 "cannot infer the class of weak local 'b' from None; write "
-                "'weak b: T? = None'"});
+                "'b: weak T? = None'"});
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
 // A weak reference is not a place a strong reference could be written to:
-// no `inout` parameter, local or match arm names a weak local or field.
+// no `inout` parameter, local or match arm names a weak local or field (its
+// object `shared`, as a weak reference's always is).
 TEST(Weak, IsNotAnInoutPlace) {
   auto r = semaCheck(R"(
     class Point { x: int; }
-    class Holder { weak peek: Point?; }
+    class Holder { peek: weak Point?; }
     fn f(p: inout Point?) { p = None; }
     fn main() -> int {
-      x = Point(1);
+      x: shared = Point(1);
       h = Holder(None);
-      weak w = x;
+      w: weak = x;
       f(w);
       f(h.peek);
       v: inout Point? = w;
@@ -120,15 +124,16 @@ TEST(Weak, IsNotAnInoutPlace) {
 // A lambda inside a lambda captures the outer one's weak capture, weakly,
 // and it is read-only there as any capture is: it is not assigned, passed
 // to an `inout` parameter, named by an `inout` local or bound by an `inout`
-// arm.  It is read as any `T?` is.
+// arm.  It is read as any `T?` is (of a `shared` object here, so a read of
+// it may be kept in a strong local).
 TEST(Weak, NestedCaptureIsReadOnly) {
   auto r = semaCheck(R"(
     class B { n: int; }
     fn reset(p: inout B?) { p = None; }
     fn look(p: view B?) -> int { return 0; }
     fn main() -> int {
-      let b = B(1);
-      weak me = b;
+      let b: shared B = B(1);
+      me: weak = b;
       let bad = fn() -> () -> int {
         return fn() -> int {
           me = None;
@@ -138,13 +143,13 @@ TEST(Weak, NestedCaptureIsReadOnly) {
           return 0;
         };
       };
-      let ok = fn() -> () -> B? {
-        return fn() -> B? {
+      let ok = fn() -> () -> int {
+        return fn() -> int {
           let n = look(me);
-          let keep: B? = me;
+          let keep: shared B? = me;
           v: view B? = me;
           match me { x: B { let sum = x.n + n; } None { } }
-          return if me == None then keep else me;
+          return if me == None then n else look(keep);
         };
       };
       return 0;
@@ -162,17 +167,19 @@ TEST(Weak, NestedCaptureIsReadOnly) {
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
 }
 
-// A `weak` local may name what a `view` names (a `view` parameter, part of
-// `self` in a `view fn`): it takes no reference, so the view is not copied,
-// and a `view fn` can walk a chain of nodes through one, reading each node.
+// A `weak` local may name a `shared` object a `view` reaches (part of a
+// `view` parameter, part of `self` in a `view fn`): it takes no reference,
+// so the view is not copied, and a `view fn` can walk a chain of `shared`
+// nodes through one, reading each node.  A `shared` parameter is named as
+// any `shared` reference is.
 TEST(Weak, LocalMayNameWhatAViewNames) {
   auto r = semaCheck(R"(
-    class Node { v: int; next: Node?; }
+    class Node { v: int; next: shared Node?; }
     class Chain {
-      head: Node?;
+      head: shared Node?;
       view fn sum() -> int {
         total = 0;
-        weak cur = self.head;
+        cur: weak = self.head;
         while cur != None {
           match cur {
             n: Node { total = total + n.v; cur = n.next; }
@@ -182,16 +189,16 @@ TEST(Weak, LocalMayNameWhatAViewNames) {
         return total;
       }
       view fn first() -> int {
-        weak h = self.head;
+        h: weak = self.head;
         match h {
           n: Node { return n.v; }
           None { return -1; }
         }
       }
     }
-    fn peek(c: view Chain, n: view Node) -> int {
-      weak w = c.head;
-      weak m = n;
+    fn peek(c: view Chain, n: shared Node) -> int {
+      w: weak = c.head;
+      m: weak = n;
       match w { x: Node { return x.v; } None { return -1; } }
     }
     fn main() -> int {
@@ -202,45 +209,54 @@ TEST(Weak, LocalMayNameWhatAViewNames) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// What a `weak` local of a `view` reads is a `view` too: the object is the
-// view's, so nothing changes through it, and it is never stored, returned
-// or captured except as a `view`.  It may be assigned another `view` (the
+// What a `weak` local of a `view` reads is a `view` too: the object is
+// reached through the view, so nothing changes through it (a `weak mut` one
+// of a `shared mut` object neither), and it is never stored, returned or
+// captured except as a `view`.  It may be assigned another `view` (the
 // cursor moves on).
 TEST(Weak, LocalOfAViewReadsAsAView) {
   auto r = semaCheck(R"(
     class Node {
       v: int;
-      next: Node?;
+      next: shared Node?;
       fn bump() { self.v = self.v + 1; }
     }
-    class Keep { n: Node?; }
-    fn take(n: Node) { }
+    class Keep { n: shared Node?; }
+    fn take(n: shared Node) { }
     class Chain {
-      head: Node?;
-      view fn leak() -> Node? {
-        weak cur = self.head;
+      head: shared Node?;
+      view fn leak() -> shared Node? {
+        cur: weak = self.head;
         match cur { n: Node { return n; } None { return None; } }
       }
       view fn poke() {
-        weak cur = self.head;
+        cur: weak = self.head;
         match cur { n: Node { n.v = 9; n.bump(); take(n); } None { } }
       }
       view fn keep(k: mut Keep) {
-        weak cur = self.head;
+        cur: weak = self.head;
         match cur { n: Node { k.n = n; } None { } }
       }
       view fn later() -> () -> int {
-        weak cur = self.head;
+        cur: weak = self.head;
         return fn() -> int { match cur { n: Node { return n.v; } None { return 0; } } };
       }
     }
-    fn first(n: view Node) -> Node {
-      weak w = n;
+    class Ring {
+      head: shared mut Node?;
+      view fn poke() {
+        cur: weak mut = self.head;
+        match cur { n: Node { n.v = 9; n.bump(); } None { } }
+      }
+    }
+    fn first(c: view Chain) -> shared Node {
+      w: weak = c.head;
       match w { x: Node { return x; } None { return Node(0, None); } }
     }
     fn main() -> int { return 0; }
   )");
   EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
   expectAll(r, {"'n' is bound to a 'view'; it cannot be returned",
                 "'n' is bound to a 'view'; cannot assign to its field 'v'",
                 "'n' is bound to a 'view'; 'bump' is not a 'view fn'",
@@ -256,9 +272,9 @@ TEST(Weak, LocalOfAViewReadsAsAView) {
 // of `self`: the arm's name is a `view` of the subject.
 TEST(Weak, MatchedPartOfSelfReturnsAsAView) {
   auto r = semaCheck(R"(
-    class Node { v: Str; next: Node?; }
+    class Node { v: Str; next: shared Node?; }
     class Chain {
-      head: Node?;
+      head: shared Node?;
       view fn front() -> view Str {
         match self.head {
           n: Node { return n.v; }
@@ -266,7 +282,7 @@ TEST(Weak, MatchedPartOfSelfReturnsAsAView) {
         }
       }
       view fn second() -> view Str {
-        weak cur = self.head;
+        cur: weak = self.head;
         match cur { n: Node { return n.v; } None { return "none"; } }
       }
     }
@@ -280,22 +296,25 @@ TEST(Weak, MatchedPartOfSelfReturnsAsAView) {
                 "'cur' is a local: a 'view' result must be part of 'self'"});
 }
 
-// Otherwise a weak reference is an ordinary `T?`: assigned, compared,
+// Otherwise a weak reference is an ordinary `shared T?`: assigned, compared,
 // matched, passed by value or as a `view`, returned, stored, captured and
-// shadowed; `weak y = x` infers `T?` from a `T` or a `T?`.
+// shadowed; `y: weak = x` infers `T?` from a `shared T` or a `shared T?`.
+// It reads as the `shared` reference it names, so what reads it may keep a
+// strong reference.  A tuple holds no `shared` reference, so no
+// destructuring assigns a weak variable.
 TEST(Weak, IsOtherwiseAnOptional) {
   auto r = semaCheck(R"(
     class Point { x: int; }
-    class Holder { item: Point?; weak peek: Point?; }
-    fn take(p: Point?) -> int { return 0; }
+    class Holder { item: shared Point?; peek: weak Point?; }
+    fn take(p: shared Point?) -> int { return 0; }
     fn look(p: view Point?) -> int { return 0; }
-    fn pass(p: Point?) -> Point? { return p; }
+    fn pass(p: shared Point?) -> shared Point? { return p; }
     fn main() -> int {
-      x = Point(1);
-      o: Point? = x;
-      weak w = x;
-      weak u = o;
-      weak e: Point?;
+      x: shared Point = Point(1);
+      o: shared Point? = x;
+      w: weak = x;
+      u: weak = o;
+      e: weak Point?;
       w = x;
       w = o;
       w = None;
@@ -312,13 +331,36 @@ TEST(Weak, IsOtherwiseAnOptional) {
       match w { p: Point { n = n + p.x; } None { } }
       match u { p: view Point { n = n + p.x; } None { } }
       f = fn() -> bool { return w == None; };
-      { weak w = x; }
-      w, n = (x, 1);
+      { w: weak = x; }
+      w = None;
       v: view Point? = w;
       return n;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // A tuple's element holds no `shared` reference, so a destructuring
+  // stores none in a weak variable.
+  auto bad = semaCheck(R"(
+    class Point { x: int; }
+    fn pair() -> (Point?, int) { return (Point(1), 2); }
+    fn main() -> int {
+      x: shared Point = Point(1);
+      w: weak = x;
+      n = 0;
+      w, n = (Point(2), 1);
+      w, n = pair();
+      return n;
+    }
+  )");
+  EXPECT_FALSE(bad.Ok);
+  for (const char *d :
+       {":8:7: error: cannot store element 0 of the tuple (a 'Point') in "
+        "variable 'w', a 'weak Point?': a 'weak' reference names a 'shared' "
+        "object, which a tuple's element never is",
+        ":9:7: error: cannot store element 0 of the tuple (a 'Point?')"})
+    EXPECT_NE(bad.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                          << bad.Diagnostics;
+  EXPECT_EQ(bad.ErrorCount, 2u) << bad.Diagnostics;
 }
 
 // A local starts with a value, and only a `weak` one may leave out its
@@ -329,9 +371,13 @@ TEST(Weak, OnlyAWeakLocalHasNoInitialValue) {
   ast::ASTContext ctx;
   auto *s = ctx.make<ast::VarDecl>(ast::SourceLocation(3, 3, 3, 10),
                                    ctx.intern("s"), ctx.getStrTy(), nullptr);
-  auto *w =
-      ctx.make<ast::VarDecl>(ast::SourceLocation(4, 3, 4, 16), ctx.intern("w"),
-                             ctx.getOptionalType(ctx.getObjTy()), nullptr);
+  // `w: weak Obj?;`: a weak local's type is the `shared` form it reads as.
+  auto *wTy =
+      ctx.make<ast::QualifiedType>(ast::SourceLocation(4, 6, 4, 16),
+                                   ast::Qualifier{ast::QualForm::Shared, false},
+                                   ctx.getOptionalType(ctx.getObjTy()));
+  auto *w = ctx.make<ast::VarDecl>(ast::SourceLocation(4, 3, 4, 16),
+                                   ctx.intern("w"), wTy, nullptr);
   w->setWeak(true);
   auto r = semaCheckAST(
       ctx,

@@ -13,7 +13,7 @@ import ::result as res;
 // one ended.
 
 /// The name of the code of @p r's error, `Ok` when it made a value.
-fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
+fn codeOf<T>(r: view res::Result<T, err::Error>) -> Str {
   match r {
     v: Ok { return "Ok"; }
     e: Err { return err::name(e.error.code); }
@@ -32,7 +32,7 @@ fn write(path: Str) {
 fn read(path: Str) {
   match io::open(path, "r") {
     r: Ok {
-      f = r.value;
+      f = move r.value;
       io::println(err::name(f.write("x").code));
       a = f.readln();
       io::println(codeOf(a));
@@ -73,7 +73,7 @@ fn update(path: Str, mode: Str) {
   }
   match io::open(path, mode) {
     u: Ok {
-      f = u.value;
+      f = move u.value;
       w1 = err::name(f.write("one\n").code);
       r = codeOf(f.read());
       w2 = err::name(f.write("two\n").code);

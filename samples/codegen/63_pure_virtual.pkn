@@ -8,8 +8,8 @@
 //            the object is a Shape, which has no `kind`); an abstract Polygon
 //            that implements one; the concrete Square, Triangle and Rect; a
 //            Shape[] of all three, a `view Shape[]` parameter, a Shape-typed
-//            variable reassigned, a Shape? unwrapped by `match`, and a
-//            `match` on the concrete classes.
+//            variable reassigned, a `view Shape?` naming an element
+//            unwrapped by `match`, and a `match` on the concrete classes.
 // expect-stdout: a square: area 4, perimeter 8
 // expect-stdout: a triangle: area 6, perimeter 12
 // expect-stdout: a rect: area 4.5, perimeter 9
@@ -122,7 +122,7 @@ fn largest(shapes: view Shape[]) -> int {
   return best;
 }
 
-fn sidesOf(o: Obj) -> int {
+fn sidesOf(o: view Obj) -> int {
   match o {
     s: Square { return s.sides; }
     t: Triangle { return t.sides; }
@@ -138,11 +138,9 @@ fn main() -> int {
     i += 1;
   }
   io::println("total area " + Str(total(shapes)));
-  best: Shape? = None;
   let at = largest(shapes);
-  if at >= 0 {
-    best = shapes[at];
-  }
+  // Names the element, not a copy.
+  best: view Shape? = if at >= 0 then shapes[at] else None;
   match best {
     s: Shape { io::println("largest: " + s.title); }
     None { io::println("no shapes"); }

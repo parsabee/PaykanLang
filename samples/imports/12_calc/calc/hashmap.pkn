@@ -5,12 +5,16 @@
 // `charOrd` derives a character's ordinal from its index in a reference
 // alphabet.
 //
-// The table has a fixed number of buckets (`Entry?[8]`), each the first entry
-// of a linked chain (`Entry.next`), or None when the bucket is empty. A new
-// key goes at the end of its bucket's chain, so a bucket keeps its keys in the
-// order they were added. `lookup` returns an optional (`Entry?`): a missing
-// key is `None`, so callers unwrap with `match` instead of pairing has() with
-// get().
+// The table has a fixed number of buckets (`Entry[8]`), each the head of a
+// linked chain (`Entry.next`): a head holds no key, and its `next` is the
+// bucket's first entry, or None when the bucket is empty. The table owns
+// each chain, so it is changed in place through the head, by methods that
+// work on the entries after the one they are called on. A new key goes at
+// the end of its bucket's chain, so a bucket keeps its keys in the order
+// they were added. `lookup` returns an optional (`float?`): a missing key is
+// `None`, so callers unwrap with `match` instead of pairing has() with get().
+
+import ::memory as mem;
 
 // One key/value pair, linked to the next one in its bucket.
 class Entry {
@@ -21,31 +25,63 @@ class Entry {
   // Link `e` at the end of the chain that starts here.
   fn append(e: Entry) {
     match self.next {
-      n: inout Entry { n.append(e); }
-      None { self.next = e; }
+      n: inout Entry { n.append(move e); }
+      None { self.next = move e; }
     }
   }
 
-  // Unlink the entry after this one whose key is `key`. Returns True if there
-  // was one.  The `inout` binding borrows `after`, a `mut` copy of the
-  // reference, so `self.next` stays writable while it is held.
-  fn unlink(key: Str) -> bool {
-    after: mut = self.next;
-    match after {
+  // The value of the entry after this one whose key is `key`, or None when
+  // there is none.
+  view fn find(key: view Str) -> float? {
+    match self.next {
+      n: Entry {
+        if n.key.equals(key) {
+          return n.value;
+        }
+        return n.find(key);
+      }
+      None { return None; }
+    }
+  }
+
+  // Give the entry after this one whose key is `key` the value `value`.
+  // Returns True if there was one.
+  fn update(key: view Str, value: float) -> bool {
+    match self.next {
       n: inout Entry {
         if n.key.equals(key) {
-          self.next = n.next;
+          n.value = value; // update in place
           return True;
         }
-        return n.unlink(key);
+        return n.update(key, value);
       }
       None { return False; }
     }
   }
+
+  // Unlink the entry after this one whose key is `key`. Returns True if there
+  // was one.  The `inout` binding borrows `self.next` while the chain is
+  // searched; when the next entry has the key, `mem::take` moves it out of
+  // `self.next`, which takes the entry after it.
+  fn unlink(key: view Str) -> bool {
+    match self.next {
+      n: inout Entry {
+        if !n.key.equals(key) {
+          return n.unlink(key);
+        }
+      }
+      None { return False; }
+    }
+    match mem::take(self.next) {
+      n: Entry { self.next = move n.next; }
+      None { }
+    }
+    return True;
+  }
 }
 
 impl Entry {
-  fn __init__(k: Str, v: float) { self.key = k; self.value = v; }
+  fn __init__(k: Str, v: float) { self.key = move k; self.value = v; }
 }
 
 // Ordinal of a character: its 1-based index in a reference alphabet, or 0 for
@@ -61,12 +97,17 @@ fn charOrd(c: char) -> int {
   return 0;
 }
 
+// Eight empty buckets: a head each, with no key.
+fn heads() -> Entry[8] {
+  return [Entry("", 0.0); 8];
+}
+
 class HashMap {
-  buckets: Entry?[8];
+  buckets: Entry[8];
   size: int;
 
   // djb2 over the key's character ordinals, folded into the bucket range.
-  view fn indexFor(key: Str) -> int {
+  view fn indexFor(key: view Str) -> int {
     h = 5381;
     i = 0;
     while i < key.len() {
@@ -77,89 +118,52 @@ class HashMap {
     return h % self.buckets.len();
   }
 
-  // The entry stored under `key`, or None when the key is absent.  Not a
-  // `view fn`, and a `mut` result: the entry it returns can be changed
-  // (insert does).  `e` borrows `cur` until its last use, so the next entry
-  // is read before `cur` moves on.
-  fn lookup(key: Str) -> mut Entry? {
-    cur: mut = self.buckets[self.indexFor(key)];
-    while cur != None {
-      match cur {
-        e: inout Entry {
-          if e.key.equals(key) {
-            return e;
-          }
-          let after = e.next;
-          cur = after;
-        }
-        None { }
-      }
-    }
-    return None;
+  // The value stored under `key`, or None when the key is absent.
+  view fn lookup(key: view Str) -> float? {
+    return self.buckets[self.indexFor(key)].find(key);
   }
 
   // Update the entry in place or append a new one. Returns True if a NEW key
   // was added.
-  fn insert(key: Str, value: float) -> bool {
-    found: mut = self.lookup(key);
-    match found {
-      e: inout Entry {
-        e.value = value; // update in place (Entry is a reference type)
-        return False;
-      }
-      None {
-        let b = self.indexFor(key);
-        first: mut = self.buckets[b];
-        match first {
-          f: inout Entry {
-            f.append(Entry(key, value));
-          }
-          None {
-            self.buckets[b] = Entry(key, value);
-          }
-        }
-        return True;
-      }
+  fn insert(key: view Str, value: float) -> bool {
+    let b = self.indexFor(key);
+    if self.buckets[b].update(key, value) {
+      return False;
     }
+    self.buckets[b].append(Entry(key.clone(), value));
+    return True;
   }
 
-  fn put(key: Str, value: float) {
+  fn put(key: view Str, value: float) {
     if self.insert(key, value) {
       self.size = self.size + 1;
     }
   }
 
   // Delete a key. Returns True if it was present.
-  fn remove(key: Str) -> bool {
-    let b = self.indexFor(key);
-    first: mut = self.buckets[b];
-    match first {
-      f: inout Entry {
-        if f.key.equals(key) {
-          self.buckets[b] = f.next; // the chain now starts at the second
-        } elif !f.unlink(key) {
-          return False;
-        }
-        self.size = self.size - 1;
-        return True;
-      }
-      None { return False; }
+  fn remove(key: view Str) -> bool {
+    if !self.buckets[self.indexFor(key)].unlink(key) {
+      return False;
     }
+    self.size = self.size - 1;
+    return True;
   }
 
   // The number of buckets, and the first entry of bucket `b`'s chain (None
   // when it is empty): with `Entry.next`, a way to visit every entry, in
-  // bucket order.  `bucket` is not a `view fn`: the entries it reaches can be
-  // changed.
-  view fn bucketCount() -> int { return self.buckets.len(); }
-  fn bucket(b: int) -> Entry?  { return self.buckets[b]; }
+  // bucket order.
+  view fn bucketCount() -> int          { return self.buckets.len(); }
+  view fn bucket(b: int) -> view Entry? { return self.buckets[b].next; }
 
-  view fn count() -> int       { return self.size; }
+  view fn count() -> int                { return self.size; }
 
   // Drop all entries.
-  fn clear()                   { self.buckets = [None; 8]; self.size = 0; }
+  fn clear() {
+    self.buckets = heads();
+    self.size = 0;
+  }
 }
 
 impl HashMap {
-  fn __init__() { self.buckets = [None; 8]; self.size = 0; }
+  fn __init__() { self.buckets = heads(); self.size = 0; }
 }

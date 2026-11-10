@@ -1,17 +1,26 @@
-// ::collections' two ways to hand out an element: a `view fn` lends it as a
-// `view` (at, atOr, last, front, back, peek), which is read in place and
-// works through a `view` of the container; get, getOr, getFront and getBack
-// hand over a copy the caller keeps.  A copy of an object shares it with the
-// container; a copy of a value (an int, a struct) is the caller's alone.
+// ::collections' three ways to hand out an element: a `view fn` lends it as
+// a `view` (at, atOr, last, front, back, peek), which is read in place and
+// works through a `view` of the container; the operations that remove it
+// move it out (pop, dequeue); and get, getOr, getFront and getBack hand over
+// a clone the caller keeps, which only Cloneable elements have.  A clone of
+// an object is a new object, the caller's alone, as a copy of a value (an
+// int, a struct) is.
 import ::io;
 import ::collections as c;
 
 class Dog {
   name: Str;
-  fn rename(n: Str) { self.name = n; }
+  fn rename(n: Str) { self.name = move n; }
 }
 impl Dog {
-  fn __init__(n: Str) { self.name = n; }
+  fn __init__(n: Str) { self.name = move n; }
+}
+impl Cloneable for Dog {}
+
+// Not Cloneable: a container of bones lends them and moves them out, and
+// has no get.
+class Bone {
+  name: Str;
 }
 
 struct P {
@@ -33,13 +42,20 @@ fn main() -> int {
   dogs = c::List<Dog>();
   dogs.push(Dog("rex"));
   dogs.push(Dog("fido"));
-  // A copy of an object is the caller's own reference: it shares the dog and
-  // outlives the list's.
+  // A clone of an object is a new one, the caller's own: renaming it leaves
+  // the list's dog as it was, and it outlives the list's.
   d: mut = dogs.get(0);
   d.rename("max");
   io::println(dogs.at(0).name + " " + d.name);
   dogs.clear();
   io::println(Str(dogs.len()) + " " + d.name);
+
+  // An element that is not Cloneable is lent, or moved out.
+  bones = c::List<Bone>();
+  bones.push(Bone("femur"));
+  bones.push(Bone("rib"));
+  rib = bones.pop();
+  io::println(bones.at(0).name + " " + rib.name + " " + Str(bones.len()));
 
   // A copy of a value is the caller's alone.
   ps = c::listOf([P(1, 2)]);
@@ -55,8 +71,8 @@ fn main() -> int {
   a: mut = m.get("a");
   a.rename("amy");
   zed = m.getOr("z", Dog("zed"));
-  io::println(m.at("a").name + " " + zed.name + " " + m.getOr("a", zed).name
-      + " " + Str(m.len()));
+  io::println(m.at("a").name + " " + zed.name + " "
+      + m.getOr("a", move zed).name + " " + Str(m.len()));
   m.remove("a");
   io::println(a.name + " " + Str(m.containsKey("a")));
 

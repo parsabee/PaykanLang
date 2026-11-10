@@ -533,6 +533,14 @@ Status Reader::readDecls(Interface &out) {
           owner && (m.Flags & kMethodPure))
         return v.fail("method '" + m.Name + "' of " + owner +
                       " is marked pure virtual");
+      // A `shared fn` is a class's method, never an initializer or destroy.
+      if ((m.Flags & kMethodShared) &&
+          (ofStruct || m.Name == names::kMethodInit ||
+           m.Name == names::kMethodInitModulePrivate ||
+           m.Name == names::kMethodDestroy))
+        return v.fail("method '" + m.Name + "' of " +
+                      (ofStruct ? "a struct" : "a class") +
+                      " is marked 'shared fn'");
     }
     if (v.remaining() > 0) // every method's modes
       for (ClassRec::Method &m : out)

@@ -96,8 +96,11 @@ paramName: TypeName
 A free function may also leave the type out (see [Untyped Parameters](#untyped-parameters)).
 
 How an argument is passed depends on its type, and a [mode](#parameter-modes-view-and-inout)
-can change it. Without a mode, the call passes a copy of a value type and a reference to an
-object or a string, which the function can change only where the parameter says `mut`:
+can change it. Without a mode, the parameter is the function's own: a value type is copied
+in, and an object or a string is handed over, so the caller writes `move s` for a variable
+it gives up, `s.clone()` for a copy, or passes a temporary; a `shared` reference copies
+([Ownership transfers](16-memory.md#ownership-transfers)). The function changes the object
+only where the parameter says `mut`:
 
 ```pkn
 import ::io;
@@ -110,7 +113,7 @@ impl P {
   fn __init__() { self.x = 0; }
 }
 
-fn f(n: int, s: Str, p: mut P) {
+fn f(n: int, s: Str, p: shared mut P) {
   n = 5;        // the function's own copy
   p.x = 7;      // the caller's object
   p = P();      // the function's own reference, now to another object
@@ -121,8 +124,8 @@ fn f(n: int, s: Str, p: mut P) {
 fn main() -> int {
   let n = 1;
   let s = "mine";
-  let p: mut = P();
-  f(n, s, p);
+  let p: shared mut P = P();    // shared: main and f both hold the object
+  f(n, s.clone(), p);
   io::println(Str(n) + " " + s + " " + Str(p.x));
   return 0;
 }
@@ -142,17 +145,22 @@ the function's copy only.
 
 ### Class / Str parameters (`s: Str`, `p: Point`)
 
-Strings and objects are passed by reference: the function receives the same object as its
-caller. A plain `p: P` parameter reads it: no field can be assigned through it and only a
+Strings and objects are passed by reference, and a plain parameter owns what it is given:
+the caller hands the object over (`move p`, or a temporary such as `P()`), gives a
+`p.clone()`, or passes a `shared` reference, which the caller and the function then both
+hold. A function that only reads an argument takes it as a `view` instead, and one that
+changes it in place as an `inout` ([Parameter modes](#parameter-modes-view-and-inout)), so
+the caller keeps it. A plain `p: P` parameter reads it: no field can be assigned through it and only a
 `view fn` can be called on it (`'p' is immutable (a 'P'; write 'mut P' to change it);
 cannot assign to its field 'x'`), and a `P` or a `mut P` argument fits it. A `p: mut P`
 parameter may change the object, and a field it assigns or a method that changes the
 object is seen by the caller; its argument is a `mut P` too, or a temporary such as `P()`
 (`cannot store a 'P' in parameter 3 of 'f', a 'mut P': a reference gains 'mut' only by
-'move'`; [Variables](02-basics.md#variables--declarations)). A caller that keeps the object
-alive for the whole call lends it, and the function changes no reference count unless it
-keeps the object (see [Borrowed parameters](16-memory.md#borrowed-parameters)). Assigning
-to the parameter makes it refer to another object; the caller's variable is unaffected.
+'move'`; [Variables](02-basics.md#variables--declarations)). A caller that keeps a
+`shared` object alive for the whole call lends it, and the function changes no reference
+count unless it keeps the object (see [Borrowed parameters](16-memory.md#borrowed-parameters)).
+Assigning to the parameter makes it refer to another object; the caller's variable is
+unaffected.
 More in [Classes](05-classes.md) and [Memory](16-memory.md).
 
 ### Array parameters (`a: int[3]`, `xs: view int[]`)
@@ -286,8 +294,8 @@ keep what it shares. With `fn keep(c: Counter)` and `v: view = Counter()`, `keep
 error: `'v' is a 'view' local; it can only be passed to a 'view' parameter, and parameter 1
 of 'keep' is not one`. The fix is to make that parameter `view` too. The builtin methods
 only read, and so do the standard library's print functions (`io::println(v)` takes a
-`view T`). `Str(s)` with a `Str`, like `Str<Str>(s)`, returns `s`
-itself, so it takes no `view`.
+`view T`). `Str(s)` with a `Str`, like `Str<Str>(s)`, returns a new string with `s`'s
+text, and takes no `view` either: `v.toString()` or `v.clone()` copies a viewed string.
 
 A value type read through a `view` -- an `int` parameter `n: view int`, a local `k: view =
 3`, a field `v.n` of a viewed object, an element `xs[i]` of a `view int[]`, a `view int`
@@ -311,8 +319,10 @@ holds cannot, as a copy of it in the literal could change it later (`[v]`, `(v, 
 or passed to a 'view' parameter`, and so is `[self]` in a `view fn`). That holds wherever
 the literal goes, a `view` parameter included: with `l` a `List<(Str, Node)>`,
 `l.contains(("ab", l.at(0).1))` is `the result of 'at' is a 'view'; it cannot be stored,
-only read or passed to a 'view' parameter`. A copying accessor gives the literal an element
-of its own: `l.contains(("ab", l.get(0).1))`.
+only read or passed to a 'view' parameter`. A clone gives the literal an element of its
+own, when the element is [Cloneable](06-traits.md#cloneable): with `impl Cloneable for Node
+{}`, `l.contains(("ab", l.at(0).1.clone()))`, or the copying accessor,
+`l.contains(("ab", l.get(0).1))`, which a list of Cloneable elements has.
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
 `k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.
@@ -327,11 +337,11 @@ the caller's variable holds.
 
 ```pkn
 import ::io;
+import ::memory as mem;
 
 fn swap(a: inout Str, b: inout Str) {
-  let t = a;
-  a = b;
-  b = t;
+  let t = mem::replace(a, "");   // a's string; a holds "" for now
+  a = mem::replace(b, move t);   // b's string; b takes a's
 }
 
 fn main() -> int {
@@ -349,6 +359,12 @@ Output:
 right left
 ```
 
+A string is move-only, so it leaves the caller's storage only in exchange for another:
+`mem::replace(a, v)` returns what `a` held and stores `v` there, and `let t = a;` is an
+error (`cannot copy 'a' (a unique 'mut Str'); it is an 'inout' borrow of the caller's
+storage: write 'a.clone()' to copy it`). The standard library's `mem::swap` does what this
+`swap` does, for any type ([::memory](../stdlib/memory.md)).
+
 The argument must be one of:
 
 - a local variable (not a `let` one: `'k' is declared with 'let' and cannot be passed to
@@ -356,7 +372,10 @@ The argument must be one of:
   "left";` above);
 - a plain (by-value) parameter, a `mut` one when it holds an object or a string;
 - another `inout` parameter, whose address is passed on;
-- a field of a `mut` object: `obj.f`, `self.f`, or a chain such as `a.b.f`.
+- a field of a `mut` object: `obj.f`, `self.f`, or a chain such as `a.b.f`;
+- an element of a fixed-size array that is one of these, or a field of one: `xs[i]`,
+  `self.grid[i][j]`, `ps[1].n`. The element is in the array's own bytes, so its address is
+  passed, after the index's bounds check.
 
 It must have exactly the parameter's type: an `int` variable does not go to an
 `x: inout float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
@@ -369,7 +388,8 @@ it. Anything else is an error:
 | a literal or another expression (`bump(3)`, `bump(k + 1)`) | `argument 1 of 'bump' must be a variable or a field: parameter 'n' is 'inout'` |
 | a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
 | a variable holding an object or a string that is not `mut`, or a field of such an object (`swap(x, y)` with `x = "left";`, `hit(c.hits, c)` with `let c = Counter();`) | `'x' is immutable (a 'Str'; write 'mut Str' to change it); it cannot be passed to 'inout' parameter 'a'`, `'c' is immutable (a 'Counter'; write 'mut Counter' to change it); it cannot be passed to 'inout' parameter 'n'` |
-| an array element (`bump(xs[0])`) | `an array element cannot be passed to 'inout' parameter 'n' yet` |
+| an element of a slice (`bump(xs[0])` with `xs: inout int[]`) | `an element of a slice cannot be passed to 'inout' parameter 'n' yet` |
+| an element of an array that is a temporary (`bump(make()[0])`) | `an element of an array that is not a variable or a field (a temporary, which dies with the statement) cannot be passed to 'inout' parameter 'n'` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
 | `self` (`reset(self)`) | `'self' cannot be passed to 'inout' parameter 'c': the method would no longer know its object` |
 
@@ -389,13 +409,13 @@ impl Counter {
   fn __init__() { self.hits = 0; }
 }
 
-fn hit(n: inout int, c: Counter) {
+fn hit(n: inout int, c: shared mut Counter) {
   n = n + 1;
   io::println("seen " + Str(c.hits));  // the write is already visible
 }
 
 fn main() -> int {
-  let c: mut = Counter();
+  let c: shared mut Counter = Counter();
   hit(c.hits, c);
   io::println(Str(c.hits));
   return 0;
@@ -415,7 +435,10 @@ What one call passes to an `inout` parameter shares no storage with anything els
 call borrows: another `inout` argument, a `view` argument, or the receiver, when the
 method may change it or is a `view fn`. A variable and a chain of fields on it share
 storage (`p` and `p.x`, `self` and `self.n`); two fields of one variable don't (`p.x` and
-`p.y`), and an element shares its array's.
+`p.y`). An element shares its array's storage; two elements at different literal indexes
+don't (`mem::swap(xs[0], xs[1])` is fine), and an element at any other index may be any of
+them (`mem::swap(xs[i], xs[j])` is `'xs' is passed to two 'inout' parameters ('a' and
+'b')`), so one leaves its slot for another by `xs[j] = mem::replace(xs[i], v)`.
 
 ```pkn
 fn swap(a: inout int, b: inout int) {
@@ -539,7 +562,7 @@ import ::io;
 
 fn shout(s: inout Str) -> Str {
   s = s + "!";
-  return s;
+  return s.clone();             // a copy: s is the caller's
 }
 
 fn main() -> int {
@@ -572,13 +595,13 @@ class Shelf {
   box: Box;
 }
 
-fn swap(s: mut Shelf) -> Str {
+fn swap(s: inout Shelf) -> Str {
   s.box = Box("new");
   return "!";
 }
 
 fn main() -> int {
-  let shelf: mut = Shelf(Box("old"));
+  shelf: mut = Shelf(Box("old"));
   let t = shelf.box.label + swap(shelf); // the label read before swap replaces the box
   io::println(t + " " + shelf.box.label);
   return 0;
@@ -1151,8 +1174,8 @@ A call in the module that declares the function calls C directly, lending
 the caller's own references (a temporary argument is released after the
 call).  A call from another module goes through the function's Paykan body,
 which only reads its parameters: it is lent what the caller keeps, and
-releases after the call only what it was handed (a temporary, a variable
-at its last use; see [Borrowed parameters](16-memory.md#borrowed-parameters)).
+releases after the call only what it was handed (a temporary or a moved
+variable; see [Borrowed parameters](16-memory.md#borrowed-parameters)).
 The module's interface says the function is native, so the caller knows
 the call changes nothing but its `inout` arguments, and lends it a field
 read that nothing else in the call may replace, as it would a variable.

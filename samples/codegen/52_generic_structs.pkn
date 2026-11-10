@@ -13,6 +13,7 @@
 // struct, and compiled once per program.
 
 import ::io;
+import ::memory as mem;
 
 struct Pair<A, B> {
   a: A;
@@ -20,10 +21,11 @@ struct Pair<A, B> {
 }
 
 impl Pair<A, B> {
-  view fn first() -> view A  { return self.a; }
-  fn swapWith(other: inout Pair<A, B>)
-                             { let t = self.a; self.a = other.a; other.a = t; }
-  fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+  view fn first() -> view A            { return self.a; }
+  fn swapWith(other: inout Pair<A, B>) { mem::swap(self.a, other.a); }
+  view fn flipped() -> Pair<B, A> {
+    return Pair<B, A>(self.b.clone(), self.a.clone());
+  }
 }
 
 trait Named {
@@ -38,8 +40,8 @@ struct Box<T> {
 }
 
 impl Box<T> {
-  fn __init__(v: T)       { self.v = v; }       // Box(3) infers T from it
-  fn set(v: T)            { self.v = v; }
+  fn __init__(v: T)       { self.v = move v; }  // Box(3) infers T from it
+  fn set(v: T)            { self.v = move v; }
   view fn get() -> view T { return self.v; }
 }
 
@@ -67,7 +69,7 @@ fn firstOf<A, B>(p: view Pair<A, B>) -> view A {
   return p.a;
 }  // A, B inferred
 fn boxed<T>(v: T) -> Box<T> {
-  return Box(v);
+  return Box(move v);
 }
 fn greet<T: Named>(x: view T) -> Str {
   return x.name();

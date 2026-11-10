@@ -102,7 +102,7 @@ fn main() -> int {
       + x.name(y, True));
   // Another reference replaces the object the result is in while it is
   // used: the write goes to that object, which stays alive until then.
-  let h: mut = H(K(8, "h" + ""));
+  let h: shared mut = H(K(8, "h" + ""));
   let g = h;
   e: mut = K(9, "e" + "");
   r: inout = pickS(h.k, e, True);

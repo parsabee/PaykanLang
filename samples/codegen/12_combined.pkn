@@ -77,7 +77,7 @@ fn favg(a: float, b: float) -> float {
 // ---- Str helpers ----------------------------------------------------------
 
 fn padLeft(s: Str, width: int) -> Str {
-  result = s;
+  result = move s;
   while result.len() < width {
     result = " " + result;
   }

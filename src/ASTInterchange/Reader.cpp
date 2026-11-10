@@ -807,18 +807,15 @@ private:
     const std::string *typeName = f.name("the type's name", NameKind::Path);
     if (!typeName)
       return nullptr;
-    // `impl Box<T>`: (type-params NAME...) after the type's name.
+    // `impl Box<T>`: (type-params NAME...) after the type's name, a bounded
+    // one (`impl List<T: Cloneable>`) as (bound NAME TRAIT...).
     std::vector<const std::string *> params;
-    if (const SExpr *tl = f.optionalList("type-params")) {
-      for (const SExpr &item : tl->Items) {
-        if (item.K != SExpr::String || item.Text.empty())
-          return fail(item, "expected a type parameter name"), nullptr;
-        if (!checkName(item, item.Text, NameKind::Ident, "a type parameter"))
-          return nullptr;
-        params.push_back(&intern(item.Text));
-      }
-      if (params.empty())
+    TypeParamBounds bounds;
+    if (f.nextIsList("type-params")) {
+      if (const SExpr *tl = f.peekList(); tl->Items.empty())
         return fail(*tl, "(type-params) of an impl needs a name"), nullptr;
+      if (!typeParams(f, params, bounds))
+        return nullptr;
     }
     // `impl Show for A`: (for TRAIT) after the type's name.
     Type *trait = nullptr;
@@ -836,8 +833,10 @@ private:
     }
     if (!f.done())
       return nullptr;
-    return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
-                              std::move(params));
+    auto *im = Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
+                                  std::move(params));
+    im->setTypeParamBounds(std::move(bounds));
+    return im;
   }
 
   TraitDecl *traitDecl(const SExpr &e) {
@@ -1176,6 +1175,11 @@ private:
     const SExpr *async = f.optionalList("async");
     if (async && !async->Items.empty())
       return fail(*async, "(async) takes no fields"), nullptr;
+    // A `shared fn` ends with `(shared)`; where one may be is Sema's to say
+    // (`only a method can be a 'shared fn'`), as for `view fn`.
+    const SExpr *shared = f.optionalList("shared");
+    if (shared && !shared->Items.empty())
+      return fail(*shared, "(shared) takes no fields"), nullptr;
     // Only a free function is generic, as the grammar has it.
     if (!tparams.empty() &&
         (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod))
@@ -1205,6 +1209,7 @@ private:
     fn->setView(view);
     fn->setStatic(isStatic);
     fn->setAsync(async != nullptr);
+    fn->setShared(shared != nullptr);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
     fn->setTypeParamBounds(std::move(bounds));
@@ -1253,7 +1258,7 @@ private:
         return nullptr;
     }
     // A local borrow (`x: view = e;`) carries (qual view) or (qual inout),
-    // `let x = e;` a trailing (let) and `weak y: T? = e;` (or a class's
+    // `let x = e;` a trailing (let) and `y: weak T? = e;` (or a class's
     // `weak` field) a trailing (weak); a borrow or a let has an initialiser.
     ParamMode mode = ParamMode::Value;
     if (!paramMode(f, mode))

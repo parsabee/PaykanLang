@@ -279,17 +279,19 @@ TEST(Scaling, AScopesWayOutReleasesALargeValueByOneCall) {
 // alive through it, and removes the copy's retain.  It removed the retains
 // from their block one at a time, each removal moving the rest of the
 // block, so a function of 3000 statements each lending `reset(c)` its `c`
-// (beside the copies of `p` and `c.p` the later operands make, SW-01) took
-// 37 s of processor time to reach --emit-pir, 31 s before those copies.  A
-// block's retains go in one pass over it now, and the function takes 2.5 s.
+// (a `shared` reference, which a call copies; beside the copies of `p` and
+// `c.p` the later operands make, SW-01) took 37 s of processor time to reach
+// --emit-pir, 31 s before those copies.  A block's retains go in one pass
+// over it now, and the function takes 2.5 s.
 TEST(Scaling, TheLendingPassRemovesABlocksRetainsInOnePass) {
   ScratchDir dir("lend");
   const std::string src =
       "struct P { x: int; y: int; }\nclass C { p: P; }\n"
       "fn first(a: P, b: int) -> int => a.x + b;\n"
       "fn bump(p: inout P) -> int { p.x = p.x + 1; return 0; }\n"
-      "fn reset(c: mut C) -> int { c.p = P(9, 9); return 0; }\n"
-      "fn main() -> int {\n  p = P(1, 2);\n  c: mut = C(P(1, 2));\n  r = 0;\n" +
+      "fn reset(c: shared mut C) -> int { c.p = P(9, 9); return 0; }\n"
+      "fn main() -> int {\n  p = P(1, 2);\n  c: shared mut = C(P(1, 2));\n"
+      "  r = 0;\n" +
       repeated("  r += first(p, bump(p)) + first(c.p, reset(c));\n", 3000) +
       "  return r % 256;\n}\n";
   const std::string path = dir.write("lend.pkn", src);

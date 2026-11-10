@@ -73,12 +73,15 @@ inline constexpr uint8_t kModeInout = 2;
 inline constexpr uint8_t kMethodPrivate = 1 << 0;
 inline constexpr uint8_t kMethodView = 1 << 1; ///< a `view fn`
 inline constexpr uint8_t kMethodImpl = 1 << 2; ///< an `impl` block's method
+/// A `shared fn`: its `self` is a shared reference, so only a receiver
+/// held `shared` calls it.
+inline constexpr uint8_t kMethodShared = 1 << 3;
 /// A pure virtual method: a class's vtable slot with no definition (§3.5's
 /// PURE bit).  Never an `impl` method's, a struct's, an initializer's or
 /// `destroy`'s (readInterface rejects it there).
 inline constexpr uint8_t kMethodPure = 1 << 4;
 inline constexpr uint8_t kMethodKnownFlags =
-    kMethodPrivate | kMethodView | kMethodImpl | kMethodPure;
+    kMethodPrivate | kMethodView | kMethodImpl | kMethodShared | kMethodPure;
 
 /// The modes of a signature's parameters (ast::ParamModes): one per
 /// parameter with its name, or none when every parameter is by value, and

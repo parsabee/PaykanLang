@@ -61,7 +61,7 @@ TEST(Optional, DeclWithNoneAndWithValue) {
 TEST(Optional, WideningTToOptionalT) {
   expectOk(withNode(R"(
     n: Node = Node(1);
-    m: Node? = n;
+    m: Node? = move n;
     l: Node? = Leaf(2);   // subclass widens too
   )"));
 }
@@ -69,7 +69,7 @@ TEST(Optional, WideningTToOptionalT) {
 TEST(Optional, OptionalSubclassToOptionalBase) {
   expectOk(withNode(R"(
     l: Leaf? = Leaf(1);
-    n: Node? = l;
+    n: Node? = move l;
   )"));
 }
 
@@ -106,7 +106,7 @@ TEST(Optional, OptionalIsNotAnObj) {
               msg);
   expectError(withNode("n: Node? = None; xs: Obj[1] = [Node(1)]; xs[0] = n;"),
               "an optional is not an object");
-  expectError(withNode("s: Str? = None; t: (Obj, int) = (s, 1);"),
+  expectError(withNode("s: Str? = None; t: (Obj, int) = (move s, 1);"),
               "does not match");
 }
 
@@ -116,7 +116,7 @@ TEST(Optional, ReassignOptionalVar) {
     n = Node(1);
     n = None;
     m: Node = Node(2);
-    n = m;
+    n = move m;
   )"));
 }
 
@@ -146,11 +146,13 @@ TEST(Optional, ParamAndReturn) {
   )");
 }
 
+// An optional of a unique reference is move-only: it moves on, inferred as
+// the optional.
 TEST(Optional, CopyOfOptional) {
   expectOk(withNode(R"(
     a: Node? = Node(1);
-    b = a;
-    c: Node? = b;
+    b = move a;
+    c: Node? = move b;
   )"));
 }
 
@@ -424,9 +426,9 @@ TEST(Optional, MatchBindingIsNarrowedToArmType) {
   // Binding has the arm type — a subclass arm binds the subclass.
   expectOk(withNode(R"(
     a: Node? = Leaf(1);
-    match a {
-      l: Leaf { x: Leaf = l; }
-      n: Node { y: Node = n; }
+    match move a {
+      l: Leaf { x: Leaf = move l; }
+      n: Node { y: Node = move n; }
       _ { }
     }
   )"));
@@ -485,13 +487,14 @@ TEST(Optional, NonOptionalFieldStillMustBeAssigned) {
 
 TEST(Optional, OptionalFieldAssignedViaMatch) {
   expectOk(std::string(kNodeClass) + R"(
+    import ::memory as mem;
     fn main() -> int {
       a: mut Node = Node(1);
       b: Node = Node(2);
-      a.next = b;
+      a.next = move b;
       a.next = None;
-      match a.next {
-        n: Node { a.next = n.next; }
+      match mem::take(a.next) {
+        n: Node { a.next = move n.next; }
         None    { }
       }
       return 0;
@@ -503,11 +506,11 @@ TEST(Optional, LinkedListTraversal) {
   expectOk(std::string(kNodeClass) + R"(
     fn sum(head: Node?) -> int {
       total: int = 0;
-      cur: Node? = head;
+      cur: Node? = move head;
       while cur != None {
-        match cur {
-          n: Node { total = total + n.v; cur = n.next; }
-          None    { }
+        match move cur {
+          n: Node { total = total + n.v; cur = move n.next; }
+          None    { cur = None; }
         }
       }
       return total;
@@ -515,8 +518,8 @@ TEST(Optional, LinkedListTraversal) {
     fn main() -> int {
       a: mut Node = Node(1);
       b: Node = Node(2);
-      a.next = b;
-      return sum(a);
+      a.next = move b;
+      return sum(move a);
     }
   )");
 }
@@ -528,7 +531,7 @@ TEST(Optional, ArrayOfOptionals) {
     xs: Node?[2] = [None, Node(1)];
     xs[0] = Node(2);
     xs[1] = None;
-    e: Node? = xs[0];
+    e: view Node? = xs[0];
     match xs[0] {
       n: Node { io::println(Str<int>(n.v)); }
       None    { }
@@ -549,9 +552,9 @@ TEST(Optional, TernaryWithNoneBranchIsOptional) {
     a: Node? = if c then Node(1) else None;
     b: Node? = if c then None else Node(2);
     s: Str? = if c then "x" else None;
-    d: Node? = if c then a else b;
+    d: Node? = if c then move a else move b;
     l: Leaf? = None;
-    e: Node? = if c then a else l;
+    e: Node? = if c then move d else move l;
   )"));
 }
 
@@ -629,17 +632,18 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
 }
 
 static const char *const kListModule =
+    "import ::memory as mem;\n"
     "class Node {\n"
     "  v: int;\n"
     "  next: Node?;\n"
-    "  fn tail() -> Node? { return self.next; }\n"
-    "  fn link(n: Node?) { self.next = n; }\n"
+    "  fn tail() -> Node? { return mem::take(self.next); }\n"
+    "  fn link(n: Node?) { self.next = move n; }\n"
     "}\n"
     "impl Node {\n"
     "  fn __init__(x: int) { self.v = x; }\n"
     "}\n"
     "fn find(head: Node?, key: int) -> Node? { return head; }\n"
-    "fn first(xs: Str?[2]) -> Str? { return xs[0]; }\n"
+    "fn first(xs: Str?[2]) -> Str? { return xs[0].clone(); }\n"
     "fn count(xs: view Str?[]) -> int { return xs.len(); }\n";
 
 TEST(OptionalModule, ExportedOptionalSignaturesRoundTrip) {
@@ -653,11 +657,11 @@ fn main() -> int {
   n.link(None);
   n.link(list::Node(2));
   t: list::Node? = n.tail();
-  f: list::Node? = list::find(n, 2);
+  f: list::Node? = list::find(move n, 2);
   g: list::Node? = list::find(None, 2);
   ss: Str?[2] = [None, "s"];
-  s: Str? = list::first(ss);
   c: int = list::count(ss);
+  s: Str? = list::first(move ss);
   match t {
     x: list::Node { io::println(Str<int>(x.v)); }
     None { io::println("none"); }
@@ -716,16 +720,16 @@ fn main() -> int {
 
 TEST(OptionalTuple, TupleWithOptionalElementsOk) {
   expectOk(std::string(kNodeClass) + R"(
-    fn pick(n: Node?, k: int) -> (Node?, int) { return (n, k); }
+    fn pick(n: Node?, k: int) -> (Node?, int) { return (move n, k); }
     fn main() -> int {
       a: Node? = Node(7);
-      t: (Node?, int) = pick(a, 1);
+      t: (Node?, int) = pick(move a, 1);
       u = pick(None, 2);
-      x, k = t;
-      y: Node?, j: int = u;
-      same: bool = t == pick(a, 1);
+      same: bool = t == pick(Node(7), 1);
+      ts: (Node?, int)[2] = [pick(None, 3), pick(None, 4)];
+      x, k = move t;
+      y: Node?, j: int = move u;
       isNone: bool = y == None;
-      ts: (Node?, int)[2] = [t, u];
       match x {
         n: Node { k = n.val(); }
         None    { }
@@ -753,9 +757,9 @@ TEST(OptionalTuple, DestructuredOptionalElementStillNeedsUnwrap) {
 TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
   expectOk(std::string(kNodeClass) + R"(
     class Box { p: (Node?, int);
-                view fn set(p: (int?, Str)) -> Str { return p.1; } }
+                view fn set(p: (int?, Str)) -> Str { return p.1.clone(); } }
     impl Box { fn __init__() { self.p = (None, 0); } }
-    fn take(p: (int?, Str)) -> Str { return p.1; }
+    fn take(p: (int?, Str)) -> Str { return p.1.clone(); }
     fn mk() -> (Node?, int) { return (None, 2); }
     fn main() -> int {
       a: (int?, Str) = (None, "a");
@@ -800,14 +804,15 @@ TEST(OptionalTuple, ArrayLiteralElementsTakeTheDeclaredElementType) {
     fn main() -> int {
       nb: int? = None;
       n: Node? = None;
+      m: Node? = None;
       tbl: (Str, int?)[3] = [("a", 1), ("b", nb), ("c", 3)];
       tbl = [("x", nb), ("y", None), ("z", 2)];
       count([("p", 1), ("q", nb)]);
       tbl[2] = ("w", None);
       ints: int?[3] = [1, nb, None];
-      nodes: Node?[3] = [None, n, Node(1)];
+      nodes: Node?[3] = [None, move n, Node(1)];
       grid: int?[2][2] = [[1, nb], [None, 2]];
-      nested: (Str, (int?, Node?))[2] = [("a", (1, None)), ("b", (nb, n))];
+      nested: (Str, (int?, Node?))[2] = [("a", (1, None)), ("b", (nb, move m))];
       return 0;
     }
   )");
@@ -852,7 +857,7 @@ TEST(OptionalTupleModule, TupleAndOptionalSignaturesRoundTrip) {
             "fn wrap(xs: (Node?, int)[2]) -> (Node?, int)[2] { return xs; }\n"
             "fn count(xs: view (Node?, Str?)[]) -> int { return xs.len(); }\n"
             "fn pairs() -> (Node?, Str?)[1] { return [(None, None)]; }\n"
-            "fn mk(n: Node?) -> (Node?, int) { return (n, 5); }\n");
+            "fn mk(n: Node?) -> (Node?, int) { return (move n, 5); }\n");
   auto ok = writeFile(tmp, "main.pkn", R"(
 import lib;
 fn main() -> int {

@@ -67,7 +67,7 @@ fn main() -> int {
   io::println("=== method: concat() (in-place mutation) ===");
   let a: mut Str = "hello";
   let b: Str = " world";
-  a.concat(b);
+  a.concat(move b);
   io::println(a);               // hello world
   // concat more
   let a2: mut Str = "hello";
@@ -95,7 +95,7 @@ fn main() -> int {
 
   io::println("=== Str passed to function ===");
   let base: Str = "hi";
-  io::println(shprintln(base));     // hi!!!
+  io::println(shprintln(move base)); // hi!!!
   io::println(repeat("ab", 4)); // abababab
 
   io::println("=== Str returned and used immediately ===");

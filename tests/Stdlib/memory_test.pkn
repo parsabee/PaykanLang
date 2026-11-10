@@ -1,18 +1,19 @@
-// ::memory Buffer<T>: a struct whose copies share the slots; new slots are
-// zero (or unset); set/at/get/copy, growth, shrinking and swap, for values and
-// references; and the errors the operations report instead of panicking.
+// ::memory Buffer<T>: a struct holding its slots, which an `inout` borrow
+// writes in place; new slots are zero (or unset); set/at/get/copy, growth,
+// shrinking and swap, for values and references; and the errors the
+// operations report instead of panicking.
 import ::io;
 import ::error as err;
 import ::memory as mem;
 import ::result as res;
 
 /// The name of @p e's code.
-fn code(e: err::Error) -> Str {
+fn code(e: view err::Error) -> Str {
   return err::name(e.code);
 }
 
 /// The name of the code of @p r's error, `Ok` when it made a value.
-fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
+fn codeOf<T>(r: view res::Result<T, err::Error>) -> Str {
   match r {
     v: Ok { return "Ok"; }
     e: Err { return code(e.error); }
@@ -20,7 +21,7 @@ fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
 }
 
 /// The text of @p r's value, or the name of its error's code.
-fn shown<T: Show>(r: res::Result<T, err::Error>) -> Str {
+fn shown<T: Show>(r: view res::Result<T, err::Error>) -> Str {
   match r {
     v: Ok { return v.value.toString(); }
     e: Err { return code(e.error); }
@@ -43,8 +44,8 @@ fn main() -> int {
   e = n.reserve(3);
   io::println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(2)));
 
-  // A copy shares the slots.
-  alias = n;
+  // A borrow writes the buffer's own slots.
+  alias: inout mem::Buffer<int> = n;
   e = alias.set(0, 42);
   io::println(n.get(0));
 

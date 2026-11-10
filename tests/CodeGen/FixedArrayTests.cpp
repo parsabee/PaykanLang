@@ -167,6 +167,60 @@ TEST(FixedArray, ParametersAndResults) {
   g.expectNoLeaks("ParametersAndResults");
 }
 
+// An element is an `inout` place: passed to a parameter (`mem::take`,
+// `mem::replace`, `mem::swap` among them), named by an `inout` local or arm,
+// returned `inout`; in an array local, in an array of arrays, in a struct
+// element's field and in an object's array field.  What an element held
+// leaves with what took it, and the array still owns the rest.
+TEST(FixedArray, AnElementIsAnInoutPlace) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
+    class Node { v: int; }
+    struct P { s: Str; n: int; }
+    class Bag { items: Str[3]; }
+    impl Bag {
+      fn __init__() { self.items = ["a", "b", "c"]; }
+      fn at(i: int) -> inout Str { return self.items[i]; }
+    }
+    fn bump(n: inout int) { n = n + 1; }
+    fn grow(s: inout Str) { s = s + "!"; }
+    fn main() -> int {
+      xs: Node?[3] = [None, Node(1), None];
+      let a = mem::take(xs[1]);
+      match a { n: Node { io::print(Str(n.v)); } None { io::print("-"); } }
+      match xs[1] { n: Node { io::println(" kept"); } None { io::println(" taken"); } }
+      ns: int[2] = [1, 2];
+      i = 1;
+      bump(ns[0]); bump(ns[i]); bump(ns[i]);
+      ps: P[2] = [P("x", 1), P("y", 2)];
+      grow(ps[1].s);
+      bump(ps[0].n);
+      grid: int[2][2] = [[1, 2], [3, 4]];
+      bump(grid[1][0]);
+      io::println(Str(ns[0]) + Str(ns[1]) + " " + ps[1].s + Str(ps[0].n) + " " +
+                  Str(grid[1][0]));
+      ss: Str[2] = ["p", "q"];
+      e: inout Str = ss[1];
+      e = e + "q";
+      let old = mem::replace(ss[0], "r");
+      mem::swap(ss[0], ss[1]);
+      ys: Node?[2] = [Node(5), None];
+      match ys[0] { n: inout Node { n = Node(n.v + 10); } None { } }
+      match ys[0] { n: Node { io::print(Str(n.v) + " "); } None { } }
+      b: mut = Bag();
+      grow(b.items[0]);
+      grow(b.at(2));
+      io::println(old + ss[0] + ss[1] + " " + b.items[0] + b.items[2]);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1 taken\n24 y!2 4\n15 pqqr a!c!\n");
+  g.expectNoLeaks("AnElementIsAnInoutPlace");
+}
+
 TEST(FixedArray, IndexesComputedAtRunTime) {
   expectOutput(R"(
     sq: int[5] = [0; 5];
@@ -193,15 +247,15 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
   expectOutput(R"(
     ss: Str[3] = ["a", "b", "c"];
     ss[1] = ss[0] + ss[2];
-    ss[2] = ss[2];
-    copy = ss;
+    ss[2] = ss[2].clone();
+    copy = ss.clone();
     copy[0] = "z";
-    ss = ss;
+    ss = ss.clone();
     io::println(ss[0] + ss[1] + ss[2] + " " + copy[0] + copy[1]);
     grid: Str[2][3] = [["a", "b", "c"], ["d", "e", "f"]];
-    row = grid[1];
-    grid[0] = row;
-    grid = [grid[1], [row[2], row[1], row[0]]];
+    row = grid[1].clone();
+    grid[0] = row.clone();
+    grid = [grid[1].clone(), [row[2].clone(), row[1].clone(), row[0].clone()]];
     grid[1][1] = "E";
     io::println(grid[0][0] + grid[1][1] + grid[1][2] + row[1]);
     os: Str?[2] = [None, "x"];
@@ -212,7 +266,7 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
     ts: (int, Str)[2] = [(1, "one"), (2, "two")];
     io::println(ts[1].1);
     big: Str[6] = ["1", "2", "3", "4", "5", "6"];
-    b2 = big;
+    b2 = big.clone();
     b2[5] = "x";
     r: inout = big;
     r[0] = "R";
@@ -232,18 +286,18 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
       view fn speak() -> Str { return "it " + self.name; }
     }
     impl Animal {
-      fn __init__(n: Str) { self.name = n; }
+      fn __init__(n: Str) { self.name = move n; }
     }
     class Dog : Animal {
       view fn speak() -> Str { return "woof " + self.name; }
     }
     impl Dog {
-      fn __init__(n: Str) { __super__(n); }
+      fn __init__(n: Str) { __super__(move n); }
     }
     class Kennel { first: Str; }
     impl Kennel {
       fn __init__(dogs: view Animal[2]) { self.first = dogs[0].speak(); }
-      fn pair(extra: Str[2]) -> Str[2] { return [self.first, extra[1]]; }
+      fn pair(extra: Str[2]) -> Str[2] { return [self.first.clone(), extra[1].clone()]; }
     }
     fn names() -> Str[2] { return ["ann", "bob"]; }
     fn shout(xs: Str[2]) -> Str[2] {
@@ -254,7 +308,7 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
     fn find(xs: Str[5], s: Str) -> int {
       i = 0;
       while i < xs.len() {
-        pair: Str[2] = [xs[i], s];
+        pair: Str[2] = [xs[i].clone(), s.clone()];
         if pair[0] == pair[1] {
           return i;
         }
@@ -280,13 +334,13 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
               " " + Str(find(["a", "b", "c", "d", "e"], "z")));
       names();
       ns = shout(names());
-      io::println(ns[0] + ns[1] + " " + shout(ns)[1] + " " +
+      io::println(ns[0] + ns[1] + " " + shout(ns.clone())[1] + " " +
               Str(names().len()) + " " + Str(names()[1].len()));
       rename(ns);
       zoo: Animal[2] = [Dog("rex"), Animal("cat")];
       zoo[1] = Dog("fido");
       k: mut = Kennel(zoo);
-      p = k.pair(ns);
+      p = k.pair(move ns);
       io::println(zoo[1].speak() + ", " + p[0] + ", " + p[1] + ", " +
               k.pair(["x", "y"])[1]);
       match names()[1] {
@@ -312,7 +366,7 @@ TEST(FixedArray, Fields) {
     impl Grid {
       fn set(r: int, c: int, v: int) { self.cells[r][c] = v; }
       view fn at(r: int, c: int) -> int { return self.cells[r][c]; }
-      fn rename(i: int, s: Str) { self.tags[i] = s; }
+      fn rename(i: int, s: Str) { self.tags[i] = move s; }
       view fn row(r: int) -> int[3] { return self.cells[r]; }
     }
     class Named { names: Str[6]; }
@@ -329,7 +383,7 @@ TEST(FixedArray, Fields) {
     class Box<T> { xs: T[2]; }
     fn mk() -> Grid { return Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]); }
     fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
-    fn clear(ts: inout Str[2]) { ts = ["", ts[0]]; }
+    fn clear(ts: inout Str[2]) { ts = ["", ts[0].clone()]; }
     fn main() -> int {
       g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]);
       g.set(1, 2, 60);
@@ -339,8 +393,8 @@ TEST(FixedArray, Fields) {
       g.cells[1] = [0, 0, 0];
       r = g.row(0);
       g.cells[0] = [7, 8, 9];
-      copy = g.tags;
-      g.tags = ["new", g.tags[0]];
+      copy = g.tags.clone();
+      g.tags = ["new", g.tags[0].clone()];
       io::println(Str(r[0]) + " " + Str(g.cells[0][0]) + " " +
               Str(g.cells[1][2]) + " " + copy[0] + " " + g.tags[1]);
       io::println(mk().tags[1] + " " + Str(mk().cells[1][1]) + " " +
@@ -351,7 +405,7 @@ TEST(FixedArray, Fields) {
       clear(g.tags);
       inner: inout = g.tags;
       inner[0] = "in";
-      b = Box<Str>(["box", t[0]]);
+      b = Box<Str>(["box", t[0].clone()]);
       io::println(t[0] + m.names[5] + m.extra[0] + " " + g.tags[0] + g.tags[1] +
               " " + b.xs[0] + b.xs[1]);
       return 0;
@@ -393,7 +447,7 @@ TEST(FixedArray, SliceParameters) {
       }
     }
     fn first(ss: view Str[]) -> int { return ss[0].len() + ss.len(); }
-    fn rename(ss: inout Str[], s: Str) { ss[ss.len() - 1] = s; }
+    fn rename(ss: inout Str[], s: Str) { ss[ss.len() - 1] = move s; }
     fn count<T>(xs: view T[]) -> int { return xs.len(); }
     fn pass(xs: view int[]) -> int { return sum(xs) + count(xs); }
     fn main() -> int {
@@ -554,33 +608,47 @@ TEST(FixedArray, RepeatLiteralsOfScalars) {
   g.expectNoLeaks("RepeatLiteralsOfScalars");
 }
 
-// v is evaluated once: every slot holds the same reference (one `Node`
-// three times, one string twice), a nested array is copied into every row,
-// and a call runs once.
+// A Copyable v is evaluated once and copied: a call returning an `int` runs
+// once, and a struct holding a `shared` Node puts that one Node in every
+// slot.  Any other v is evaluated for each slot: `[Node(1); 3]` makes three
+// Nodes, `[Str(7); 2]` two strings, a nested array a row each, and a call
+// returning a `Str` runs once per slot.  A variable or an element that is
+// not Copyable is cloned for each (`[s.clone(); 3]`); repeated as it is, it
+// is an error.
 TEST(FixedArray, RepeatLiteralsOfReferences) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
     class Node { v: int; }
     impl Node { fn __init__(v: int) { self.v = v; } }
+    struct Ref { n: shared mut Node; }
     class Counter {
       n: int;
       fn next() -> int {
         self.n = self.n + 1;
         return self.n * 10;
       }
+      fn label() -> Str {
+        self.n = self.n + 1;
+        return Str(self.n);
+      }
     }
     fn main() -> int {
       s = "ab";
-      ss = [s; 3];
+      ss = [s.clone(); 3];
       ss[1] = "c";
       ts = [Str(7); 2];
-      io::println(ss[0] + ss[1] + ss[2] + " " + ts[0] + ts[1]);
+      io::println(ss[0] + ss[1] + ss[2] + " " + ts[0] + ts[1] + " " + s);
       nodes = [Node(1); 3];
       nodes[0].v = 42;
-      io::println(Str(nodes[1].v) + " " + Str(nodes[2].v));
+      io::println(Str(nodes[0].v) + " " + Str(nodes[1].v) + " " + Str(nodes[2].v));
+      k: shared mut = Node(2);
+      refs = [Ref(k); 3];
+      refs[0].n.v = 43;
+      io::println(Str(refs[1].n.v) + " " + Str(refs[2].n.v) + " " + Str(k.v));
       grid: Str[3][3] = [[s + "!"; 3]; 3];
       grid[1][1] = "x";
-      grid[2] = [grid[1][1]; 3];
+      grid[2] = [grid[1][1].clone(); 3];
       io::println(grid[0][1] + grid[1][1] + grid[1][0] + grid[2][2]);
       os: int?[4] = [None; 4];
       os[2] = 5;
@@ -589,7 +657,7 @@ TEST(FixedArray, RepeatLiteralsOfReferences) {
       io::println(os[2]);
       io::println(ps[1]);
       ns: Node?[3] = [None; 3];
-      ns[1] = nodes[2];
+      ns[1] = mem::replace(nodes[0], Node(0));
       match ns[1] {
         n: Node { io::println("node " + Str(n.v)); }
         None { io::println("none"); }
@@ -601,12 +669,36 @@ TEST(FixedArray, RepeatLiteralsOfReferences) {
       c: mut = Counter(0);
       tens = [c.next(); 4];
       io::println(Str(c.n) + " " + Str(tens[0] + tens[3]));
+      labels = [c.label(); 3];
+      io::println(Str(c.n) + " " + labels[0] + labels[1] + labels[2]);
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "abcab 77\n42 42\nab!xab!x\nNone\n5\n1\nnode 42\nnone\n"
-                      "1 20\n");
+  EXPECT_EQ(r.StdOut, "abcab 77 ab\n42 1 1\n43 43 43\nab!xab!x\nNone\n5\n1\n"
+                      "node 42\nnone\n1 20\n4 234\n");
   g.expectNoLeaks("RepeatLiteralsOfReferences");
+  // A variable's Str and an element's row, repeated as they are.
+  for (const char *v : {"s", "grid[1]"}) {
+    auto e = compileAndRun(std::string(R"(
+      fn main() -> int {
+        s = "ab";
+        grid: Str[2][2] = [["x"; 2]; 2];
+        xs = [)") + v + R"(; 3];
+        return 0;
+      }
+    )");
+    EXPECT_FALSE(e.CompileOk) << v;
+    EXPECT_NE(e.StdErr.find("'[v; n]' evaluates its value for each of its 3 "
+                            "elements, and '" +
+                            std::string(v) + "' (a '"),
+              std::string::npos)
+        << e.StdErr;
+    EXPECT_NE(e.StdErr.find("') is not Copyable: write a value made for each, "
+                            "such as '[" +
+                            std::string(v) + ".clone(); 3]'"),
+              std::string::npos)
+        << e.StdErr;
+  }
 }

@@ -1,10 +1,12 @@
 // 34 — single evaluation: the operands of an object read on an assignment's
-// right-hand side run exactly once (#52).  Assigning an object element or
-// field retains what it reads; that ownership handling must reuse the value
-// already computed instead of evaluating the array, the index or the
-// receiver a second time (each helper below prints when it is called).
-// Exercises: `x = arr[idx()]`, `x = arrs()[1]`, a declaration from an
-//            element, `x = make().c` and an element passed to a call.
+// right-hand side run exactly once (#52).  Assigning a `shared` field retains
+// what it reads, and an element (an array holds unique references) is cloned
+// or passed to a `view`; that handling must reuse the value already computed
+// instead of evaluating the array, the index or the receiver a second time
+// (each helper below prints when it is called).
+// Exercises: `x = arr[idx()].clone()`, `x = arrs()[1].clone()`, a
+//            declaration from an element, `x = make().c` and an element
+//            passed to a call.
 //
 // expect-stdout: idx called
 // expect-stdout: 1
@@ -25,9 +27,10 @@ class C {
 impl C {
   fn __init__(v: int) { self.v = v; }
 }
+impl Cloneable for C {}
 
 class Holder {
-  c: C;
+  c: shared C;
 }
 impl Holder {
   fn __init__(v: int) { self.c = C(v); }
@@ -48,18 +51,18 @@ fn make() -> Holder {
   return Holder(5);
 }
 
-fn show(c: C) {
+fn show(c: view C) {
   io::println("show " + Str(c.v));
 }
 
 fn main() -> int {
   let arr = [C(1), C(2)];
-  x = C(9);
-  x = arr[idx()];
+  x: shared C = C(9);
+  x = arr[idx()].clone();
   io::println(Str(x.v));
-  x = arrs()[1];
+  x = arrs()[1].clone();
   io::println(Str(x.v));
-  let y = arr[idx()];
+  let y = arr[idx()].clone();
   io::println(Str(y.v));
   x = make().c;
   io::println(Str(x.v));

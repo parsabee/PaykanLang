@@ -22,11 +22,13 @@ namespace sema {
 
 namespace {
 
-/// `view fn name(int, view Str) -> T`, as a requirement or a method reads.
-std::string fnSignature(bool view, const std::string &name,
+/// `view fn name(int, view Str) -> T`, as a requirement or a method reads;
+/// `shared fn ...` for a `shared fn`.
+std::string fnSignature(bool shared, bool view, const std::string &name,
                         const std::vector<ast::Type *> &params,
                         const ast::ParamModes &modes, ast::Type *ret) {
-  std::string s = view ? "view fn " : "fn ";
+  std::string s = shared ? "shared " : "";
+  s += view ? "view fn " : "fn ";
   s += name + "(";
   for (size_t i = 0; i < params.size(); ++i) {
     if (i)
@@ -101,6 +103,15 @@ void Sema::registerBuiltinTraits() {
   // Copyable (the concurrency prototype) by what a type holds: the scalars
   // here, and every aggregate of Copyable parts (traitImplOwner).
   builtin(names::kTraitCopyable, nullptr, nullptr, values);
+  // Cloneable, `view fn clone() -> Self` (#369): every Copyable type (the
+  // scalars here), `Str`, and an aggregate of Cloneable parts
+  // (traitImplOwner); a class opts in with `impl Cloneable for`.
+  std::vector<ast::Type *> cloneable = values;
+  cloneable.push_back(Ctx.getStrTy());
+  builtin(names::kTraitCloneable, names::kMethodClone,
+          Ctx.make<ast::ClassType>(ast::SourceLocation(),
+                                   Ctx.intern(names::kSelfType)),
+          cloneable);
 }
 
 bool Sema::declareTraits(ast::TranslationUnit *tu) {
@@ -299,6 +310,9 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   // Copyable by structure (the concurrency prototype).
   if (isBuiltinTrait(names::kTraitCopyable))
     return isCopyable(ty) ? ty : nullptr;
+  // Cloneable by structure, or a struct's own block (#369).
+  if (isBuiltinTrait(names::kTraitCloneable))
+    return isCloneable(ty) ? ty : nullptr;
   // An optional shows "None" or its value's text, a tuple its elements, a
   // struct its fields and an enum its variant and its fields (the builtin
   // `Show`), when each of them has a text.  Before the struct case.
@@ -435,7 +449,31 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
               "class is shared by reference, not held in place");
     return false;
   }
-  if (const ast::Type *owner = traitImplOwner(ty, *tr)) {
+  // A subclass's `impl Cloneable for` block gives it a `clone` of its own,
+  // the one that makes an object of its class (#369).
+  const bool cloneable = tr->Trait->IsBuiltin &&
+                         tr->Trait->Decl->getName() == names::kTraitCloneable;
+  const bool ownClone = ast::isa<ast::ClassType>(ty) && cloneable;
+  // A struct writes its `clone` when a part has none; one whose every field
+  // is Cloneable has the built-in one already.
+  bool structClone = false;
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty); st && cloneable) {
+    bool partMissing = false;
+    for (size_t i = 0; i < st->getNumFields(); ++i)
+      if (!isCloneablePart(st->getElementType(i),
+                           st->findFieldQualifier(st->getFieldName(i))))
+        partMissing = true;
+    structClone = partMissing;
+    if (!partMissing) {
+      error(im->getLocation(),
+            "struct '" + name +
+                "' already implements 'Cloneable': each of "
+                "its fields is Cloneable, so its 'clone' is built in");
+      return false;
+    }
+  }
+  if (const ast::Type *owner = traitImplOwner(ty, *tr);
+      owner && !structClone && !(ownClone && owner != ty)) {
     error(im->getLocation(),
           kind + " '" + name + "' already implements '" + trait + "'" +
               (owner == ty
@@ -474,8 +512,9 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
       ok = false;
       continue;
     }
-    const std::string want = fnSignature(req->isView(), req->getName(),
-                                         sig.Params, sig.Modes, sig.Ret);
+    const std::string want =
+        fnSignature(req->isShared(), req->isView(), req->getName(), sig.Params,
+                    sig.Modes, sig.Ret);
     ast::MethodDecl *m = methodOf(ty, req->getName());
     if (!m) {
       std::string msg = kind;
@@ -492,8 +531,9 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
     }
     if (!sameSignature(m, req, sig)) {
       std::string msg = "'";
-      msg += fnSignature(m->isView(), m->getName(), m->getParamTypes(),
-                         m->getParamModes(), m->getReturnType());
+      msg += fnSignature(m->isShared(), m->isView(), m->getName(),
+                         m->getParamTypes(), m->getParamModes(),
+                         m->getReturnType());
       msg += "' of " + kind + " '";
       msg += name;
       msg += "' does not match '";
@@ -518,6 +558,7 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
 bool Sema::sameSignature(const ast::MethodDecl *m, const ast::FuncDecl *req,
                          const RequiredSig &sig) {
   bool same = m->isView() == req->isView() &&
+              m->isShared() == req->isShared() &&
               typesEqual(m->getReturnType(), sig.Ret) &&
               m->getParamTypes().size() == sig.Params.size() &&
               m->getParamModes().Result == sig.Modes.Result;
@@ -537,15 +578,17 @@ std::string Sema::unmetRequirement(ast::Type *ty, const TraitRef &tr) {
     RequiredSig sig;
     if (!resolveRequirement(req, subst, trait, sig))
       return "a requirement of '" + trait + "' does not resolve";
-    const std::string want = fnSignature(req->isView(), req->getName(),
-                                         sig.Params, sig.Modes, sig.Ret);
+    const std::string want =
+        fnSignature(req->isShared(), req->isView(), req->getName(), sig.Params,
+                    sig.Modes, sig.Ret);
     const ast::MethodDecl *m = methodOf(ty, req->getName());
     if (!m)
       return "it has no method '" + want + "'";
     if (!sameSignature(m, req, sig))
       return "its '" +
-             fnSignature(m->isView(), m->getName(), m->getParamTypes(),
-                         m->getParamModes(), m->getReturnType()) +
+             fnSignature(m->isShared(), m->isView(), m->getName(),
+                         m->getParamTypes(), m->getParamModes(),
+                         m->getReturnType()) +
              "' does not match '" + want + "'";
   }
   return "";
@@ -575,6 +618,23 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
   for (auto *fn : tu->getGenericFuncDecls())
     check(fn, fn->getTypeParams(), fn->getTypeParamBounds());
   return ok;
+}
+
+bool Sema::implBoundsHold(const ast::ImplDecl *im,
+                          const std::vector<ast::Type *> &args) {
+  const auto &bounds = im->getTypeParamBounds();
+  Subst subst;
+  for (size_t i = 0; i < im->getTypeParams().size() && i < args.size(); ++i)
+    subst[*im->getTypeParams()[i]] = args[i];
+  for (size_t i = 0; i < bounds.size() && i < args.size(); ++i)
+    for (ast::Type *b : bounds[i]) {
+      if (!namesBuiltinTrait(b))
+        return false; // reported with the block
+      auto tr = resolveTraitRef(b, subst, im->getLocation());
+      if (!tr || !traitImplOwner(args[i], *tr))
+        return false;
+    }
+  return true;
 }
 
 bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
@@ -631,8 +691,7 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
                  tr->Trait->Decl->getName() == names::kTraitCopyable) {
           std::string part;
           isCopyable(args[i], &part);
-          why = part.empty() ? "a reference, a 'Str', a function value or a "
-                               "task is move-only"
+          why = part.empty() ? "a reference, a 'Str' or a task is move-only"
                              : "it holds move-only " + part;
         }
         error(loc, "'" + typeName(args[i]) + "' does not implement trait '" +

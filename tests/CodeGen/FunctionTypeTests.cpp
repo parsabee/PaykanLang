@@ -33,26 +33,30 @@ std::string writeTempFile(const std::filesystem::path &dir,
 TEST(FunctionType, LambdasNamedFunctionsAndCalls) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
     fn square(x: int) -> int { return x * x; }
-    fn apply(f: (int) -> int, x: int) -> int { return f(x); }
-    fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
+    fn apply(f: view (int) -> int, x: int) -> int { return f(x); }
+    fn twice(f: (int) -> int) -> (int) -> int {
+      let b: shared = mem::Box<(int) -> int>(move f);   // what a closure may capture
+      return fn(x: int) -> int { return b.value()(b.value()(x)); };
+    }
     class Button { label: Str; onClick: (Str) -> void; }
     struct Op { name: Str; run: (int, int) -> int; }
     fn main() -> int {
       n = 10;
-      s = "s";
+      s: shared Str = "s";
       add = fn(x: int) -> int { return x + n; };   // captures n
       g = square;
-      h = twice(add);
+      h = twice(fn(x: int) -> int { return x + n; });
       k: (int) -> int = fn(x: int) -> int { return x; };
-      fs: ((int) -> int)[2] = [square, add];
+      fs: ((int) -> int)[2] = [square, fn(x: int) -> int { return x + n; }];
       b = Button("ok", fn(l: Str) { io::println(l + s); });
       b.onClick("clicked ");
       o = Op("add", fn(a: int, b: int) -> int { return a + b; });
       v = fn(x: view Str, c: inout int) -> bool { c = c + x.len(); return c > 3; };
       m = 0;
       ok = v("abc", m);
-      t: ((int) -> int, Str) = (g, "t");
+      t: ((int) -> int, Str) = (square, "t");
       io::println(Str(apply(g, 3)) + " " + Str(h(1)) + " " + Str(fs[1](2)) + " " +
               Str(o.run(1, 2)) + " " + Str(t.0(4)) + " " + Str(m) + Str(ok));
       n = 20;                                      // the capture is a copy
@@ -65,15 +69,21 @@ TEST(FunctionType, LambdasNamedFunctionsAndCalls) {
   g.expectNoLeaks("LambdasNamedFunctionsAndCalls");
 }
 
+// A capture is a copy of a Copyable value: a `shared fn`'s `self` (the same
+// object, retained), a function value (its closure shared), a struct, an
+// array, a tuple of `shared` references and a `shared` object, each released
+// with the closure.  A plain method's `self` and a tuple holding a unique
+// object or a `Str` are not Copyable, so capturing them is an error.
 TEST(FunctionType, CapturesAreCopiedAndReleased) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
     struct P { x: int; y: int; }
+    struct Named { node: shared Node; label: shared Str; }
     class Counter {
       n: int;
-      fn make() -> () -> int { return fn() -> int { return self.n + 1; }; }
-      fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
+      shared fn make() -> () -> int { return fn() -> int { return self.n + 1; }; }
+      shared fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
     }
     fn makeAdders(base: int) -> ((int) -> int)[2] {
       return [fn(x: int) -> int { return x + base; }, fn(x: int) -> int { return x * base; }];
@@ -87,17 +97,17 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
       while i < xs.len() { total = total + f(xs[i]); i = i + 1; }   // a copy out of the view
       return total;
     }
-    fn describe(n: Node) -> (Str) -> Str {
+    fn describe(n: shared Node) -> (Str) -> Str {
       p = P(1, 2);
-      t = (n, "t");
+      t = (Named(n, "t"), 0);
       xs: int[2] = [3, 4];
       return fn(prefix: Str) -> Str {
-        inner = fn() -> int { return p.x + t.1.len() + xs[1]; };
-        return prefix + n.toString() + Str(inner()) + t.0.toString();
+        inner = fn() -> int { return p.x + t.0.label.len() + xs[1]; };
+        return prefix + n.toString() + Str(inner()) + t.0.node.toString();
       };
     }
     fn main() -> int {
-      c: mut = Counter(5);
+      c: shared mut = Counter(5);
       get = c.make();                  // captures self: the same object
       add = c.adder();
       add(10);
@@ -109,7 +119,7 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
       d = describe(Node(7));           // a struct, a tuple, an array and an object, captured
       io::println(d(">"));
       opt: (() -> int)? = None;
-      opt = get;
+      opt = move get;
       match opt {
         f: () -> int { io::println("some " + Str(f())); }
         None { io::println("none"); }
@@ -121,31 +131,52 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
   EXPECT_EQ(r.StdOut, "16 15\n4 6\n12 45\n>N76N7\nsome 16\n");
   EXPECT_EQ(r.ExitCode, 0);
   g.expectNoLeaks("CapturesAreCopiedAndReleased");
+  auto e = compileAndRun(R"(
+    class Node { n: int; }
+    class Counter {
+      n: int;
+      fn make() -> () -> int { return fn() -> int { return self.n + 1; }; }
+    }
+    fn describe(n: Node) -> () -> int {
+      t = (move n, "t");
+      return fn() -> int { return t.1.len(); };
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(e.CompileOk);
+  for (const char *msg :
+       {"cannot capture 'self': a method borrows its receiver, and a function "
+        "captures by copy; a 'shared fn' may capture it, or a 'weak' local of "
+        "it ('me: weak mut = self;')",
+        "cannot capture 't' (a unique '(Node, Str)'): a function captures by "
+        "copy"})
+    EXPECT_NE(e.StdErr.find(msg), std::string::npos) << msg << "\n" << e.StdErr;
 }
 
 // A captured name is read-only, not a `view`: read, it is a value like any
 // other, which the lambda returns, stores and passes on by value, whatever
-// it holds (a struct, a tuple, a tagged union holding a reference); the copy
+// it holds (a struct, a tuple, a tagged union holding a reference, here a
+// `shared Str`, since a function captures only Copyable values); the copy
 // holds the references the capture does.
 TEST(FunctionType, CapturedValuesAreReadAsValues) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    struct P { name: Str; }
-    enum Shape { Circle(r: int), Named(label: Str) }
+    struct P { name: shared Str; }
+    enum Shape { Circle(r: int), Named(label: shared Str) }
     fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }
-    fn show(p: P) -> Str { return p.name; }
+    fn show(p: P) -> Str { return p.name.clone(); }
     fn describe(s: Shape) -> Str {
-      match s { n: Named { return n.label; } _ { return "circle"; } }
+      match s { n: Named { return n.label.clone(); } _ { return "circle"; } }
     }
     fn main() -> int {
       p = P("ada" + "!");
-      t = (1, "x" + "y");
+      t = (1, P("x" + "y"));
       sh = Shape::Named("sq" + "uare");
       getP = constant(p);
       getT = constant(t);
       getS = constant(sh);
-      f = fn() -> Str { local = p; pair = t; return show(local) + pair.1 + describe(sh); };
-      io::println(getP().name + " " + getT().1 + " " + describe(getS()) + " " + f());
+      f = fn() -> Str { local = p; pair = t; return show(local) + pair.1.name + describe(sh); };
+      io::println(getP().name + " " + getT().1.name + " " + describe(getS()) + " " + f());
       return 0;
     }
   )");
@@ -166,11 +197,11 @@ TEST(FunctionType, ValuesHeldInPlaceCrossTheCall) {
       byVal = fn(p: P) -> P { return P(p.x + 1, p.name + "!"); };
       byView = fn(p: view P) -> int { return p.x + p.name.len(); };
       byInout = fn(p: inout P) { p.x = p.x * 10; p.name = "changed"; };
-      tup = fn(t: (int, Str)) -> (Str, int) { return (t.1, t.0); };
+      tup = fn(t: (int, Str)) -> (Str, int) { return (t.1.clone(), t.0); };
       arr = fn(a: int[2], s: view Str[]) -> int[2] { return [a[1] + s.len(), a[0]]; };
       objs = fn(n: Node, m: view Node) -> Node { return Node(n.n + m.n); };
       p = P(1, "a");
-      q = byVal(p);
+      q = byVal(p.clone());
       byInout(q);
       t = tup((7, "seven"));
       xs = arr([1, 2], ["x", "y", "z"]);
@@ -190,7 +221,7 @@ TEST(FunctionType, CallsOfValuesWithReferenceAndMemoryResults) {
   // A call through a function value that is not a name (an element, a
   // tuple's field, another call's result) returning a reference, an object
   // or a value held in memory; a named function in a variable without an
-  // annotation, called and copied.
+  // annotation, called and moved.
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { v: int; view fn get() -> int { return self.v; } }
@@ -212,7 +243,7 @@ TEST(FunctionType, CallsOfValuesWithReferenceAndMemoryResults) {
       t: ((int) -> Str, int) = (fn(x: int) -> Str { return "t" + Str(x); }, 0);
       io::println(p.name + " " + Str(p.x) + " " + t.0(8) + " " + Str(mkF()(5)) + " " + ps[0](1).name);
       g = sq;
-      h = g;
+      h = move g;
       g = fn(x: int) -> int { return x + 1; };
       return h(3) + g(3);
     }
@@ -229,7 +260,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class O { cb: (int) -> int; n: int; }
-    fn reset(o: mut O) -> int {
+    fn reset(o: shared mut O) -> int {
       o.cb = fn(x: int) -> int { return x * 100; };
       o.n = o.n + 1;
       return o.n;
@@ -240,7 +271,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
     }
     fn main() -> int {
       k = 5;
-      o: mut = O(fn(x: int) -> int { return x + k; }, 0);
+      o: shared mut = O(fn(x: int) -> int { return x + k; }, 0);
       a = o.cb(reset(o));              // the closure held before, with 1
       b = o.cb(1);                     // the replacement
       f = fn(x: int) -> int { return x + k; };
@@ -289,8 +320,10 @@ TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
 
 TEST(FunctionType, FunctionValuesAreValues) {
   // A function value is its code and its closure, held in place: equal
-  // when both are the same, copied with its closure shared, a ValueType,
-  // and optional with None as no code.
+  // when both are the same, Copyable (copied with its closure shared), a
+  // ValueType, and optional with None as no code.  A call through a field
+  // keeps its closure while an argument replaces it; the object is `shared
+  // mut`, since a unique one cannot be copied into that argument.
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     fn square(x: int) -> int { return x * x; }
@@ -304,7 +337,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
     struct Pair { f: (int) -> int; g: ((int) -> int)?; }
     class Holder { cb: ((int) -> int)?; }
     class Runner { run: (int) -> int; }
-    fn clear(x: mut Runner) -> int { x.run = square; return 2; }
+    fn clear(x: shared mut Runner) -> int { x.run = square; return 2; }
     fn main() -> int {
       a = square;
       b = square;
@@ -326,7 +359,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
       match pick(False) { f: (int) -> int { io::println("some"); } None { io::println("none"); } }
       match pick(True) { _ { io::println("any"); } }
       match pick(True) { f: (int) -> int { io::println(Str(f(4))); } _ { } }
-      run: mut = Runner(adder(10));
+      run: shared mut = Runner(adder(10));
       io::println(Str(run.run(clear(run))) + " " + Str(run.run(2)));
       v = square;
       swapIn(v);
@@ -348,6 +381,21 @@ TEST(FunctionType, FunctionValuesAreValues) {
                       "8 125 True\n");
   EXPECT_EQ(r.ExitCode, 8);
   g.expectNoLeaks("FunctionValuesAreValues");
+  auto e = compileAndRun(R"(
+    fn square(x: int) -> int { return x * x; }
+    class Runner { run: (int) -> int; }
+    fn clear(x: mut Runner) -> int { x.run = square; return 2; }
+    fn main() -> int {
+      run: mut = Runner(square);
+      return run.run(clear(run));
+    }
+  )");
+  EXPECT_FALSE(e.CompileOk);
+  EXPECT_NE(e.StdErr.find("cannot copy 'run' (a unique 'mut Runner'); write "
+                          "'move run' to transfer it, or declare it 'shared "
+                          "mut Runner'"),
+            std::string::npos)
+      << e.StdErr;
 }
 
 TEST(FunctionType, AcrossModules) {
@@ -356,16 +404,20 @@ TEST(FunctionType, AcrossModules) {
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
   writeTempFile(tmpDir, "lib/ops.pkn", R"(
+import ::memory as mem;
 fn square(x: int) -> int { return x * x; }
-fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
+fn twice(f: (int) -> int) -> (int) -> int {
+  let b: shared = mem::Box<(int) -> int>(move f);   // what a closure may capture
+  return fn(x: int) -> int { return b.value()(b.value()(x)); };
+}
 class Button {
   label: Str;
   onClick: (Str) -> Str;
-  fn click() -> Str { return self.onClick(self.label); }
+  fn click() -> Str { return self.onClick(self.label.clone()); }
 }
 struct Op { name: Str; run: (int, int) -> int; }
 fn makeCounter(start: int) -> () -> int { return fn() -> int { return start + 1; }; }
-fn applyAll(xs: view int[], f: (int) -> int) -> int {
+fn applyAll(xs: view int[], f: view (int) -> int) -> int {
   t = 0; i = 0;
   while i < xs.len() { t = t + f(xs[i]); i = i + 1; }
   return t;
@@ -376,7 +428,7 @@ import lib::ops;
 fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
   sq = ops::square;                    // an imported function as a value
-  t = ops::twice(sq);                  // a closure made in the other module
+  t = ops::twice(ops::square);         // a closure made in the other module
   b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
@@ -391,4 +443,40 @@ fn main() -> int {
   EXPECT_EQ(r.ExitCode, 0);
   g.expectNoLeaks("AcrossModules");
   std::filesystem::remove_all(tmpDir);
+}
+
+// A function value is Copyable: its clone is a copy, sharing its closure, so
+// it is `==` to the original, wherever the value is held (a variable, a
+// struct's field, an array's element, a tuple's element, an object's field).
+// A clone read in place out of a struct, an array or a tuple once tripped the
+// lowering's chain visitor.
+TEST(FunctionType, ACloneIsACopyWhereverItIsHeld) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn sq(x: int) -> int { return x * x; }
+    struct Pair { f: (int) -> int; n: int; }
+    class Holder { f: (int) -> int; }
+    fn main() -> int {
+      k = 3;
+      let add = fn(x: int) -> int { return x + k; };
+      let p = Pair(add, 1);
+      let fs = [sq, add];
+      let t = (add, 2);
+      let h = Holder(add);
+      let a = add.clone();
+      let b = p.f.clone();
+      let c = fs[1].clone();
+      let d = t.0.clone();
+      let e = h.f.clone();
+      io::println(Str(a(1)) + " " + Str(b(1)) + " " + Str(c(1)) + " " +
+                  Str(d(1)) + " " + Str(e(1)) + " " + Str(fs[0].clone()(5)));
+      io::println(Str(a == add) + " " + Str(p.f.clone() == p.f) + " " +
+                  Str(fs[1].clone() == add) + " " + Str(e == h.f));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "4 4 4 4 4 25\nTrue True True True\n");
+  g.expectNoLeaks("ACloneIsACopyWhereverItIsHeld");
 }

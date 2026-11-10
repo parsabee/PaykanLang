@@ -13,15 +13,18 @@ class Pair {
 }
 
 impl Pair {
-  fn __init__(a: Cell, b: Cell) { self.a = a; self.b = b; }
+  fn __init__(a: Cell, b: Cell) { self.a = move a; self.b = move b; }
 }
 
 class Cell {
   v: int;
   kind: Kind;
-  view fn kindOf() -> Kind     { return self.kind; }
-  fn pairWith(o: Cell) -> Pair { return Pair(self, o); }
+  view fn kindOf() -> Kind          { return self.kind; }
+  view fn pairWith(o: Cell) -> Pair { return Pair(self.clone(), move o); }
 }
+
+// pairWith puts a clone of its receiver in the pair.
+impl Cloneable for Cell {}
 
 impl Cell {
   fn __init__(v: int) {
@@ -34,7 +37,7 @@ impl Cell {
 }
 
 class Splitter {
-  view fn split(c: Cell) -> Cell[2] {
+  view fn split(c: view Cell) -> Cell[2] {
     return [Cell(c.v / 2), Cell(c.v - c.v / 2)];
   }
 }

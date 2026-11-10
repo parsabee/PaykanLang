@@ -61,8 +61,8 @@ fn main() -> int {
       + " " + Str(buf.len()));
 
   // Box<f32>: one rounded value shared through two names.
-  ratio: mut = memory::Box<f32>(0.1);
-  alias: mut = ratio;
+  ratio: shared mut = memory::Box<f32>(0.1);
+  alias: shared mut = ratio;
   r: inout f32 = alias.get();
   r = r * 3;
   io::println(Str(ratio.get()) + " " + Str(ratio.get() == 0.3));

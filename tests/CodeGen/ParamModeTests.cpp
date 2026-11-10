@@ -225,8 +225,10 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
 
 // A field passed to an `inout` parameter is the object's own storage, by
 // address: the callee's writes are seen at once through any reference to
-// the object, `self.f` and chains work, and an object the call might lose
-// (a chain, a call's result, an array element) is kept alive for the call.
+// the object (`h` is `shared mut`, and the callee is given another
+// reference to it), `self.f` and chains work, and an object the call might
+// lose (a chain, a call's result, an array element) is kept alive for the
+// call.
 TEST(ParamMode, InoutFieldsArePassedByAddress) {
   LeakGuard guard;
   auto r = compileAndRun(R"(import ::io;
@@ -247,16 +249,16 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
       fn __init__() { self.inner = Inner(); self.total = 0; self.f = 0.5; }
     }
     fn bump(n: inout int) { n = n + 1; }
-    fn watch(t: inout int, h: Holder) {
+    fn watch(t: inout int, h: shared mut Holder) {
       t = t + 1;
       io::println("seen " + Str(h.total));
       t = t + 1;
     }
-    fn replace(n: inout int, h: mut Holder) { h.inner = Inner(); n = 99; }
+    fn replace(n: inout int, h: shared mut Holder) { h.inner = Inner(); n = 99; }
     fn make() -> Holder { return Holder(); }
     fn twice(x: inout float) { x = x * 2; }
     fn main() -> int {
-      h: mut = Holder();
+      h: shared mut = Holder();
       bump(h.total);
       watch(h.total, h);
       h.selfBump();
@@ -305,7 +307,7 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
       c: mut = Counter(30);
       c.tick();
       names: Str[2] = ["a", "b"];
-      cs: Counter[3] = [c, c, c];
+      cs: Counter[3] = [Counter(1), Counter(2), Counter(3)];
       io::println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
               " " + Str(passOn(c, [7])) + " " + Str(size(names)) +
               Str(size(cs)));
@@ -320,12 +322,14 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
 // An `inout` parameter of a reference type is the caller's variable itself:
 // assigning to it replaces what the caller holds (releasing the old value,
 // with nothing retained for the call), through a field, passing on, a
-// method's virtual slot, a template, destructuring and self-assignment; its
-// value can be returned and kept, and another reference to the old object
-// keeps that object alive.
+// method's virtual slot, a template, destructuring and an assignment of its
+// own clone; a clone of its value can be returned and kept (`k` is not the
+// object `pass` ticks), and another reference to the old object keeps that
+// object alive.
 TEST(ParamMode, InoutParametersOfReferenceTypes) {
   LeakGuard guard;
   auto r = compileAndRun(R"(import ::io;
+    import ::memory as mem;
     class Counter {
       n: int;
       fn tick() { self.n = self.n + 1; }
@@ -342,19 +346,21 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
     impl Fast {
       fn __init__(n: int) { __super__(n); }
     }
+    impl Cloneable for Counter {}
+    impl Cloneable for Fast {}
     class Holder { c: Counter; }
     impl Holder { fn __init__() { self.c = Counter(100); } }
-    fn same(c: inout Counter) { c = c; c.tick(); }
-    fn keep(c: inout Counter) -> Counter { return c; }
+    fn same(c: inout Counter) { c = c.clone(); c.tick(); }
+    fn keep(c: inout Counter) -> Counter { return c.clone(); }
     fn pass(c: inout Counter) { same(c); reset(c); }
     fn reset(c: inout Counter) { c = Counter(50); }
-    fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
-    fn flip(a: inout Str, b: inout Str) { a, b = (b, a); }
+    fn swap<T>(a: inout T, b: inout T) { mem::swap(a, b); }
+    fn flip(a: inout Str, b: inout Str) { a, b = (b.clone(), a.clone()); }
     fn clear(o: inout Counter?) { o = None; }
     fn fill(o: inout Counter?) { o = Counter(5); }
     fn pair(t: inout (int, Str)) { t = (t.0 + 1, t.1 + "?"); }
     fn refill(xs: inout int[]) { xs[1] = xs[0] + 8; xs[0] = xs.len(); }
-    fn seen(c: inout Counter, other: Counter) -> int {
+    fn seen(c: inout Counter, other: shared mut Counter) -> int {
       c = Counter(0);
       return other.n;
     }
@@ -379,7 +385,7 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
       pair(t);
       xs: int[2] = [1, 7];
       refill(xs);
-      y: mut = Counter(4);
+      y: shared mut = Counter(4);
       z = y;
       w = seen(y, z);
       h: mut = Holder();
@@ -393,7 +399,7 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "3 30 ab 21 507 True 2t? 29 40 8\n");
+  EXPECT_EQ(r.StdOut, "2 30 ab 21 507 True 2t? 29 40 8\n");
   guard.expectNoLeaks("inout reference parameters");
 }
 
@@ -458,12 +464,14 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
 }
 
 // A literal holds its own copy of each element read through a `view` (a value
-// type, and what is made from a shared one), and its own reference to each
-// object it is given: the value it makes outlives them and is released once.
+// type, and what is made from a shared one), and owns each object it is
+// given (`wrap`'s `n` and a clone of it, so a change to one is not seen in
+// the other): the value it makes outlives them and is released once.
 TEST(LocalBorrow, LiteralsHoldTheirElements) {
   LeakGuard guard;
   auto r = compileAndRun(R"(import ::io;
     class Node { n: int; }
+    impl Cloneable for Node {}
     class Named { name: Str; n: int; }
     impl Named {
       view fn pair() -> (Str, int) { return (self.name + "!", self.n); }
@@ -471,7 +479,7 @@ TEST(LocalBorrow, LiteralsHoldTheirElements) {
     }
     fn tup(s: view Str) -> (Str, int) { return (s + "", s.len()); }
     fn arr(k: view int) -> int[3] { return [k; 3]; }
-    fn wrap(n: Node) -> (Node, (Node, int)) { return (n, (n, 1)); }
+    fn wrap(n: Node) -> (Node, (Node, int)) { return (n.clone(), (move n, 1)); }
     fn main() -> int {
       t = tup(Str(12));
       a = arr(4);
@@ -489,7 +497,7 @@ TEST(LocalBorrow, LiteralsHoldTheirElements) {
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "12 2 4 6 h!9 10 3\n");
+  EXPECT_EQ(r.StdOut, "12 2 4 5 h!9 10 3\n");
   guard.expectNoLeaks("literals of views");
 }
 
@@ -627,7 +635,7 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
       }
     }
     fn main() -> int {
-      a: mut Animal = Dog(5);
+      a: shared mut Animal = Dog(5);
       keep = a;
       match a {
         d: inout Dog {
@@ -677,29 +685,29 @@ TEST(LocalBorrow, InoutArmsSurviveAChangeThroughAnotherReference) {
     class A { n: int; }
     impl A { fn __init__(n: int) { self.n = n; } }
     class B : A { x: Str; }
-    impl B { fn __init__(n: int, x: Str) { __super__(n); self.x = x; } }
+    impl B { fn __init__(n: int, x: Str) { __super__(n); self.x = move x; } }
     class H {
       s: Sh;
       p: P?;
       a: A;
-      fn poke(other: mut H) {
+      fn poke(other: shared mut H) {
         match self.s { l: inout L { other.s = Sh::E; io::print(l.s + " "); } _ { } }
       }
     }
     impl H {
       fn __init__() { self.s = Sh::L("x" + "y"); self.p = P("a" + "b"); self.a = B(1, "b" + "x"); }
     }
-    fn f(x: inout Sh, o: mut H) {
+    fn f(x: inout Sh, o: shared mut H) {
       match x { l: inout L { o.s = Sh::E; io::print(l.s + " "); } _ { } }
     }
-    fn firstL(x: inout Sh, o: mut H) -> Str {
+    fn firstL(x: inout Sh, o: shared mut H) -> Str {
       while True {
-        match x { l: inout L { o.s = Sh::E; l.s = l.s + "!"; return l.s; } _ { break; } }
+        match x { l: inout L { o.s = Sh::E; l.s = l.s + "!"; return l.s.clone(); } _ { break; } }
       }
       return "none";
     }
     fn main() -> int {
-      h: mut = H();
+      h: shared mut = H();
       g = h;
       match h.s { l: inout L { g.s = Sh::E; io::print(l.s + " "); } _ { } }
       match h.p { q: inout P { g.p = None; q.y = q.y + "c"; io::print(q.y + " "); } None { } }
@@ -738,7 +746,7 @@ TEST(LocalBorrow, InoutPlacesInAStructKeepItsObject) {
     class O { h: H; }
     fn fresh(t: Str) -> H { return H(P(Sh::L(t + ""), Q(t + "q"), Box(t + "b"))); }
     fn main() -> int {
-      o: mut = O(fresh("x"));
+      o: shared mut = O(fresh("x"));
       g = o;
       match o.h.p.s { l: inout L { g.h = fresh("y"); l.s = l.s + "!"; } _ { } }
       match o.h.p.q { q: inout Q { g.h = fresh("z"); q.n = q.n + "!"; } None { } }
@@ -766,7 +774,7 @@ TEST(LocalBorrow, InoutArmsGoBackAtTheirLastUse) {
     enum Sh { E, L(s: Str) }
     class H { s: Sh; }
     fn main() -> int {
-      h: mut = H(Sh::L("x" + "y"));
+      h: shared mut = H(Sh::L("x" + "y"));
       g = h;
       match h.s { l: inout L { l.s = l.s + "1"; h.s = Sh::E; } _ { } }
       io::print(h.s.toString() + " ");
@@ -820,13 +828,13 @@ TEST(LocalBorrow, ABorrowEndsBeforeABinderOfItsName) {
       v: view = s;
       io::print(v + " ");
       s = "changed";
-      let g = fn(v: Str) -> Str => v + "?";
+      let g = fn(v: view Str) -> Str => v + "?";
       on: N? = N("n" + "1");
       match on {
         n: view N {
           io::print(n.s + " ");
           on = N("n" + "2");
-          let h = fn(n: N?) -> Str => if n == None then "-" else "+";
+          let h = fn(n: view N?) -> Str => if n == None then "-" else "+";
           io::println(g(s) + " " + h(on));
         }
         None { }
@@ -865,8 +873,8 @@ TEST(LocalBorrow, InoutArmsFindTheirSubjectOnce) {
     }
     class H { s: Sh; }
     fn mk(t: Str) -> H { io::print("mk "); return H(Sh::L(t + "")); }
-    fn first(b: mut B) -> Str {
-      match b.next().s { l: inout L { l.s = l.s + "?"; return l.s; } _ { return "-"; } }
+    fn first(b: inout B) -> Str {
+      match b.next().s { l: inout L { l.s = l.s + "?"; return l.s.clone(); } _ { return "-"; } }
     }
     fn main() -> int {
       b: mut = B(W(Sh::L("a" + ""), Animal(1), Q("p" + "")), W(Sh::E, Dog(2), None), 0);
@@ -916,13 +924,13 @@ TEST(LocalBorrow, InoutArmsMatchAnInoutResult) {
     fn pick(x: inout E, y: inout E, first: bool) -> inout E {
       return if first then x else y;
     }
-    fn early(b: mut B) -> Str {
+    fn early(b: inout B) -> Str {
       match b.slot() { r: inout R { r.w += 1; return Str(r.w); } A { return "-"; } }
     }
     fn viaParam(b: inout B) { match b.slot() { r: inout R { r.w += 10; } A { } } }
-    fn reset(h: mut H) { h.b = B(E::A, Animal(0), None, 0); h.s = S(E::A); }
+    fn reset(h: shared mut H) { h.b = B(E::A, Animal(0), None, 0); h.s = S(E::A); }
     fn main() -> int {
-      let b: mut = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
+      b: mut = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
       match b.slot() { r: inout R { r.w += 100; r.s = r.s + "!"; } A { } }
       io::println(Str(b.e) + " " + Str(b.calls));
       match b.pet() { d: inout Dog { d = Dog(d.n + 5); } _ { } }
@@ -948,7 +956,7 @@ TEST(LocalBorrow, InoutArmsMatchAnInoutResult) {
       match c.slot() { r: inout R { r.w = 40; } A { } }
       s = S(E::R(3, "s" + ""));
       match s.slot() { r: inout R { r.w *= 2; } A { } }
-      let h: mut = H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
+      let h: shared mut = H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
       let g = h;
       match h.b.slot() { r: inout R { g.b = B(E::A, Animal(1), None, 0); r.w = 9; } A { } }
       match h.s.slot() { r: inout R { reset(g); r.w = 60; } A { } }
@@ -1112,7 +1120,7 @@ TEST(BorrowedResult, AFieldOfAConditionalIsWrittenThrough) {
       bump(x.either(y, True));
       bump(x.either(y, False));
       io::println(Str(x.n) + " " + Str(y.n) + " " + x.name(y, False) + x.name(y, True));
-      let h: mut = H(K(8, "h" + ""));
+      let h: shared mut = H(K(8, "h" + ""));
       let g = h;
       e: mut = K(9, "e" + "");
       r: inout = pickS(h.k, e, True);

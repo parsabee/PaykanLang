@@ -292,8 +292,8 @@ bool Parser::errorAtCurrent(const std::string &expected) {
   else if (t.Kind == Tok::KwLet)
     hint = " ('let' only starts a local declaration: 'let x = 1;')";
   else if (t.Kind == Tok::KwWeak)
-    hint = " ('weak' only starts the declaration of a weak reference, a local "
-           "or a class field: 'weak y: Point? = x;')";
+    hint = " ('weak' qualifies the type of a weak reference, a local or a "
+           "class field: 'y: weak Point? = x;')";
   error(t.Loc, "unexpected " + found + "; " + expected + hint);
   return true;
 }
@@ -311,7 +311,8 @@ void Parser::skipToTopLevelBoundary() {
     case Tok::Eof:
       return;
     case Tok::KwView:
-      if (depth == 0 && kind(1) == Tok::KwFn)
+    case Tok::KwShared:
+      if (depth == 0 && atMethodStart())
         return;
       break;
     case Tok::KwFn:
@@ -346,7 +347,8 @@ void Parser::skipToMemberBoundary() {
     case Tok::Eof:
       return;
     case Tok::KwView:
-      if (depth == 0 && kind(1) == Tok::KwFn)
+    case Tok::KwShared:
+      if (depth == 0 && atMethodStart())
         return;
       break;
     case Tok::KwFn:
@@ -501,14 +503,16 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwShared:
     case Tok::KwView:
-      if (kind(1) != Tok::KwFn) {
+      if (!atMethodStart()) {
         errorAtCurrent("expected 'import', 'class', 'struct', 'enum', 'trait', "
                        "'impl' or 'fn' at top level");
         ok = false;
         break;
       }
-      [[fallthrough]]; // `view fn`: Sema says only a method can be one
+      [[fallthrough]]; // `view fn`, `shared fn`: Sema says only a method can
+                       // be one
     case Tok::KwAsync:
       if (kind() == Tok::KwAsync && kind(1) != Tok::KwFn) {
         errorAtCurrent("expected 'fn' after 'async'");
@@ -697,7 +701,7 @@ bool Parser::parseTypeParamList(std::vector<const std::string *> &out,
   return true;
 }
 
-VarDecl *Parser::parseVarDecl() {
+VarDecl *Parser::parseVarDecl(const char *notWeak) {
   SourceLocation start = cur().Loc;
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a name");
@@ -706,10 +710,88 @@ VarDecl *Parser::parseVarDecl() {
   const std::string &name = intern(consume().Text);
   if (!expect(Tok::Colon, "after the name (a declaration needs a type)"))
     return nullptr;
+  if (at(Tok::KwWeak)) {
+    if (notWeak) {
+      errorAtCurrent(notWeak);
+      return nullptr;
+    }
+    Type *ty = nullptr;
+    if (!parseWeakAnnotation(ty))
+      return nullptr;
+    auto *vd = Ctx.make<VarDecl>(span(start), name, ty, nullptr);
+    vd->setWeak(true);
+    return vd;
+  }
   Type *ty = parseTypeAnnotation();
   if (!ty)
     return nullptr;
   return Ctx.make<VarDecl>(span(start), name, ty, nullptr);
+}
+
+// `weak T` is a `shared` reference that owns nothing: it names a `shared`
+// object, and reads it; `weak mut T` names a `shared mut` object, and may
+// change it.  Its type is the `shared` (`shared mut`) form, marked weak on
+// the declaration.  The type is inferred when an initializer follows (a
+// local's).
+bool Parser::parseWeakAnnotation(Type *&ty) {
+  SourceLocation start = consume().Loc; // "weak"
+  const bool mut = accept(Tok::KwMut);
+  if (at(Tok::KwMut) || at(Tok::KwShared) || at(Tok::KwLocked) ||
+      at(Tok::KwAtomic) || at(Tok::KwWeak)) {
+    error(cur().Loc, "'weak' takes 'mut' or nothing: 'weak Node?' names a "
+                     "'shared' object, 'weak mut Node?' a 'shared mut' one");
+    return false;
+  }
+  Type *inner = nullptr;
+  if (!at(Tok::Assign) && !at(Tok::Semi) && !at(Tok::Comma) &&
+      !at(Tok::RParen)) {
+    inner = parseTypeAnnotation();
+    if (!inner)
+      return false;
+  }
+  ty = Ctx.make<QualifiedType>(span(start), Qualifier{QualForm::Shared, mut},
+                               inner);
+  return true;
+}
+
+std::string Parser::sourceText(size_t from, size_t to) {
+  const Token &a = peek(from);
+  const Token &b = peek(to);
+  // The tokens are views into one source buffer: the text from the first's
+  // start to the last's end.
+  const char *first = a.Text.data();
+  const char *last = b.Text.data() + b.Text.size();
+  return std::string(first, last);
+}
+
+void Parser::weakPrefixError() {
+  // `weak NAME: TYPE` or `weak NAME = e`: `NAME: weak TYPE`, `weak mut`
+  // for a `shared mut` type.
+  const std::string name(peek(1).Text);
+  std::string fix = name + ": weak";
+  if (kind(2) == Tok::Colon) {
+    size_t k = 3;
+    while (kind(k) != Tok::Assign && kind(k) != Tok::Semi &&
+           kind(k) != Tok::Eof && kind(k) != Tok::RBrace)
+      ++k;
+    if (k > 3) {
+      std::string type = sourceText(3, k - 1);
+      constexpr std::string_view kSharedMut = "shared mut ";
+      constexpr std::string_view kShared = "shared ";
+      if (type.rfind(kSharedMut, 0) == 0)
+        fix += " mut " + type.substr(kSharedMut.size());
+      else if (type.rfind(kShared, 0) == 0)
+        fix += " " + type.substr(kShared.size());
+      else
+        fix += " " + type;
+    }
+  } else if (kind(2) == Tok::Assign) {
+    fix += " = ...";
+  }
+  error(cur().Loc, "'weak' goes after the colon, before the type: write '" +
+                       fix +
+                       "' (a weak reference names a 'shared' object, 'weak "
+                       "mut' a 'shared mut' one)");
 }
 
 ClassDecl *Parser::parseClassDecl() {
@@ -757,23 +839,37 @@ ClassDecl *Parser::parseClassDecl() {
   ClassBody body;
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
-    if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    if (atMethodStart()) {
       if (auto *m = parseFuncDecl(FuncKind::ClassMethod)) {
         body.Methods.push_back(m);
         continue;
       }
     } else if (at(Tok::Ident) || (at(Tok::KwWeak) && kind(1) == Tok::Ident)) {
-      // `weak next: Node?;`: a field holding a weak reference.
-      const bool weak = accept(Tok::KwWeak);
+      // `next: weak Node?;`: a field holding a weak reference.  The old
+      // spelling, `weak next: Node?;`, is an error, and parsed on.
+      bool oldWeak = false;
+      if (at(Tok::KwWeak)) {
+        weakPrefixError();
+        consume();
+        oldWeak = true;
+      }
       if (auto *f = parseVarDecl()) {
-        f->setWeak(weak);
+        if (oldWeak)
+          f->setWeak(true);
+        if (f->isWeak() && !f->getType()) {
+          error(f->getLocation(), "a 'weak' field names its class: '" +
+                                      f->getName() + ": weak " +
+                                      std::string(name) + "?;'");
+          oldWeak = true; // reported: the class is in error
+        }
         if (expect(Tok::Semi, "after the field declaration")) {
           body.Fields.push_back(f);
+          ok = ok && !oldWeak;
           continue;
         }
       }
     } else if (at(Tok::KwWeak)) {
-      errorAtCurrent("expected a field name after 'weak': 'weak next: " +
+      errorAtCurrent("'weak' qualifies a field's type: 'next: weak " +
                      std::string(name) + "?;'");
     } else if (at(Tok::KwStatic)) {
       errorAtCurrent("a 'static fn' goes in an 'impl' block, not the class "
@@ -836,7 +932,10 @@ StructDecl *Parser::parseStructDecl() {
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     if (at(Tok::Ident)) {
-      if (auto *f = parseVarDecl()) {
+      if (auto *f = parseVarDecl(
+              "a struct field cannot be 'weak': a weak reference is a field "
+              "of a class or a local (a struct is a value, copied with its "
+              "fields)")) {
         if (expect(Tok::Semi, "after the field declaration")) {
           fields.push_back(f);
           continue;
@@ -846,8 +945,7 @@ StructDecl *Parser::parseStructDecl() {
       errorAtCurrent("a struct field cannot be 'weak': a weak reference is a "
                      "field of a class or a local (a struct is a value, "
                      "copied with its fields)");
-    } else if (at(Tok::KwFn) || at(Tok::KwStatic) ||
-               (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    } else if (at(Tok::KwStatic) || atMethodStart()) {
       errorAtCurrent("a struct body holds fields only ('name: Type;'); a "
                      "method goes in an 'impl' block: 'impl " +
                      std::string(name) + " { fn ... }'");
@@ -957,35 +1055,82 @@ EnumDecl *Parser::parseEnumDecl() {
 
 // implDecl ::= "impl" ( typeAnnotation "for" )? modulePath
 //              "{" implMember* "}"
-// implMember ::= ( "view" | "static" )? "fn" ... ( block | "=>" expr ";" )
+// implMember ::= ( "shared"? "view"? | "static" ) "fn" ... ( block | "=>" expr
+// ";" )
 ImplDecl *Parser::parseImplDecl() {
   SourceLocation start = consume().Loc; // "impl"
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a type name after 'impl'");
     return nullptr;
   }
+  // `impl List<T: Cloneable>`: a generic type whose parameters carry bounds
+  // (a `:` inside its angle brackets), read as a type parameter list.  The
+  // block is part of the instances whose arguments meet them (#369).
+  auto boundedTarget = [&] {
+    if (!at(Tok::Ident) || kind(1) != Tok::Less)
+      return false;
+    int depth = 1;
+    for (size_t k = 2;; ++k) {
+      const Tok t = kind(k);
+      if (t == Tok::Eof || t == Tok::LBrace || t == Tok::Semi)
+        return false;
+      if (t == Tok::Less)
+        ++depth;
+      else if (t == Tok::Greater && --depth == 0)
+        return false;
+      else if (depth == 1 && t == Tok::Colon && kind(k - 1) == Tok::Ident)
+        return true;
+    }
+  };
+  std::string typeName;
+  std::vector<const std::string *> typeParams;
+  TypeParamBounds bounds;
+  auto parseBounded = [&] {
+    typeName = consume().Text;
+    consume(); // "<"
+    return parseTypeParamList(typeParams, &bounds) &&
+           expect(Tok::Greater, "to close the type parameter list");
+  };
   // `impl Show for A`: the trait (`Into<int>`, `fmt::Show`) comes first.
   Type *trait = nullptr;
-  Type *target = parseTypeAnnotation();
-  if (!target)
-    return nullptr;
+  Type *target = nullptr;
   const char *after = "after 'impl'";
-  if (accept(Tok::KwFor)) {
-    trait = target;
-    after = "after 'for'";
-    if (!at(Tok::Ident)) {
-      errorAtCurrent("expected a type name after 'for'");
+  if (boundedTarget()) {
+    if (!parseBounded())
+      return nullptr;
+    if (at(Tok::KwFor)) {
+      errorAtCurrent("the bounds go on the type after 'for' ('impl Trait "
+                     "for " +
+                     typeName + "<T: Bound>')");
       return nullptr;
     }
+  } else {
     target = parseTypeAnnotation();
     if (!target)
       return nullptr;
+    if (accept(Tok::KwFor)) {
+      trait = target;
+      target = nullptr;
+      after = "after 'for'";
+      if (!at(Tok::Ident)) {
+        errorAtCurrent("expected a type name after 'for'");
+        return nullptr;
+      }
+      if (boundedTarget()) {
+        if (!parseBounded())
+          return nullptr;
+      } else {
+        target = parseTypeAnnotation();
+        if (!target)
+          return nullptr;
+      }
+    }
   }
   // The type by its name; a generic one (`Box<T>`) names its parameters.
   // A built-in type is Sema's to reject.
-  std::string typeName;
-  std::vector<const std::string *> typeParams;
-  if (auto *named = dyn_cast<ClassType>(target)) {
+  if (!target) {
+    // Read above, with its bounds.
+  } else if (auto *named = dyn_cast<ClassType>(target)) {
     typeName = named->getName();
   } else if (isa<BuiltinType>(target)) {
     typeName = ast::typeName(target);
@@ -1026,7 +1171,7 @@ ImplDecl *Parser::parseImplDecl() {
     if (isStatic && !at(Tok::KwFn)) {
       errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
                      "'self', so it is never a 'view fn')");
-    } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    } else if (atMethodStart()) {
       if (auto *m = parseFuncDecl(isStatic ? FuncKind::StaticFn
                                            : FuncKind::ImplMethod)) {
         m->setStatic(isStatic);
@@ -1045,12 +1190,15 @@ ImplDecl *Parser::parseImplDecl() {
   leaveNesting();
   if (!expectCloseBrace("to close the impl block", open) || !ok)
     return nullptr;
-  return Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
-                            trait, std::move(typeParams));
+  auto *im =
+      Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
+                         trait, std::move(typeParams));
+  im->setTypeParamBounds(std::move(bounds));
+  return im;
 }
 
 // traitDecl ::= "trait" IDENT ( "<" typeParamList ">" )? "{" traitMember* "}"
-// traitMember ::= "view"? "fn" IDENT "(" paramList ")"
+// traitMember ::= "shared"? "view"? "fn" IDENT "(" paramList ")"
 //                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 TraitDecl *Parser::parseTraitDecl() {
   SourceLocation start = consume().Loc; // "trait"
@@ -1076,7 +1224,7 @@ TraitDecl *Parser::parseTraitDecl() {
   bool ok = true;
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
-    if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+    if (atMethodStart()) {
       if (auto *m = parseFuncDecl(FuncKind::Requirement)) {
         methods.push_back(m);
         continue;
@@ -1099,7 +1247,8 @@ TraitDecl *Parser::parseTraitDecl() {
 
 // -- Functions
 //
-// funcDecl ::= "view"? "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
+// funcDecl ::= "shared"? "view"? "fn" IDENT ( "<" typeParamList ">" )? "("
+// paramList ")"
 //              ( "->" ( "view" | "inout" )? typeAnnotation )? block
 //              -- or ";" in a class body: a pure virtual method
 // paramList ::= ( param ( "," param )* )?
@@ -1175,6 +1324,8 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   SourceLocation start = cur().Loc;
   // `async fn` (the concurrency prototype): a free function that is a task.
   const bool async = !native && accept(Tok::KwAsync);
+  // `shared fn`, `shared view fn` (a method whose `self` is shared; Sema).
+  const bool shared = !native && accept(Tok::KwShared);
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
   if (native && !expect(Tok::KwFn, "after 'native'"))
@@ -1289,6 +1440,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr);
     fn->setView(view);
+    fn->setShared(shared);
     fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
@@ -1341,6 +1493,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                   nullptr, std::move(typeParams));
     fn->setView(view);
+    fn->setShared(shared);
     fn->setAsync(async);
     fn->setResultMode(resultMode);
     fn->setModulePrivateInit(modulePrivateInit);
@@ -1379,6 +1532,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
                                 body, std::move(typeParams));
   fn->setInferredResult(expressionBody && !retTy);
   fn->setView(view);
+  fn->setShared(shared);
   fn->setAsync(async);
   fn->setResultMode(resultMode);
   fn->setModulePrivateInit(modulePrivateInit);
@@ -1563,6 +1717,36 @@ bool Parser::parseTypedDecl(Stmt *&out) {
   VarDecl *decl = parseVarDecl();
   if (!decl)
     return false;
+  if (decl->isWeak()) {
+    // `y: weak T? = x;`, `y: weak = x;`, or `y: weak T?;` (None).
+    if (at(Tok::Comma)) {
+      error(cur().Loc, "'weak' declares one variable; destructuring with "
+                       "'weak' is not supported");
+      return false;
+    }
+    Expr *init = nullptr;
+    if (accept(Tok::Assign)) {
+      init = parseExpression();
+      if (!init)
+        return false;
+    }
+    const auto *qt =
+        decl->getType() ? dyn_cast<QualifiedType>(decl->getType()) : nullptr;
+    if (!init && (!decl->getType() || (qt && !qt->getInnerType()))) {
+      error(start, "a 'weak' declaration needs a type or an initial value: "
+                   "'" +
+                       decl->getName() + ": weak Point? = x;'");
+      return false;
+    }
+    auto *vd =
+        Ctx.make<VarDecl>(span(start), decl->getName(), decl->getType(), init);
+    vd->setWeak(true);
+    auto *ds = Ctx.make<DeclStmt>(span(start), vd);
+    if (!expect(Tok::Semi, "after the declaration"))
+      return false;
+    out = ds;
+    return true;
+  }
   if (at(Tok::Comma)) {
     std::vector<DestructureStmt::Target> targets;
     targets.push_back(DestructureStmt::Target{&decl->getName(), decl->getType(),
@@ -1649,6 +1833,13 @@ bool Parser::parseLetDecl(Stmt *&out) {
   const std::string &name = intern(consume().Text);
   Type *ty = nullptr;
   if (accept(Tok::Colon)) {
+    if (at(Tok::KwWeak)) {
+      error(cur().Loc, "a 'weak' local cannot be 'let': it reads None once "
+                       "its object is gone, and is assigned as it walks; "
+                       "write '" +
+                           std::string(name) + ": weak = ...'");
+      return false;
+    }
     if (at(Tok::KwView) || at(Tok::KwInout)) {
       error(cur().Loc, "a local borrow cannot be 'let': a '" +
                            std::string(cur().Text) +
@@ -1686,6 +1877,10 @@ bool Parser::parseLetDecl(Stmt *&out) {
 // class `T` (Sema checks), given or inferred from the initializer; without
 // an initializer the local starts as None.
 bool Parser::parseWeakDecl(Stmt *&out) {
+  // `weak y: T? = x;`, the spelling before `y: weak T? = x;`: an error,
+  // parsed on so that `y`'s uses are checked.
+  if (kind(1) == Tok::Ident)
+    weakPrefixError();
   SourceLocation start = consume().Loc; // "weak"
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a variable name after 'weak'");
@@ -1717,8 +1912,8 @@ bool Parser::parseWeakDecl(Stmt *&out) {
   }
   if (!ty && !init) {
     error(start, "a 'weak' declaration needs a type or an initial value: "
-                 "'weak " +
-                     std::string(name) + ": Point? = x;'");
+                 "'" +
+                     std::string(name) + ": weak Point? = x;'");
     return false;
   }
   auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);

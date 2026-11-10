@@ -88,7 +88,7 @@ static const char *const kShapesModule =
     "}\n"
     "class Mid {\n"
     "  a: Alpha;\n"
-    "  fn alpha() -> Alpha { return self.a; }\n"
+    "  view fn alpha() -> view Alpha { return self.a; }\n"
     "}\n"
     "impl Mid {\n"
     "  fn __init__() { self.a = Alpha(); }\n"
@@ -105,7 +105,7 @@ fn main() -> int {
   a: shapes::Alpha = shapes::Alpha();
   z: shapes::Zeta = a.make();
   w: shapes::Zeta = shapes::mk();
-  return a.take(z) + w.v;
+  return a.take(move z) + w.v;
 }
 )");
   auto r = semaCheckFile(main, tmp);
@@ -173,7 +173,7 @@ import shapes;
 fn main() -> int {
   a: shapes::Alpha = shapes::Alpha();
   zs: shapes::Zeta[2] = a.many();
-  first: shapes::Zeta = zs[0];
+  first: view shapes::Zeta = zs[0];
   return a.count(zs) + first.v;
 }
 )");
@@ -194,6 +194,7 @@ static const char *const kLeafModule =
     "class Thing { v: int; "
     "view fn val() -> int { return self.v; } }\n"
     "impl Thing { fn __init__(v: int) { self.v = v; } }\n"
+    "impl Cloneable for Thing {}\n"
     "enum Mode { Fast, Slow }\n"
     "fn made() -> Thing { return Thing(5); }\n";
 
@@ -202,8 +203,9 @@ static const char *const kMidModule =
     "class Wrap {\n"
     "  t: leaf::Thing;\n"
     "  mode: leaf::Mode;\n"
-    "  fn get() -> leaf::Thing { return self.t; }\n"
-    "  fn put(t: leaf::Thing) -> int { self.t = t; return t.val(); }\n"
+    "  fn get() -> leaf::Thing { return self.t.clone(); }\n"
+    "  fn put(t: leaf::Thing) -> int { n = t.val(); self.t = move t; return n; "
+    "}\n"
     "  view fn getMode() -> leaf::Mode { return self.mode; }\n"
     "}\n"
     "impl Wrap {\n"
@@ -224,7 +226,7 @@ fn main() -> int {
   t = w.get();            // leaf's Thing, reached through mid's signature
   u = mid::make();
   m = w.getMode();
-  return t.val() + w.put(u) + u.val();
+  return t.val() + u.val() + w.put(move u);
 }
 )");
   auto r = semaCheckFile(main, tmp);
@@ -601,7 +603,7 @@ trait Named { view fn name() -> Str; }
 struct Keyed<K: Hashable> { k: K; }
 impl Hashable for Keyed<K> { view fn hash() -> int { return self.k.hash(); } }
 class GBox<T> { v: T; }
-impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl GBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
 impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
 enum Maybe<T: Hashable> { Just(v: T), Nothing }
@@ -848,7 +850,7 @@ TEST(Module, ModuleTraitBlockGivesMethodsOnly) {
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "gb.pkn", R"(trait Named { view fn name() -> Str; }
 class GBox<T> { v: T; }
-impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl GBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Named for GBox<T> { view fn name() -> Str { return "gbox"; } }
 fn named<T: Named>(x: view T) -> Str { return x.name(); }
 fn mine() -> Str { return named(GBox<int>(1)); }

@@ -75,7 +75,7 @@ fn pick(x: inout E, y: inout E, first: bool) -> inout E {
   return if first then x else y;
 }
 
-fn early(b: mut B) -> Str {
+fn early(b: shared mut B) -> Str {
   match b.slot() {
     r: inout R {
       r.w += 1;
@@ -92,13 +92,13 @@ fn viaParam(b: inout B) {
   }
 }
 
-fn reset(h: mut H) {
+fn reset(h: shared mut H) {
   h.b = B(E::A, Animal(0), None, 0);
   h.s = S(E::A);
 }
 
 fn main() -> int {
-  let b: mut = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
+  let b: shared mut = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
   match b.slot() {
     r: inout R {
       r.w += 100;
@@ -155,7 +155,7 @@ fn main() -> int {
   }
   io::println(Str(c.v) + " " + Str(s.e));
   // Another reference replaces what the storage is in while the arm runs.
-  let h: mut =
+  let h: shared mut =
       H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
   let g = h;
   match h.b.slot() {

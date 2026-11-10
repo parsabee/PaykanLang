@@ -447,7 +447,7 @@ TEST(Class, Inheritance) {
 TEST(Class, InheritedFieldAccess) {
   auto r = semaCheck(withClasses(R"(
     class Animal { name: Str; }
-    class Dog : Animal { fn getName() -> Str { return self.name; } }
+    class Dog : Animal { fn getName() -> Str { return self.name.clone(); } }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -483,7 +483,7 @@ TEST(Class, FieldShadowingSuperclass) {
 
 TEST(Class, ForwardReference) {
   auto r = semaCheck(withClasses(R"(
-    class Dog : Animal { fn getName() -> Str { return self.name; } }
+    class Dog : Animal { fn getName() -> Str { return self.name.clone(); } }
     class Animal { name: Str; }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -498,14 +498,14 @@ TEST(Class, SuperCallValid) {
     }
 
     impl Animal {
-      fn __init__(n: Str) { self.name = n; }
+      fn __init__(n: Str) { self.name = move n; }
     }
     class Dog : Animal {
       breed: Str;
     }
 
     impl Dog {
-      fn __init__(n: Str, b: Str) { __super__(n); self.breed = b; }
+      fn __init__(n: Str, b: Str) { __super__(move n); self.breed = move b; }
     }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -873,7 +873,7 @@ TEST(Class, OverrideToStringAndEqualsAccepted) {
     }
 
     impl Person {
-      fn __init__(n: Str) { self.name = n; }
+      fn __init__(n: Str) { self.name = move n; }
     }
     fn main() -> int { return 0; }
   )");
@@ -1350,7 +1350,7 @@ class C {
   n: int;
   view fn show() -> int { return self.n; }
 }
-fn look(c: C) -> int { return c.n; }
+fn look(c: view C) -> int { return c.n; }
 impl C {
   fn __init__(flag: bool) {
     io::println(self.name);
@@ -1385,13 +1385,14 @@ fn main() -> int { return 0; }
         "is not assigned yet",
         "15:9: error: 'self' is used before every field is assigned: 'name' "
         "is not assigned yet",
+        "15:30: error: cannot capture 'self': a method borrows its receiver",
         "16:17: error: field 'name' is read before it is assigned",
         "24:15: error: 'self' is used before every field is assigned: "
         "'__super__' has not run yet",
         "29:35: error: field 'y' is read before it is assigned"})
     EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
                                                         << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
 }
 
 // What is assigned on every path so far can be read, an optional field (None
@@ -1408,7 +1409,7 @@ class C : B {
   n: int;
   view fn show() -> Str { return self.name + ""; }
 }
-fn look(c: C) -> int { return c.n; }
+fn look(c: view C) -> int { return c.n; }
 impl C {
   fn __init__(flag: bool) {
     __super__(1);
@@ -1416,8 +1417,9 @@ impl C {
     match self.next { c: C { self.n = c.n; } None { self.n = self.a; } }
     self.n = self.n + self.name.len();
     io::println(self.show() + Str(look(self)));
-    f = fn() -> int { return self.n; };
-    keep = self;
+    let n = self.n;
+    f = fn() -> int { return n; };
+    keep: view = self;
   }
 }
 struct S { x: int; y: int; }

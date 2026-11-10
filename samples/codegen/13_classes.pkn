@@ -5,7 +5,8 @@
 //       base-type variable holding subclass instance (Obj polymorphism)
 // Exercises: class lowering (object layout, vtables with inherited and
 //            overridden slots), `vcall` dispatch, field loads and stores,
-//            class-typed parameters and returns (reference counted),
+//            class-typed parameters (owned ones, which the call's
+//            `move` hands over, and borrowed `view` ones) and returns,
 //            and rebinding a base-type variable to another subclass
 //            instance, which releases the object it owned before.
 
@@ -32,11 +33,11 @@ class Greeter {
   name: Str;
 
   view fn greet() -> Str { return "Hello, " + self.name + "!"; }
-  fn rename(n: Str)      { self.name = n; }
+  fn rename(n: Str)      { self.name = move n; }
 }
 
 impl Greeter {
-  fn __init__(n: Str) { self.name = n; }
+  fn __init__(n: Str) { self.name = move n; }
 }
 
 // ---- Inheritance: Shape / Rectangle / Square ------------------------------
@@ -141,7 +142,7 @@ class Person {
 }
 
 impl Person {
-  fn __init__(n: Str, a: int) { self.name = n; self.age = a; }
+  fn __init__(n: Str, a: int) { self.name = move n; self.age = a; }
 }
 
 // ---- Three-level inheritance: Vehicle / Car / SportsCar -------------------
@@ -176,7 +177,7 @@ impl SportsCar {
 
 // ---- Functions that take / return class instances -------------------------
 
-fn printCounterValue(c: Counter) {
+fn printCounterValue(c: view Counter) {
   io::println(Str(c.value()));
 }
 
@@ -188,12 +189,12 @@ fn sumAreas(r: Rectangle, s: Square) -> int {
   return r.area() + s.area();
 }
 
-fn describePerson(p: Person) {
+fn describePerson(p: view Person) {
   io::println(p.toString());
 }
 
 fn makeAdult(n: Str) -> Person {
-  return Person(n, 18);
+  return Person(move n, 18);
 }
 
 // ===========================================================================
@@ -245,7 +246,7 @@ fn main() -> int {
   io::println("=== sumAreas ===");
   let r2 = Rectangle(3, 7);
   let sq2 = Square(4);
-  io::println(Str(sumAreas(r2, sq2)));  // 21 + 16 = 37
+  io::println(Str(sumAreas(move r2, move sq2)));  // 21 + 16 = 37
 
   // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
   io::println("=== Polymorphism via base type ===");

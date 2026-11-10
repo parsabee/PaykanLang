@@ -1,8 +1,9 @@
 // Function values (docs/language/14-function-types.md) in the collections:
 // a function value is held in place and equal to another holding the same
 // code and closure, so it is an element of a List<T>, found by `contains`
-// and `indexOf` (a named function, or a copy of a lambda's value), and a
-// value of a HashMap.
+// and `indexOf` (a named function, or the lambda's value the list holds,
+// lent by `at`: a function value moves in, and has no clone), and a value
+// of a HashMap.
 import ::io;
 import ::collections;
 
@@ -25,7 +26,8 @@ fn main() -> int {
   double = fn(x: int) -> int {
     return x * 2;
   };
-  fs.push(double);
+  fs.push(move double);
+  twice: view = fs.at(2);
   i: unsigned = 0;
   total = 0;
   while i < fs.len() {
@@ -33,8 +35,8 @@ fn main() -> int {
     total = total + f(3);
     i = i + 1;
   }
-  io::println(Str(total) + " " + Str(fs.contains(double)) + " "
-      + idx(fs.indexOf(double)) + " " + Str(fs.contains(fn(x: int) -> int {
+  io::println(Str(total) + " " + Str(fs.contains(twice)) + " "
+      + idx(fs.indexOf(twice)) + " " + Str(fs.contains(fn(x: int) -> int {
     return x * 2;
   })) + " " + Str(fs.contains(square)) + " " + idx(fs.indexOf(square)));
 

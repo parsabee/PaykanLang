@@ -432,6 +432,15 @@ Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
     return B.fieldAddr(obj, ct->getName(), ma->getFieldName(),
                        ma->getFieldName() + ".addr");
   }
+  // An element of a fixed-size array: its address in the array's bytes,
+  // which are a place of their own as a struct's are (Sema takes no
+  // temporary's and no slice's), after the index's bounds check.
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(arg)) {
+    Val base = emitInoutArg(se->getArray(), keep, keepObject);
+    if (!base)
+      return Val();
+    return elementAddressIn(se->getArray(), se->getIndex(), base);
+  }
   auto *id = ast::dyn_cast<ast::Identifier>(arg);
   if (!id || !CurrentScope->hasLocal(id->getName())) {
     reportInternalError("an 'inout' argument is not a variable or a field");

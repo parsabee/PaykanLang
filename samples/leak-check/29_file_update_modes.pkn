@@ -58,14 +58,14 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 
 /// The text @p r read, or the name of its error's code.
 fn text(r: res::Result<Str, err::Error>) -> Str {
-  match r {
-    s: Ok { return s.value; }
+  match move r {
+    s: Ok { return move s.value; }
     e: Err { return err::name(e.error.code); }
   }
 }
 
 /// Makes the file at @p path hold just @p s.
-fn fill(path: Str, s: Str) {
+fn fill(path: view Str, s: Str) {
   match io::open(path, "w") {
     f: Ok { f.value.write(s); }
     e: Err { io::println("fill: " + err::name(e.error.code)); }
@@ -73,7 +73,7 @@ fn fill(path: Str, s: Str) {
 }
 
 /// Prints all of the file at @p path.
-fn show(path: Str) {
+fn show(path: view Str) {
   match io::open(path, "r") {
     f: Ok { io::print(text(f.value.read())); }
     e: Err { io::println("show: " + err::name(e.error.code)); }
@@ -85,7 +85,7 @@ fn main(args: view Str[]) -> int {
   fill(w, "old\n");
   match io::open(w, "w+") {
     o: Ok {
-      let f = o.value;
+      let f = move o.value;
       io::println("w+ write: " + err::name(f.write("hello\n").code));
       io::println("w+ read: " + text(f.read()));
       io::println("w+ write: " + err::name(f.write("world\n").code));
@@ -99,7 +99,7 @@ fn main(args: view Str[]) -> int {
   fill(r, "abcdefgh\nijkl\n");
   match io::open(r, "r+") {
     o: Ok {
-      let f = o.value;
+      let f = move o.value;
       io::println("r+ write: " + err::name(f.write("XY").code));
       io::println("r+ readbytes: " + text(f.readbytes(2)));
       io::println("r+ write: " + err::name(f.write("Z").code));
@@ -116,7 +116,7 @@ fn main(args: view Str[]) -> int {
   fill(a, "abc\n");
   match io::open(a, "a+") {
     o: Ok {
-      let f = o.value;
+      let f = move o.value;
       io::println("a+ write: " + err::name(f.write("hello\n").code));
       io::println("a+ read: " + text(f.read()));
       io::println("a+ write: " + err::name(f.write("world\n").code));

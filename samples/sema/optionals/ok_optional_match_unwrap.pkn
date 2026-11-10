@@ -17,7 +17,7 @@ impl Leaf {
   fn __init__(x: int) { __super__(x); }
 }
 
-fn value(n: Node?) -> int {
+fn value(n: view Node?) -> int {
   match n {
     // exhaustive: Node arm + None arm
     x: Node { return x.v; }
@@ -25,7 +25,7 @@ fn value(n: Node?) -> int {
   }
 }
 
-fn kind(n: Node?) -> Str {
+fn kind(n: view Node?) -> Str {
   match n {
     l: Leaf { return "leaf"; }
     x: Node { return "node"; }

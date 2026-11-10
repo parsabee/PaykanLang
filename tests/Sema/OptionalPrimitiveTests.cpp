@@ -207,7 +207,7 @@ TEST(OptionalPrimitive, MatchWithoutNoneArmIsNotExhaustive) {
 }
 
 TEST(OptionalPrimitive, DestructuringDoesNotBox) {
-  expectError(inMain("t = (1, \"a\");\n a: int?, s: Str = t;"),
+  expectError(inMain("t = (1, \"a\");\n a: int?, s: Str = move t;"),
               "does not match declared type 'int?'");
 }
 

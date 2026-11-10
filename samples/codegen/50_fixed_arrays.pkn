@@ -1,7 +1,8 @@
 // 50 — fixed-size arrays (docs/language/09-arrays.md).  `T[n]` holds n
-// elements inline: it is a value, so copying it copies its elements.  An
-// array of arrays puts its first length on its first index: `int[2][3]` is
-// two `int[3]`s.
+// elements inline: it is a value, so copying it copies its elements (one of
+// move-only elements, a `Str[3]`, is copied by `.clone()`).  An array of
+// arrays puts its first length on its first index: `int[2][3]` is two
+// `int[3]`s.
 // Exercises: arrays of int, float, char, an enum and Str, a copy changed
 // apart from its source, an assigned literal reading the old value, a 2D
 // grid walked with len(), an `inout` local.  Run with --track-heap: zero
@@ -57,7 +58,7 @@ fn main() -> int {
       / 2.0) + ", " + Str(word[0]) + Str(word[1]) + ", " + way);
 
   let names: Str[3] = ["ann", "bob", "cy"];
-  roll = names; // the same three strings
+  roll = names.clone(); // a copy of the three strings
   roll[2] = "dee";
   io::println(names[2] + " " + roll[2] + " " + Str(roll.len()));
   return 0;

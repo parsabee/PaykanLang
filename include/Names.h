@@ -117,6 +117,12 @@ inline constexpr const char *kTraitValueType = "ValueType";
 /// or optional of Copyable parts, an `atomic` handle.  Structural, never
 /// implemented.
 inline constexpr const char *kTraitCopyable = "Copyable";
+/// `view fn clone() -> Self`: the explicit copy of a move-only value, beside
+/// the implicit `Copyable` (#369).  Every Copyable type is Cloneable, its
+/// clone the copy; so are `Str`, and a struct, tuple, fixed array or
+/// optional of Cloneable parts; a class opts in with `impl Cloneable for`.
+inline constexpr const char *kTraitCloneable = "Cloneable";
+inline constexpr const char *kMethodClone = "clone";
 inline constexpr const char *kMethodHash = "hash";
 /// The built-in traits an `impl ... for` block gives a class or a struct, so
 /// the conformances a module interface records (pkm IMPL,
@@ -124,7 +130,7 @@ inline constexpr const char *kMethodHash = "hash";
 /// has `Show` through `Obj`, and the rest follow from a type's structure
 /// (src/Sema/SemaTraits.cpp, traitImplOwner).
 inline bool isImplBuiltinTrait(std::string_view n) {
-  return n == kTraitHashable;
+  return n == kTraitHashable || n == kTraitCloneable;
 }
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";
@@ -244,6 +250,9 @@ inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
 inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
 inline constexpr const char *kPaykanBufferShrink = "PaykanBuffer_shrink";
 inline constexpr const char *kPaykanBufferIsSet = "PaykanBuffer_isSet";
+/// `mem::swap<T>(a: inout T, b: inout T)`: each place takes the other's
+/// value, with the references it owns (#369).
+inline constexpr const char *kPaykanMemSwap = "Paykan_mem_swap";
 inline constexpr const char *kPaykanBufferTryGrow = "PaykanBuffer_tryGrow";
 inline constexpr const char *kPaykanBufferTryReserve =
     "PaykanBuffer_tryReserve";

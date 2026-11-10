@@ -170,6 +170,17 @@ void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i) {
   PaykanType_copy((const PaykanType *)t, out, PaykanBuffer_get(t, b, i));
 }
 
+void Paykan_mem_swap(void *t, void *a, void *b) {
+  // Byte by byte: a value's references move with its bytes.
+  unsigned char *x = (unsigned char *)a;
+  unsigned char *y = (unsigned char *)b;
+  for (int64_t n = ((const PaykanType *)t)->size; n > 0; --n, ++x, ++y) {
+    unsigned char c = *x;
+    *x = *y;
+    *y = c;
+  }
+}
+
 void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
   const PaykanType *t = (const PaykanType *)type;
   PaykanBuffer *buf = buffer_at(b);

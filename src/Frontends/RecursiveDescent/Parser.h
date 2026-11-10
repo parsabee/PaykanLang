@@ -53,6 +53,13 @@ private:
   const Token &peek(size_t k = 0);
   const Token &cur() { return peek(0); }
   Tok kind(size_t k = 0) { return peek(k).Kind; }
+  /// At a method: `fn`, `view fn`, `shared fn` or `shared view fn`.
+  bool atMethodStart() {
+    size_t k = kind() == Tok::KwShared ? 1 : 0;
+    if (kind(k) == Tok::KwView)
+      ++k;
+    return kind(k) == Tok::KwFn;
+  }
   bool at(Tok k) { return kind() == k; }
   /// The current token, consumed: a reference into Buf, which holds until
   /// the next token is lexed (copy it to keep it past a peek()).
@@ -190,7 +197,18 @@ private:
   void prefixModeError();
   void prefixBorrowError();
   bool parseBorrowDecl(ast::Stmt *&out);
-  ast::VarDecl *parseVarDecl();
+  /// `name: Type`, or `name: weak T` / `name: weak mut T` (a weak reference,
+  /// marked on the VarDecl, the type `shared mut T` for `weak mut`) where
+  /// @p notWeak is null; else `weak` is that error.
+  ast::VarDecl *parseVarDecl(const char *notWeak = nullptr);
+  /// After the colon, at `weak`: the type of a weak reference into @p ty
+  /// (null when it is inferred); false after an error.
+  bool parseWeakAnnotation(ast::Type *&ty);
+  /// At `weak NAME` (the spelling before #369's weak qualifier): the error
+  /// naming the declaration as it is written now.
+  void weakPrefixError();
+  /// The source text of the tokens @p from to @p to (inclusive) ahead.
+  std::string sourceText(size_t from, size_t to);
 
   // -- Statements
   ast::CompoundStmt *parseBlock();

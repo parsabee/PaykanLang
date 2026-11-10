@@ -157,7 +157,7 @@ TEST(Class, StrField) {
 
     impl Greeter {
       fn __init__(s: Str) {
-        self.msg = s;
+        self.msg = move s;
       }
     }
   )",
@@ -282,12 +282,12 @@ TEST(Class, InheritedField) {
     }
 
     impl Animal {
-      fn __init__(n: Str) { self.name = n; }
+      fn __init__(n: Str) { self.name = move n; }
     }
     class Dog : Animal {}
 
     impl Dog {
-      fn __init__(n: Str) { __super__(n); }
+      fn __init__(n: Str) { __super__(move n); }
     }
   )",
                                  R"(
@@ -363,7 +363,7 @@ TEST(Class, SuperInit) {
     impl Car {
       fn __init__(s: int, b: Str) {
         __super__(s);
-        self.brand = b;
+        self.brand = move b;
       }
     }
   )",
@@ -448,7 +448,7 @@ TEST(Class, PassToFunction) {
   )",
                                  R"(
     x: Num = Num(55);
-    show(x);
+    show(move x);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "55\n");
@@ -1121,7 +1121,7 @@ TEST(Class, MethodMatchesOwnType) {
   auto r = compileAndRun(R"(import ::io;
     class Node {
       v: int;
-      view fn isNode(o: Obj) -> bool {
+      view fn isNode(o: view Obj) -> bool {
         match o { n: Node { return True; } _ { return False; } }
       }
     }
@@ -1188,7 +1188,9 @@ TEST(Class, EqualsWithMatchBoundArgument) {
 // matched, on both branches, with a fresh object in one of them.  Before, a
 // read or an assignment dropped its statement (an `io::println` printed
 // nothing, a variable it declared failed an assertion) or failed the PIR
-// verifier, and an `inout` argument was an internal compiler error.
+// verifier, and an `inout` argument was an internal compiler error.  `a` and
+// `b` are `shared mut`: `a.next` holds `b`, which the program still changes
+// through its own name, and the match reads the change through `a.next`.
 TEST(Class, FieldsOfAConditionalReceiver) {
   LeakGuard g;
   auto r = compileAndRun(withFns(R"(
@@ -1198,23 +1200,23 @@ TEST(Class, FieldsOfAConditionalReceiver) {
       n: int;
       t: (int, Str);
       p: Point;
-      next: Node?;
-      weak back: Node?;
+      next: shared mut Node?;
+      back: weak mut Node?;
     }
     fn bump(x: inout int) { x = x + 1; }
     fn shout(s: inout Str) { s = s + "!"; }
   )",
                                  R"(
-    a: mut = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
-    b: mut = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
+    a: shared mut = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
+    b: shared mut = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
     b.back = a;
     for k in 1..=2 {
-      x = (if k == 1 then a else b).name;
+      x = (if k == 1 then a else b).name.clone();
       io::println(x + " " + (if k == 1 then a else b).name);
       c = Node("c", 3, (30, "tc"), Point(5, 6), None, None);
       io::println((if k == 1 then a else c).name + Str(k));
       io::println((if k == 1 then a else b).t.1 + Str((if k == 1 then a else b).t.0));
-      t = (if k == 1 then a else b).t;
+      t = (if k == 1 then a else b).t.clone();
       p = (if k == 1 then a else b).p;
       io::println(t.1 + Str(p.y) + Str((if k == 1 then a else b).p.x));
       io::println((if k == 1 then a else b).back == None);

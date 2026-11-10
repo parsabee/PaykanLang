@@ -381,6 +381,11 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       emitPureVirtualTrap(fn, ct, funcDecl->getName());
       continue;
     }
+    // The `clone` an empty `impl Cloneable for` block derives (#369).
+    if (funcDecl->isDerivedClone()) {
+      emitDerivedClone(fn, ct);
+      continue;
+    }
     FunctionStateGuard fnState(*this, fn, md->getReturnType(), ct);
     {
       ScopeGuard guard(*this);

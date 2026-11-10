@@ -327,7 +327,7 @@ enum Shape {
   Label(text: Str)
 }
 
-fn area(s: Shape) -> float {
+fn area(s: view Shape) -> float {
   match s {
     Empty { return 0.0; }
     c: Circle { return 3.0 * c.r * c.r; }
@@ -373,10 +373,15 @@ u = Shape::Rect(1);       // error: variant 'Rect' of enum 'Shape' has 2 field(s
 ### Binding the fields
 
 An arm `name: Variant { … }` runs when the value is that variant and binds `name` to its
-fields, read as a struct's are (`r.w`). The binding is a copy, as a by-value parameter is;
-with `view` (`r: view Rect`) it is read-only, and with `inout` (`r: inout Rect`) it stands
-for the subject, which the arm sets to the variant it holds after its last use, so writing
-through it changes the subject:
+fields, read as a struct's are (`r.w`). When the fields are Copyable, the binding is a copy,
+as a by-value parameter is. When one of them is move-only (a `Str`, an object) and the
+subject is a variable, a parameter or a field, the binding is a borrow of the subject's
+fields, a `view`: it is read and passed to `view` parameters, as `describe(o)` below, but
+not stored, moved or written; `match move a` gives the arm the fields to own, and ends `a`
+([Borrowing the subject](08-match.md#borrowing-the-subject)). With `view` (`r: view Rect`)
+the binding is read-only, and with `inout` (`r: inout Rect`) it stands for the subject,
+which the arm sets to the variant it holds after its last use, so writing through it
+changes the subject:
 
 ```pkn
 import ::io;
@@ -393,7 +398,7 @@ fn deposit(a: inout Account, amount: int) {
   }
 }
 
-fn describe(o: Account::Open) -> Str {
+fn describe(o: view Account::Open) -> Str {
   return o.owner + " has " + Str(o.balance);
 }
 
@@ -442,10 +447,12 @@ with equal fields (compared as a struct's are: a `Str` by its text, an object by
 A tagged union is a value held in place, like a struct ([Structs](11-structs.md)): its
 **tag**, the variant's index, followed by each variant's fields one after another, only the
 current variant's set. So a value is as large as the tag and all its variants' fields
-together, assigning one copies those bytes, and the references among the fields (a `Str`,
-an object) are shared, as a struct's are. A tagged union can be a variable, a parameter or a
+together, and assigning one copies those bytes when every variant's fields are Copyable;
+one whose fields may hold a `Str` or an object is move-only, and moves, as a struct holding
+one does ([Copyable](06-traits.md#copyable)). A tagged union can be a variable, a parameter or a
 result, a field of a class or a struct, a tuple or array element, the value of an optional
-(`Shape?`) and the element of a container (`List<Shape>`), and a lambda can capture one.
+(`Shape?`) and the element of a container (`List<Shape>`), and a lambda can capture one
+whose fields are Copyable (a lambda captures by copy: [Captures](14-function-types.md#captures)).
 
 Held in place, a variant cannot hold its own enum, directly or through a struct or a tuple
 (`enum 'Expr' contains itself: variant 'Add' holds an 'Expr'; an enum is held in place, so
@@ -466,7 +473,7 @@ class Pair {
   r: Expr;
 }
 
-fn eval(e: Expr) -> int {
+fn eval(e: view Expr) -> int {
   match e {
     n: Num { return n.v; }
     a: Add { return eval(a.args.l) + eval(a.args.r); }
@@ -477,7 +484,7 @@ fn eval(e: Expr) -> int {
 fn main() -> int {
   // (2 + 3) * 4
   let sum = Expr::Add(Pair(Expr::Num(2), Expr::Num(3)));
-  let e = Expr::Mul(Pair(sum, Expr::Num(4)));
+  let e = Expr::Mul(Pair(move sum, Expr::Num(4)));
   io::println(eval(e));
   return 0;
 }

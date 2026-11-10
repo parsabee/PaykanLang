@@ -72,8 +72,9 @@ copied around like a number. A struct can be generic, like a class
   or array element that holds the struct (the field of an object through a `mut` reference
   to it).  Chains work: `line.a.x = 0`, `shape.at.y`, `ps[1].x = 2`.
 - A struct is a **value held in place**, like a tuple: `q = p` copies it, and passing
-  or returning one copies it.  A copy of a struct holding an object names the same
-  object.  A struct is not an `Obj`.
+  or returning one copies it, when its fields are Copyable; one holding a `Str` or a
+  unique object moves, and `clone()` copies it.  A copy of a struct holding a `shared`
+  object names the same object.  A struct is not an `Obj`.
 - Nominal: two structs with the same fields are different types, and a struct is not the
   tuple of its fields.
 - Methods: `impl Point { fn shift(d: int) { self.x = self.x + d; } }`.  In a method
@@ -259,26 +260,28 @@ module 'm'`).
 
 ## Structs as Values
 
-A struct is a value, like a tuple or an `int`: it is held in place and assigning it,
-passing it to a parameter without a mode or returning it copies it.  The copy holds the
-same references: a copy of a struct holding an object names that same object, as a copy of
-a tuple does.  Changing a field of the copy leaves the original as it was; changing the
-shared object is seen through both.
+A struct is a value, like a tuple or an `int`: it is held in place, and assigning it,
+passing it to a parameter without a mode or returning it copies it when its fields are
+Copyable.  A struct with a `Str` or a unique object among its fields is move-only, as a
+tuple holding one is: it moves (`b = move a;`), and `clone()` copies it when its fields are
+[Cloneable](06-traits.md#cloneable).  The copy holds the same `shared` references: a copy
+of a struct holding a `shared` object names that same object.  Changing a field of the copy
+leaves the original as it was; changing the shared object is seen through both.
 
 ```pkn
 import ::io;
 
 class Node { n: int; view fn toString() -> Str { return "Node" + Str(self.n); } }
-struct Item { name: Str; node: Node; }
+struct Item { name: Str; node: shared mut Node; }
 
 fn rename(it: Item) -> Item { it.name = it.name + "'"; return it; }   // its own copy
 
 fn main() -> int {
   let a = Item("a", Node(1));
-  b = a;                           // a copy: the same Node
+  b = a.clone();                   // a copy: its own name, the same Node
   b.name = "b";
   b.node.n = 2;                    // the shared object
-  let c = rename(a);
+  let c = rename(a.clone());
   io::println(a);
   io::println(b);
   io::println(c.name + " " + Str(a == b) + " " + Str(a == Item("a", a.node)));
@@ -347,11 +350,10 @@ Point(x: 0, y: 0)
 ```
 
 A field of a struct is an `inout` place when the struct is one: a variable, a field (of an
-object or of another struct), an `inout` parameter or result.  A field of a temporary is
-not (`a field of a struct that is not a variable or a field (a temporary, which dies with
-the statement) cannot be passed to 'inout' parameter 'n'`), and neither is a field of an
-array element yet (`an array element cannot be passed to 'inout' parameter 'n' yet`) or
-of a struct in a tuple.
+object or of another struct), an element of a fixed-size array (`ps[1].n`), an `inout`
+parameter or result.  A field of a temporary is not (`a field of a struct that is not a
+variable or a field (a temporary, which dies with the statement) cannot be passed to
+'inout' parameter 'n'`), and neither is a field of a struct in a tuple.
 
 ---
 
@@ -386,14 +388,14 @@ struct Counter {
 }
 
 impl Counter {
-  fn __init__(name: Str) { self.n = 0; self.name = name; }
+  fn __init__(name: Str) { self.n = 0; self.name = move name; }
   fn tick() { self.n = self.n + 1; }
   fn tickTwice() { self.tick(); self.tick(); }
   view fn get() -> int { return self.n; }
   view fn label() -> view Str { return self.name; }
   view fn same(other: view Counter) -> bool { return self.n == other.n; }
   fn slot() -> inout int { return self.n; }
-  static fn named(s: Str) -> Counter { return Counter(s); }
+  static fn named(s: Str) -> Counter { return Counter(move s); }
 }
 
 class Box { c: Counter; }
@@ -405,9 +407,9 @@ fn main() -> int {
   c.tick();
   c.tickTwice();                   // a method calling methods on self
   bump(c.slot());                  // an inout result: c.n
-  let b: mut = Box(c);             // a copy in the field
+  let b: mut = Box(c.clone());     // a copy in the field
   b.c.tick();                      // the field's struct, through a mut Box
-  d = c;                           // a copy
+  d = c.clone();                   // a copy
   d.n = 9;
   v: view = c;
   io::println(Str(c.get()) + " " + Str(b.c.get()) + " " + Str(d.get()) + " " +
@@ -537,6 +539,7 @@ Hashable>`) is checked at each instantiation.
 
 ```pkn
 import ::io;
+import ::memory as mem;
 
 struct Pair<A, B> {
   a: A;
@@ -545,14 +548,14 @@ struct Pair<A, B> {
 
 impl Pair<A, B> {
   view fn first() -> view A { return self.a; }
-  fn swapWith(other: inout Pair<A, B>) { let t = self.a; self.a = other.a; other.a = t; }
-  fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+  fn swapWith(other: inout Pair<A, B>) { mem::swap(self.a, other.a); }
+  view fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b.clone(), self.a.clone()); }
 }
 
 struct Box<T> { v: T; }
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
   view fn get() -> view T { return self.v; }
 }
 
@@ -707,9 +710,10 @@ with `<`.
 - At run time a struct is laid out in place like a C struct of its fields, exactly as the
   tuple of its field types is ([Tuples](10-tuples.md#notes)): a struct of `int`s allocates
   nothing, a reference field is its box, retained once per copy and released when the
-  variable goes out of scope, the holding object is destroyed or the array goes.  At a
-  variable's last use an assignment, a store or a `return` moves its references instead,
-  and the variable releases none ([Memory](16-memory.md#ownership-transfers)).  A
+  variable goes out of scope, the holding object is destroyed or the array goes.  A
+  `move`, a `return` of the variable, and an assignment or a store at its last use move its
+  references instead, and the variable releases none
+  ([Memory](16-memory.md#ownership-transfers)).  A
   method takes the receiver's address as its first argument, and a `view fn` the same;
   a constructor writes its result into the caller's storage.
 - `toString` and `==` go through the struct's layout, constant data the compiler emits

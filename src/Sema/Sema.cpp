@@ -759,6 +759,19 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   // A qualified type (the concurrency prototype): the inner type, its
   // qualifier left for the declaration to take (takeQualifier).
   if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    // A part of a type (a tuple's element, a type argument, an array's
+    // element, a function type's parameter or result) keeps no qualifier
+    // yet: it would be dropped, and a `shared` reference would come back
+    // out as a unique one (#368).
+    if (NestedTypeDepth > 0) {
+      error(loc, std::string("'") + qt->getQualifier().spelling() +
+                     "' cannot qualify a part of a type yet (a tuple's "
+                     "element, a type argument, an array's element or a "
+                     "function type's parameter or result): only a whole "
+                     "variable, field, parameter or result takes one; hold "
+                     "the reference in a struct field to qualify it");
+      return nullptr;
+    }
     if (!qt->getInnerType()) {
       error(loc, std::string("'") + qt->getQualifier().spelling() +
                      "' needs a type here ('" + qt->getQualifier().spelling() +
@@ -895,7 +908,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     }
     FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
     const TypeContext element(context, {" element"});
-    auto *elemTy = resolveType(at->getElementType(), loc, element);
+    auto *elemTy = resolvePart(at->getElementType(), loc, element);
     if (!elemTy)
       return nullptr;
     if (elemTy == Ctx.getVoidTy()) { // it has no value (resolveValueType)
@@ -921,7 +934,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       elem = f->getElementType();
     }
     const TypeContext element(context, {" element"});
-    auto *base = resolveType(elem, loc, element);
+    auto *base = resolvePart(elem, loc, element);
     if (!base)
       return nullptr;
     ast::Type *fixed = base;
@@ -969,16 +982,23 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       const std::string n = std::to_string(i + 1);
       const TypeContext argument(
           context, {" type argument ", n, " of '", gt->getName(), "'"});
-      auto *arg = resolveType(gt->getArgs()[i], loc, argument);
+      auto *arg = resolvePart(gt->getArgs()[i], loc, argument);
       if (!arg)
         return nullptr;
       args.push_back(arg);
     }
+    // The template's own declarations are no part of this type: their
+    // qualifiers stand (`fn put(o: mut Obj)` of a `Tag<int>` in a tuple).
+    const unsigned savedDepth = std::exchange(NestedTypeDepth, 0u);
+    ast::Type *inst = nullptr;
     if (StructTemplates.count(gt->getName()))
-      return instantiateStruct(gt->getName(), args, loc, gt);
-    if (EnumTemplates.count(gt->getName()))
-      return instantiateEnum(gt->getName(), args, loc, gt);
-    return instantiateClass(gt->getName(), args, loc, gt);
+      inst = instantiateStruct(gt->getName(), args, loc, gt);
+    else if (EnumTemplates.count(gt->getName()))
+      inst = instantiateEnum(gt->getName(), args, loc, gt);
+    else
+      inst = instantiateClass(gt->getName(), args, loc, gt);
+    NestedTypeDepth = savedDepth;
+    return inst;
   }
 
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
@@ -1035,7 +1055,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       const TypeContext what(context, {" parameter ", n});
       FixedArrayAllowed = true;
       SliceAllowed = fnt->getMode(i) != ast::ParamMode::Value;
-      auto *pty = resolveType(fnt->getParamType(i), loc, what);
+      auto *pty = resolvePart(fnt->getParamType(i), loc, what);
       if (!pty)
         return nullptr;
       if (pty == Ctx.getVoidTy()) {
@@ -1047,7 +1067,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     }
     FixedArrayAllowed = true; // a result may be a fixed-size array
     const TypeContext result(context, {" result"});
-    auto *ret = resolveType(fnt->getReturnType(), loc, result);
+    auto *ret = resolvePart(fnt->getReturnType(), loc, result);
     if (!ret)
       return nullptr;
     return checked(
@@ -1061,7 +1081,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       NoArrayHolder = "a tuple element";
       const std::string n = std::to_string(i);
       const TypeContext element(context, {" element ", n});
-      auto *elemTy = resolveType(tt->getElementType(i), loc, element);
+      auto *elemTy = resolvePart(tt->getElementType(i), loc, element);
       if (!elemTy)
         return nullptr;
       if (elemTy == Ctx.getVoidTy()) {
@@ -1161,6 +1181,85 @@ bool Sema::checkDistinctParams(const ast::FuncDecl *fn,
   return true;
 }
 
+/// Whether @p e, the value of a `[v; n]` literal, holds no reference that n
+/// copies would share: None, or an enum's variant without fields.
+static bool holdsNothingToCopy(const ast::Expr *e) {
+  if (ast::isa<ast::NoneLiteral>(e))
+    return true;
+  const auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e);
+  ast::Type *ty =
+      ev ? const_cast<ast::EnumValueExpr *>(ev)->getResolvedType() : nullptr;
+  const auto *et = ty ? ast::dyn_cast<ast::EnumType>(ty) : nullptr;
+  if (!et)
+    return false;
+  const int64_t i = et->findVariant(ev->getVariantName());
+  return i >= 0 && !et->getPayload(static_cast<size_t>(i));
+}
+
+bool Sema::repeatsAPlace(const ast::ArrayLiteralExpr *node, ast::Type *elemTy) {
+  if (!node->isRepeat() || node->getLength() <= 1)
+    return false;
+  // A place in a form that copies (a `shared` reference) is the copy
+  // rule's: it may not be an element (checkQualifiedFlow).
+  const ast::Expr *v = node->getElements().front();
+  return isCopyPlace(v) && !holdsNothingToCopy(v) && !isCopyable(elemTy) &&
+         !isCopyablePart(elemTy, qualifierOf(v));
+}
+
+bool Sema::checkRepeatValue(ast::ArrayLiteralExpr *node, ast::Type *elemTy,
+                            const MovedMap &before) {
+  if (!node->isRepeat() || node->getLength() <= 1)
+    return true;
+  ast::Expr *v = node->getElements().front();
+  if (holdsNothingToCopy(v) || isCopyable(elemTy) ||
+      (isCopyPlace(v) && isCopyablePart(elemTy, qualifierOf(v))))
+    return true; // evaluated once, and copied (or not an element's form)
+  node->setEachElement(true);
+  const std::string n = std::to_string(node->getLength());
+  const std::string each =
+      "'[v; n]' evaluates its value for each of its " + n + " elements";
+  if (repeatsAPlace(node, elemTy)) {
+    std::string msg = each + ", and '" + placeText(v) + "' (a '" +
+                      typeName(elemTy) +
+                      "') is not Copyable: write a value made for each";
+    if (isCloneable(elemTy))
+      msg += ", such as '[" + placeText(v) + ".clone(); " + n + "]'";
+    error(v->getLocation(), msg);
+    return false;
+  }
+  // A `move` in it would move its variable once per element.
+  const ast::Expr *moved = nullptr;
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(v);
+      u && u->getOpcode() == ast::UnaryOpcode::Move)
+    moved = u->getOperand();
+  std::string name = moved ? placeText(moved) : std::string();
+  ast::SourceLocation at = v->getLocation();
+  for (const auto &[key, state] : MovedVars) {
+    if (!name.empty())
+      break;
+    auto it = before.find(key);
+    if (it == before.end() || it->second.At != state.At) {
+      name = std::string(keyName(key));
+      at = state.At;
+    }
+  }
+  if (!name.empty()) {
+    error(at, each + ", so it cannot move '" + name + "' (that would move it " +
+                  n + " times)");
+    return false;
+  }
+  return true;
+}
+
+/// Whether @p e names storage: a variable, a field, an element or a tuple's
+/// element (not a temporary, and not `move x`).
+static bool isPlaceExpr(const ast::Expr *e) {
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return !id->isFunctionRef();
+  return ast::isa<ast::MemberAccessExpr>(e) ||
+         ast::isa<ast::SubscriptExpr>(e) || ast::isa<ast::TupleIndexExpr>(e);
+}
+
 bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
                        ast::Type *bindTy) {
   const std::string &name = arm->getBinding();
@@ -1193,7 +1292,12 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     // `n: view T` is a `view` local of the subject, whatever the subject is.
     if (arm->getMode() == ast::ParamMode::View)
       CurrentScope->Kinds[name] = VarKind::ViewLocal;
-    else if (MatchSubjectIsView) {
+    else if (MatchSubjectIsView ||
+             (isPlaceExpr(subject) &&
+              !isCopyablePart(bindTy, qualifierOf(subject)))) {
+      // A binding of a `view` subject is a `view`; so is a plain binding of
+      // a move-only part of a place (the copy rule): the place keeps its
+      // value, and `match move x` binds owned parts instead.
       CurrentScope->Kinds[name] = VarKind::ViewBinding;
       CurrentScope->ViewSubjects[name] = subject;
     } else {
@@ -1630,6 +1734,14 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
   if (ty && !S.ParallelStack.empty() &&
       !S.checkParallelRead(node->getName(), ty, node->getLocation()))
     return nullptr;
+  // Inside a lambda, a variable of the function it is written in is
+  // captured (by copy) when it is first used; an `atomic` one too (before
+  // its handle or value is taken below).
+  if (ty && !S.LambdaStack.empty() &&
+      !S.captureVariable(node->getName(), ty,
+                         S.CurrentScope->findOwner(node->getName()),
+                         node->getLocation()))
+    return nullptr;
   if (auto *at = ast::dyn_cast<ast::AtomicType>(ty)) {
     if (std::exchange(S.WantAtomicHandle, false)) {
       node->setAtomicHandle(true);
@@ -1637,13 +1749,6 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
     }
     return at->getInnerType();
   }
-  // Inside a lambda, a variable of the function it is written in is
-  // captured (by copy) when it is first used.
-  if (ty && !S.LambdaStack.empty() &&
-      !S.captureVariable(node->getName(), ty,
-                         S.CurrentScope->findOwner(node->getName()),
-                         node->getLocation()))
-    return nullptr;
   return ty;
 }
 
@@ -1789,7 +1894,7 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
   if (!typeArgAnns.empty()) {
     std::vector<ast::Type *> typeArgs;
     for (size_t i = 0; i < typeArgAnns.size(); ++i) {
-      auto *t = S.resolveType(typeArgAnns[i], loc,
+      auto *t = S.resolvePart(typeArgAnns[i], loc,
                               "type argument " + std::to_string(i + 1) +
                                   " of '" + spelled + "'");
       if (!t)
@@ -1935,6 +2040,16 @@ Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
   }
   // A `view` is never stored: the fields are values.
   if (!ok || !S.checkViewArgs({}, fieldTys, args, callee))
+    return nullptr;
+  // Each field owns what it is given (#369): its qualifier, and the copy
+  // rule.
+  for (size_t i = 0; i < args.size(); ++i)
+    if (!S.checkQualifiedFlow(
+            payload->findFieldQualifier(payload->getFieldName(i)), args[i],
+            "field '" + payload->getFieldName(i) + "' of '" + callee + "'",
+            args[i]->getLocation()))
+      ok = false;
+  if (!ok)
     return nullptr;
   node->setVariant(enumTy, static_cast<size_t>(idx));
   node->setResolvedType(enumTy);
@@ -2622,6 +2737,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       }
     }
     if (superInit && argTypes.size() == expectedParams.size()) {
+      // A by-value parameter owns what it is given: the copy rule (#369).
+      for (size_t i = 0; i < argTypes.size(); ++i)
+        if (argTypes[i] &&
+            superInit->getParamModes().mode(i) == ast::ParamMode::Value)
+          S.checkQualifiedFlow(superInit->getParamQual(i),
+                               node->getArguments()[i],
+                               "parameter " + std::to_string(i + 1) + " of '" +
+                                   names::kMethodSuper + "'",
+                               node->getArguments()[i]->getLocation());
       S.checkInoutArgs(node, superInit->getParamModes(), expectedParams,
                        node->getArguments(), names::kMethodSuper);
       S.checkViewArgs(superInit->getParamModes(), expectedParams,
@@ -2764,8 +2888,10 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return nullptr;
   const std::string callee = displayName(node->getCalleeName());
   // A by-value parameter is an owning slot (the prototype): what flows
-  // into it converts and, under the copy rule, moves.  A builtin borrows.
-  if (!sig->IsBuiltin)
+  // into it converts and, under the copy rule, moves.  A builtin borrows;
+  // an imported function of Paykan code does not.
+  const bool owns = !sig->IsBuiltin || (sig->Imported && !sig->Native);
+  if (owns)
     for (size_t i = 0; i < argTypes.size() && i < sig->ParamTypes.size(); ++i)
       if (argTypes[i] && sig->Modes.mode(i) == ast::ParamMode::Value &&
           !S.checkQualifiedFlow(i < sig->ParamQuals.size() ? sig->ParamQuals[i]
@@ -2776,8 +2902,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                 node->getArguments()[i]->getLocation()))
         return nullptr;
   // A borrow takes the qualifier its parameter says (the prototype).
-  if (!sig->IsBuiltin && !S.checkBorrowQualifiers(sig->Modes, sig->ParamQuals,
-                                                  node->getArguments(), callee))
+  if (owns && !S.checkBorrowQualifiers(sig->Modes, sig->ParamQuals,
+                                       node->getArguments(), callee))
     return nullptr;
   S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
                    callee);
@@ -2813,6 +2939,18 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // but for the builtin `Show`'s `toString()` of an optional whose value
   // has a text: "None", or the value's text.
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
+    // `o.clone()`: None, or the value's clone (the builtin `Cloneable`).
+    if (node->getMethodName() == names::kMethodClone &&
+        node->getNumArguments() == 0) {
+      std::string why;
+      if (!S.isCloneable(ot, &why)) {
+        S.error(node->getLocation(),
+                "'" + typeName(ot) + "' is not Cloneable: " + why);
+        return nullptr;
+      }
+      node->setResolvedType(ot);
+      return ot;
+    }
     if (node->getMethodName() == names::kMethodToString &&
         node->getNumArguments() == 0) {
       if (S.hasText(ot)) {
@@ -2830,6 +2968,18 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
 
   // A fixed-size array, and a slice of one, has one method, `len()`, its
   // length.
+  if (ast::isa<ast::FixedArrayType>(recvTy) &&
+      node->getMethodName() == names::kMethodClone &&
+      node->getNumArguments() == 0) {
+    std::string why;
+    if (!S.isCloneable(recvTy, &why)) {
+      S.error(node->getLocation(),
+              "'" + typeName(recvTy) + "' is not Cloneable: " + why);
+      return nullptr;
+    }
+    node->setResolvedType(recvTy);
+    return recvTy;
+  }
   if (ast::dyn_cast<ast::FixedArrayType>(recvTy) ||
       ast::dyn_cast<ast::SliceType>(recvTy)) {
     if (node->getMethodName() != names::kLen || node->getNumArguments() != 0) {
@@ -2873,6 +3023,17 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                 recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
               ct == S.Ctx.getStrTy())) {
     builtinResult = S.Ctx.getIntTy();
+  } else if (mname == names::kMethodClone && (!ct || ct == S.Ctx.getStrTy()) &&
+             !(st && st->findMethod(mname))) {
+    // `x.clone()` (the builtin `Cloneable`, #369): a copy of a Copyable
+    // value, a new `Str`, and part by part for a struct or a tuple.
+    std::string why;
+    if (!S.isCloneable(recvTy, &why)) {
+      S.error(node->getLocation(),
+              "'" + typeName(recvTy) + "' is not Cloneable: " + why);
+      return nullptr;
+    }
+    builtinResult = recvTy;
   } else if (ct == S.Ctx.getStrTy() && ast::strParseKind(mname, parsed)) {
     builtinResult = S.Ctx.getOptionalType(S.Ctx.getBuiltinType(parsed));
   } else if (recvTy == S.Ctx.getBuiltinType(ast::BuiltinType::U64) &&
@@ -2900,6 +3061,14 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                                : st->findMethod(node->getMethodName());
   std::string ownerName = ct ? ct->getName() : st->getName();
 
+  if (!method && ct && node->getMethodName() == names::kMethodClone &&
+      node->getNumArguments() == 0 && !S.isErroneousClass(ct)) {
+    S.error(node->getLocation(),
+            "class '" + ct->getName() +
+                "' is not Cloneable: write 'impl Cloneable for " +
+                ct->getName() + " {}' to derive its 'clone', or write one");
+    return nullptr;
+  }
   if (!method) {
     if (ct ? S.isErroneousClass(ct)
            : S.ErroneousClasses.count(st->getName()) != 0) {
@@ -2967,8 +3136,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
   }
 
-  // Only a `view fn` may be called on a `view`.
-  S.checkMethodReceiver(node, method);
+  // A `shared fn` takes a shared receiver; only a `view fn` may be called
+  // on a `view`.
+  if (S.checkSharedReceiver(node, method))
+    S.checkMethodReceiver(node, method);
   // Another module's instantiation: what the method does is read from its
   // template.
   S.copyImportedInstance(recvTy, node->getLocation());
@@ -3002,8 +3173,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   sliceArgNote(paramTys[i], argTy));
     }
   }
+  // `equals` is lent its argument, as `==` lends it: comparing keeps nothing.
+  const bool lends = node->getMethodName() == names::kMethodEquals;
   for (size_t i = 0; i < node->getNumArguments(); ++i)
-    if (node->getArguments()[i]->getResolvedType() &&
+    if (!lends && node->getArguments()[i]->getResolvedType() &&
         method->getParamModes().mode(i) == ast::ParamMode::Value &&
         !S.checkQualifiedFlow(method->getParamQual(i), node->getArguments()[i],
                               "parameter " + std::to_string(i + 1) + " of '" +
@@ -3136,6 +3309,8 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   // Anywhere else, an array of its own length of its elements' common type.
   std::vector<ast::Type *> elemTys;
   elemTys.reserve(node->getNumElements());
+  const MovedMap movedBefore =
+      node->isRepeat() ? S.MovedVars : MovedMap{}; // checkRepeatValue's
   for (ast::Expr *elem : node->getElements()) {
     auto *ty = visit(elem);
     if (!ty)
@@ -3196,15 +3371,17 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   for (size_t i = 0; i < elemTys.size(); ++i) {
     S.checkAssignable(elemTy, elemTys[i], node->getElements()[i]);
     S.checkViewNotStored(node->getElements()[i], elemTys[i]);
+    // The array owns its elements: a move-only one moves in, and an
+    // element's type keeps no qualifier, so a `shared` reference, a frozen
+    // object or a cell cannot be one (#369).  A `[v; n]` of a place that is
+    // not Copyable is checkRepeatValue's.
+    if (!S.repeatsAPlace(node, elemTy))
+      S.checkQualifiedFlow(ast::Qualifier{}, node->getElements()[i],
+                           "an element of the array",
+                           node->getElements()[i]->getLocation());
   }
-  // `[v; n]` copies its value n times (the copy rule, --strict-ownership).
-  if (std::string part; node->isRepeat() && node->getLength() > 1 &&
-                        S.StrictOwnership && !S.isCopyable(elemTy, &part)) {
-    S.error(node->getLocation(), "'[v; n]' copies its value: '" +
-                                     typeName(elemTy) + "' is not Copyable" +
-                                     (part.empty() ? "" : " (" + part + ")"));
+  if (!S.checkRepeatValue(node, elemTy, movedBefore))
     return nullptr;
-  }
   node->setResolvedType(fixed);
   return fixed;
 }
@@ -3231,21 +3408,22 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                 std::to_string(fixed->getLength()));
     return nullptr;
   }
-  // `[v; n]` copies its value n times (the copy rule, --strict-ownership).
-  if (std::string part; node->isRepeat() && node->getLength() > 1 &&
-                        S.StrictOwnership && !S.isCopyable(elemTy, &part)) {
-    S.error(node->getLocation(), "'[v; n]' copies its value: '" +
-                                     typeName(elemTy) + "' is not Copyable" +
-                                     (part.empty() ? "" : " (" + part + ")"));
-    return nullptr;
-  }
   bool ok = true;
+  const MovedMap movedBefore =
+      node->isRepeat() ? S.MovedVars : MovedMap{}; // checkRepeatValue's
   for (ast::Expr *elem : node->getElements()) {
     auto *ty = visitExpecting(elem, elemTy);
     if (!ty) {
       ok = false;
       continue;
     }
+    // The array owns its elements: a move-only one moves in, and no
+    // qualified reference is one (#369).  A `[v; n]` of a place that is not
+    // Copyable is checkRepeatValue's.
+    if (!S.repeatsAPlace(node, elemTy) &&
+        !S.checkQualifiedFlow(ast::Qualifier{}, elem, "an element of the array",
+                              elem->getLocation()))
+      ok = false;
     if (hasInferredLength(elemTy)) {
       ast::Type *filled = S.fillLengths(elemTy, ty);
       if (!filled) {
@@ -3266,6 +3444,9 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
     }
   }
   if (!ok)
+    return nullptr;
+  // `[v; n]`, after the value's own errors.
+  if (!S.checkRepeatValue(node, elemTy, movedBefore))
     return nullptr;
   node->setResolvedType(fixed);
   return fixed;
@@ -3488,6 +3669,12 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       ok = false;
       continue;
     }
+    // The tuple owns its elements: a move-only one moves in, and an
+    // element's type keeps no qualifier, so no qualified reference is one
+    // (#369).
+    if (!S.checkQualifiedFlow(ast::Qualifier{}, elem, "an element of the tuple",
+                              elem->getLocation()))
+      ok = false;
     if (holdsFixedArray(ty)) {
       S.errorFixedArrayHere(elem->getLocation(), ty,
                             "tuple element " + std::to_string(i));
@@ -3624,10 +3811,12 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   // The lowering extracts the elements from this resolved type.
   node->getValue()->setResolvedType(tt);
 
-  // Each element is stored in its target.
+  // Each element is stored in its target: a move-only one moves (#369).
   bool ok = true;
   for (size_t i = 0; i < tt->getArity() && ok; ++i)
     ok = checkViewNotStored(node->getValue(), tt->getElementType(i));
+  if (ok && !checkCopyRule(node->getValue(), node->getValue()->getLocation()))
+    return bindTargetsAfterError();
   StringSet seen;
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
@@ -3706,7 +3895,32 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
                             "' to variable '" + name + "' of type '" +
                             typeName(varTy) + "'");
       ok = false;
+      continue;
     }
+    // A weak variable names a `shared` (`shared mut`) object, which a
+    // tuple's element never holds (it keeps no qualifier): only a literal's
+    // None is one it takes.
+    if (const VarKind k = varKind(name);
+        k == VarKind::Weak || k == VarKind::WeakView) {
+      const auto *lit = ast::dyn_cast<ast::TupleLiteralExpr>(node->getValue());
+      const ast::Expr *elem = lit && i < lit->getElements().size()
+                                  ? lit->getElements()[i]
+                                  : nullptr;
+      if (!elem || !ast::isa<ast::NoneLiteral>(elem)) {
+        const ast::Qualifier want = qualifierOfVar(name);
+        const char *form = want.Mut ? "weak mut" : "weak";
+        error(target.Loc, "cannot store element " + std::to_string(i) +
+                              " of the tuple (a '" + typeName(elemTy) +
+                              "') in variable '" + name + "', a '" + form +
+                              " " + typeName(varTy) + "': a '" + form +
+                              "' reference names a '" +
+                              qualifiedName(want, nullptr) +
+                              "' object, which a tuple's element never is");
+        ok = false;
+        continue;
+      }
+    }
+    MovedVars.erase(varKey(owner, name)); // assigned again after a move
   }
   return ok;
 }
@@ -3727,6 +3941,9 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // The conversions (`Str<int>(n)`, `int<float>(x)`, ...) are not functions:
   // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
+  // `Str(s)` of a `Str` copies it (#369): it reads a `view`.
+  FunctionTable[names::kString].Modes.Modes = {ast::ParamMode::View};
+  FunctionTable[names::kString].Modes.Names = {"s"};
 
   registerBuiltinTraits();
 
@@ -4096,13 +4313,8 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
               "', expected '" + sourceName + "'");
     return nullptr;
   }
-  // `Str<Str>(s)` is the `Str` constructor, which returns `s` itself and so
-  // takes no `view`, as `Str(s)` takes none.
-  if (pair->Spelled == names::kString) {
-    const FunctionSig *ctor = lookupFunction(names::kString);
-    checkViewArgs(ctor->Modes, ctor->ParamTypes, node->getArguments(),
-                  names::kString);
-  }
+  // (`Str<Str>(s)` makes a new string, so it reads a `view` as any other
+  // conversion does, #369.)
 
   return applyConversion(node, pair);
 }
@@ -4531,9 +4743,11 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
               (CurrentClassCtx->Struct ? ": assign its fields instead" : ""));
     return false;
   }
-  // The variable is still declared after this error.  A `weak` local of a
-  // `view` may take another `view`: its reads stay `view`s.
+  // The variable is still declared after this error.  A `weak` local may
+  // take a `view`: it owns nothing (a `weak` local of a `view` reads as
+  // `view`s; a cursor walking a borrowed chain is the usual one).
   const bool viewOk = varKind(varName) == VarKind::WeakView ||
+                      varKind(varName) == VarKind::Weak ||
                       checkViewNotStored(node->getValue(), valTy);
 
   // Look up the variable in all enclosing scopes.
@@ -4597,7 +4811,16 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                                      "'");
     return false;
   }
-  if (!checkQualifiedFlow(qualifierOfVar(varName), node->getValue(),
+  // A `weak` variable owns nothing: assigning it copies no owner.  It
+  // names a `shared` object (`weak mut`, a `shared mut` one).
+  const VarKind kind = varKind(varName);
+  if ((kind == VarKind::Weak || kind == VarKind::WeakView) &&
+      !checkWeakStore(node->getValue(), qualifierOfVar(varName),
+                      CurrentScope->lookup(varName),
+                      "variable '" + varName + "'", node->getLocation()))
+    return false;
+  if (kind != VarKind::Weak && kind != VarKind::WeakView &&
+      !checkQualifiedFlow(qualifierOfVar(varName), node->getValue(),
                           "variable '" + varName + "'", node->getLocation()))
     return false;
 
@@ -4641,10 +4864,13 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
-    // The result is an owning slot of the caller's (the prototype).
+    // The result is an owning slot of the caller's (the prototype).  A
+    // returned local or by-value parameter leaves as by `move`: a `return`
+    // is always its last use.
     if (CurrentResult.Mode == ast::ParamMode::Value &&
         !checkQualifiedFlow(CurrentResultQual, node->getReturnValue(),
-                            "the result", node->getLocation()))
+                            "the result", node->getLocation(),
+                            /*implicitMove=*/true))
       return false;
     // A borrowed result is a borrow of what the function was given.
     if (CurrentResult.Mode != ast::ParamMode::Value) {
@@ -5700,8 +5926,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     FixedArrayAllowed = true; // a local may be a fixed-size array
     // and a length may be `_` where an initializer gives it
     InferredLengthAllowed = node->getInitExpr() != nullptr;
+    ResolvingWeakDecl = node->isWeak();
     declTy = resolveValueType(node->getType(), node->getLocation(),
                               "variable '" + node->getName() + "'");
+    ResolvingWeakDecl = false;
     if (!declTy) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
@@ -5822,15 +6050,15 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
 
   // A `weak` local holds a weak reference: its type is `T?` of a class `T`
-  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
+  // (`y: weak = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
   // class: inferred, it would be a weak reference to the None value itself,
   // which never reads None.
   if (node->isWeak()) {
     if (!node->getType() && node->getInitExpr() &&
         isNoneValue(node->getInitExpr())) {
-      error(node->getLocation(),
-            "cannot infer the class of weak local '" + node->getName() +
-                "' from None; write 'weak " + node->getName() + ": T? = None'");
+      error(node->getLocation(), "cannot infer the class of weak local '" +
+                                     node->getName() + "' from None; write '" +
+                                     node->getName() + ": weak T? = None'");
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
@@ -5850,12 +6078,22 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   // the initializer's (a copy of a `shared` reference is `shared`); a
   // qualified slot takes what converts into it.
   if (!sharesStorage(declTy) || node->isWeak()) {
-    // One written alone (`x: shared = 1;`, `weak w: shared = n;`) is
-    // checked as an annotation's is (resolveValueType).
-    if (!qual.isUnique() && node->isWeak()) {
+    // One written alone (`x: shared = 1;`, `w: weak mut = n;`) is
+    // checked as an annotation's is (resolveValueType).  A weak variable is
+    // `weak` (the `shared` form) or `weak mut` (`shared mut`): it names a
+    // `shared` object, or a `shared mut` one.
+    if (node->isWeak() && qual.Form != ast::QualForm::Shared) {
       error(node->getLocation(),
             "weak variable '" + node->getName() +
-                "' takes no qualifier: a weak reference counts nothing");
+                "' is 'weak' or 'weak mut': a weak reference names a 'shared' "
+                "object");
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    if (node->isWeak() && node->getInitExpr() &&
+        !checkWeakStore(node->getInitExpr(), qual, declTy,
+                        "variable '" + node->getName() + "'",
+                        node->getLocation())) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
@@ -5863,11 +6101,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
-    // A weak variable holds nothing: what it views is written as its
-    // owner's form allows (the prototype), so it takes the initializer's.
-    qual = node->isWeak() && node->getInitExpr()
-               ? qualifierOf(node->getInitExpr())
-               : ast::Qualifier{};
+    // A weak variable holds nothing: it reads as the `shared` (`shared
+    // mut`) reference it names, while its object lives.
+    if (!node->isWeak())
+      qual = ast::Qualifier{};
   } else if (!qualified && node->getInitExpr()) {
     qual = qualifierOf(node->getInitExpr());
   }
@@ -5992,6 +6229,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   ast::Type *fieldTy = nullptr;
   ast::Qualifier fieldQual; // the prototype
+  bool weakField = false;   // a `weak` field of a class
   if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
     // A struct's fields can be assigned, in place, where the struct is
     // changeable: not through a `view`, and not in a `let` local, whose
@@ -6047,6 +6285,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     // Look up the field in the class hierarchy.
     fieldTy = ct->findField(node->getFieldName());
     fieldQual = ct->findFieldQualifier(node->getFieldName());
+    weakField = ct->isWeakField(node->getFieldName());
     if (!fieldTy) {
       if (isErroneousClass(ct)) // the class declaration was already reported
         ++SuppressedFollowOns;
@@ -6094,6 +6333,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                 node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
     return false;
   }
+  // A `weak` field owns nothing: storing a reference there copies no owner.
+  // It names a `shared` object (`weak mut`, a `shared mut` one).
+  if (weakField)
+    return checkWeakStore(node->getValue(), fieldQual, fieldTy,
+                          "field '" + node->getFieldName() + "'",
+                          node->getLocation());
   if (!checkQualifiedFlow(fieldQual, node->getValue(),
                           "field '" + node->getFieldName() + "'",
                           node->getLocation()))
@@ -6458,6 +6703,10 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
       // 2. Resolve the arm's type annotation.
       auto *resolvedArmTy =
           resolveType(arm->getArmType(), arm->getLocation(), "match arm");
+      // A qualifier written on the arm's type (not part of an arm's binding
+      // yet: it takes the subject's form) must not reach the next
+      // declaration resolved.
+      (void)takeQualifier();
       arm->setArmType(resolvedArmTy); // write canonical pointer back
       auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy)
                                   : nullptr;
@@ -6577,6 +6826,10 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
     } else {
       auto *resolvedArmTy =
           resolveType(arm->getArmType(), arm->getLocation(), "match arm");
+      // A qualifier written on the arm's type (not part of an arm's binding
+      // yet: it takes the subject's form) must not reach the next
+      // declaration resolved.
+      (void)takeQualifier();
       arm->setArmType(resolvedArmTy); // write canonical pointer back
       ast::Type *bindTy = nullptr;
       if (!resolvedArmTy) {

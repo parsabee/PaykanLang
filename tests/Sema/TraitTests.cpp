@@ -403,12 +403,12 @@ fn main() -> int {
   io::println(s);
   io::println(s.toString());
   io::println((1, fn(x: int) => x));
-  io::println((1, s).toString());
-  io::println(Outer(1, s));
+  io::println((1, S(fn(x: int) => x)).toString());
+  io::println(Outer(1, S(fn(x: int) => x)));
   io::println(O(None).toString());
   io::println(E::N);
   io::println(E::N.toString());
-  o: S? = s;
+  o: S? = S(fn(x: int) => x);
   io::println(o);
   io::println(o.toString());
   io::println(show(s));
@@ -495,19 +495,20 @@ struct Q { p: P; at: (float, char?); }
 enum E { A(q: Q), B(n: int?), N }
 enum Maybe<X> { Just(v: X), Nothing }
 fn show<X: Show>(x: view X) -> Str { return x.toString(); }
+fn mkQ(n: int) -> Q { return Q(P(n, "p", Handler()), (2.5, None)); }
 fn main() -> int {
   p = P(1, "p", Handler());
-  q = Q(p, (2.5, None));
+  q = mkQ(1);
   io::println(p);
   io::println(q.toString());
-  io::println((1, q));
-  io::println(E::A(q));
+  io::println((1, mkQ(2)));
+  io::println(E::A(mkQ(3)));
   io::println(E::B(None).toString());
   o: Q? = None;
   io::println(o);
   io::println(o.toString());
-  m: Maybe<Q> = Maybe::Just(q);
-  return show(m).len() + show((p, E::N)).len();
+  m: Maybe<Q> = Maybe::Just(move q);
+  return show(m).len() + show((move p, E::N)).len();
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

@@ -1,3 +1,6 @@
+// The copy rule: a move-only value read from a place flows into an owning
+// slot only by `move`, and `[v; n]` copies its value.  Each line marked
+// `error` is rejected by Sema.
 import ::io;
 
 class Node {
@@ -6,7 +9,7 @@ class Node {
 
 fn make() -> Node {
   let n = Node(1);
-  return n;                     // strict: write `return move n`
+  return n;                     // fine: a returned local moves
 }
 
 fn take(n: Node) -> int {
@@ -15,16 +18,16 @@ fn take(n: Node) -> int {
 
 fn main() -> int {
   let a = Node(2);
-  let b = a;                    // strict: cannot copy a unique
+  let b = a;                    // error: cannot copy a unique
   let s: shared = Node(3);
   let t = s;                    // fine: shared is Copyable
-  io::println(Str(take(a)));    // strict: cannot copy into a parameter
+  io::println(Str(take(a)));    // error: cannot copy into a parameter
   io::println(Str(take(move a)));
   let m = make();
   return t.id - 3;
 }
 
 fn repeat_copies() -> int {
-  let arr = [Node(1); 3];       // strict: '[v; n]' copies a move-only value
+  let arr = [Node(1); 3];       // error: '[v; n]' copies a move-only value
   return arr[0].id;
 }

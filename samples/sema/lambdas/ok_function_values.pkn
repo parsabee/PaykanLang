@@ -10,9 +10,12 @@ fn square(x: int) -> int {
 fn apply(f: (int) -> int, x: int) -> int {
   return f(x);
 }
-fn twice(f: (int) -> int) -> (int) -> int {
+fn twice(f: view (int) -> int, x: int) -> int {
+  return f(f(x));
+}
+fn adder(n: int) -> (int) -> int {
   return fn(x: int) -> int {
-    return f(f(x));
+    return x + n;
   };
 }
 
@@ -30,8 +33,9 @@ fn main() -> int {
   let add = fn(x: int) -> int {
     return x + n;
   };  // captures n
+  let k = add(1);
   let g: (int) -> int = square;
-  let fs: ((int) -> int)[2] = [square, twice(add)];
+  let fs: ((int) -> int)[2] = [square, adder(n)];
   let b = Button("ok", fn(l: Str) { io::println(l); });
   b.onClick("clicked");
   let o = Op("add", fn(a: int, b: int) -> int { return a + b; });
@@ -48,5 +52,6 @@ fn main() -> int {
     f: () -> int { m = m + f(); }
     None { }
   }
-  return apply(g, 3) + fs[1](2) + o.run(1, 2) + add(1) + (if ok then m else 0);
+  return apply(move g, 3) + fs[1](2) + o.run(1, 2) + k + twice(add, 1)
+      + (if ok then m else 0);
 }

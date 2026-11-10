@@ -13,7 +13,7 @@ class Shape {
 }
 
 impl Shape {
-  fn __init__(name: Str)    { self.name = name; }
+  fn __init__(name: Str)    { self.name = move name; }
   view fn report() -> float { return self.area(); }
 }
 
@@ -43,8 +43,8 @@ fn total(shapes: view Shape[]) -> float {
 fn main() -> int {
   let a: Shape = Square("a", 1.0);
   let b: Polygon = Square("b", 2.0);
-  let scene = Scene(a, None, [a, b]);
-  let box = Box<Shape>(b);
+  let scene = Scene(Square("c", 3.0), None, [move a, move b]);
+  let box = Box<Shape>(Square("d", 4.0));
   match scene.extra {
     s: Shape { return 1; }
     None { }

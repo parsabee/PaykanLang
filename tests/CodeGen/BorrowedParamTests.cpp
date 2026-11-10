@@ -10,7 +10,9 @@
 // frees everything it allocates.  Each also says how many arguments the
 // lending pass lent, how many copies it kept because something between the
 // read and the call may let the object go (the window), and some how many
-// parameters it lent and how many their bodies own from their entry.
+// parameters it lent and how many their bodies own from their entry.  The
+// watched nodes are `shared` (`shared mut` where an `inout` parameter
+// replaces one), since a `weak` reference names only a `shared` object.
 
 #include "CodeGenTestUtils.h"
 
@@ -32,7 +34,7 @@ class Node {
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn report(w: view Watcher, tag: view Str) {
@@ -43,48 +45,48 @@ fn report(w: view Watcher, tag: view Str) {
 }
 
 // Reads its parameter only.
-fn inner(n: Node) {
+fn inner(n: shared Node) {
   io::println("inner reads " + n.name);
 }
 
 // Hands its parameter on at its last use, then does more work.
-fn outer(n: Node, w: view Watcher) {
-  inner(n);
+fn outer(n: shared Node, w: view Watcher) {
+  inner(move n);
   report(w, "in outer, after inner");
 }
 
 // Reassigns its parameter.
-fn rebind(n: Node, w: view Watcher) {
+fn rebind(n: shared Node, w: view Watcher) {
   n = Node("other");
   report(w, "in rebind, after the assignment");
 }
 
 class Holder {
-  n: Node?;
+  n: shared Node?;
 }
 
 // Keeps its parameter in a field, then lets the field go.
-fn stash(h: mut Holder, n: Node, w: view Watcher) {
-  h.n = n;
+fn stash(h: inout Holder, n: shared Node, w: view Watcher) {
+  h.n = move n;
   h.n = None;
   report(w, "in stash, after the field let go");
 }
 
 fn main() -> int {
-  a = Node("a");
+  a: shared = Node("a");
   wa = Watcher(a);
-  outer(a, wa);              // a's last use: a transfer
+  outer(move a, wa);         // a's last use: a transfer
   report(wa, "in main, after outer");
 
-  b = Node("b");
+  b: shared = Node("b");
   wb = Watcher(b);
-  rebind(b, wb);
+  rebind(move b, wb);
   report(wb, "in main, after rebind");
 
-  c = Node("c");
+  c: shared = Node("c");
   wc = Watcher(c);
   h: mut = Holder(None);
-  stash(h, c, wc);
+  stash(h, move c, wc);
   report(wc, "in main, after stash");
 
   // A temporary handed to outer: outer hands it on to inner.
@@ -126,16 +128,16 @@ TEST(BorrowedParams, AFieldReadBesideItsRootsLastUseKeepsItsCopy) {
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Holder {
   n: Node?;
-  s: Str;
+  s: shared Str;
 }
 
 class Watcher {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn report(w: view Watcher, tag: view Str) {
@@ -147,26 +149,26 @@ fn report(w: view Watcher, tag: view Str) {
 
 // The callee replaces the field its argument was read from, then reads
 // the argument: the caller must keep the argument alive (a hold).
-fn clearThenRead(s: Str, h: mut Holder) {
+fn clearThenRead(s: shared Str, h: shared mut Holder) {
   h.s = "replaced";
   io::println("still have " + s);
 }
 
 // Given a node's name and the node at its last use: the node may die
 // inside, the name must not.
-fn nameAndNode(s: Str, n: Node, w: view Watcher) {
+fn nameAndNode(s: shared Str, n: shared Node, w: view Watcher) {
   n = Node("other");
   report(w, "in nameAndNode, after the assignment");
   io::println("name " + s);
 }
 
 fn main() -> int {
-  h: mut = Holder(None, "original " + "string");
+  h: shared mut = Holder(None, "original " + "string");
   clearThenRead(h.s, h);
 
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watcher(x);
-  nameAndNode(x.name, x, wx);   // x's last use
+  nameAndNode(x.name, move x, wx);   // x's last use
   report(wx, "in main, after nameAndNode");
   return 0;
 }
@@ -192,11 +194,11 @@ TEST(BorrowedParams, AMoveInsideAnAndKeepsTheCopyOfAFieldRead) {
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -206,17 +208,17 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn g(n: Node) -> bool { return True; }
+fn g(n: shared Node) -> bool { return True; }
 
-fn f(s: Str, b: bool, w: view Watch) {
+fn f(s: shared Str, b: bool, w: view Watch) {
   io::println("in f, x is " + state(w) + "; s = " + s);
 }
 
 fn main() -> int {
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watch(x);
   c = wx.target != None;
-  f(x.name, c && g(x), wx);
+  f(x.name, c && g(move x), wx);
   io::println("after f: x is " + state(wx));
   return 0;
 }
@@ -244,7 +246,7 @@ class Node {
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -254,14 +256,14 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn g(n: Node) -> bool { return True; }
+fn g(n: shared Node) -> bool { return True; }
 
-fn f(n: Node, b: bool, w: view Watch) {
+fn f(n: shared Node, b: bool, w: view Watch) {
   io::println("in f, x is " + state(w) + "; n.name = " + n.name);
 }
 
 fn main() -> int {
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watch(x);
   c = wx.target != None;
   f(x, c && g(x), wx);
@@ -287,11 +289,11 @@ TEST(BorrowedParams, AMoveIntoASiblingArgumentKeepsTheCopy) {
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -301,14 +303,14 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn g(n: Node) -> int { return 1; }
+fn g(n: shared Node) -> int { return 1; }
 
-fn f(s: Str, k: int) -> int { return s.len() + k; }
+fn f(s: shared Str, k: int) -> int { return s.len() + k; }
 
 fn main() -> int {
-  x = Node("x" + "name");
+  x: shared = Node("x" + "name");
   wx = Watch(x);
-  r = f(x.name, g(x));
+  r = f(x.name, g(move x));
   io::println("after f: x is " + state(wx) + " (" + Str(r) + ")");
   io::println("end of main");
   return 0;
@@ -332,11 +334,11 @@ TEST(BorrowedParams, AReadOfAnInoutArgumentsVariableIsOwned) {
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak mut Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -346,13 +348,13 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn f(s: Str, n: inout Node, w: view Watch) {
+fn f(s: shared Str, n: inout Node, w: view Watch) {
   n = Node("other");
   io::println("in f, old x is " + state(w) + "; s = " + s);
 }
 
 fn main() -> int {
-  x: mut = Node("x" + "name");
+  x: shared mut = Node("x" + "name");
   wx = Watch(x);
   f(x.name, x, wx);
   io::println("after f: " + x.name);
@@ -378,11 +380,11 @@ TEST(BorrowedParams, AReadOfAMutatedStructIsOwned) {
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -393,12 +395,12 @@ fn state(w: view Watch) -> Str {
 }
 
 struct S {
-  n: Node;
+  n: shared Node;
   w: Watch;
 }
 
 impl S {
-  fn set(s: Str, v: Node) {
+  fn set(s: shared Str, v: shared Node) {
     self.n = Node("z");
     io::println("in set, old node is " + state(self.w) + "; s = " + s + ", v = " + v.name);
   }
@@ -430,15 +432,15 @@ TEST(BorrowedParams, AParameterHandedOnBesideItsFieldKeepsTheField) {
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Holder {
-  n: Node;
+  n: shared Node;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -448,19 +450,19 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn sink(s: Str, h: mut Holder, w: view Watch) {
+fn sink(s: shared Str, h: mut Holder, w: view Watch) {
   h.n = Node("replaced");
   io::println("in sink, old node is " + state(w) + "; s = " + s);
 }
 
 fn cur(h: mut Holder, w: view Watch) {
-  sink(h.n.name, h, w);
+  sink(h.n.name, move h, w);
 }
 
 fn main() -> int {
   h: mut = Holder(Node("n" + "ame"));
   w = Watch(h.n);
-  cur(h, w);
+  cur(move h, w);
   io::println("after cur: old node is " + state(w));
   return 0;
 }
@@ -478,7 +480,9 @@ fn main() -> int {
 // Each call kind given `h.n` and `h`, where the callee replaces h.n and then
 // uses its argument (plan/k1_kinds): a direct call, a vcall, a constructor,
 // a struct method, a function value, a generic function and `__super__`.
-// The read stays held; the variables are lent.
+// The read stays held; the variables are lent.  The node and the holder are
+// `shared`, so the caller keeps them while it passes them; the generic
+// function borrows its argument (a `T` parameter takes no `shared` one).
 TEST(BorrowedParams, EveryCallKindKeepsWhatItsCalleeReplaces) {
   LeakGuard g;
   pir::Statistics stats;
@@ -489,33 +493,33 @@ class Node {
 }
 
 class Holder {
-  n: Node;
+  n: shared Node;
 }
 
-fn direct(m: Node, h: mut Holder) {
+fn direct(m: shared Node, h: shared mut Holder) {
   h.n = Node("z");
   io::println("direct: " + m.name);
 }
 
 class Base {
-  view fn take(m: Node, h: mut Holder) {
+  view fn take(m: shared Node, h: shared mut Holder) {
     io::println("base");
   }
 }
 
 class Derived: Base {
-  view fn take(m: Node, h: mut Holder) {
+  view fn take(m: shared Node, h: shared mut Holder) {
     h.n = Node("z");
     io::println("vcall: " + m.name);
   }
 }
 
 class Keeper {
-  m: Node;
+  m: shared Node;
 }
 
 impl Keeper {
-  fn __init__(m: Node, h: mut Holder) {
+  fn __init__(m: shared Node, h: shared mut Holder) {
     h.n = Node("z");
     self.m = m;
     io::println("ctor: " + m.name);
@@ -523,11 +527,11 @@ impl Keeper {
 }
 
 class Parent {
-  m: Node;
+  m: shared Node;
 }
 
 impl Parent {
-  fn __init__(m: Node, h: mut Holder) {
+  fn __init__(m: shared Node, h: shared mut Holder) {
     h.n = Node("z");
     self.m = m;
     io::println("super: " + m.name);
@@ -538,7 +542,7 @@ class Child: Parent {
 }
 
 impl Child {
-  fn __init__(h: mut Holder) {
+  fn __init__(h: shared mut Holder) {
     __super__(h.n, h);
   }
 }
@@ -548,19 +552,19 @@ struct S {
 }
 
 impl S {
-  view fn meth(m: Node, h: mut Holder) {
+  view fn meth(m: shared Node, h: shared mut Holder) {
     h.n = Node("z");
     io::println("struct method: " + m.name);
   }
 }
 
-fn gen<T>(m: T, h: mut Holder) -> T {
+fn gen<T>(m: view T, h: shared mut Holder) -> view T {
   h.n = Node("z");
   return m;
 }
 
 fn main() -> int {
-  h: mut = Holder(Node("a" + "1"));
+  h: shared mut = Holder(Node("a" + "1"));
   direct(h.n, h);
   h.n = Node("a" + "2");
   b: Base = Derived();
@@ -571,7 +575,7 @@ fn main() -> int {
   s = S(1);
   s.meth(h.n, h);
   h.n = Node("a" + "5");
-  f = fn(m: Node) -> Str { h.n = Node("z"); return m.name; };
+  f = fn(m: shared Node) -> Str { h.n = Node("z"); return m.name.clone(); };
   io::println("icall: " + f(h.n));
   h.n = Node("a" + "6");
   io::println("generic: " + gen(h.n, h).name);
@@ -600,17 +604,18 @@ fn main() -> int {
 // Every way a callee can write its box parameter (plan/w1_written), each
 // called with a copy, which is lent (the caller's node stays alive), and at
 // the argument's last use (a move: the old node dies inside, as before).
+// The nodes are `shared mut`, so the caller can keep a copy.
 TEST(BorrowedParams, EveryWayACalleeWritesItsParameter) {
   LeakGuard g;
   pir::Statistics stats;
   auto r = compilePassesAndRun(R"pkn(import ::io;
 
 class Node {
-  name: Str;
+  name: shared Str;
 }
 
 class Watch {
-  weak target: Node?;
+  target: weak mut Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -620,12 +625,12 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn assign(n: Node, w: view Watch) {
+fn assign(n: shared mut Node, w: view Watch) {
   n = Node("b");
   io::println("  assign: old is " + state(w) + ", n = " + n.name);
 }
 
-fn compound(s: Str) {
+fn compound(s: shared Str) {
   s += "!";
   io::println("  compound: s = " + s);
 }
@@ -634,14 +639,14 @@ fn bump(n: inout Node) {
   n = Node("c");
 }
 
-fn viaInout(n: mut Node, w: view Watch) {
+fn viaInout(n: shared mut Node, w: view Watch) {
   bump(n);
   io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn pair(a: Node) -> (Node, int) { return (a, 1); }
+fn pair(a: Node) -> (Node, int) { return (move a, 1); }
 
-fn destructure(n: Node, w: view Watch) {
+fn destructure(n: shared mut Node, w: view Watch) {
   n, k = pair(Node("m"));
   io::println("  destructure: old is " + state(w) + ", n = " + n.name);
 }
@@ -650,26 +655,26 @@ class Sub: Node {
   extra: int;
 }
 
-fn armInout(n: mut Node, w: view Watch) {
+fn armInout(n: shared mut Node, w: view Watch) {
   match n {
     s: inout Node { s = Node("arm"); }
   }
   io::println("  armInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn inoutLocal(n: mut Node, w: view Watch) {
+fn inoutLocal(n: shared mut Node, w: view Watch) {
   r: inout = n;
   r = Node("loc");
   io::println("  inoutLocal: old is " + state(w) + ", n = " + n.name);
 }
 
-fn toNone(n: Node?, w: view Watch) {
+fn toNone(n: shared mut Node?, w: view Watch) {
   n = None;
   io::println("  toNone: old is " + state(w));
 }
 
 fn main() -> int {
-  a: mut = Node("a");
+  a: shared mut = Node("a");
   wa = Watch(a);
   io::println("copies:");
   assign(a, wa);
@@ -681,22 +686,22 @@ fn main() -> int {
   inoutLocal(a, wa);
   io::println("after copies: a is " + state(wa) + ", a = " + a.name);
   io::println("moves:");
-  b = Node("b0");
+  b: shared mut = Node("b0");
   wb = Watch(b);
   assign(b, wb);
-  c: mut = Node("c0");
+  c: shared mut = Node("c0");
   wc = Watch(c);
   viaInout(c, wc);
-  d = Node("d0");
+  d: shared mut = Node("d0");
   wd = Watch(d);
   toNone(d, wd);
-  e = Node("e0");
+  e: shared mut = Node("e0");
   we = Watch(e);
   destructure(e, we);
-  f: mut = Node("f0");
+  f: shared mut = Node("f0");
   wf = Watch(f);
   armInout(f, wf);
-  g: mut = Node("g0");
+  g: shared mut = Node("g0");
   wg = Watch(g);
   inoutLocal(g, wg);
   io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd) + " " + state(we) + " " + state(wf) + " " + state(wg));
@@ -732,16 +737,16 @@ fn main() -> int {
 }
 
 // The 65th box parameter and those after it have no bit in the ownership
-// mask (docs/pir.md §3): handed over always, each a copy of the variable
-// the caller keeps, which the callee releases; the 64 before them are lent
-// and released by nobody.
+// mask (docs/pir.md §3): handed over always, each a copy of the (`shared`)
+// variable the caller keeps, which the callee releases; the 64 before them
+// are lent and released by nobody.
 TEST(BorrowedParams, BoxParametersPastTheSixtyFourthAreHandedOver) {
   LeakGuard g;
   pir::Statistics stats;
   std::string params;
   std::string args;
   for (int i = 0; i < 66; ++i) {
-    params += (i ? ", s" : "s") + std::to_string(i) + ": Str";
+    params += (i ? ", s" : "s") + std::to_string(i) + ": shared Str";
     args += i ? ", a" : "a";
   }
   auto r = compilePassesAndRun("import ::io;\n"
@@ -751,7 +756,7 @@ TEST(BorrowedParams, BoxParametersPastTheSixtyFourthAreHandedOver) {
                                    "  return s0 + s63 + s64 + s65;\n"
                                    "}\n"
                                    "fn main() -> int {\n"
-                                   "  a = \"a\" + \"1\";\n"
+                                   "  a: shared Str = \"a\" + \"1\";\n"
                                    "  io::println(wide(" +
                                    args +
                                    ") + a);\n"

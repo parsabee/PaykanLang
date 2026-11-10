@@ -62,9 +62,10 @@ fn main() -> int {
   io::println("=== ternary with owned Str variables as branches ===");
   let p = "alpha";
   let q = "beta";
-  r = pickStr(True, p, q);
+  // The first call takes copies; the second, the last use, moves both.
+  r = pickStr(True, p.clone(), q.clone());
   io::println(r);           // alpha
-  r = pickStr(False, p, q);
+  r = pickStr(False, move p, move q);
   io::println(r);           // beta
 
   return 0;

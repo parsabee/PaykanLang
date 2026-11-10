@@ -529,7 +529,7 @@ void ModuleLowering::bootstrapBuiltins() {
   }
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
-  IdentityCtors.insert(kString);
+  // (`Str(s)` of a `Str` is no identity: it copies, showCallOf.)
 }
 
 // -- Entry point
@@ -1699,7 +1699,7 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   ast::Type *declTy = canonicalizeDeclType(node->getType());
   Type pirTy = declTy ? toPIRType(declTy) : Type::Void;
 
-  // `weak y: T? = e;`: a weak reference to what the initializer names
+  // `y: weak T? = e;`: a weak reference to what the initializer names
   // (none for a missing initializer or `None`), in a `weak` local.
   if (node->isWeak()) {
     Val box = node->getInitExpr() ? emitAsShared(node->getInitExpr())

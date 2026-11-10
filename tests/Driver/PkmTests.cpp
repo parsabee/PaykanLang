@@ -198,7 +198,7 @@ struct Project {
     writeFile(Dir / "mid.pkn",
               "import base;\n"
               "fn mid() -> int { return base::base() + 1; }\n"
-              "fn pick(c: base::Cell) -> int { return c.v; }\n");
+              "fn pick(c: view base::Cell) -> int { return c.v; }\n");
     writeFile(Dir / "main.pkn",
               "import ::io; import mid;\nimport base;\n"
               "fn main() -> int {\n"
@@ -729,27 +729,27 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
   fs::remove_all(dir);
   writeFile(dir / "lib/slices.pkn",
             "class C { a: int[3]; }\n"
-            "fn reset(c: mut C) -> int { c.a = [9, 9, 9]; return 0; }\n"
+            "fn reset(c: shared mut C) -> int { c.a = [9, 9, 9]; return 0; }\n"
             "fn total(xs: view int[], x: int) -> int => xs[0];\n"
-            "fn plain(xs: view int[], c: mut C) -> int => total(xs, "
+            "fn plain(xs: view int[], c: shared mut C) -> int => total(xs, "
             "reset(c));\n"
             "fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
-            "fn generic<T>(xs: view T[], c: mut C) -> int => first(xs, "
+            "fn generic<T>(xs: view T[], c: shared mut C) -> int => first(xs, "
             "reset(c));\n");
-  writeFile(dir / "lib/other.pkn",
-            "import lib::slices;\n"
-            "fn more(c: mut slices::C) -> int => slices::generic(c.a, c);\n");
+  writeFile(dir / "lib/other.pkn", "import lib::slices;\n"
+                                   "fn more(c: shared mut slices::C) -> int => "
+                                   "slices::generic(c.a, c);\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::slices;\nimport lib::other;\n"
             "fn main() -> int {\n"
-            "  let c: mut = slices::C([1, 2, 3]);\n"
+            "  let c: shared mut = slices::C([1, 2, 3]);\n"
             "  let n = slices::plain(c.a, c);\n"
             "  io::println(Str(n) + \" \" + Str(slices::generic(c.a, c) + "
             "other::more(c)));\n"
             "  return 0;\n}\n");
   writeFile(dir / "plain.pkn", "import ::io;\nimport lib::slices;\n"
                                "fn main() -> int {\n"
-                               "  let c: mut = slices::C([1, 2, 3]);\n"
+                               "  let c: shared mut = slices::C([1, 2, 3]);\n"
                                "  io::println(Str(slices::plain(c.a, c)));\n"
                                "  return 0;\n}\n");
   auto in = [&](const std::string &args) {
@@ -759,20 +759,20 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
                              "slice 'xs': they are copied to the heap before "
                              "the call to ";
   const std::string plain =
-      "lib/slices.pkn:4:52: warning: 'reset'" + copied +
+      "lib/slices.pkn:4:59: warning: 'reset'" + copied +
       "'total'\n"
       "  3 | fn total(xs: view int[], x: int) -> int => xs[0];\n"
-      "  4 | fn plain(xs: view int[], c: mut C) -> int => total(xs, "
+      "  4 | fn plain(xs: view int[], c: shared mut C) -> int => total(xs, "
       "reset(c));\n"
-      "    |                                                    ^~\n"
+      "    |                                                           ^~\n"
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n";
   const std::string generic =
-      "lib/slices.pkn:6:55: warning: 'reset'" + copied + "'first<int>'\n";
+      "lib/slices.pkn:6:62: warning: 'reset'" + copied + "'first<int>'\n";
   const std::string genericLines =
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
-      "  6 | fn generic<T>(xs: view T[], c: mut C) -> int => first(xs, "
+      "  6 | fn generic<T>(xs: view T[], c: shared mut C) -> int => first(xs, "
       "reset(c));\n"
-      "    |                                                       ^~\n";
+      "    |                                                              ^~\n";
   // Built from source: both; from the cache entries, the instantiation
   // `main` makes, whose template comes from the entry.
   auto r = in("main.pkn");
@@ -817,21 +817,21 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
   fs::remove_all(dir);
   writeFile(dir / "lib/sl/inner.pkn",
             "class C { a: int[3]; }\n"
-            "fn wipe(c: mut C) -> int { c.a = [0, 0, 0]; return 0; }\n"
+            "fn wipe(c: shared mut C) -> int { c.a = [0, 0, 0]; return 0; }\n"
             "fn total(xs: view int[], x: int) -> int => xs[0] + x;\n");
   writeFile(dir / "lib/sl.pkn",
             "import lib::sl::inner as q;\n"
             "fn own(xs: view int[], x: int) -> int => xs[0] + x;\n"
-            "fn plain(xs: view int[], c: mut q::C) -> int => q::total(xs, "
-            "q::wipe(c));\n"
-            "fn gen<T>(xs: view int[], c: mut q::C, t: T) -> int => "
+            "fn plain(xs: view int[], c: shared mut q::C) -> int => "
             "q::total(xs, q::wipe(c));\n"
-            "fn mine<T>(xs: view int[], c: mut q::C, t: T) -> int => own(xs, "
-            "q::wipe(c));\n");
+            "fn gen<T>(xs: view int[], c: shared mut q::C, t: T) -> int => "
+            "q::total(xs, q::wipe(c));\n"
+            "fn mine<T>(xs: view int[], c: shared mut q::C, t: T) -> int => "
+            "own(xs, q::wipe(c));\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::sl;\nimport lib::sl::inner;\n"
             "fn main() -> int {\n"
-            "  let c: mut = inner::C([1, 2, 3]);\n"
+            "  let c: shared mut = inner::C([1, 2, 3]);\n"
             "  let a = sl::plain(c.a, c);\n"
             "  c.a = [1, 2, 3];\n"
             "  let b = sl::gen(c.a, c, 1);\n"
@@ -845,26 +845,27 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
   const std::string copied = " in a later argument may write the elements of "
                              "slice 'xs': they are copied to the heap before "
                              "the call to ";
-  const std::string line3 = "fn plain(xs: view int[], c: mut q::C) -> int => "
-                            "q::total(xs, q::wipe(c));\n";
+  const std::string line3 =
+      "fn plain(xs: view int[], c: shared mut q::C) -> int => "
+      "q::total(xs, q::wipe(c));\n";
   const std::string line4 =
-      "fn gen<T>(xs: view int[], c: mut q::C, t: T) -> int "
+      "fn gen<T>(xs: view int[], c: shared mut q::C, t: T) -> int "
       "=> q::total(xs, q::wipe(c));\n";
   const std::string line5 =
-      "fn mine<T>(xs: view int[], c: mut q::C, t: T) -> int "
+      "fn mine<T>(xs: view int[], c: shared mut q::C, t: T) -> int "
       "=> own(xs, q::wipe(c));\n";
   const std::string plain =
-      "lib/sl.pkn:3:58: warning: 'q::wipe'" + copied + "'q::total'\n" +
+      "lib/sl.pkn:3:65: warning: 'q::wipe'" + copied + "'q::total'\n" +
       "  2 | fn own(xs: view int[], x: int) -> int => xs[0] + x;\n" + "  3 | " +
-      line3 + "    | " + std::string(57, ' ') + "^~\n" + "  4 | " + line4;
-  const std::string gen = "lib/sl.pkn:4:65: warning: 'lib::sl::inner::wipe'" +
+      line3 + "    | " + std::string(64, ' ') + "^~\n" + "  4 | " + line4;
+  const std::string gen = "lib/sl.pkn:4:72: warning: 'lib::sl::inner::wipe'" +
                           copied + "'lib::sl::inner::total'\n";
   const std::string genLines = "  3 | " + line3 + "  4 | " + line4 + "    | " +
-                               std::string(64, ' ') + "^~\n" + "  5 | " + line5;
+                               std::string(71, ' ') + "^~\n" + "  5 | " + line5;
   const std::string mine =
-      "lib/sl.pkn:5:61: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
+      "lib/sl.pkn:5:68: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
   const std::string mineLines = "  4 | " + line4 + "  5 | " + line5 + "    | " +
-                                std::string(60, ' ') + "^~\n";
+                                std::string(67, ' ') + "^~\n";
   auto r = in("main.pkn");
   EXPECT_EQ(r.exitCode, 0) << r.out;
   EXPECT_EQ(r.out, plain + gen + genLines + mine + mineLines + "1 1 1\n");
@@ -877,15 +878,18 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
 // A cache entry is written from moved code (docs/pir.md §12; pkm.md §5.13):
 // the run that builds the module counts the moves at last use made in its
 // code, and the run that reuses the entry makes none of them again, with
-// the same result and nothing leaked.
+// the same result and nothing leaked.  The references are `shared`, whose
+// copies the moves at last use turn into transfers (a unique one moves by
+// `move`), so `pass` is not generic: a qualifier is not part of a type
+// argument.
 TEST(Pkm, ACacheEntryIsMovedCode) {
   REQUIRE_BACKEND();
   Project p("moves");
   writeFile(p.Dir / "base.pkn",
             "class Cell { v: int; }\n"
-            "fn pass<T>(x: T) -> T { y = x; return y; }\n"
-            "fn pick(c: Cell) -> int { return c.v; }\n"
-            "fn give(c: Cell) -> int { return pick(pass(c)); }\n");
+            "fn pass(x: shared Cell) -> shared Cell { y = x; return y; }\n"
+            "fn pick(c: shared Cell) -> int { return c.v; }\n"
+            "fn give(c: shared Cell) -> int { return pick(pass(c)); }\n");
   writeFile(p.Dir / "main.pkn",
             "import base;\n"
             "fn main() -> int { return base::give(base::Cell(7)); }\n");
@@ -1860,7 +1864,7 @@ TEST(Pkm, PureVirtualMethodsAcrossModules) {
             "  fn grow();\n"
             "}\n"
             "impl Shape {\n"
-            "  fn __init__(name: Str) { self.name = name; }\n"
+            "  fn __init__(name: Str) { self.name = move name; }\n"
             "  view fn report() -> Str { return self.name + \" \" + "
             "Str(self.area()); }\n"
             "}\n"
@@ -2343,8 +2347,9 @@ TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
 // A module's code, in a cache entry and in its `.pkm`, keeps no mark of the
 // copies the lowering made only to hand an argument over (`retain lend`,
 // docs/pir.md §6): the lending pass lends them or clears them before the
-// code is kept, here lending both copies of `x`, which `both` keeps for the
-// calls, whatever the importer's program does with its own.
+// code is kept, here lending both copies of `x` (a `shared` reference, which
+// a call copies), which `both` keeps for the calls, whatever the importer's
+// program does with its own.
 TEST(Pkm, ModuleCodeKeepsNoLendMark) {
   REQUIRE_BACKEND();
   fs::path dir =
@@ -2353,12 +2358,12 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
   writeFile(dir / "lib.pkn",
             "class Pair<T> {\n"
             "  a: T;\n"
-            "  view fn first(x: T) -> int { return 1; }\n"
-            "  view fn both(x: T) -> int {\n"
+            "  view fn first(x: shared T) -> int { return 1; }\n"
+            "  view fn both(x: shared T) -> int {\n"
             "    return self.first(x) + self.first(x);\n"
             "  }\n"
             "}\n"
-            "fn make(s: Str) -> Pair<Str> { return Pair<Str>(s); }\n");
+            "fn make(s: Str) -> Pair<Str> { return Pair<Str>(move s); }\n");
   writeFile(dir / "main.pkn", "import lib;\n"
                               "fn main() -> int {\n"
                               "  p = lib::make(\"x\");\n"
@@ -2385,12 +2390,14 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
 }
 
 // A module's compiled code is lent what its importer keeps (#98 part 2,
-// docs/pir.md §3, §12): the program's copies of `s` and `n` for lib's
-// constructor, its `stash`, which keeps the node in a field, and its
-// native function's body, and for the standard library's List and
-// HashMap, are lent arguments, and the compiled callees, whose lending ran
-// when their `.pkm` was made, release nothing they were lent and retain
-// what they keep.  The program frees everything and prints what it did.
+// docs/pir.md §3, §12): the program's copies of the `shared` references `s`
+// and `n` for lib's constructor, its `stash`, which keeps the node in a
+// field, and its native function's body are lent arguments, and the
+// compiled callees, whose lending ran when their `.pkm` was made, release
+// nothing they were lent and retain what they keep.  The program frees
+// everything and prints what it did.  (A standard library container is lent
+// nothing the program keeps: its element type takes no `shared` (#368), and
+// a unique value the program keeps is a clone or a move, not a copy.)
 TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
   REQUIRE_BACKEND();
   fs::path dir =
@@ -2398,39 +2405,32 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
   fs::remove_all(dir);
   writeFile(dir / "lib.pkn",
             "native fn width(s: view Str) -> int = \"pk_lent_width\";\n"
-            "class Node { name: Str; }\n"
-            "class Holder { n: Node?; }\n"
-            "fn stash(h: mut Holder, n: Node) { h.n = n; }\n"
-            "fn named(n: Node) -> Str { return n.name; }\n");
+            "class Node { name: shared Str; }\n"
+            "class Holder { n: shared Node?; }\n"
+            "fn stash(h: mut Holder, n: shared Node) { h.n = n; }\n"
+            "fn named(n: shared Node) -> shared Str { return n.name; }\n");
   writeFile(dir / "lib.c", "#include <stdint.h>\n"
                            "int64_t pk_lent_width(void *s) { return s ? 7 : 0; "
                            "}\n");
-  writeFile(
-      dir / "main.pkn",
-      "import ::io;\n"
-      "import ::collections as c;\n"
-      "import lib;\n"
-      "fn main() -> int {\n"
-      "  s = \"abc\" + \"def\";\n"
-      "  n = lib::Node(s);\n"
-      "  h: mut = lib::Holder(None);\n"
-      "  lib::stash(h, n);\n"
-      "  l = c::List<lib::Node>();\n"
-      "  l.push(n);\n"
-      "  m = c::HashMap<Str, Str>();\n"
-      "  m.put(s, \"v\");\n"
-      "  io::println(Str<int>(lib::width(s)) + \" \" + lib::named(n) +\n"
-      "              \" \" + l.at(0).name + \" \" + m.getOr(s, s) + \" \" + "
-      "s);\n"
-      "  return 0;\n"
-      "}\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\n"
+            "import lib;\n"
+            "fn main() -> int {\n"
+            "  s: shared = \"abc\" + \"def\";\n"
+            "  n: shared = lib::Node(s);\n"
+            "  h: mut = lib::Holder(None);\n"
+            "  lib::stash(move h, n);\n"
+            "  io::println(Str<int>(lib::width(s)) + \" \" + lib::named(n) + "
+            "\" \" + s);\n"
+            "  return 0;\n"
+            "}\n");
   auto in = [&](const std::string &cmd) {
     return run("cd " + dir.string() + " && " + cmd);
   };
   ASSERT_EQ(in("cc -std=c11 -fPIC -c lib.c -o lib.o").exitCode, 0);
   auto ran = in(paykanCmd() + " --track-heap --object=lib.o main.pkn");
   EXPECT_EQ(ran.exitCode, 0) << ran.out;
-  EXPECT_TRUE(contains(ran.out, "7 abcdef abcdef v abcdef\n")) << ran.out;
+  EXPECT_TRUE(contains(ran.out, "7 abcdef abcdef\n")) << ran.out;
   EXPECT_TRUE(contains(ran.out, "live blocks       : 0\n")) << ran.out;
   // lib came from its cache entry this time: its compiled code is lent to.
   auto again = in(paykanCmd() + " --track-heap --object=lib.o main.pkn");
@@ -2439,10 +2439,7 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
   ASSERT_EQ(pir.exitCode, 0) << pir.out;
   for (const char *call :
        {"call @\"lib::Node\"(lent %s.", "call @\"lib::stash\"(%h.8, lent %n.",
-        "call @List<Node>.push(%l.addr.12, lent %n.",
-        "call @\"HashMap<Str, Str>.put\"(%m.addr.16, lent %s.",
-        "call @\"lib::width\"(lent %s.",
-        "call @\"HashMap<Str, Str>.getOr\"(%m.addr.40, lent %s.41, lent %s."})
+        "call @\"lib::width\"(lent %s."})
     EXPECT_TRUE(contains(pir.out, call)) << call << "\n" << pir.out;
   // n's last use hands it over.
   EXPECT_TRUE(contains(pir.out, "call @\"lib::named\"(%n.")) << pir.out;
@@ -2510,31 +2507,31 @@ TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
   writeFile(dir / "cells.pkn",
             "class Cell<T> { v: T; }\n"
             "impl Cell<T> {\n"
-            "  fn put(x: T) -> int { self.v = x; return 0; }\n"
+            "  fn put(x: T) -> int { self.v = move x; return 0; }\n"
             "  view fn size() -> int => 1;\n"
             "}\n"
             "struct Slot<T> { v: T; }\n"
             "impl Slot<T> {\n"
-            "  fn set(x: T) -> int { self.v = x; return 0; }\n"
+            "  fn set(x: T) -> int { self.v = move x; return 0; }\n"
             "  view fn size() -> int => 1;\n"
             "}\n"
-            "fn cellOf(s: Str) -> Cell<Str> => Cell<Str>(s);\n"
-            "fn slotOf(s: Str) -> Slot<Str> => Slot<Str>(s);\n");
+            "fn cellOf(s: Str) -> Cell<Str> => Cell<Str>(move s);\n"
+            "fn slotOf(s: Str) -> Slot<Str> => Slot<Str>(move s);\n");
   writeFile(
       dir / "main.pkn",
       "import ::io;\n"
       "import cells;\n"
       "class Holder { slot: cells::Slot<Str>; }\n"
-      "fn reads(c: cells::Cell<Str>) -> Str => c.v + Str(c.size());\n"
-      "fn replaces(c: mut cells::Cell<Str>) -> Str =>\n"
+      "fn reads(c: view cells::Cell<Str>) -> Str => c.v + Str(c.size());\n"
+      "fn replaces(c: inout cells::Cell<Str>) -> Str =>\n"
       "  c.v + Str(c.put(\"new\" + \"!\"));\n"
-      "fn readsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.size());\n"
-      "fn setsSlot(h: mut Holder) -> Str =>\n"
+      "fn readsSlot(h: view Holder) -> Str => h.slot.v + Str(h.slot.size());\n"
+      "fn setsSlot(h: inout Holder) -> Str =>\n"
       "  h.slot.v + Str(h.slot.set(\"other\" + \"?\"));\n"
       "fn main() -> int {\n"
-      "  let c: mut = cells::cellOf(\"old\" + \"?\");\n"
+      "  c: mut = cells::cellOf(\"old\" + \"?\");\n"
       "  io::println(reads(c) + \" \" + replaces(c) + \" \" + reads(c));\n"
-      "  let h: mut = Holder(cells::slotOf(\"first\" + \".\"));\n"
+      "  h: mut = Holder(cells::slotOf(\"first\" + \".\"));\n"
       "  io::println(readsSlot(h) + \" \" + setsSlot(h) + \" \" +\n"
       "              readsSlot(h));\n"
       "  return 0;\n"
@@ -2546,11 +2543,11 @@ TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
             "import ::io;\n"
             "import labels;\n"
             "class Box { s: Str; }\n"
-            "fn sized(b: Box) -> Str {\n"
+            "fn sized(b: view Box) -> Str {\n"
             "  let c = labels::labelled(\"x\");\n"
             "  return b.s + Str(c.size());\n"
             "}\n"
-            "fn stored(b: Box) -> Str {\n"
+            "fn stored(b: view Box) -> Str {\n"
             "  let c: mut = labels::labelled(\"x\");\n"
             "  return b.s + Str(c.put(\"y\"));\n"
             "}\n"
@@ -2689,7 +2686,7 @@ TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
             "  view fn twice() -> T { return self.v + self.v; } }\n"
             "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
             "struct Pair<A, B> { a: A; b: B; }\n"
-            "fn first<T>(x: T, y: T) -> T { return _keep(x); }\n"
+            "fn first<T>(x: T, y: T) -> T { return _keep(move x); }\n"
             "fn _keep<T>(x: T) -> T { return x; }\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -2814,8 +2811,9 @@ TEST(Pkm, StrOfAValueAcrossModules) {
             "  view fn toString() -> Str { return \"P\" + Str(self.x); }\n"
             "}\n"
             "struct Size { w: int; h: int; }\n"
-            "fn show<T>(x: T) -> Str { return Str(x); }\n"
-            "fn both(p: Point) -> Str { return Str(p) + Str(Size(1, 2)); }\n");
+            "fn show<T>(x: view T) -> Str { return Str(x); }\n"
+            "fn both(p: view Point) -> Str { return Str(p) + "
+            "Str(Size(1, 2)); }\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::shows;\n"
             "fn main() -> int {\n"
@@ -2835,7 +2833,7 @@ TEST(Pkm, StrOfAValueAcrossModules) {
   };
   const std::string expected =
       "P3 (4, a) None\nP3Size(w: 1, h: 2) P3 Size(w: 5, h: 6)\n";
-  const std::string e5 = "lib/shows.pkn:6:34: error: 'Str' cannot convert a "
+  const std::string e5 = "lib/shows.pkn:6:39: error: 'Str' cannot convert a "
                          "value of type '(int) -> int', which does not "
                          "implement trait 'Show'";
   const std::string note = "bad.pkn:3:7: note: in instantiation of ";
@@ -3076,22 +3074,24 @@ TEST(Pkm, FunctionTypesAcrossModules) {
   auto dir =
       fs::temp_directory_path() / ("pkm_fntypes_" + std::to_string(getpid()));
   fs::remove_all(dir);
-  writeFile(dir / "ops.pkn",
-            "fn square(x: int) -> int { return x * x; }\n"
-            "fn twice(f: (int) -> int) -> (int) -> int {\n"
-            "  return fn(x: int) -> int { return f(f(x)); }; }\n"
-            "fn each(xs: view int[], f: (view int, inout int) -> void) -> int "
-            "{\n"
-            "  t = 0; i = 0;\n"
-            "  while i < xs.len() { f(xs[i], t); i = i + 1; }\n"
-            "  return t; }\n"
-            "class Button { label: Str; onClick: (Str) -> Str;\n"
-            "  fn click() -> Str { return self.onClick(self.label); } }\n");
+  writeFile(
+      dir / "ops.pkn",
+      "fn square(x: int) -> int { return x * x; }\n"
+      "fn twice(f: (int) -> int) -> (int) -> int {\n"
+      "  return fn(x: int) -> int { return f(f(x)); }; }\n"
+      "fn each(xs: view int[], f: (view int, inout int) -> void) -> int "
+      "{\n"
+      "  t = 0; i = 0;\n"
+      "  while i < xs.len() { f(xs[i], t); i = i + 1; }\n"
+      "  return t; }\n"
+      "class Button { label: Str; onClick: (Str) -> Str;\n"
+      "  view fn click() -> Str { return self.onClick(self.label.clone()); "
+      "} }\n");
   writeFile(dir / "main.pkn",
             "import ::io; import ops;\n"
             "fn main() -> int {\n"
             "  t = ops::twice(ops::square);\n"
-            "  b: mut = ops::Button(\"b\", fn(l: Str) -> Str { return l + "
+            "  b = ops::Button(\"b\", fn(l: Str) -> Str { return l + "
             "\"!\"; });\n"
             "  n = ops::each([1, 2, 3], fn(x: view int, acc: inout int) { acc "
             "= acc + x; });\n"
@@ -3250,7 +3250,7 @@ TEST(Pkm, FunctionTypeArgumentsInInstantiationNames) {
             "  p = shapes::makePair();\n"
             "  q = shapes::Pair(fn(x: int) -> int { return x + 1; }, 2);\n"
             "  m = shapes::makeMap();\n"
-            "  r: shapes::Pair<(int, int) -> int, Str> = p;\n"
+            "  r: shapes::Pair<(int, int) -> int, Str> = shapes::makePair();\n"
             "  io::println(Str(shapes::apply(p, 3)) + \" \" + p.b + \" \" + "
             "Str(q.a(q.b)) + \" \" + Str(m.key()(3)) + \" \" + m.v + \" "
             "\" + Str(r.first()(2, 2)));\n"
@@ -3308,7 +3308,9 @@ TEST(Pkm, StructAndClassInstantiationsOfOneNameConflict) {
 
 // A `weak` field crosses modules and prebuilt `.pkm` files: the importer
 // stores and reads it as a weak reference (the interface records the flag),
-// so a tree built from another module's class is freed with its root.
+// so a tree built from another module's class is freed with its root.  The
+// nodes are `shared mut`: the tree and `main` both hold `a`, and the back
+// link is `weak mut`, which `add`, a `shared fn`, stores `self` in.
 TEST(Pkm, WeakFieldsAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =
@@ -3317,26 +3319,26 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   writeFile(dir / "tree.pkn",
             "class Node {\n"
             "  name: Str;\n"
-            "  weak parent: Node?;\n"
-            "  first: Node?;\n"
-            "  next: Node?;\n"
-            "  fn add(child: mut Node) {\n"
+            "  parent: weak mut Node?;\n"
+            "  first: shared mut Node?;\n"
+            "  next: shared mut Node?;\n"
+            "  shared fn add(child: shared mut Node) {\n"
             "    child.parent = self; child.next = self.first; self.first = "
             "child; }\n"
             "  view fn path() -> Str {\n"
             "    match self.parent { p: Node { return p.path() + \"/\" + "
             "self.name; } None { return self.name.toString(); } } }\n"
             "}\n"
-            "impl Node { fn __init__(name: Str) { self.name = name; "
+            "impl Node { fn __init__(name: Str) { self.name = move name; "
             "self.parent = None; self.first = None; self.next = None; } }\n");
   writeFile(dir / "main.pkn",
             "import ::io; import tree;\n"
             "fn main() -> int {\n"
-            "  root: mut = tree::Node(\"root\");\n"
-            "  a: mut = tree::Node(\"a\");\n"
+            "  root: shared mut = tree::Node(\"root\");\n"
+            "  a: shared mut = tree::Node(\"a\");\n"
             "  root.add(a);\n"
             "  a.parent = root;\n"
-            "  weak w = root;\n"
+            "  w: weak mut = root;\n"
             "  io::print(a.path() + \" \");\n"
             "  root = tree::Node(\"other\");\n"
             "  io::print(a.path() + \" \");\n"
@@ -3359,8 +3361,8 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
   auto dump = paykan("pkm dump --section=iface tree.pkm");
   for (const char *line :
-       {"    field name: Str", "    weak field parent: Node?",
-        "    field first: Node?"})
+       {"    field name: Str", "    weak field parent: shared mut Node?",
+        "    field first: shared mut Node?"})
     EXPECT_TRUE(contains(dump.out, line)) << line << "\n" << dump.out;
   fs::remove_all(dir);
 }
@@ -3609,7 +3611,7 @@ trait Named { view fn name() -> Str; }
 struct Keyed<K: Hashable> { k: K; }
 impl Hashable for Keyed<K> { view fn hash() -> int { return self.k.hash(); } }
 class GBox<T> { v: T; }
-impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl GBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
 impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
 enum Maybe<T: Hashable> { Just(v: T), Nothing }
@@ -4299,14 +4301,14 @@ TEST(Pkm, TraitBlocksAndSubclassesOnEveryPath) {
   fs::remove_all(p.Dir);
   writeFile(p.Dir / "lib" / "gb.pkn", R"(trait Named { view fn name() -> Str; }
 class Box<T> { v: T; }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }
 impl Named for Box<T> { view fn name() -> Str { return "gbox"; } }
 class NBox<T> { v: T; }
-impl NBox<T> { fn __init__(v: T) { self.v = v; } }
+impl NBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Named for NBox<T> { view fn name() -> Str { return self.v.name(); } }
 class SBox<T> { v: T; }
-impl SBox<T> { fn __init__(v: T) { self.v = v; } }
+impl SBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Show for SBox<T> {}
 class CK { v: int; }
 impl CK { fn __init__(v: int) { self.v = v; } }

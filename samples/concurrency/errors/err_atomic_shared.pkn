@@ -10,7 +10,7 @@ class Limits {
 class Config {
   name: Str;
   limits: Limits;
-  fn rename(n: Str) { self.name = n; }
+  fn rename(n: Str) { self.name = move n; }
 }
 
 fn main() -> int {

@@ -44,7 +44,7 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
       io::println(p.label("p=") + " " + Str(p.sum()));
       q: mut = Point3::unit();
       q.shift(1);
-      base: Point = q;
+      base: view Point = q;
       io::println(base.label("q=") + " " + Str(q.volume()) + " " +
               Str(base.sum()));
       return 0;
@@ -65,9 +65,9 @@ TEST(Impl, GenericBlocks) {
       view fn describe() -> Str { return "Box"; }
     }
     impl Box<U> {
-      fn __init__(v: U) { self.v = v; }
+      fn __init__(v: U) { self.v = move v; }
       view fn get() -> view U { return self.v; }
-      fn set(v: U) { self.v = v; }
+      fn set(v: U) { self.v = move v; }
     }
     trait Named { view fn name() -> Str; }
     impl Named for Box<T> {
@@ -108,17 +108,17 @@ class Bag {
 }
 impl Bag {
   fn __init__() {
-    self.items = [""; 4];
+    self.items = ["", "", "", ""];
     self.n = 0;
   }
   static fn of(a: Str, b: Str) -> Bag {
     bag: mut = Bag();
-    bag.add(a);
-    bag.add(b);
+    bag.add(move a);
+    bag.add(move b);
     return bag;
   }
   fn add(s: Str) {
-    self.items[self.n] = s;
+    self.items[self.n] = move s;
     self.n = self.n + 1;
   }
   view fn first() -> view Str { return self.items[0]; }
@@ -154,11 +154,11 @@ TEST(Impl, GenericBlocksAcrossModules) {
   std::ofstream(dir / "gen.pkn") << R"(
 class Box<T> { v: T; }
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T) { self.v = move v; }
   view fn get() -> view T { return self.v; }
-  fn set(v: T) { self.v = _pick(v, self.v); }
+  fn set(v: T) { self.v = _pick(move v, self.v); }
 }
-fn _pick<T>(a: T, b: T) -> T { return a; }
+fn _pick<T>(a: T, b: view T) -> T { return a; }
 fn mk() -> Box<int> { return Box<int>(41); }
 )";
   std::ofstream(dir / "main.pkn") << R"(import ::io;

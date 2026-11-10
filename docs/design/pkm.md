@@ -374,10 +374,12 @@ method of a `CLASS` or `STRUCT` record carries one after its signature,
 `ast::MethodDecl`'s flags (`kMethod*` in `include/paykan/pkm/Interface.h`:
 bit 0 `Private`, which nothing sets (a member's privacy is its name's,
 docs/design/visibility.md), bit 1 a `view fn`, bit 2 an `impl` block's
-method, bit 4 a pure virtual method, docs/language/05-classes.md, the value
-§3.5 gives `PURE`); a reader rejects any other bit, and the pure bit on a
-struct's method, an `impl` block's, an initializer (`__init__`,
-`___init__`) or `destroy`.  A `CLASS` record lists the complete vtable, so
+method, bit 3 a `shared fn` (its `self` is shared, so only a receiver held
+`shared` calls it, docs/language/05-classes.md), bit 4 a pure virtual
+method, docs/language/05-classes.md, the value §3.5 gives `PURE`); a reader
+rejects any other bit, the pure bit on a struct's method, an `impl` block's,
+an initializer (`__init__`, `___init__`) or `destroy`, and the shared bit on
+a struct's method, an initializer or `destroy`.  A `CLASS` record lists the complete vtable, so
 an importer works out from the pure bits which classes are abstract; that
 is never written.  A class's constructor is the `FUNC` record of its name,
 an abstract class's too, though its module defines no such function

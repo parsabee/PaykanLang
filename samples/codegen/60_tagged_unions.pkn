@@ -8,7 +8,7 @@
 //            of a value (`toString`, `io::println`) and of an enum without
 //            fields; `==` and `!=`; a tagged union in a struct, a tuple, an
 //            optional, a fixed-size array and a List, held by an object,
-//            captured by a lambda, passed and returned; a variant's fields
+//            passed to a lambda, passed and returned; a variant's fields
 //            as a parameter's type (`MyType::WithPrimitive`).
 // expect-stdout: NoElement | 7 2.5 | three Node#3 | 0 1 4 | 3 squares
 // expect-stdout: WithPrimitive(i: 7, f: 2.5) WithObject(obj: Node#3, str: three)
@@ -64,7 +64,7 @@ fn getMyType(k: int) -> MyType {
   for i in 0..k - 1 {
     let e = b.push(i * i);
   }
-  return MyType::WithStruct(b);
+  return MyType::WithStruct(move b);
 }
 
 /// What @p e holds, as text: the user's example, every arm of it.
@@ -131,11 +131,11 @@ fn main() -> int {
   xs[1] = getMyType(2);
   list = col::List<MyType>();
   for i in 0..3 {
-    list.push(xs[i]);
+    list.push(if i == 1 then getMyType(2) else MyType::NoElement);
   }
-  io::print(Str(list.len()) + " " + list.get(2).toString() + " | ");
-  let check = fn() => xs[1] != MyType::NoElement;
-  io::println(if check() then "caught" else "missed");
+  io::print(Str(list.len()) + " " + list.at(2).toString() + " | ");
+  let check = fn(x: view MyType) => x != MyType::NoElement;
+  io::println(if check(xs[1]) then "caught" else "missed");
 
   // Held by an object, and an enum without fields shown by name.
   let h: mut = Holder(MyType::NoElement);

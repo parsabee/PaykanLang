@@ -385,10 +385,22 @@ TEST(Interface, PureVirtualMethods) {
         << slotless;
   }
   bad = i;
-  bad.Classes[0].Methods[1].Flags = 0x28;
+  bad.Classes[0].Methods[1].Flags = 0x60;
   EXPECT_NE(readError(writeInterface(bad), "shapes")
-                .find("method 'kind' has unknown flags 0x28"),
+                .find("method 'kind' has unknown flags 0x60"),
             std::string::npos);
+  // A `shared fn` is a class's method other than its initializer and its
+  // destroy (Sema rejects the others).
+  for (const char *notShared : {"__init__", "___init__", "destroy"}) {
+    bad = i;
+    bad.Classes[0].Methods.push_back(
+        {notShared, "void", {}, kMethodShared, {}});
+    EXPECT_NE(readError(writeInterface(bad), "shapes")
+                  .find("method '" + std::string(notShared) +
+                        "' of a class is marked 'shared fn'"),
+              std::string::npos)
+        << notShared;
+  }
   bad = i;
   StructRec point;
   point.Name = "Point";
