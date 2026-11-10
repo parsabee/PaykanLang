@@ -757,9 +757,11 @@ bool Parser::parseWeakAnnotation(Type *&ty) {
 std::string Parser::sourceText(size_t from, size_t to) {
   const Token &a = peek(from);
   const Token &b = peek(to);
-  return std::string(
-      a.Text.data(),
-      static_cast<size_t>(b.Text.data() + b.Text.size() - a.Text.data()));
+  // The tokens are views into one source buffer: the text from the first's
+  // start to the last's end.
+  const char *first = a.Text.data();
+  const char *last = b.Text.data() + b.Text.size();
+  return std::string(first, last);
 }
 
 void Parser::weakPrefixError() {

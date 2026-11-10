@@ -448,8 +448,9 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
       *why = "its " + what + " ('" + qualifiedName(q, t) + "') " +
              (what == "elements" ? "are" : "is") + " not Cloneable";
   };
-  // Every Copyable type is Cloneable: its clone is the copy.
-  if (isCopyable(ty) || ty == Ctx.getStrTy())
+  // Every Copyable type is Cloneable: its clone is the copy (one already
+  // reported, with no type, too).
+  if (!ty || isCopyable(ty) || ty == Ctx.getStrTy())
     return true;
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return isCloneable(ot->getInnerType(), why);
@@ -811,12 +812,22 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
         quals[i].Form == ast::QualForm::Shared &&
         !ast::isa<ast::NoneLiteral>(args[i]) && !(q == quals[i])) {
       const char *form = quals[i].Mut ? "weak mut" : "weak";
-      error(args[i]->getLocation(),
-            "cannot pass '" + text + "' (a '" + qualifiedName(q, ty) +
-                "') to parameter '" + modes.name(i) + "' of '" + callee +
-                "', a '" + form + "' field's: a '" + form +
-                "' reference names a '" + qualifiedName(quals[i], nullptr) +
-                "' object");
+      std::string msg = "cannot pass '";
+      msg += text;
+      msg += "' (a '";
+      msg += qualifiedName(q, ty);
+      msg += "') to parameter '";
+      msg += modes.name(i);
+      msg += "' of '";
+      msg += callee;
+      msg += "', a '";
+      msg += form;
+      msg += "' field's: a '";
+      msg += form;
+      msg += "' reference names a '";
+      msg += qualifiedName(quals[i], nullptr);
+      msg += "' object";
+      error(args[i]->getLocation(), msg);
       ok = false;
       continue;
     }
