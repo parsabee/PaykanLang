@@ -54,6 +54,11 @@ ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
     ast::Type *ty = recv->getResolvedType();
     if (!ty)
       return nullptr;
+    // An element of an `atomic` array: the array's handle,
+    // emitAtomicMethodCall.
+    if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(recv);
+        se && se->isAtomicElement())
+      return se->getArray();
     // A field's function value: in a struct's bytes, or in an object.
     if (m->isFieldCall())
       return L.getExprStructType(recv) ? L.memValueVisitsFirst(recv) : recv;
@@ -254,7 +259,7 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return t == Type::Box ? L.emitSharedGet(v, node->getName() + ".obj") : v;
   }
   // Owned ref vars store a box — unwrap to the underlying object.
-  if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName())) {
+  if (ast::isCountedRef(astTy) && L.CurrentScope->isOwned(node->getName())) {
     if (L.isHeldRead(node))
       return held(val);
     val = L.emitSharedGet(val, node->getName() + ".obj");
@@ -276,6 +281,19 @@ Val ModuleLowering::ExprEmitter::visitArrayLiteralExpr(
 }
 
 Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
+  // An element of an `atomic` array: one atomic load.
+  if (node->isAtomicElement()) {
+    Val cell = visit(node->getArray());
+    const bool owned =
+        cell && L.holdCell(cell, node->getArray(), {node->getIndex()});
+    Val index = cell ? visit(node->getIndex()) : Val();
+    Val v = index
+                ? L.emitAtomicLoad(node->getResolvedType(), cell, "elem", index)
+                : Val();
+    if (owned)
+      L.emitRelease(cell);
+    return v;
+  }
   // An element of a fixed-size array or a slice, read in place (one held
   // in memory is its address).
   if (ast::Type *arrTy = node->getArray()->getResolvedType();
@@ -328,7 +346,7 @@ Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
     return Val();
   }
   bool isClassResult =
-      node->getResolvedType() && ast::isRefType(node->getResolvedType());
+      node->getResolvedType() && ast::isCountedRef(node->getResolvedType());
   Type resultTy =
       isClassResult ? Type::Box : L.toPIRType(node->getResolvedType());
 
@@ -374,7 +392,7 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     // A value field (a number, a value held in memory) is read: `x` has
     // ended, and its teardown drops the references the read retained.
     if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(node->getOperand());
-        ma && ast::isRefType(ast::stripOptional(ma->getResolvedType()))) {
+        ma && ast::isCountedRef(ast::stripOptional(ma->getResolvedType()))) {
       Val addr = L.emitPlaceAddress(ma);
       if (!addr)
         return Val();
@@ -392,7 +410,11 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     if (!ast::isa<ast::Identifier>(node->getOperand()))
       return visit(node->getOperand());
     auto *id = ast::cast<ast::Identifier>(node->getOperand());
-    if (L.holdsBox(id->getName())) {
+    // `move` of an `atomic` variable where its value is wanted: the value.
+    if (L.holdsBox(id->getName()) &&
+        !(ast::isa<ast::AtomicType>(
+              L.CurrentScope->lookupASTType(id->getName())) &&
+          !ast::isa<ast::AtomicType>(node->getResolvedType()))) {
       Val box = L.loadVarBox(id->getName());
       L.B.store(L.CurrentScope->lookup(id->getName()), Val::null(Type::Box));
       return box;
@@ -604,7 +626,7 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
         eq = L.B.unary(Opcode::Not, eq, "ne");
       return eq;
     }
-    if (lt && rt && ast::isRefType(lt) && ast::isRefType(rt)) {
+    if (lt && rt && ast::isCountedRef(lt) && ast::isCountedRef(rt)) {
       auto *call = L.ASTCtx.make<ast::MethodCallExpr>(
           node->getLocation(), node->getLHS(), L.ASTCtx.intern(kMethodEquals),
           std::vector<ast::Expr *>{node->getRHS()});
@@ -1073,7 +1095,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Type paramTy = initArgs.size() < superFn->Sig.Params.size()
                          ? superFn->Sig.Params[initArgs.size()]
                          : Type::Void;
-      if (ast::isMemType(argExpr->getResolvedType())) {
+      if (ast::isMemType(argExpr->getResolvedType()) &&
+          !argExpr->getNewAtomicCell()) {
         Val p = L.emitMemAddress(argExpr); // passed by address
         if (!p)
           return Val();
@@ -1164,7 +1187,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Type paramTy = args.size() < callee->Sig.Params.size()
                        ? callee->Sig.Params[args.size()]
                        : Type::Void;
-    if (ast::isMemType(arg->getResolvedType())) {
+    if (ast::isMemType(arg->getResolvedType()) && !arg->getNewAtomicCell()) {
       Val p = L.emitMemAddress(arg); // passed by address
       if (!p)
         return Val();
@@ -1289,28 +1312,87 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
 // place (the prototype): the receiver is the place's handle, its cell.
 Val ModuleLowering::ExprEmitter::emitAtomicMethodCall(ast::MethodCallExpr *node,
                                                       ast::AtomicType *at) {
-  Val cell = visit(node->getReceiver());
+  ast::Type *inner = at->getInnerType();
+  // An array's length is its type's; its receiver still runs.
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(inner)) {
+    Val cell = visit(node->getReceiver());
+    if (!cell)
+      return Val();
+    if (L.exprProducesFreshBox(node->getReceiver()))
+      L.emitRelease(cell);
+    return Val::i64(ft->getLength());
+  }
+  // The cell, or the array and the index of its element.
+  auto *element = ast::dyn_cast<ast::SubscriptExpr>(node->getReceiver());
+  if (element && !element->isAtomicElement())
+    element = nullptr;
+  ast::Expr *handle = element ? element->getArray() : node->getReceiver();
+  Val cell = visit(handle);
   if (!cell)
     return Val();
+  std::vector<ast::Expr *> later(node->getArguments());
+  if (element)
+    later.push_back(element->getIndex());
+  const bool owned = L.holdCell(cell, handle, later);
+  struct ReleaseAfter {
+    ModuleLowering &L;
+    Val Cell;
+    bool Owned;
+    ~ReleaseAfter() {
+      if (Owned)
+        L.emitRelease(Cell);
+    }
+  } releaseAfter{L, cell, owned};
+  Val index;
+  if (element) {
+    index = visit(element->getIndex());
+    if (!index)
+      return Val();
+  }
   Val obj = L.emitSharedGet(cell, "cell.obj");
-  ast::Type *inner = at->getInnerType();
   const bool isFloat =
       ast::BuiltinType::isFloatKind(ModuleLowering::builtinKind(inner));
   std::vector<Val> args{obj};
-  for (ast::Expr *arg : node->getArguments()) {
-    Val v = visit(arg);
+  if (index)
+    args.push_back(index);
+  if (node->getMethodName() == kMethodExchange) {
+    Val v = visit(node->getArguments()[0]);
     if (!v)
       return Val();
     args.push_back(L.atomicToRaw(inner, v));
-  }
-  if (node->getMethodName() == kMethodExchange) {
     Val old = L.callRuntime(
-        isFloat ? kPaykanAtomicFExchange : kPaykanAtomicExchange, args, "old");
+        index ? (isFloat ? kPaykanAtomicArrayFExchange
+                         : kPaykanAtomicArrayExchange)
+              : (isFloat ? kPaykanAtomicFExchange : kPaykanAtomicExchange),
+        args, "old");
     return L.atomicFromRaw(inner, old, "old");
   }
-  Val swapped = L.callRuntime(isFloat ? kPaykanAtomicFCompareExchange
-                                      : kPaykanAtomicCompareExchange,
-                              args, "swapped");
+  // `expected`, in a slot of the raw type: the runtime writes the value it
+  // found there, and it goes back to the variable.
+  ast::Expr *expected = node->getArguments()[0];
+  std::vector<Val> keep;
+  Val place = L.emitInoutArg(expected, keep);
+  if (!place)
+    return Val();
+  const Type exact = L.toPIRType(inner);
+  Val raw = L.atomicToRaw(inner, L.B.ptrLoad(place, exact, "expected"));
+  pir::LocalId slot = L.B.addLocal("expected", raw.Ty);
+  L.B.store(slot, raw);
+  args.push_back(L.B.localAddr(slot, "expected.addr"));
+  Val desired = visit(node->getArguments()[1]);
+  if (!desired)
+    return Val();
+  args.push_back(L.atomicToRaw(inner, desired));
+  Val swapped =
+      L.callRuntime(index ? (isFloat ? kPaykanAtomicArrayFCompareExchange
+                                     : kPaykanAtomicArrayCompareExchange)
+                          : (isFloat ? kPaykanAtomicFCompareExchange
+                                     : kPaykanAtomicCompareExchange),
+                    args, "swapped");
+  L.B.ptrStore(place, L.coerceTo(L.atomicFromRaw(inner, L.B.load(slot, "found"),
+                                                 "found"),
+                                 exact));
+  L.releaseAfterCall(keep);
   return L.B.cast(swapped, Type::Bool, "swapped.bool");
 }
 
@@ -1688,7 +1770,8 @@ bool ModuleLowering::ExprEmitter::emitMethodArgs(
         return false;
       continue;
     }
-    if (ast::isMemType(argExpr->getResolvedType())) {
+    if (ast::isMemType(argExpr->getResolvedType()) &&
+        !argExpr->getNewAtomicCell()) {
       Val p = L.emitMemAddress(argExpr); // passed by address
       if (!p)
         return false;
@@ -1712,7 +1795,7 @@ bool ModuleLowering::ExprEmitter::emitMethodArgs(
                                 : nullptr;
     // Ref-typed arguments to user methods and to the virtual `equals` use
     // the callee-consumes ABI (+1 box); builtin methods borrow.
-    bool isClassParam = ast::isRefType(paramASTTy) &&
+    bool isClassParam = ast::isCountedRef(paramASTTy) &&
                         (userDefined || node->getMethodName() == kMethodEquals);
     if (isClassParam) {
       // A method, a vtable slot or a struct's method: it lends.
@@ -1741,6 +1824,8 @@ bool ModuleLowering::ExprEmitter::emitMethodArgs(
 // -- Subscript assignment
 
 Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
+  if (node->getAtomicKind() != ast::AssignStmt::AtomicKind::None)
+    return emitAtomicElementAssign(node);
   // An element of a fixed-size array or a slice, written in place.
   ast::Type *arrTy = node->getArray()->getResolvedType();
   auto *ft = ast::dyn_cast<ast::FixedArrayType>(arrTy);
@@ -1752,7 +1837,7 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   ast::Type *elemTy = ft ? ft->getElementType() : st->getElementType();
   if (ast::isMemType(elemTy)) {
     emitMemAssign(addr, node->getValue());
-  } else if (ast::isRefType(elemTy)) {
+  } else if (ast::isCountedRef(elemTy)) {
     // The new reference is taken before the old one goes (`xs[0] =
     // xs[0];`).
     if (Val box = emitAsShared(node->getValue())) {
@@ -1840,7 +1925,8 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     }
 
     Val v = emitElementLoad(at, elemTy);
-    if (ast::isRefType(elemTy)) // the binding becomes an owner of the element
+    if (ast::isCountedRef(
+            elemTy)) // the binding becomes an owner of the element
       emitRetain(v, /*lend=*/false, elemTy);
     if (!owner) {
       Type pirTy = toPIRType(bindTy);
@@ -1856,7 +1942,7 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     // Re-assignment of an existing variable.
     pir::LocalId local = owner->lookup(name);
     ast::Type *varTy = CurrentScope->lookupASTType(name);
-    if (varTy && ast::isRefType(varTy)) {
+    if (varTy && ast::isCountedRef(varTy)) {
       if (CurrentScope->isWeak(name)) {
         storeWeakVar(name, v);
         continue;

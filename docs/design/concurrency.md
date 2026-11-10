@@ -964,8 +964,11 @@ every call and thread, so the runtime locks it (proposed; owner may change).
 
 ### Counting
 
-Plain or atomic is chosen statically, by type, since a header bit would
-branch on every plain count (against decision 3): an `atomic shared` object,
+Plain or atomic is chosen by the count itself (#368: its range, from
+`PAYKAN_REF_ATOMIC` up, tells it, which costs the one compare the fast paths
+already make, so no count site has to know the form of what it counts; this
+section's draft chose it by type, since a header bit would
+branch on every plain count): an `atomic shared` object,
 a cell, a channel, a loop and a task record count atomically, every other
 object plainly, and a frozen or immortal count is never written (decision
 37).  Atomic counts on user objects are sound only if every retain or
@@ -1339,7 +1342,7 @@ cannot wait for itself` (proposed; owner may change).
 `atomic T` holds a number, `bool`, `char`, or a fixed array of them as one
 cell of atomic elements (decision 33; proposed; owner may change); the
 prototype's `atomic T` takes every number type, `bool` and `char`, and no
-fixed array yet: `'atomic' holds a number, a 'bool' or a 'char', not
+fixed array yet: `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not
 'Node': an object crosses threads as 'atomic shared Node' (frozen) or
 'locked Node'` (prototype, 2026-11-03; the mut model: `'locked mut
 Node'`).  A
@@ -1419,7 +1422,7 @@ const': an object read from several threads has several owners; write
 'atomic shared T'`) and `atomic shared N` (`'atomic shared T' would
 be written from several threads with no lock; write 'atomic shared
 T' to freeze it, or 'locked T' to change it under a lock`), `atomic N` of a
-class is Sema's `'atomic' holds a number, a 'bool' or a 'char', not 'N':
+class is Sema's `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'N':
 an object crosses threads as 'atomic shared N' (frozen) or 'locked
 N'`, and `shared T` stays the single-thread read-only form, which
 still does not convert into `atomic shared` (owner, 2026-11-03).  (The mut
@@ -1465,7 +1468,12 @@ Box<int>'); 'get' is not a 'view fn'`, and through a bare box `'bx' is
 immutable (a 'Box<int>'; write 'mut Box<int>' to change it); 'get' is not
 a 'view fn'`: `get()` needs a `mut` box.)
 
-**Freezing.**  The conversion walks the value once ([Runtime](#runtime)):
+**Freezing.**  (#368: as built, every object of the value is counted
+atomically and none is a sentinel, so a hold of an object inside keeps it
+alive however the root goes, and a site need not know that its path passes
+through a handle; there is no thaw, and the last reference to each object
+frees it.  A hold of an object inside therefore writes its count.  The rest
+of this section is the draft.)  The conversion walks the value once ([Runtime](#runtime)):
 every object's strong count must be 1 and its weak count 0; the root's
 stays 1, now atomic, and each object inside becomes `PAYKAN_REF_FROZEN`, a
 sentinel of its own beside the immortal one, so the thaw never touches None
@@ -2357,7 +2365,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | binding qualifier | `'p' binds part of a 'shared Obj': its type is 'shared Node', not 'atomic shared Node'` |
 | binding a conditional of two forms | `'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one` |
 | shared contents | `cannot make 'Settings' 'atomic shared': field 'cache' is shared` (also `'locked'`; paths dotted); `'Obj' cannot be 'atomic shared': it may be any class`; `a 'const' value cannot hold 'task::Task<err::Error>' (field 'worker'): it could never be decided; use 'locked'` (the mut model: an immutable value; the prototype's `cannot make 'Node(...)' (a 'Node') 'atomic shared': field 'next' is 'shared mut Node': a 'shared' reference is aliased on its own thread`, also `'locked mut'`) |
-| cell type | `'atomic' holds a number, 'bool', 'char' or a fixed array of them; 'Node' is a reference: use 'locked Node' or 'atomic shared Node'`; `'atomic shared' shares an object; 'int' is a value: copy it` (the prototype: `'atomic' holds a number, a 'bool' or a 'char', not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked Node'`, 2026-11-03; the mut model: `'locked mut Node'`) |
+| cell type | `'atomic' holds a number, 'bool', 'char' or a fixed array of them; 'Node' is a reference: use 'locked Node' or 'atomic shared Node'`; `'atomic shared' shares an object; 'int' is a value: copy it` (the prototype: `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked Node'`, 2026-11-03; the mut model: `'locked mut Node'`) |
 | atomic operations | `'hits' is 'atomic': 'hits = hits + 1' reads and writes it separately; write 'hits += 1'` (otherwise `use 'compareExchange' in a loop`); `'*=' is not an atomic operation on 'hits': use '+=', '-=', 'exchange' or 'compareExchange'`; `'seen' is an 'atomic bool[64]': it is read by element`; bitwise operators on an `atomic int` get today's `the bitwise operators take unsigned operands` |
 | lending an atomic | `'seen[3]' is an element of an 'atomic bool[64]': it has no handle and cannot be lent`; `'hits' is 'atomic': its value cannot be lent 'inout' or bound by address` |
 | through a `const` form | `cannot assign 'cfg.path': 'cfg' is 'atomic shared', which never changes; a field that changes is 'atomic' or 'locked'` (also `'const'`, `'shared'`); `cannot pass 'cfg.path' to 'inout' parameter 'p': 'cfg' is 'atomic shared', which never changes`; `cannot move 'c.name' out: 'c' is 'const', which never changes`; `'rename' is not a 'view fn'; through 'atomic shared' reference 'cfg' only 'view fn's can be called`; `'keep' is a 'shared view fn', whose 'self' could be stored and changed; through 'shared' reference 's' only 'view fn's can be called`; `cannot call 'w.onClick': it is reached through 'const' 'w', and a call may change what its captures own; hold it 'shared'` (the mut model, owner 2026-11-03: `'x' is immutable (a 'T'; write 'mut T' to change it); cannot assign to its field 'f'`, also `; 'm' is not a 'view fn'`, `; it cannot be passed to 'inout' parameter 'p'` and `; cannot assign to its elements`; `field 'f' is immutable (a 'shared T'; write 'shared mut T' to change it); cannot assign to its field 'g'`; `'x' is frozen (an 'atomic shared T'); cannot assign to its field 'f'`, also `; 'm' is not a 'view fn'`; a `let` variable keeps `'x' is declared with 'let' and cannot be passed to 'inout' parameter 'p'`) |
@@ -2423,7 +2431,7 @@ Errors unless marked.  `12:9` stands for a source position.
 | `mut` on a frozen object or a cell (the mut model) | `'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock`; `an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'` |
 | `mut` misplaced (the mut model) | `'mut shared' is spelled 'shared mut': the form first, then the writes`; `a type takes one qualifier: 'shared mut shared' is two` |
 | warning: `locked T` (the mut model) | `'locked T' locks an object nothing writes; 'atomic shared T' is read from every thread with no lock`; and `lock c as v: inout` on it, an error: `'c' is 'locked T', whose contents are never written; declare it 'locked mut T' for a 'lock ... as v: inout' block` |
-| `atomic` of an object (the mut model) | `'atomic' holds a number, a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic shared N' (frozen) or 'locked mut N'` |
+| `atomic` of an object (the mut model) | `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'N': an object crosses threads as 'atomic shared N' (frozen) or 'locked mut N'` |
 
 Run-time panics, printed after `paykan: `: `a value moved out of 'q.jobs'
 is still borrowed`, `a value made 'atomic shared' is still borrowed`, `task

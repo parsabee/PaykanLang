@@ -7,7 +7,7 @@
 // expect-stdout: n 20, m 20, k 4
 // expect-stdout: s served 3001, bytes 1500, done True, ids 6
 // expect-stdout: served 2951 True 0
-// expect-leaks: the cells and the frozen object are immortal in the prototype
+// expect-stdout: seen True False 4, hits 3 5
 
 import ::io;
 
@@ -53,8 +53,9 @@ fn main() -> int {
 
   // exchange and compareExchange on a variable
   n: atomic int = 5;
-  let swapped = n.compareExchange(5, 9);   // True: 5 -> 9
-  let missed = n.compareExchange(5, 1);    // False: it holds 9
+  expected = 5;
+  let swapped = n.compareExchange(expected, 9);   // True: 5 -> 9
+  let missed = n.compareExchange(expected, 1);    // False: it holds 9, now in 'expected'
   io::println("n " + Str(n) + " " + Str(swapped) + " " + Str(missed));
 
   // handles: a copy of an atomic place is another handle to its cell
@@ -78,7 +79,17 @@ fn main() -> int {
       + ", done " + Str(st.done) + ", ids " + Str(ids));
   // a parallel loop over a frozen object's cells
   parallel for i in 0..100 { if i % 2 == 0 { st.served -= 1; } }
+  found = 2951;
   io::println("served " + Str(st.served) + " "
-      + Str(st.served.compareExchange(2951, 0)) + " " + Str(st.served));
+      + Str(st.served.compareExchange(found, 0)) + " " + Str(st.served));
+
+  // an array is one cell of atomic elements, used by element
+  seen: atomic bool[4] = [False; 4];
+  let first = seen[2].exchange(True);
+  hits: atomic int[2] = [1, 2];
+  hits[0] += 2;
+  parallel for i in 0..3 { hits[1] += 1; }
+  io::println("seen " + Str(seen[2]) + " " + Str(first) + " " + Str(seen.len())
+      + ", hits " + Str(hits[0]) + " " + Str(hits[1]));
   return 0;
 }

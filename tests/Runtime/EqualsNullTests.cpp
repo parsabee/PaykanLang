@@ -38,7 +38,8 @@ int32_t countAfterEquals(EqualsFn fn, PaykanObject *self, PaykanObject *other,
   fn(self, box, mask);
   int32_t count = other->strong;
   // Back to what it was: no reference, the test disposes of it.
-  other->strong = 0;
+  if (other->strong != PAYKAN_REF_MAX)
+    other->strong = 0;
   return count;
 }
 

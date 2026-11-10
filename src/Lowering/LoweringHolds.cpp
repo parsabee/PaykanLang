@@ -558,7 +558,7 @@ ModuleLowering::BorrowedReads::field(ast::MemberAccessExpr *ma) {
     return {nullptr, true, holds(r)};
   // A box read from the object's slot is borrowed, unless the read is a
   // reference of its own (a `weak` field's, a temporary's field).
-  if (ast::isRefType(ma->getResolvedType()) && !L.isWeakFieldAccess(ma) &&
+  if (ast::isCountedRef(ma->getResolvedType()) && !L.isWeakFieldAccess(ma) &&
       !L.exprProducesFreshBox(ma))
     return {ma, false, {}};
   return {};
@@ -573,7 +573,7 @@ ModuleLowering::BorrowedReads::Use
 ModuleLowering::BorrowedReads::part(const ast::Expr *e, const Use &base) {
   if (ast::isMemType(e->getResolvedType()))
     return base;
-  if (!base.Borrowed || !ast::isRefType(e->getResolvedType()))
+  if (!base.Borrowed || !ast::isCountedRef(e->getResolvedType()))
     return {};
   if (std::any_of(base.Owners.begin(), base.Owners.end(),
                   [&](const ast::Expr *o) { return L.isHeldRead(o); })) {
@@ -633,11 +633,11 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
     }
     eval(lhs);
     eval(rhs);
-    if (!none && ast::isRefType(lt))
+    if (!none && ast::isCountedRef(lt))
       call(L.valueMethodEffect(lt, names::kMethodEquals), be);
     return;
   }
-  const bool refs = lt && rt && ast::isRefType(lt) && ast::isRefType(rt);
+  const bool refs = lt && rt && ast::isCountedRef(lt) && ast::isCountedRef(rt);
   if (refs && (eq || be->getOpcode() == ast::BinaryOpcode::Add)) {
     // `a == b` is `a.equals(b)`, a Str's the runtime's; `a + b` joins two
     // strings in the runtime.  The left operand is in use until then, and
@@ -1112,7 +1112,7 @@ struct ModuleLowering::EffectScan {
   /// Whether a value of type @p ty holds a reference that storing another
   /// releases.
   static bool holdsReference(const ast::Type *ty) {
-    return !ty || ast::isRefType(ty) || memHoldsRefs(ty);
+    return !ty || ast::isCountedRef(ty) || memHoldsRefs(ty);
   }
   /// Whether the arguments @p args give a call something to reach an object
   /// through, or storage holding a reference to change.
@@ -1452,7 +1452,7 @@ bool clonesAnObject(ast::Type *ty, const ast::Type *strTy,
     return false;
   // A `Str`'s clone is the runtime's copy; a shared reference is the same
   // object in the clone.
-  if (ast::isRefType(ast::stripOptional(ty)))
+  if (ast::isCountedRef(ast::stripOptional(ty)))
     return q.Form == ast::QualForm::Unique && ast::stripOptional(ty) != strTy;
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     for (size_t i = 0; i < st->getNumFields(); ++i)
@@ -2273,7 +2273,7 @@ bool ModuleLowering::isFixedField(ast::ClassType *ct,
       if (f != field)
         continue;
       if (!DeclaredClasses.count(c->getName()) || c->isWeakField(field) ||
-          !ast::isRefType(canonicalizeDeclType(fieldTy)))
+          !ast::isCountedRef(canonicalizeDeclType(fieldTy)))
         return false;
       if (!(Canonical.empty() && PL.MainWorld == World::Closed) &&
           !names::isPrivateName(field))

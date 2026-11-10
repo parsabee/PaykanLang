@@ -579,7 +579,8 @@ fn main() -> int {
   c: atomic char = 'a';
   let old: char = c.exchange('b');
   n: atomic int = 5;
-  let swapped: bool = n.compareExchange(5, 9);
+  e0 = 5;
+  let swapped: bool = n.compareExchange(e0, 9);
   m = n;
   m += 1;
   bump(n, 10);
@@ -601,7 +602,9 @@ fn main() -> int {
   hn = 4;
   let plain: int = n;
   let sum = n + m + plain + v + k + hn;
-  let r = n.compareExchange(9, 1) && st.served.compareExchange(2, 0);
+  e1 = 9;
+  e2 = 2;
+  let r = n.compareExchange(e1, 1) && st.served.compareExchange(e2, 0);
   return sum + ids + (if was || old == 'a' || swapped || r then 1 else 0);
 })");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -623,7 +626,7 @@ fn main() -> int {
   n += 1;
   n -= 1;
   let was = n.exchange(3);
-  let ok = n.compareExchange(3, 4);
+  e = 3; let ok = n.compareExchange(e, 4);
   let st = Stats(0);
   st.served += 1;
   let old = st.served.exchange(5);
@@ -651,7 +654,7 @@ fn fresh(v: int) -> atomic int { return v; })");
           (":6:3" + reassigned).c_str(),
           ":7:13: error: 'n' is declared with 'let' and cannot be changed by "
           "'exchange'",
-          ":8:12: error: 'n' is declared with 'let' and cannot be changed by "
+          ":8:19: error: 'n' is declared with 'let' and cannot be changed by "
           "'compareExchange'"});
   expectCleanLines(r, {":9:", ":10:", ":11:", ":12:", ":13:", ":14:", ":16:"});
 }
@@ -707,7 +710,8 @@ fn main() -> int {
                 (":6:3" + hitsReads).c_str(),
                 (":7:3: error: 'hits" + separately).c_str(),
                 (":8:3: error: 'hits" + separately).c_str(),
-                ":9:3: error: 'atomic' holds a number, a 'bool' or a 'char', "
+                ":9:3: error: 'atomic' holds a number, a 'bool', a 'char' or a "
+                "fixed array of them, "
                 "not 'Str': an object crosses threads as 'atomic shared "
                 "Str' (frozen) or 'locked mut Str'",
                 (":11:3" + bnReads).c_str(), (":12:3" + bnReads).c_str(),
@@ -730,32 +734,36 @@ TEST(Concurrency, ExchangeAndCompareExchange) {
 fn main() -> int {
   hits: atomic int = 0;
   let b = Box(0);
+  ei = 1; ef = 1.0;
   let x = hits.load();
   b.n.compareExchange(1);
   b.n.exchange(1, 2);
-  let r: int = hits.compareExchange(1, 2);
+  let r: int = hits.compareExchange(ei, 2);
   let e: bool = hits.exchange(5);
   let t = hits.exchange("s");
-  let u = hits.compareExchange(1, True);
+  let u = hits.compareExchange(ei, True);
   f: atomic float = 1.0;
-  let w: bool = f.compareExchange(1.0, 2.0);
+  let w: bool = f.compareExchange(ef, 2.0);
+  let lit = hits.compareExchange(1, 2);
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   expectErrors(
-      r, {":5:11: error: 'atomic int' has no method 'load': an atomic place "
+      r, {":6:11: error: 'atomic int' has no method 'load': an atomic place "
           "has 'exchange(v)' and 'compareExchange(expected, desired)'",
-          ":6:3: error: method 'compareExchange' expects 2 argument(s), got 1",
-          ":7:3: error: method 'exchange' expects 1 argument(s), got 2",
-          ":8:3: error: initializer of type 'bool' does not match declared "
+          ":7:3: error: method 'compareExchange' expects 2 argument(s), got 1",
+          ":8:3: error: method 'exchange' expects 1 argument(s), got 2",
+          ":9:3: error: initializer of type 'bool' does not match declared "
           "type 'int' for variable 'r'",
-          ":9:3: error: initializer of type 'int' does not match declared "
+          ":10:3: error: initializer of type 'int' does not match declared "
           "type 'bool' for variable 'e'",
-          ":10:25: error: argument 1 of 'exchange' has type 'Str', expected "
+          ":11:25: error: argument 1 of 'exchange' has type 'Str', expected "
           "'int'",
-          ":11:35: error: argument 2 of 'compareExchange' has type 'bool', "
-          "expected 'int'"});
-  expectCleanLines(r, {":12:", ":13:"});
+          ":12:36: error: argument 2 of 'compareExchange' has type 'bool', "
+          "expected 'int'",
+          ":15:34: error: 'compareExchange' writes the value it found into "
+          "its first argument"});
+  expectCleanLines(r, {":13:", ":14:"});
 }
 
 // -- `locked`
@@ -1223,4 +1231,388 @@ fn main() -> int {
 }
 )");
   expectErrors(r, {":9:11: error: 'me' is a 'shared view fn'"});
+}
+
+// -- `atomic` arrays (#368)
+
+TEST(Concurrency, AnAtomicArrayIsUsedByElement) {
+  auto r = semaCheck(R"(class C { hits: atomic int[2]; }
+impl C { fn __init__() { self.hits = [0, 0]; } }
+fn total(a: atomic int[2]) -> int { return a[0] + a[1]; }
+fn main() -> int {
+  a: atomic int[2] = [1, 2];
+  a[0] = 5;
+  a[1] += 1;
+  a[1] -= 1;
+  let old = a[0].exchange(9);
+  e = 9;
+  let ok = a[0].compareExchange(e, 1);
+  x: int = a[1];
+  m = a;
+  m[0] += 1;
+  let c = C();
+  c.hits[1] += 1;
+  return old + x + total(a) + total(c.hits);
+})");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, AnAtomicArrayIsNotReadOrLentWhole) {
+  auto r = semaCheck(R"(fn bump(b: inout bool) { b = True; }
+fn cell(b: atomic bool) { }
+class C { a: atomic bool[4]; }
+fn main() -> int {
+  seen: atomic bool[4] = [False; 4];
+  let all: bool[4] = seen;
+  seen = [True; 4];
+  bump(seen[3]);
+  cell(seen[3]);
+  h = seen[3];
+  let n = seen.exchange(True);
+  return 0;
+}
+fn f(c: mut C) { c.a = [True; 4]; }
+)");
+  expectErrors(
+      r,
+      {":6:22: error: 'seen' is an 'atomic bool[4]': it is read by element",
+       ":7:3: error: 'seen' is an 'atomic bool[4]': it is written by element",
+       "'seen[3]' is an element of an 'atomic bool[4]': it has no handle "
+       "and cannot be",
+       ":9:8: error: 'seen[3]' is an element of an 'atomic bool[4]': it has "
+       "no handle to share",
+       ":10:7: error: 'seen[3]' is an element of an 'atomic bool[4]': it has "
+       "no handle to share",
+       ":11:11: error: 'atomic bool[4]' has no method 'exchange': an array "
+       "is used by element",
+       ":14:18: error: 'c.a' is an 'atomic bool[4]': it is written by "
+       "element"});
+}
+
+TEST(Concurrency, ALetAtomicArrayIsNotChangedThroughItsName) {
+  auto r = semaCheck(R"(fn main() -> int {
+  let a: atomic int[2] = [1, 2];
+  a[0] = 5;
+  let old = a[0].exchange(9);
+  return old;
+}
+)");
+  expectErrors(
+      r, {":3:3: error: 'a' is declared with 'let' and cannot be reassigned",
+          ":4:13: error: 'a' is declared with 'let' and cannot be changed by "
+          "'exchange'"});
+}
+
+TEST(Concurrency, CompareExchangeTakesAVariableOfTheCellsType) {
+  auto r = semaCheck(R"(class B { e: int; }
+fn main() -> int {
+  n: atomic int = 1;
+  let a = n.compareExchange(1, 2);
+  let b = n.compareExchange(1 + 1, 2);
+  let k = 1;
+  let c = n.compareExchange(k, 2);
+  m: mut B = B(1);
+  let d = n.compareExchange(m.e, 2);
+  e = 1;
+  let f = n.compareExchange(e, 2);
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectErrors(r, {":4:29: error: 'compareExchange' writes the value it found",
+                   ":5:29: error: 'compareExchange' writes the value it found",
+                   ":7:29: error:"});
+  expectCleanLines(r, {":9:", ":11:"});
+}
+
+// -- A cell's contents are reached in a `lock` block only (#368)
+
+TEST(Concurrency, ACellsContentsAreNotBorrowedOrReadPastIt) {
+  auto r = semaCheck(R"(class N { v: int; }
+class A { inner: locked mut N; }
+class W { c: locked mut N; }
+fn nested(a: locked mut A) -> int {
+  x = 0;
+  lock a.inner as v: view { x = v.v; }
+  return x;
+}
+fn viewOf(l: locked mut N) -> int { v: view N = l; return v.v; }
+fn inoutOf(l: locked mut N) -> int { v: inout N = l; v.v = 1; return 0; }
+fn result(w: view W) -> view N { return w.c; }
+fn eq(a: locked Str, b: locked Str) -> bool { return a == b; }
+fn add(a: locked Str) -> Str { return a + "x"; }
+fn text(a: locked Str) -> Str { return Str(a); }
+fn none() -> int {
+  o: locked mut N? = None;
+  x = 0;
+  lock o as v: view { x = 1; }
+  return x;
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(
+      r, {":6:8: error: 'a' is 'locked'", ":9:37: error: 'l' is 'locked'",
+          ":10:38: error: 'l' is 'locked'", ":11:34: error: 'w.c' is 'locked'",
+          ":12:54: error: 'a' is 'locked'", ":13:39: error: 'a' is 'locked'",
+          ":14:40: error: 'a' is 'locked'",
+          ":18:8: error: 'o' may be None: 'match' it"});
+}
+
+TEST(Concurrency, TwoHandlesOfCellsCompareByIdentity) {
+  auto r = semaCheck(R"(class N { v: int; }
+fn eq(a: locked mut N, b: locked mut N) -> bool { return a == b; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, ALockOperandIsItselfAndNothingElse) {
+  auto r = semaCheck(R"(class N { v: int; }
+fn pick(x: int, a: locked mut N) -> locked mut N { return a; }
+fn main() -> int {
+  c: locked mut N = N(1);
+  let n = N(2);
+  lock pick(c.v, c) as v: view { }
+  lock (if False then c else n) as w: view { }
+  return 0;
+}
+)");
+  expectErrors(r,
+               {":6:13: error: 'c' is 'locked'", "is not 'locked': a 'lock'"});
+}
+
+TEST(Concurrency, ACellKeepsTheClassItWasMadeWith) {
+  auto r = semaCheck(R"(class B { v: int; }
+class D : B { y: int; }
+fn main() -> int {
+  d: locked mut D = D(1, 2);
+  o: locked mut Obj = d;
+  b: locked mut B = d;
+  return 0;
+}
+)");
+  expectErrors(r, {":5:23: error: a 'locked' cell keeps the class it was made "
+                   "with: cannot store 'D' in 'Obj'",
+                   ":6:21: error: a 'locked' cell keeps the class"});
+}
+
+TEST(Concurrency, AnAtomicPlaceIsNoExpectedOfCompareExchange) {
+  auto r = semaCheck(R"(class C { m: atomic int; }
+fn f(c: C) {
+  n: atomic int = 5;
+  m: atomic int = 5;
+  a: atomic int[1] = [5];
+  n.compareExchange(m, 7);
+  n.compareExchange(c.m, 7);
+  n.compareExchange(a[0], 7);
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+}
+
+TEST(Concurrency, AnAtomicCellIsNotLentByAddress) {
+  auto r = semaCheck(R"(fn w(a: inout atomic int[2]) -> int { return a[0]; }
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {"parameter 'a' is 'inout': an 'atomic' cell is never lent"});
+}
+
+TEST(Concurrency, AwaitKeepsTheFormOfTheResult) {
+  auto r = semaCheck(R"(class R { v: int; }
+async fn cell(x: locked mut R) -> locked mut R { return x; }
+async fn frozen(x: atomic shared R) -> atomic shared R { return x; }
+fn main() -> int {
+  let c: locked mut R = R(1);
+  let t = cell(c);
+  let r = await t;
+  let bad = r.v;
+  let f: atomic shared R = R(2);
+  let u = frozen(f);
+  w: mut R = await u;
+  lock r as v: view { }
+  return 0;
+}
+)");
+  expectErrors(r, {":8:13: error: 'r' is 'locked'",
+                   "a 'shared' reference, a frozen object and a cell convert "
+                   "only as they are"});
+  expectCleanLines(r, {":12:"});
+}
+
+TEST(Concurrency, ADerivedClassThatCannotCrossKeepsItsBaseFromCrossing) {
+  auto r = semaCheck(R"(class K { v: int; }
+class Base { v: int; }
+class D : Base { w: weak K?; }
+fn f(b: Base) { let r: atomic shared Base = move b; }
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {"(of class 'D', derived from 'Base')"});
+}
+
+TEST(Concurrency, AnAtomicPlaceThroughSeveralFieldsIsItsHandle) {
+  auto r = semaCheck(R"(class P { a: atomic int[2]; n: atomic int; }
+class Q { p: P; }
+fn bump(c: atomic int) { c += 1; }
+fn f(q: Q) {
+  q.p.a[1] += 4;
+  bump(q.p.n);
+  h = q.p.a;
+  h[0] = 1;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, AnAtomicPlaceHasNoAddress) {
+  auto r = semaCheck(R"(class C { n: atomic int; }
+fn bump(x: inout int) { x += 1; }
+fn f(c: mut C) {
+  a: atomic int = 1;
+  bump(a);
+  bump(c.n);
+  x: inout = a;
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {"'a' is 'atomic': it has no address and cannot be passed",
+                   "'c.n' is 'atomic': it has no address and cannot be passed",
+                   "'a' is 'atomic': it has no address and cannot be named"});
+}
+
+TEST(Concurrency, AnAtomicVariableIsNotWrittenAfterAMoveOrInALambda) {
+  auto r = semaCheck(R"(fn i(x: atomic int) -> int { return x; }
+fn moved() -> int {
+  a: atomic int = 1;
+  b: atomic int = move a;
+  a = 3;
+  return b;
+}
+fn self() {
+  a: atomic int = 1;
+  a += i(move a);
+}
+fn captured() {
+  a: atomic int = 1;
+  f = fn() { a += 1; };
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {":5:3: error: 'a' was moved", ":10:3: error: 'a' was moved",
+                   ":14:14: error: cannot capture 'a'"});
+}
+
+TEST(Concurrency, ExpectedIsNotWrittenFromAParallelBody) {
+  auto r = semaCheck(R"(fn main() -> int {
+  n: atomic int = 5;
+  e = 0;
+  parallel for i in 0..100 { n.compareExchange(e, i); }
+  return e;
+}
+)");
+  expectErrors(r, {"'e' is written by 'compareExchange' in a 'parallel for'"});
+}
+
+TEST(Concurrency, AVariableAPlainBindingReadsIsNotMovedInTheArm) {
+  auto r = semaCheck(R"(class In { v: int; }
+class O { o: In?; }
+async fn run(i: O) -> int { return 1; }
+fn f(n: O) -> int {
+  match n.o {
+    x: In { let t = run(move n); return x.v + await t; }
+    None { return 0; }
+  }
+}
+fn g(e: In?) -> In? {
+  match move e {
+    x: In { return move x; }
+    None { return None; }
+  }
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {":6:25: error: 'n' is read by a 'match' binding"});
+  expectCleanLines(r, {":12:"});
+}
+
+TEST(Concurrency, AConditionalOfCellsKeepsEachBranchsClass) {
+  auto r = semaCheck(R"(class N { v: int; }
+class D : N { s: int; }
+fn f(p: bool, a: locked mut N, d: locked mut D) -> int {
+  let c: locked mut N = if p then a else d;
+  lock (if p then a else d) as y: inout { }
+  return 0;
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(
+      r, {":4:42: error: a 'locked' cell keeps the class", "is not 'locked'"});
+}
+
+TEST(Concurrency, ATaskHasNoFormUntilItIsAwaited) {
+  auto r = semaCheck(R"(class N { v: int; }
+async fn lk() -> locked mut N { return N(2); }
+fn main() -> int {
+  lock lk() as y: view { }
+  return 0;
+}
+)");
+  expectErrors(r, {":4:8: error: 'lk()' is not 'locked'"});
+}
+
+TEST(Concurrency, ADerivedClassThatCannotCrossIsFoundOnceAllInstancesExist) {
+  auto r = semaCheck(R"(class In { v: int; }
+class Base { n: int; }
+class D<T> : Base { c: T; }
+fn share(b: Base) -> atomic shared Base { return move b; }
+fn main() -> int {
+  s: shared In = In(1);
+  let f = share(D<shared In>(1, s));
+  return 0;
+}
+)");
+  expectErrors(r, {"extends 'Base', which is sent to another thread"});
+}
+
+TEST(Concurrency, ALoopOrALambdaInsideALockBlockIsTheBlocksOwn) {
+  auto r = semaCheck(R"(class N { v: int; }
+fn main() -> int {
+  let c: locked mut N = N(1);
+  lock c as v: inout {
+    for i in 0..3 { if i == 1 { break; } else { continue; } }
+    let f = fn() -> int { return 2; };
+    v.v = f();
+  }
+  parallel for i in 0..4 { let g = fn() -> int { return 1; }; }
+  return 0;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, ATaskIsHeldByAVariable) {
+  auto r = semaCheck(R"(async fn ping(n: int) -> int { return n; }
+fn pass<T>(t: T) -> T { return move t; }
+fn main() -> int {
+  let p = (ping(1), ping(2));
+  let q = pass(ping(1));
+  return 0;
+}
+)");
+  expectErrors(r, {"a tuple cannot hold a task yet",
+                   "cannot be a task yet: a task is held by a variable"});
+}
+
+TEST(Concurrency, AnOptionalHandleIsNotMatchedOrClonedYet) {
+  auto r = semaCheck(R"(fn none<T: Copyable>() -> T? { return None; }
+fn main() -> int {
+  v = none<atomic int>();
+  x = v.clone();
+  match none<atomic int>() { y: atomic int { } None { } }
+  return 0;
+}
+)");
+  expectErrors(r, {"'clone' of an optional 'atomic' handle",
+                   "a 'match' on an optional 'atomic' handle"});
 }

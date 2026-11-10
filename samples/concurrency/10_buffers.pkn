@@ -4,7 +4,6 @@
 // (`atomic shared mem::Box<mem::Buffer<T>>`), is read by every thread with
 // no reference counting.  Element reads are a bounds check and a load.
 // expect-stdout: sum 1.49998e+10 of 100000 elements
-// expect-leaks: the frozen box and its buffer are immortal in the prototype
 
 import ::io;
 import ::memory as mem;

@@ -909,6 +909,7 @@ private:
   Expr *Array;
   Expr *Index;
   Expr *Value;
+  AssignStmt::AtomicKind Atomic = AssignStmt::AtomicKind::None;
 
 public:
   SubscriptAssignStmt(SourceLocation loc, Expr *array, Expr *index, Expr *value)
@@ -918,6 +919,10 @@ public:
   Expr *getArray() const { return Array; }
   Expr *getIndex() const { return Index; }
   Expr *getValue() const { return Value; }
+
+  /// An element of an `atomic` array: the one atomic operation it is.
+  void setAtomicKind(AssignStmt::AtomicKind k) { Atomic = k; }
+  AssignStmt::AtomicKind getAtomicKind() const { return Atomic; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_SubscriptAssignStmt;
@@ -2411,6 +2416,7 @@ public:
 class SubscriptExpr : public Expr {
   Expr *Array;
   Expr *Index;
+  bool AtomicElement = false;
 
 public:
   SubscriptExpr(SourceLocation loc, Expr *array, Expr *index)
@@ -2418,6 +2424,10 @@ public:
 
   Expr *getArray() const { return Array; }
   Expr *getIndex() const { return Index; }
+
+  /// An element of an `atomic` array (Sema): read by one atomic operation.
+  void setAtomicElement(bool atomic) { AtomicElement = atomic; }
+  bool isAtomicElement() const { return AtomicElement; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_SubscriptExpr;
@@ -2821,6 +2831,12 @@ inline bool isRefType(const Type *ty) {
   return ty && !isFunctionValue(ty) && !isMemOptional(ty) &&
          (isa<ClassType>(ty) ||
           (isa<OptionalType>(ty) && !isValueOptional(ty)));
+}
+
+/// Whether a slot of type @p ty holds a counted reference: a reference, or
+/// the handle to an `atomic` cell.
+inline bool isCountedRef(const Type *ty) {
+  return isRefType(ty) || (ty && isa<AtomicType>(ty));
 }
 
 /// Returns true for a type whose values are held in memory, in place: a

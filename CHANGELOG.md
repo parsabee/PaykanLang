@@ -13,6 +13,15 @@ samples/concurrency/README.md.
 
 ### Added
 
+- Cells and frozen objects are freed (#368). An `atomic` or `locked` cell and every object of an
+  `atomic shared` value are counted atomically, and the last reference to one, on any thread, frees
+  it. A value made `atomic shared` while something else holds it stops the
+  program: `a value made 'atomic shared' is still borrowed`.
+- `atomic T[n]`, a fixed array of atomic elements, used by element: `a[i]`, `a[i] = v`, `a[i] += v`,
+  `a[i].exchange(v)`, `a[i].compareExchange(e, d)` and `a.len()` (docs/language/19-concurrency.md,
+  "Atomic arrays").
+- `x.compareExchange(expected, desired)` writes the value it found into `expected` when it does not
+  store, so `expected` is now a variable of the cell's type.
 - A move out of borrowed storage is checked as the program runs (#368; docs/language/19-concurrency.md,
   "A move out of borrowed storage"). `mem::replace`, `mem::take`, `pop`, `removeAt`, `mem::swap` of a
   borrowed place with an owned one, and any other function that moves a value out of what its caller
@@ -345,6 +354,23 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A cell's contents are reached only in a `lock` block: `lock a.inner` with `a` itself `locked`, a `view`
+  or `inout` local or a `view` result of a cell, and `==`, `+` or `Str(s)` of a `locked Str` read them
+  with no lock (the last three corrupted memory). `lock` of an optional cell is an error: it segfaulted
+  on None (`'o' may be None: 'match' it, and lock the cell its arm binds`). A conditional is a cell
+  only if each branch is, and a `locked` cell keeps the class it was made with.
+- `await` of an `async fn` keeps the result's form: a `locked mut R` or an `atomic shared R` result was
+  typed as a plain unique `R` (src/Sema/SemaConcurrency.cpp, `qualifierOf`).
+- A class that holds `weak` or `shared` links in a derived class no longer crosses threads as its base
+  class (`of class 'D', derived from 'Base'`).
+- `None` is immortal: its count was written from every thread that read end of file.
+- A variable a plain `match` binding reads cannot be moved in that arm (it could cross to a task with
+  the binding's reference on it), an `atomic` place has no address to pass `inout`, and a `lock` block's
+  own loop may `break` and a lambda inside it `return`.
+- A narrow integer in an `atomic` cell wraps at each add, so `compareExchange`, which compares bits,
+  finds the value its type holds.
+- An argument or a first assignment naming an `atomic` place through more than one field is another
+  handle to the cell; it was a copy in a new cell.
 - A part of an `-> inout` result, of a conditional of places or past a temporary handle (`id(h).n`)
   is a place for the copy rule (`let x = f(w).n` copied a unique field and left two owners), and a `shared fn` or `shared view fn` on a conditional of places or on a borrowed
   result takes its receiver's form (`(if p then a else b).share()` and `l.at(0).share()` treated the

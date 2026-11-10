@@ -24,7 +24,8 @@ inline int64_t paykanTestEquals(int64_t (*fn)(PaykanObject *, PaykanShared *,
   PaykanShared *box = PaykanShared_new(other);
   int64_t result = fn(self, box, 0); // lent: equals releases nothing
   if (other)
-    --other->strong;
+    if (other->strong != PAYKAN_REF_MAX)
+      --other->strong;
   return result;
 }
 

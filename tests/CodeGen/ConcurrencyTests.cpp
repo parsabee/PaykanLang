@@ -255,19 +255,22 @@ TEST(Concurrency, AtomicExchangeAndCompareExchange) {
     fn main() -> int {
       n: atomic int = 5;
       let old = n.exchange(100);
-      let ok = n.compareExchange(100, 7);
-      let no = n.compareExchange(100, 8);
+      e = 100;
+      let ok = n.compareExchange(e, 7);
+      let no = n.compareExchange(e, 8);
       io::println(Str(old) + " " + Str(ok) + " " + Str(no) + " " + Str(n));
       f: atomic float = 2.0;
       let fo = f.exchange(0.5);
-      let fok = f.compareExchange(0.5, 4.0);
+      fe = 0.5;
+      let fok = f.compareExchange(fe, 4.0);
       io::println(Str(fo) + " " + Str(f) + " " + Str(fok));
       b: atomic bool = False;
       let was = b.exchange(True);
       io::println(Str(was) + " " + Str(b));
       c: atomic char = 'a';
-      let cok = c.compareExchange('a', 'b');
-      let cno = c.compareExchange('a', 'c');
+      ce = 'a';
+      let cok = c.compareExchange(ce, 'b');
+      let cno = c.compareExchange(ce, 'c');
       let wc = c.exchange('q');
       io::println(Str(c) + " " + Str(cok) + " " + Str(cno) + " " + Str(wc));
       return 0;
@@ -482,7 +485,7 @@ TEST(Concurrency, AFieldStoreFreezesOrMakesACell) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1006 2030 4\n");
   EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(liveBlocksAfterRun(), 5);
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
 }
 
 // A buffer is a struct, a value, and takes no qualifier; boxed, the box is
@@ -624,4 +627,368 @@ TEST(Concurrency, ParallelForWritesABufferOfTheEnclosingFunction) {
   EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
   // Each pass adds 2 * xs[i]: 8 * sum(i % 10) = 8 * 4.5 * n.
   EXPECT_EQ(r.StdOut, "7200000 72\n");
+}
+
+// -- Counted cells, atomic arrays and compareExchange's write-back (#368)
+
+TEST(Concurrency, CellsAndFrozenValuesAreFreedByTheirLastHandle) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Item { v: int; child: Item?; name: Str; }
+    class Count { n: atomic int; }
+    fn bump(c: atomic int) { c += 1; }
+    fn same(c: atomic int) -> atomic int { return c; }
+    async fn read(c: atomic shared Item) -> int { return c.v; }
+    async fn add(l: locked mut Item, n: int) -> int {
+      for i in 0..n { lock l as a: inout { a.v += 1; } }
+      return n;
+    }
+    fn main() -> int {
+      a: atomic int = 1;
+      bump(a);
+      h = same(a);
+      h += 1;
+      let c = Count(a);
+      c.n += 1;
+      let f: atomic shared Item = Item(1, Item(2, None, "in"), "out");
+      let t = read(f);
+      let u = read(f);
+      l: locked mut Item = Item(10, None, "cell");
+      let w = add(l, 100);
+      n = await t + await u + await w;
+      lock l as v: view { n += v.v; }
+      io::println(Str(a) + " " + Str(n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "4 212\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, ACellHeldByManyTasksIsCountedExactly) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    async fn work(c: atomic int, n: int) -> int {
+      for i in 0..n {
+        h: atomic int = c;
+        h += 1;
+      }
+      return n;
+    }
+    fn main() -> int {
+      c: atomic int = 0;
+      let a = work(c, 2000);
+      let b = work(c, 2000);
+      let d = work(c, 2000);
+      let t = await a + await b + await d;
+      io::println(Str(c) + " " + Str(t));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "6000 6000\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, CompareExchangeWritesTheValueFound) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class B { e: int; }
+    fn main() -> int {
+      n: atomic int = 5;
+      e = 4;
+      let no = n.compareExchange(e, 9);
+      let ok = n.compareExchange(e, 9);
+      f: atomic f32 = 1.5;
+      fe: f32 = 2.5;
+      let fno = f.compareExchange(fe, 0.5);
+      c: atomic char = 'x';
+      ce = 'y';
+      let cno = c.compareExchange(ce, 'z');
+      t: atomic bool = True;
+      be = False;
+      let bno = t.compareExchange(be, False);
+      m: mut B = B(0);
+      let fieldNo = n.compareExchange(m.e, 1);
+      io::println(Str(no) + " " + Str(e) + " " + Str(ok) + " " + Str(n) + " "
+          + Str(fno) + " " + Str(fe) + " " + Str(cno) + " " + Str(ce) + " "
+          + Str(bno) + " " + Str(be) + " " + Str(fieldNo) + " " + Str(m.e));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "False 5 True 9 False 1.5 False x False True False 9\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, AnAtomicArrayWorksFromEveryThread) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Hits { a: atomic int[3]; }
+    impl Hits { fn __init__() { self.a = [0; 3]; } }
+    fn total(a: atomic int[3]) -> int { return a[0] + a[1] + a[2]; }
+    fn main() -> int {
+      a: atomic int[3] = [1, 2, 3];
+      parallel for i in 0..3000 { a[i % 3] += 1; }
+      a[0] -= 1;
+      let was = a[1].exchange(7);
+      e = 7;
+      let ok = a[1].compareExchange(e, 8);
+      let h = Hits();
+      h.a[2] += 5;
+      f: atomic float[2] = [0.5; 2];
+      f[1] += 1.0;
+      b: atomic bool[2] = [False; 2];
+      b[1] = True;
+      x: float = f[1];
+      y: bool = b[1];
+      io::println(Str(was) + " " + Str(ok) + " " + Str(total(a)) + " "
+          + Str(total(h.a)) + " " + Str(x) + " " + Str(y) + " " + Str(a.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1002 True 2011 5 1.5 True 3\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, AHoldOfAPartOfAFrozenValueKeepsItAlive) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class K { v: int; }
+    class C { name: Str; opt: K?; }
+    class H { cfg: atomic shared C; }
+    fn mk() -> atomic shared C { return C("a" + Str(1), K(4)); }
+    fn look(n: view Str, h: shared mut H) -> int {
+      h.cfg = C("r", None);
+      return n.len();
+    }
+    fn main() -> int {
+      io::println(mk().name);
+      let h: shared mut H = H(C("o" + Str(2), None));
+      io::println(Str(look(h.cfg.name, h)));
+      r: atomic shared C = C("s", K(1));
+      match r.opt {
+        k: K { r = C("t", None); io::println(Str(k.v)); }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "a1\n2\n1\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, ALockBlockHoldsItsCell) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class K { v: int; }
+    class C { l: locked mut K; }
+    fn mk() -> locked mut K { return K(7); }
+    fn main() -> int {
+      c: locked mut K = K(1);
+      lock c as v: inout {
+        c = K(2);
+        v.v = 5;
+        io::println(Str(v.v));
+      }
+      lock mk() as v: view { io::println(Str(v.v)); }
+      lock C(K(1)).l as v: view { io::println(Str(v.v)); }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "5\n7\n1\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, AnOperationHoldsItsCellWhileLaterOperandsRun) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class C { n: atomic int; a: atomic int[2]; }
+    impl C { fn __init__(v: int) { self.n = v; self.a = [v, v]; } }
+    fn rep(o: inout C) -> int { o = C(2); return 0; }
+    fn mk() -> atomic int[3] { return [7, 8, 9]; }
+    fn main() -> int {
+      o: mut C = C(1);
+      let x = o.n.exchange(rep(o));
+      p: mut C = C(3);
+      let y = p.a[rep(p)];
+      q: mut C = C(5);
+      q.a[0] = rep(q);
+      io::println(Str(x) + " " + Str(y) + " " + Str(mk()[1]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1 3 8\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, AHandleIsCopyableAndMoves) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn fresh(v: int) -> atomic int { return v; }
+    fn take(t: (atomic int, int)) -> int { return t.1; }
+    fn main() -> int {
+      t = (fresh(1), 2);
+      let k = take(t);
+      h = t.0;
+      h += 1;
+      c = t.clone();
+      a: atomic int = 1;
+      b: atomic int = move a;
+      b += 1;
+      f = fn(x: atomic int) { x += 1; };
+      n: atomic int = 1;
+      f(n);
+      io::println(Str(k) + " " + Str(h) + " " + Str(b) + " " + Str(n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "2 2 2 2\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, APlainArrayFlowsIntoAnAtomicSlotAsANewCell) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class C { a: atomic int[2]; }
+    class P { a: atomic int[2]; }
+    impl P { fn __init__(x: int[2]) { self.a = x; } }
+    fn take(a: atomic int[3]) -> int { return a[0]; }
+    fn mk() -> atomic int[3] { io::println("made"); return [7, 8, 9]; }
+    fn main() -> int {
+      c = C([1, 2]);
+      o = P([3, 4]);
+      io::println(Str(c.a[0] + take([5, 6, 7]) + o.a[1]));
+      io::println(Str(o.a.len()) + " " + Str(mk().len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "10\nmade\n2 3\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, ACompoundAssignmentOfAnElementIsOneOperation) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn f() -> int { io::println("f"); return 1; }
+    fn main() -> int {
+      hits: atomic int[3] = [0; 3];
+      parallel for i in 0..300000 { hits[i % 3] += 1; }
+      a: atomic int[2] = [1, 2];
+      a[f()] += 10;
+      u: atomic u8 = 255;
+      u += 1;
+      e: u8 = u;
+      let ok = u.compareExchange(e, 7);
+      s: atomic i8[1] = [127];
+      s[0] += 1;
+      x: i8 = s[0];
+      io::println(Str(hits[0] + hits[1] + hits[2]) + " " + Str(a[1]) + " "
+          + Str(ok) + " " + Str(x));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "f\n300000 12 True -128\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, AVariableReturnedIntoAFrozenResultMoves) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class C { id: int; }
+    fn f() -> atomic shared C { let c = C(1); return c; }
+    fn g(c: C) -> atomic shared C { return c; }
+    fn main() -> int {
+      io::println(Str(f().id + g(C(2)).id));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, CompareExchangeHoldsWhatExpectedIsIn) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class B { e: int; }
+    class W { b: B; c: B?; }
+    fn rep(w: shared mut W) -> int {
+      w.b = B(7);
+      w.c = B(9);
+      return 1;
+    }
+    fn main() -> int {
+      n: atomic int = 5;
+      w: shared mut W = W(B(0), None);
+      n.compareExchange(w.b.e, rep(w));
+      match w.c {
+        c: B { io::println(Str(c.e)); }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "9\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, AHandleInAHeldReadIsRetainedOnce) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(class C { n: atomic int; }
+    fn f(c: atomic int, o: inout C) -> int { return 1; }
+    fn main() -> int {
+      o: mut C = C(1);
+      f(o.n, o);
+      p = C(1);
+      h: atomic int = (move p).n;
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, ACompoundAssignmentWhoseIndexTakesAnArgumentCompiles) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn f(n: int) -> int { io::println("f"); return n; }
+    fn main() -> int {
+      a: atomic int[2] = [1, 2];
+      a[f(1)] += 1;
+      io::println(Str(a[1]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "f\n3\n");
+  EXPECT_EQ(liveBlocksAfterRun(), 0);
+}
+
+TEST(Concurrency, NoneIsNotCountedAcrossThreads) {
+  auto r = compileAndRun(R"(import ::io;
+    fn main() -> int {
+      parallel for i in 0..4 {
+        match io::open("/dev/null", "r") {
+          o: Ok { for j in 0..200000 { let r = o.value.readln(); } }
+          e: Err { }
+        }
+      }
+      io::println("done");
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "done\n");
+  EXPECT_EQ(r.ExitCode, 0);
 }

@@ -4,10 +4,7 @@
 // Unit tests for the concurrency prototype's `atomic T` cell (PaykanAtomic_*,
 // src/Runtime/Atomic.c): one heap object holding 64 bits, an integer or a
 // double's bits, that any thread reads and changes by atomic operations.
-// The prototype never counts a cell: it is immortal, its strong count
-// PAYKAN_REF_MAX, which retains and releases leave alone, and its destroy
-// is a no-op.  So the runtime never frees one, and a test that runs on the
-// tracking allocator frees the cell itself at its end (discard, below).
+// Its count is atomic (PAYKAN_REF_ATOMIC + n), so the last handle frees it.
 
 #include <gtest/gtest.h>
 
@@ -50,10 +47,14 @@ PaykanObject *cell(PaykanShared *handle) { return PaykanShared_get(handle); }
 /// prototype leaks every cell, samples/concurrency/README.md "What is
 /// not"): the count put at 1 is the thaw the design describes, and the
 /// release then frees the block as it frees any object's.
-void discard(PaykanShared *handle) {
-  ASSERT_EQ(handle->strong, PAYKAN_REF_MAX);
-  handle->strong = 1;
-  Paykan_release(handle);
+void discard(PaykanShared *handle) { Paykan_release(handle); }
+
+/// compareExchange, its `expected` by value.
+int64_t cas(PaykanObject *c, int64_t expected, int64_t desired) {
+  return PaykanAtomic_compare_exchange(c, &expected, desired);
+}
+int64_t fcas(PaykanObject *c, double expected, double desired) {
+  return PaykanAtomic_fcompare_exchange(c, &expected, desired);
 }
 
 std::string text(PaykanShared *s) {
@@ -71,7 +72,7 @@ std::string toString(PaykanShared *handle) {
 
 /// The equals slot with `other` lent (bit 0 of the mask clear).  Not
 /// RuntimeEqualsHelper.h's paykanTestEquals: that undoes by hand the retain
-/// boxing takes, which an immortal cell's count never took.
+/// boxing takes, by writing a plain count.
 int64_t equalsLent(PaykanShared *self, PaykanShared *other) {
   return vtEquals(self)(cell(self), other, 0);
 }
@@ -91,41 +92,56 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
 
 } // namespace
 
-// -- The cell is immortal
+// -- The cell is counted atomically
 
-TEST(AtomicCell, IsImmortal) {
+TEST(AtomicCell, IsCountedAtomicallyAndFreedByItsLastHandle) {
   TrackingHeap heap;
   PaykanShared *c = PaykanAtomic_new(1, PAYKAN_ATOMIC_INT);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(c->weak, 0);
   EXPECT_EQ(Paykan_heap_live_blocks(), 1);
-  // Boxing counts nothing, and the box is the cell: a handle.
+  // A box is another handle to the cell.
   EXPECT_EQ(PaykanShared_new(c), c);
   EXPECT_EQ(PaykanShared_get(c), c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
-  // A retain, by the function or inline, leaves the count alone.
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 2);
+  // A retain, by the function or inline, counts one more.
   Paykan_retain(c);
   Paykan_retain_inline(c);
   Paykan_retain_nonnull_inline(c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
-  // So does a release, and it never frees the cell.
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 5);
+  // A release counts one less and only the last frees it.
   Paykan_release(c);
   Paykan_release_inline(c);
   Paykan_release_nonnull_inline(c);
-  Paykan_dispose(c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
+  Paykan_release(c);
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 1);
   EXPECT_EQ(Paykan_heap_live_blocks(), 1);
   EXPECT_EQ(PaykanAtomic_load(cell(c)), 1);
-  // A weak reference loads the cell without a count, and its release
-  // leaves the block: the cell is never destroyed.
-  PaykanWeak *w = Paykan_weak_new(c);
-  EXPECT_EQ(c->weak, 1);
-  EXPECT_EQ(Paykan_weak_load(w), c);
-  EXPECT_EQ(c->strong, PAYKAN_REF_MAX);
-  Paykan_weak_release(w);
-  EXPECT_EQ(c->weak, 0);
-  EXPECT_EQ(Paykan_heap_live_blocks(), 1);
-  discard(c);
+  Paykan_release(c);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+}
+
+// Handles retained and released on many threads lose no count: the last
+// release frees the cell once.
+TEST(AtomicCell, ACountChangedFromManyThreadsIsExact) {
+  TrackingHeap heap;
+  PaykanShared *c = PaykanAtomic_new(0, PAYKAN_ATOMIC_INT);
+  std::vector<std::thread> threads;
+  threads.reserve(8);
+  for (int t = 0; t < 8; ++t)
+    threads.emplace_back([c] {
+      for (int i = 0; i < 20000; ++i) {
+        Paykan_retain_inline(c);
+        Paykan_retain(c);
+        Paykan_release_inline(c);
+        Paykan_release(c);
+      }
+    });
+  for (std::thread &t : threads)
+    t.join();
+  EXPECT_EQ(c->strong, PAYKAN_REF_ATOMIC + 1);
+  Paykan_release(c);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
 TEST(AtomicCell, HasOneVTableWhoseWalkIsNothing) {
@@ -164,13 +180,13 @@ TEST(AtomicInt, LoadStoreAddAndExchange) {
 TEST(AtomicInt, CompareExchange) {
   PaykanShared *c = PaykanAtomic_new(42, PAYKAN_ATOMIC_INT);
   // The cell holds another value than expected: nothing is stored, 0.
-  EXPECT_EQ(PaykanAtomic_compare_exchange(cell(c), 1, 9), 0);
+  EXPECT_EQ(cas(cell(c), 1, 9), 0);
   EXPECT_EQ(PaykanAtomic_load(cell(c)), 42);
   // It holds the expected value: desired is stored, 1.
-  EXPECT_EQ(PaykanAtomic_compare_exchange(cell(c), 42, 9), 1);
+  EXPECT_EQ(cas(cell(c), 42, 9), 1);
   EXPECT_EQ(PaykanAtomic_load(cell(c)), 9);
   // Expected and desired the same: a store that changes nothing, 1.
-  EXPECT_EQ(PaykanAtomic_compare_exchange(cell(c), 9, 9), 1);
+  EXPECT_EQ(cas(cell(c), 9, 9), 1);
   EXPECT_EQ(PaykanAtomic_load(cell(c)), 9);
   discard(c);
 }
@@ -219,7 +235,7 @@ TEST(AtomicInt, OneCompareExchangeOfManyWins) {
   std::vector<std::thread> threads;
   for (int t = 1; t <= kThreads; ++t)
     threads.emplace_back([c, t, &won] {
-      if (PaykanAtomic_compare_exchange(cell(c), 0, t))
+      if (cas(cell(c), 0, t))
         ++won;
     });
   for (std::thread &t : threads)
@@ -260,18 +276,18 @@ TEST(AtomicFloat, LoadStoreAddAndExchange) {
 TEST(AtomicFloat, CompareExchangeComparesTheBits) {
   PaykanShared *c = PaykanAtomic_fnew(0.0, PAYKAN_ATOMIC_F64);
   // -0.0 == 0.0, but their bits differ: not the value expected.
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), -0.0, 1.0), 0);
+  EXPECT_EQ(fcas(cell(c), -0.0, 1.0), 0);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), 0.0);
   EXPECT_FALSE(std::signbit(PaykanAtomic_fload(cell(c))));
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), 0.0, -0.0), 1);
+  EXPECT_EQ(fcas(cell(c), 0.0, -0.0), 1);
   EXPECT_TRUE(std::signbit(PaykanAtomic_fload(cell(c))));
   // A NaN is never == itself, but its bits are: the compare finds it.
   const double nan = std::numeric_limits<double>::quiet_NaN();
   PaykanAtomic_fstore(cell(c), nan);
   EXPECT_TRUE(std::isnan(PaykanAtomic_fload(cell(c))));
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), nan, 2.0), 1);
+  EXPECT_EQ(fcas(cell(c), nan, 2.0), 1);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), 2.0);
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), 2.5, 3.0), 0);
+  EXPECT_EQ(fcas(cell(c), 2.5, 3.0), 0);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), 2.0);
   discard(c);
 }
@@ -319,10 +335,9 @@ TEST(AtomicFloat, AnF32CellRoundsEveryStore) {
   // The expected value is compared as given, against the rounded value the
   // cell holds: 0.2 as a double is not in the cell, its f32 rounding is.
   // The desired value is rounded like any store.
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), 0.2, 0.3), 0);
+  EXPECT_EQ(fcas(cell(c), 0.2, 0.3), 0);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), double(float(0.2)));
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), double(float(0.2)), 0.3),
-            1);
+  EXPECT_EQ(fcas(cell(c), double(float(0.2)), 0.3), 1);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), double(float(0.3)));
   discard(c);
 }
@@ -368,7 +383,7 @@ TEST(AtomicFloat, AnF16CellRoundsEveryStore) {
   PaykanAtomic_fstore(cell(c), 65520.0);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), kInf);
   // A compare-exchange's desired value is rounded like any store.
-  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), kInf, -0.1), 1);
+  EXPECT_EQ(fcas(cell(c), kInf, -0.1), 1);
   EXPECT_EQ(PaykanAtomic_fload(cell(c)), -0.0999755859375);
   discard(c);
 }
@@ -441,11 +456,79 @@ TEST(AtomicEquals, IsIdentity) {
   PaykanShared *s = PaykanShared_new((PaykanObject *)PaykanString_new("1", 1));
   EXPECT_EQ(vtEquals(a)(cell(a), s, 1), 0);
   EXPECT_EQ(Paykan_heap_live_blocks(), blocks);
-  // A handle handed over is left alone, as every release of a cell is.
+  // A handle handed over is released.
+  Paykan_retain(b);
   EXPECT_EQ(vtEquals(a)(cell(a), b, 1), 0);
-  EXPECT_EQ(b->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(b->strong, PAYKAN_REF_ATOMIC + 1);
+  Paykan_retain(a);
   EXPECT_EQ(vtEquals(a)(cell(a), a, 1), 1);
-  EXPECT_EQ(a->strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
   discard(a);
   discard(b);
+}
+
+// -- compareExchange writes the value it found into `expected`
+
+TEST(AtomicInt, ACompareExchangeThatFailsWritesTheValueFound) {
+  PaykanShared *c = PaykanAtomic_new(5, PAYKAN_ATOMIC_INT);
+  int64_t e = 4;
+  EXPECT_EQ(PaykanAtomic_compare_exchange(cell(c), &e, 9), 0);
+  EXPECT_EQ(e, 5);
+  EXPECT_EQ(PaykanAtomic_compare_exchange(cell(c), &e, 9), 1);
+  EXPECT_EQ(e, 5); // left alone
+  EXPECT_EQ(PaykanAtomic_load(cell(c)), 9);
+  discard(c);
+}
+
+TEST(AtomicFloat, ACompareExchangeThatFailsWritesTheValueFound) {
+  PaykanShared *c = PaykanAtomic_fnew(1.5, PAYKAN_ATOMIC_F64);
+  double e = 2.5;
+  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), &e, 9.0), 0);
+  EXPECT_EQ(e, 1.5);
+  EXPECT_EQ(PaykanAtomic_fcompare_exchange(cell(c), &e, 9.0), 1);
+  EXPECT_EQ(PaykanAtomic_fload(cell(c)), 9.0);
+  discard(c);
+}
+
+// -- `atomic T[n]`
+
+TEST(AtomicArray, IsUsedByElementAndFreedByItsLastHandle) {
+  TrackingHeap heap;
+  PaykanShared *a = PaykanAtomicArray_new(4, PAYKAN_ATOMIC_INT);
+  EXPECT_EQ(a->strong, PAYKAN_REF_ATOMIC + 1);
+  EXPECT_EQ(PaykanAtomicArray_load(cell(a), 2), 0);
+  PaykanAtomicArray_store(cell(a), 2, 7);
+  EXPECT_EQ(PaykanAtomicArray_add(cell(a), 2, 3), 7);
+  EXPECT_EQ(PaykanAtomicArray_exchange(cell(a), 2, 20), 10);
+  int64_t e = 1;
+  EXPECT_EQ(PaykanAtomicArray_compare_exchange(cell(a), 2, &e, 21), 0);
+  EXPECT_EQ(e, 20);
+  EXPECT_EQ(PaykanAtomicArray_compare_exchange(cell(a), 2, &e, 21), 1);
+  EXPECT_EQ(PaykanAtomicArray_load(cell(a), 2), 21);
+  EXPECT_EQ(PaykanAtomicArray_load(cell(a), 3), 0);
+  PaykanShared *copy = PaykanAtomicArray_clone(cell(a));
+  PaykanAtomicArray_store(cell(a), 2, 1);
+  EXPECT_EQ(PaykanAtomicArray_load(cell(copy), 2), 21);
+  discard(copy);
+  discard(a);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+}
+
+TEST(AtomicArray, FloatsRoundToTheirKind) {
+  PaykanShared *a = PaykanAtomicArray_new(2, PAYKAN_ATOMIC_F32);
+  PaykanAtomicArray_fstore(cell(a), 1, 0.1);
+  EXPECT_EQ(PaykanAtomicArray_fload(cell(a), 1), (double)0.1f);
+  EXPECT_EQ(PaykanAtomicArray_fadd(cell(a), 1, 1.0), (double)0.1f);
+  EXPECT_EQ(PaykanAtomicArray_fexchange(cell(a), 1, 2.0), (double)1.1f);
+  double e = 3.0;
+  EXPECT_EQ(PaykanAtomicArray_fcompare_exchange(cell(a), 1, &e, 4.0), 0);
+  EXPECT_EQ(e, 2.0);
+  discard(a);
+}
+
+TEST(AtomicArrayDeathTest, AnIndexOutOfRangeStopsTheProgram) {
+  PaykanShared *a = PaykanAtomicArray_new(2, PAYKAN_ATOMIC_INT);
+  EXPECT_DEATH(PaykanAtomicArray_load(cell(a), 2), "out of range");
+  EXPECT_DEATH(PaykanAtomicArray_store(cell(a), -1, 0), "out of range");
+  discard(a);
 }

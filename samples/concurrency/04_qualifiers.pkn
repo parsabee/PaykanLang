@@ -13,7 +13,6 @@
 // expect-stdout: 44
 // expect-stdout: f #5
 // expect-stdout: l #66
-// expect-leaks: the frozen object and the locked cell are immortal in the prototype
 
 import ::io;
 

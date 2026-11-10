@@ -8,6 +8,7 @@
 
 #include "RuntimeInternal.h"
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +29,8 @@
 // never one that is dying, pending or destroyed.  Both counts are 32 bits
 // (Runtime.h, PaykanObject); one more reference than the limit panics
 // instead of wrapping to a count that would free a live object.  The limit
-// is PAYKAN_REF_MAX - 1 for a strong count: PAYKAN_REF_MAX itself marks an
-// immortal object (below), and PAYKAN_REF_MAX for a weak count.
+// is PAYKAN_REF_ATOMIC - 1 for a plain strong count (below), and
+// PAYKAN_REF_MAX for a weak count.
 
 enum { kDying = -1, kPending = -2 };
 
@@ -41,18 +42,27 @@ PAYKAN_NORETURN static void count_overflow(const char *kind, int limit) {
 
 // -- Strong references
 
-// An object whose strong count is PAYKAN_REF_MAX is immortal (the
-// concurrency prototype's cells and frozen objects, Atomic.c, Locked.c,
-// Object.c): nothing counts it, so a handle to it crosses threads with no
-// atomic count.  A counted object's limit is one below: the reference that
-// would reach the sentinel is the overflow.
+// A count below PAYKAN_REF_ATOMIC is one thread's, plain.  A cell's, or that
+// of an object in an `atomic shared` value, is PAYKAN_REF_ATOMIC + n, on any
+// thread (docs/design/concurrency.md, "Atomic counts"); an immortal object's
+// is never written.
+
+#define ATOMIC_COUNT(obj) ((_Atomic int32_t *)&(obj)->strong)
 
 static inline void strong_retain(PaykanObject *obj) {
-  if (obj->strong != PAYKAN_REF_MAX) {
-    if (PAYKAN_UNLIKELY(obj->strong == PAYKAN_REF_MAX - 1))
-      count_overflow("strong", PAYKAN_REF_MAX - 1);
+  const int32_t s = obj->strong;
+  if (s < PAYKAN_REF_ATOMIC - 1) {
     ++obj->strong;
+    return;
   }
+  if (PAYKAN_UNLIKELY(s == PAYKAN_REF_ATOMIC - 1))
+    count_overflow("strong", PAYKAN_REF_ATOMIC - 1);
+  if (s == PAYKAN_REF_MAX)
+    return;
+  if (PAYKAN_UNLIKELY(atomic_fetch_add_explicit(ATOMIC_COUNT(obj), 1,
+                                                memory_order_relaxed) >=
+                      PAYKAN_REF_MAX - 1))
+    count_overflow("strong", PAYKAN_REF_MAX - 1 - PAYKAN_REF_ATOMIC);
 }
 
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
@@ -160,7 +170,17 @@ void Paykan_release(PaykanShared *shared) {
   // taken jump to a distant `ret`, which measurably slowed retain/release-
   // heavy programs; the decrement and its test stand on their own lines for
   // clang-tidy (bugprone-inc-dec-in-conditions), the shape is the same.
-  if (shared && shared->strong != PAYKAN_REF_MAX) {
+  if (shared && shared->strong >= PAYKAN_REF_ATOMIC) {
+    if (shared->strong == PAYKAN_REF_MAX ||
+        atomic_fetch_sub_explicit(ATOMIC_COUNT(shared), 1,
+                                  memory_order_acq_rel) !=
+            PAYKAN_REF_ATOMIC + 1)
+      return;
+    // The last reference, after every reader's last read: this thread has
+    // it alone, and destroys it as any object.
+    shared->strong = 1;
+  }
+  if (shared) {
     shared->strong -= 1;
     if (shared->strong > 0)
       return;

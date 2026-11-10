@@ -8,7 +8,6 @@
 // expect-stdout: dot = 333283335000
 // expect-stdout: ys[7] = 21
 // expect-stdout: hits = 1000
-// expect-leaks: the atomic cell is immortal in the prototype
 
 import ::io;
 

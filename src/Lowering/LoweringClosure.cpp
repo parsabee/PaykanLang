@@ -133,7 +133,7 @@ void ModuleLowering::emitClosureDestructor(
         emitMemRelease(B.fieldAddr(self, name, field, field + ".addr"), ty);
       continue;
     }
-    if (!ast::isRefType(ty))
+    if (!ast::isCountedRef(ty))
       continue;
     if (captureWeak[i]) {
       B.weakRelease(B.fieldLoad(self, name, field, Type::Weak, field));
@@ -230,7 +230,7 @@ void ModuleLowering::emitLambdaBody(ast::LambdaExpr *node) {
           pir::LocalId local = B.addLocal(cname, Type::Box);
           B.store(local, box);
           CurrentScope->declare(cname, local, ty);
-        } else if (ast::isRefType(ty)) {
+        } else if (ast::isCountedRef(ty)) {
           Val box = B.fieldLoad(self, name, field, Type::Box, cname);
           emitRetain(box, /*lend=*/false, ty);
           pir::LocalId local = B.addLocal(cname, Type::Box);
@@ -300,7 +300,7 @@ void ModuleLowering::emitLambdaInto(ast::LambdaExpr *node, const Val &dst) {
         return;
       B.fieldStore(obj, name, field, B.weakNew(box, field + ".weak"));
       emitRelease(box);
-    } else if (ast::isRefType(cap.Ty)) {
+    } else if (ast::isCountedRef(cap.Ty)) {
       Val box = emitAsShared(id); // +1, the field's own
       if (!box)
         return;

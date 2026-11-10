@@ -393,9 +393,42 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   // A value into a slot of an `atomic` type (the prototype): the slot takes
   // a new cell holding it (an `atomic` place's handle is passed as it is).
+  // A cell keeps the class it was made with: through a handle of a wider
+  // one, an `inout` block could replace its contents with another class.
+  if (auto *te = src ? ast::dyn_cast<ast::TernaryExpr>(src) : nullptr)
+    for (ast::Expr *b : conditionalBranches(te))
+      if (ast::Type *bt = b->getResolvedType();
+          dst && bt && ast::isRefType(ast::stripOptional(bt)) &&
+          ast::stripOptional(dst) != ast::stripOptional(bt) &&
+          qualifierOf(b).Form == ast::QualForm::Locked) {
+        error(b->getLocation(),
+              "a 'locked' cell keeps the class it was made with: cannot store "
+              "'" +
+                  typeName(bt) + "' in '" + typeName(dst) + "'");
+        return false;
+      }
+  if (dst && srcTy && src &&
+      ast::stripOptional(dst) != ast::stripOptional(srcTy) &&
+      ast::isRefType(ast::stripOptional(srcTy)) &&
+      qualifierOf(src).Form == ast::QualForm::Locked) {
+    error(src->getLocation(),
+          "a 'locked' cell keeps the class it was made with: cannot store '" +
+              typeName(srcTy) + "' in '" + typeName(dst) + "'");
+    return false;
+  }
   if (auto *at = ast::dyn_cast<ast::AtomicType>(dst);
       at && srcTy && !ast::isa<ast::AtomicType>(srcTy) &&
       isAssignable(at->getInnerType(), srcTy)) {
+    if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(src);
+        se && se->isAtomicElement()) {
+      error(
+          src->getLocation(),
+          "'" + placeText(src) + "' is an element of an '" +
+              typeName(
+                  const_cast<ast::Expr *>(se->getArray())->getResolvedType()) +
+              "': it has no handle to share");
+      return false;
+    }
     src->setNewAtomicCell(at);
     return true;
   }
@@ -778,6 +811,10 @@ bool Sema::checkTypeArgs(const std::string &name,
                         "function's result type only)");
       return false;
     }
+    if (ast::isa<ast::TaskType>(args[i])) {
+      error(loc, what + " cannot be a task yet: a task is held by a variable");
+      return false;
+    }
   }
   return true;
 }
@@ -866,8 +903,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return resolveQualifiedAnnotation(qt, loc, context, flags);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
-  // `atomic T` (the concurrency prototype): T is a number, `bool` or
-  // `char` (the design's fixed arrays of them are not in the prototype).
+  // `atomic T`: T is a number, a `bool`, a `char` or a fixed array of them.
   if (auto *at = ast::dyn_cast<ast::AtomicType>(ty))
     return resolveAtomicAnnotation(at, loc, context, flags);
   if (ast::isa<ast::TaskType>(ty))
@@ -1005,18 +1041,23 @@ ast::Type *Sema::resolveQualifiedAnnotation(ast::QualifiedType *qt,
   return inner;
 }
 
-// `atomic T` (the concurrency prototype): T is a number, `bool` or
-// `char` (the design's fixed arrays of them are not in the prototype).
+// `atomic T`: T is a number, a `bool`, a `char` or a fixed array of them.
 ast::Type *Sema::resolveAtomicAnnotation(ast::AtomicType *at,
                                          ast::SourceLocation loc,
                                          const TypeContext &context,
                                          const TypeFlags & /*flags*/) {
+  // An array under `atomic` is the cell's contents, held in the object.
+  FixedArrayAllowed = ast::isa<ast::FixedArrayType>(at->getInnerType());
   ast::Type *inner = resolveType(at->getInnerType(), loc, context);
   if (!inner)
     return nullptr;
-  auto *bt = ast::dyn_cast<ast::BuiltinType>(inner);
+  ast::Type *element = inner;
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(inner))
+    element = ft->getElementType();
+  auto *bt = ast::dyn_cast<ast::BuiltinType>(element);
   if (!bt || bt->getTypeKind() == ast::BuiltinType::Void) {
-    std::string msg = "'atomic' holds a number, a 'bool' or a 'char', not '";
+    std::string msg = "'atomic' holds a number, a 'bool', a 'char' or a "
+                      "fixed array of them, not '";
     msg += typeName(inner);
     msg += "'";
     if (ast::isRefType(inner)) {
@@ -1026,8 +1067,6 @@ ast::Type *Sema::resolveAtomicAnnotation(ast::AtomicType *at,
       msg += "' (frozen) or 'locked mut ";
       msg += typeName(inner);
       msg += "'";
-    } else {
-      msg += " (the prototype has no atomic arrays)";
     }
     error(loc, msg);
     return nullptr;
@@ -2121,6 +2160,8 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
       node->setAtomicHandle(true);
       return at;
     }
+    if (!S.checkAtomicReadable(at, node->getName(), node->getLocation()))
+      return nullptr;
     return at->getInnerType();
   }
   return ty;
@@ -2474,6 +2515,8 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
       S.MovedVars[S.varKey(id->getName())] =
           Sema::MovedState{node->getLocation(), false, "await"};
     }
+    if (auto *qt = ast::dyn_cast<ast::QualifiedType>(tt->getInnerType()))
+      return qt->getInnerType();
     return tt->getInnerType();
   }
   if (node->getOpcode() == ast::UnaryOpcode::Move) {
@@ -2565,15 +2608,21 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
   std::vector<ast::Expr *> links;
   for (ast::Expr *x = operand; ast::chainOperand(x); x = ast::chainOperand(x))
     links.push_back(x);
+  // What the caller wants is of the chain's top, typed after these.
+  const bool wanted = S.WantAtomicHandle;
   for (auto it = links.rbegin(); it != links.rend(); ++it) {
     // The link that takes this one: a method call on an `atomic` place
     // takes its handle (the prototype).
     ast::Expr *outer = std::next(it) == links.rend() ? e : *std::next(it);
     S.WantAtomicHandle =
-        ast::isa<ast::MethodCallExpr>(outer) && Sema::isPlaceChain(*it);
+        ((ast::isa<ast::MethodCallExpr>(outer) ||
+          ast::isa<ast::SubscriptExpr>(outer)) &&
+         Sema::isPlaceChain(*it)) ||
+        (ast::isa<ast::MethodCallExpr>(outer) && Sema::isElementOfPlace(*it));
     ChainTypes[*it] = visit(*it);
     S.WantAtomicHandle = false;
   }
+  S.WantAtomicHandle = wanted;
 }
 
 namespace {
@@ -2692,6 +2741,13 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     lhsTy = visit(node->getLHS());
     rhsTy = visitOperand(node->getRHS(), lhsTy);
   }
+  // A `locked Str`'s text is its contents, reached in a `lock` block.
+  if (lhsTy == S.Ctx.getStrTy() &&
+      !S.checkNotLocked(node->getLHS(), node->getLocation()))
+    return nullptr;
+  if (rhsTy == S.Ctx.getStrTy() &&
+      !S.checkNotLocked(node->getRHS(), node->getLocation()))
+    return nullptr;
   if (!lhsTy || !rhsTy)
     return nullptr;
 
@@ -3048,6 +3104,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         visitExpecting(node->getArguments()[i],
                        i < expectedArgs.size() ? expectedArgs[i] : nullptr);
     S.WantAtomicHandle = false;
+    // `Str(s)` of a `locked Str` is its contents.
+    if (ty == S.Ctx.getStrTy() &&
+        node->getCalleeName() == S.Ctx.getStrTy()->getName() &&
+        !S.checkNotLocked(node->getArguments()[i], node->getLocation()))
+      return nullptr;
     argTypes.push_back(ty);
   }
 
@@ -3301,13 +3362,21 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // Resolve receiver type.  A method call on an `atomic` place (the
   // prototype) takes its handle, not its value.
-  S.WantAtomicHandle = Sema::isPlaceChain(node->getReceiver());
+  S.WantAtomicHandle = Sema::isPlaceChain(node->getReceiver()) ||
+                       Sema::isElementOfPlace(node->getReceiver());
   auto *recvTy = visit(node->getReceiver());
   S.WantAtomicHandle = false;
   if (!recvTy)
     return nullptr;
   if (auto *at = ast::dyn_cast<ast::AtomicType>(recvTy))
     return S.checkAtomicMethodCall(node, at);
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy);
+      ot && ast::isa<ast::AtomicType>(ot->getInnerType()) &&
+      node->getMethodName() == names::kMethodClone) {
+    S.error(node->getLocation(),
+            "'clone' of an optional 'atomic' handle is not supported yet");
+    return nullptr;
+  }
   if (!S.checkNotLocked(node->getReceiver(), node->getLocation()))
     return nullptr;
   // A `mem::Buffer<T>` of the enclosing function in a `parallel for` body
@@ -3686,6 +3755,8 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
         node->setResolvedType(at);
         return at;
       }
+      if (!S.checkAtomicReadable(at, placeText(node), node->getLocation()))
+        return nullptr;
       node->setResolvedType(at->getInnerType());
       return at->getInnerType();
     }
@@ -3911,11 +3982,34 @@ bool Sema::checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index) {
 }
 
 ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
+  // An `atomic` array is used through its handle, and its element's handle
+  // is wanted by the method called on it.
+  const bool wantElementHandle = std::exchange(S.WantAtomicHandle, false);
+  S.WantAtomicHandle = Sema::isPlaceChain(node->getArray());
   auto *arrayTy = visit(node->getArray());
+  S.WantAtomicHandle = false;
   if (!arrayTy)
     return nullptr;
   if (!S.checkNotLocked(node->getArray(), node->getLocation()))
     return nullptr;
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(arrayTy))
+    if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(at->getInnerType())) {
+      auto *idx = visit(node->getIndex());
+      if (!idx)
+        return nullptr;
+      if (idx != S.Ctx.getIntTy()) {
+        S.error(node->getIndex()->getLocation(),
+                "array index must be 'int', got '" + typeName(idx) + "'");
+        return nullptr;
+      }
+      if (!S.checkFixedIndex(ft, node->getIndex()))
+        return nullptr;
+      node->setAtomicElement(true);
+      ast::Type *elem = ft->getElementType();
+      ast::Type *ty = wantElementHandle ? S.Ctx.getAtomicType(elem) : elem;
+      node->setResolvedType(ty);
+      return ty;
+    }
 
   // An optional array / string cannot be indexed (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(arrayTy)) {
@@ -4121,6 +4215,12 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       S.error(elem->getLocation(), "tuple element " + std::to_string(i) +
                                        " has type 'void' (the expression "
                                        "produces no value)");
+      ok = false;
+      continue;
+    }
+    if (ast::isa<ast::TaskType>(ty)) {
+      S.error(elem->getLocation(), "a tuple cannot hold a task yet: a task "
+                                   "is held by a variable");
       ok = false;
       continue;
     }
@@ -4964,6 +5064,8 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
 
   // Each of the module's templates once more, with a move-only class for
   // each parameter without bounds: its copies need `T: Copyable` (#368).
+  if (ok && !hasErrors() && !checkCrossedClasses())
+    ok = false;
   if (ok && !hasErrors() && !checkArchetypes())
     ok = false;
 
@@ -5190,8 +5292,12 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // a reduction.
   if (auto *owner = CurrentScope->findOwner(node->getVarName())) {
     ast::Type *varTy = owner->lookup(node->getVarName());
-    if (auto *at = ast::dyn_cast<ast::AtomicType>(varTy))
+    if (auto *at = ast::dyn_cast<ast::AtomicType>(varTy)) {
+      if (!LambdaStack.empty() && !captureVariable(node->getVarName(), varTy,
+                                                   owner, node->getLocation()))
+        return false;
       return checkAtomicAssign(node, at);
+    }
     if (isOuterScope(owner))
       return checkParallelAssign(node, varTy);
   }
@@ -5217,6 +5323,17 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   auto *valTy = resolveExprType(node->getValue(), expected);
   WantAtomicHandle = false;
   const auto &varName = node->getVarName();
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(node->getValue());
+      se && se->isAtomicElement() && !CurrentScope->findOwner(varName)) {
+    error(node->getValue()->getLocation(),
+          "'" + placeText(se) + "' is an element of an '" +
+              typeName(
+                  const_cast<ast::Expr *>(se->getArray())->getResolvedType()) +
+              "': it has no handle to share; declare '" + varName +
+              "' with its type to read it");
+    declarePoisoned(CurrentScope, varName);
+    return false;
+  }
   if (!valTy) {
     // The value's error was reported.  A first assignment still declares the
     // variable -- poisoned -- so its uses are not reported as undeclared; an
@@ -5335,11 +5452,11 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
-  if (!ParallelStack.empty()) {
+  if (ParallelStack.size() > ReturnParallelBase) {
     error(node->getLocation(), "'return' cannot leave a 'parallel for' body");
     return false;
   }
-  if (LockDepth > 0) {
+  if (LockDepth > ReturnLockBase) {
     error(node->getLocation(), "'return' cannot leave a 'lock' block");
     return false;
   }
@@ -5352,6 +5469,9 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
     WantAtomicHandle = false;
     if (!valTy)
+      return false;
+    if (CurrentResult.Mode != ast::ParamMode::Value &&
+        !checkNotLocked(node->getReturnValue(), node->getLocation()))
       return false;
     // A function that returns nothing returns no value, not one of `void`
     // (an inferred result reports it with its inference).
@@ -5652,17 +5772,31 @@ bool Sema::visitLockStmt(ast::LockStmt *node) {
     error(node->getLocation(), "a 'lock' block cannot hold another 'lock'");
     return false;
   }
-  LockOperand = true;
+  // Only the operand itself is the cell the block takes: a cell on the way
+  // to it, or read in an argument of it, is reached with no lock.
+  LockOperand = node->getCell();
   ast::Type *cellTy = resolveExprType(node->getCell());
-  LockOperand = false;
+  LockOperand = nullptr;
   if (!cellTy)
     return false;
   const ast::Qualifier cellQ = qualifierOf(node->getCell());
-  if (cellQ.Form != ast::QualForm::Locked) {
+  bool isCell = cellQ.Form == ast::QualForm::Locked;
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(node->getCell()))
+    for (ast::Expr *b : conditionalBranches(te))
+      isCell = isCell && qualifierOf(b).Form == ast::QualForm::Locked &&
+               ast::stripOptional(b->getResolvedType()) ==
+                   ast::stripOptional(cellTy);
+  if (!isCell) {
     error(node->getCell()->getLocation(),
           "'" + placeText(node->getCell()) +
               "' is not 'locked': a 'lock' block takes a 'locked' variable, "
               "field or parameter");
+    return false;
+  }
+  if (ast::isa<ast::OptionalType>(cellTy)) {
+    error(node->getCell()->getLocation(),
+          "'" + placeText(node->getCell()) +
+              "' may be None: 'match' it, and lock the cell its arm binds");
     return false;
   }
   ast::VarDecl *b = node->getBinding();
@@ -5689,7 +5823,9 @@ bool Sema::visitLockStmt(ast::LockStmt *node) {
                                           : VarKind::Inout;
   DeclLoopDepth[varKey(CurrentScope, b->getName())] = LoopDepth;
   ++LockDepth;
+  const unsigned savedLockLoops = std::exchange(LockLoopBase, LoopDepth);
   const bool ok = visit(node->getBody());
+  LockLoopBase = savedLockLoops;
   --LockDepth;
   return ok;
 }
@@ -5699,7 +5835,7 @@ bool Sema::visitBreakStmt(ast::BreakStmt *node) {
     error(node->getLocation(), "'break' outside of a loop");
     return false;
   }
-  if (LockDepth > 0) {
+  if (LockDepth > 0 && LoopDepth <= LockLoopBase) {
     error(node->getLocation(), "'break' cannot leave a 'lock' block");
     return false;
   }
@@ -5724,7 +5860,7 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
     error(node->getLocation(), "'continue' outside of a loop");
     return false;
   }
-  if (LockDepth > 0) {
+  if (LockDepth > 0 && LoopDepth <= LockLoopBase) {
     error(node->getLocation(), "'continue' cannot leave a 'lock' block");
     return false;
   }
@@ -6001,7 +6137,11 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
         ErroneousNames.insert(node->getName());
         return false;
       }
-    callTy = Ctx.getTaskType(retTy);
+    // The task's result keeps its form, which `await` hands on.
+    callTy = Ctx.getTaskType(
+        node->getResultQual().Form == ast::QualForm::Unique
+            ? retTy
+            : Ctx.getQualifiedType(node->getResultQual(), retTy));
   }
   // Register the function in the function table.
   declareFunction(node->getName(), callTy, paramTypes);
@@ -6690,6 +6830,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     viewOk = false;
   // A local borrow of a type argument's form (`v: view T` with T = `shared
   // Node`, #368) takes that form, as a parameter of it does.
+  // A borrow of a cell would reach its contents with no lock.
+  if (node->getInitExpr() && node->getMode() != ast::ParamMode::Value &&
+      !checkNotLocked(node->getInitExpr(), node->getLocation()))
+    viewOk = false;
   if (node->getInitExpr() && node->getMode() != ast::ParamMode::Value &&
       qual.FromArgument && ast::isRefType(declTy) &&
       ((node->getMode() == ast::ParamMode::Inout && !qual.isUnique()) ||
@@ -6934,9 +7078,14 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   const unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
+  WantAtomicHandle = isPlaceChain(node->getArray());
   auto *arrTy = resolveExprType(node->getArray());
+  WantAtomicHandle = false;
   if (!arrTy)
     return false;
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(arrTy))
+    if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(at->getInnerType()))
+      return checkAtomicElementAssign(node, ft);
   // An optional cannot be indexed (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(arrTy)) {
     errorOptionalUnwrap(node->getLocation(), ot);
@@ -7236,6 +7385,12 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 
   // Optional-mode: the subject is `T?` — `match` is how an optional is
   // unwrapped (issue #5).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(subjectTy);
+      ot && ast::isa<ast::AtomicType>(ot->getInnerType())) {
+    error(node->getSubject()->getLocation(),
+          "a 'match' on an optional 'atomic' handle is not supported yet");
+    return false;
+  }
   if (auto *optTy = ast::dyn_cast<ast::OptionalType>(subjectTy))
     return checkOptionalMatch(node, optTy);
 

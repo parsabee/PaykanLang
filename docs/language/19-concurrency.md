@@ -13,11 +13,6 @@ the one in [the design document](../design/concurrency.md); this version impleme
 qualifiers, `move`, the send check, `atomic`, `locked` and `parallel for`, and runs tasks on
 MLIR's async runtime and parallel loops on LLVM's OpenMP runtime ([Runtime](#runtime)).
 
-An example that makes an `atomic` or `locked` cell, or freezes an object, shows what it
-prints under **Prints** rather than **Output**: in this version such a cell or object is never
-freed ([Limits for now](#limits-for-now)), so `--track-heap` reports it and the test suite does
-not run those examples. Their output was checked by hand.
-
 ## Who holds an object: the qualifiers
 
 Every reference to an object carries a **qualifier** that says how the object is held, and
@@ -917,7 +912,7 @@ fn main() -> int {
 }
 ```
 
-Prints:
+Output:
 
 ```
 hits = 1000
@@ -961,7 +956,7 @@ fn main() -> int {
 }
 ```
 
-Prints:
+Output:
 
 ```
 ys[99999] = 199998
@@ -1035,7 +1030,7 @@ fn main() -> int {
 }
 ```
 
-Prints:
+Output:
 
 ```
 total 2000, sum 2000, ids 3
@@ -1113,12 +1108,15 @@ takes the lock for its own block.
 
 `atomic T` is a cell holding one number, `bool` or `char` that any thread may change with
 one atomic operation at a time. `T` is any number type (`int`, `float`, `u8`, `f32`, ...),
-`bool` or `char`, never a class: an object crosses threads frozen, as `atomic shared T`
+`bool`, `char` or a [fixed array of them](#atomic-arrays), never a class: an object crosses
+threads frozen, as `atomic shared T`
 ([below](#atomic-shared-frozen-objects)), or `locked mut`. A read of the place is an
 atomic load and `=` an atomic store; `+=` and `-=` are one atomic add or subtract (an
 integer wraps like `+`, a float adds by a compare-and-swap loop); `x.exchange(v)` stores
 `v` and returns the value found; `x.compareExchange(expected, desired)` stores `desired`
-only if the cell holds `expected`, and returns whether it did. A variable, a parameter, a
+only if the cell holds `expected`, bit for bit, and returns whether it did; when it did not,
+it writes the value it found into `expected`, which is therefore a variable of the cell's
+type (a loop retries with what it just read). A variable, a parameter, a
 result or a class field can be `atomic`. A copy of an atomic place (`m = n`, an argument, a
 result, a field assigned in `__init__`) is another **handle** to the same cell, and `let m =
 n` a read-only copy of its value;
@@ -1147,8 +1145,9 @@ fn main() -> int {
   io::println("i8 " + Str(a) + ", f32 " + Str(f) + ", char " + Str(c) + " (was " + Str(old) + ")");
 
   n: atomic int = 5;
-  let swapped = n.compareExchange(5, 9);       // True: 5 -> 9
-  let missed = n.compareExchange(5, 1);        // False: it holds 9
+  expected = 5;
+  let swapped = n.compareExchange(expected, 9);  // True: 5 -> 9
+  let missed = n.compareExchange(expected, 1);   // False: it holds 9, now in 'expected'
   m = n;                                       // another handle to n's cell
   m += 1;
   bump(n, 10);
@@ -1166,7 +1165,7 @@ fn main() -> int {
 }
 ```
 
-Prints:
+Output:
 
 ```
 i8 -126, f32 1.75, char b (was a)
@@ -1210,9 +1209,49 @@ Error:
 field 'c' in struct 'P' has type 'atomic int': a struct cannot hold an 'atomic' field in the prototype (hold the cell in a class)
 'hits' is 'atomic': 'hits = ...' reads and writes it separately; write 'hits += e', or use 'exchange' or 'compareExchange'
 'hits' is 'atomic': this operator reads and writes it separately; its atomic operations are '+=', '-=', 'exchange' and 'compareExchange'
-'atomic' holds a number, a 'bool' or a 'char', not 'Str': an object crosses threads as 'atomic shared Str' (frozen) or 'locked mut Str'
+'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Str': an object crosses threads as 'atomic shared Str' (frozen) or 'locked mut Str'
 'atomic shared' qualifies a reference; 'int' is a value
 ```
+
+### Atomic arrays
+
+`atomic T[n]` is one cell of `n` atomic elements, used by element: `a[i]` is an atomic load,
+`a[i] = v` an atomic store, `a[i] += v` and `-=` one atomic add or subtract, and
+`a[i].exchange(v)` and `a[i].compareExchange(expected, desired)` work as on a single cell.
+`a.len()` is its length. A copy of the place (`m = a`, an argument) is another handle to the
+whole array; an element has no handle of its own.
+
+```pkn
+import ::io;
+
+fn total(a: atomic int[3]) -> int { return a[0] + a[1] + a[2]; }
+
+fn main() -> int {
+  hits: atomic int[3] = [0; 3];
+  parallel for i in 0..300 { hits[i % 3] += 1; }
+  hits[1] -= 50;
+  let was = hits[2].exchange(7);
+  io::println(Str(was) + " " + Str(total(hits)) + " " + Str(hits.len()));
+  return 0;
+}
+```
+
+Output:
+
+```
+100 157 3
+```
+
+An array is read and written by element, and an element is never lent:
+
+```
+'seen' is an 'atomic bool[64]': it is read by element
+'seen' is an 'atomic bool[64]': it is written by element
+'seen[3]' is an element of an 'atomic bool[64]': it has no handle and cannot be passed to 'inout' parameter 'b'
+'seen[3]' is an element of an 'atomic bool[64]': it has no handle to share
+```
+
+An index outside the array stops the program.
 
 ## `atomic shared`: frozen objects
 
@@ -1255,7 +1294,7 @@ fn main() -> int {
 }
 ```
 
-Prints:
+Output:
 
 ```
 32 33 0
@@ -1285,7 +1324,7 @@ fn main() -> int {
 }
 ```
 
-Prints:
+Output:
 
 ```
 sum = 299995 of 100000
@@ -1387,7 +1426,7 @@ fn main() -> int {
 Error:
 
 ```
-'atomic' holds a number, a 'bool' or a 'char', not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked mut Node'
+'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked mut Node'
 cannot store a 'shared Node' in variable 'f', an 'atomic shared Node': a 'shared' reference, a frozen object and a cell convert only as they are
 ```
 
@@ -1474,9 +1513,11 @@ In this version tasks run on MLIR's async runtime, a thread pool that takes each
 as a call returns, and parallel loops on LLVM's OpenMP runtime (`libomp`), which runs a loop
 as at most 256 chunks handed to its threads one at a time (`OMP_NUM_THREADS` sets how many).
 Both ship with the LLVM the compiler is built against: `paykan run` loads them into the JIT
-when a program uses them, and `paykan build` links them. Reference counts stay plain: the
-checks above keep every plainly counted reference on one thread, and a handle crosses
-without a count because its cell or frozen object is never freed. The design's
+when a program uses them, and `paykan build` links them. A cell and every object of a frozen
+value are counted atomically, and the last reference to one, on any thread, frees it. Reading
+through a borrow counts nothing, so readers write no shared memory until a copy or a hold
+needs a count. Every other object is counted plainly: the checks above keep it on one
+thread. The design's
 [Runtime](../design/concurrency.md#runtime) section describes the runtime of Paykan's own
 that the finished feature needs; what `parallel for` costs, and why, is in
 [benchmarks/README.md](../../benchmarks/README.md).
@@ -1745,11 +1786,8 @@ one.
 
 ## Limits for now
 
-- A cell and a frozen object are never freed: their counts are left alone so that a handle
-  crosses threads without an atomic count, and `--track-heap` reports them as live.
-- Reference counts are not atomic. The checks keep every plainly counted reference on one
-  thread; a program that calls into runtime pieces that are not thread-safe from a task (heap
-  tracking, standard input) is not protected.
+- A program that calls into runtime pieces that are not thread-safe from a task (standard
+  input) is not protected.
 - No channels, no cancellation, no event loop of the program's own, and no `join`: `await` in
   ordinary code blocks the thread. A program with an `async fn` is compiled with the `-O1`
   pipeline under `-O0`: the coroutines of MLIR's async runtime do not survive an unoptimized
@@ -1766,8 +1804,9 @@ one.
   and an `atomic shared` or `locked` parameter or result of a function type are errors
   (`'atomic shared' cannot qualify an element yet`); a struct's field holds a frozen object
   or a cell.
-- `atomic` holds one number, `bool` or `char`: no atomic arrays, no `atomic` field in a
-  struct, and `compareExchange` does not write the value found back into `expected`.
+- A struct cannot hold an `atomic` field, and an optional `atomic` handle cannot be matched or
+  cloned.
+- A task is held by a variable: not in a tuple or an array, and not as a type argument.
 - `locked` holds an object, not a value: wrap a value in a class.
 - `break` and `continue` cannot be used in a `parallel for` body.
 - An object held in a struct, a tuple or an array is reached through the value, which takes

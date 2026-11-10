@@ -49,7 +49,7 @@ std::pair<ast::Type *, int64_t> innermostElements(ast::FixedArrayType *ft) {
 /// Whether a value of @p ty holds a reference: is one, or holds one (a
 /// function value holds its closure's).
 bool holdsRef(const ast::Type *ty) {
-  if (ast::isRefType(ty) || ast::isFunctionValue(ty))
+  if (ast::isCountedRef(ty) || ast::isFunctionValue(ty))
     return true;
   if (ast::isMemOptional(ty))
     return holdsRef(ast::cast<ast::OptionalType>(ty)->getInnerType());
@@ -390,7 +390,7 @@ void ModuleLowering::forEachMemRef(
     forEachMemRef(addr, shape, fn, /*set=*/false);
     return;
   }
-  if (ast::isRefType(ty)) {
+  if (ast::isCountedRef(ty)) {
     fn(B.ptrLoad(addr, Type::Box, "elem"), set ? ty : nullptr);
     return;
   }
@@ -471,7 +471,7 @@ size_t ModuleLowering::memReleaseCount(ast::Type *ty) {
   size_t n = 0;
   if (ast::Type *shape = memShapeOf(ty); shape != ty) {
     n = memReleaseCount(shape);
-  } else if (ast::isRefType(ty)) {
+  } else if (ast::isCountedRef(ty)) {
     n = 1;
   } else if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     for (ast::Type *e : tt->getElementTypes())
@@ -522,7 +522,7 @@ void ModuleLowering::emitMemReleaseByTag(const Val &addr, ast::Type *ty) {
     emitMemReleaseByTag(addr, shape);
     return;
   }
-  if (ast::isRefType(ty)) {
+  if (ast::isCountedRef(ty)) {
     emitRelease(B.ptrLoad(addr, Type::Box, "elem"));
     return;
   }
@@ -625,7 +625,7 @@ Val ModuleLowering::tupleElementIn(ast::Expr *tuple, size_t index,
 
 Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty,
                                     bool stable) {
-  const bool ref = ast::isRefType(ty);
+  const bool ref = ast::isCountedRef(ty);
   return B.ptrLoad(addr, ref ? Type::Box : toPIRType(ty), "elem",
                    ref && stable);
 }
@@ -712,7 +712,7 @@ void ModuleLowering::emitElementInit(ast::Expr *e, ast::Type *ty,
     emitMemInit(e, dst);
     return;
   }
-  if (ast::isRefType(ty)) { // the slot owns a reference
+  if (ast::isCountedRef(ty)) { // the slot owns a reference
     if (Val box = emitAsShared(e))
       B.ptrStore(dst, box);
     return;
@@ -738,7 +738,7 @@ void ModuleLowering::emitFixedRepeat(ast::ArrayLiteralExpr *lit,
   }
   // The value is evaluated once, into the first slot; the others copy it.
   const bool inMem = ast::isMemType(elemTy);
-  const bool ref = ast::isRefType(elemTy);
+  const bool ref = ast::isCountedRef(elemTy);
   Val v;
   if (inMem) {
     emitMemInit(elem, dst);

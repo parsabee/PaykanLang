@@ -107,7 +107,7 @@ TEST_F(Weak, ImmortalNoneAlwaysLoads) {
   EXPECT_EQ(loaded, &PaykanObject_None);
   Paykan_release(loaded);
   Paykan_weak_release(w);
-  EXPECT_EQ(PaykanObject_None.strong, 1);
+  EXPECT_EQ(PaykanObject_None.strong, PAYKAN_REF_MAX);
   EXPECT_EQ(PaykanObject_None.weak, 0);
 }
 
