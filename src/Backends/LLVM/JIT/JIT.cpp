@@ -101,6 +101,10 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectWalk,      reinterpret_cast<void *>(&PaykanObject_walk)},
     {kPaykanFreeze,          reinterpret_cast<void *>(&Paykan_freeze)},
     {kPaykanFreezeMem,       reinterpret_cast<void *>(&Paykan_freeze_mem)},
+    {kPaykanWalkChild,       reinterpret_cast<void *>(&Paykan_walk_child)},
+    {kPaykanMovedUnique,     reinterpret_cast<void *>(&Paykan_moved_unique)},
+    {kPaykanMovedUniqueMem,  reinterpret_cast<void *>(&Paykan_moved_unique_mem)},
+    {kPaykanPanicMoved,      reinterpret_cast<void *>(&Paykan_panic_moved)},
 
     {kPaykanPanicDivByZero,  reinterpret_cast<void *>(&Paykan_panic_div_by_zero)},
     {kPaykanPanicDivOverflow, reinterpret_cast<void *>(&Paykan_panic_div_overflow)},
@@ -150,6 +154,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanBufferGrow,      reinterpret_cast<void *>(&PaykanBuffer_grow)},
     {kPaykanBufferShrink,    reinterpret_cast<void *>(&PaykanBuffer_shrink)},
     {kPaykanMemSwap,         reinterpret_cast<void *>(&Paykan_mem_swap)},
+    {kPaykanMemMoveOut,      reinterpret_cast<void *>(&Paykan_mem_move_out)},
     {kPaykanBufferIsSet,     reinterpret_cast<void *>(&PaykanBuffer_isSet)},
     {kPaykanBufferTryGrow,   reinterpret_cast<void *>(&PaykanBuffer_tryGrow)},
     {kPaykanBufferTryReserve, reinterpret_cast<void *>(&PaykanBuffer_tryReserve)},

@@ -457,9 +457,18 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
   pir::LocalId subj = B.addMemLocal("match.subj", l.Size, l.Align);
   Val addr = B.localAddr(subj, "match.subj.addr");
   std::optional<pir::LocalId> place;
-  if (!emitMemMatchSubject(node, addr, place))
-    return Val();
-  CurrentScope->declare("match.subj", subj, subjTy);
+  // Read for its presence alone: nothing is held.
+  const bool holdsNothing = matchHoldsNothing(node);
+  const size_t subjectMark = MemTemps.size();
+  if (holdsNothing) {
+    addr = emitMemAddress(node->getSubject());
+    if (!addr)
+      return Val();
+  } else {
+    if (!emitMemMatchSubject(node, addr, place))
+      return Val();
+    CurrentScope->declare("match.subj", subj, subjTy);
+  }
 
   ast::MatchArm *noneArm = nullptr;
   ast::MatchArm *valueArm = nullptr;
@@ -478,6 +487,8 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
 
   Val isNone =
       optTy ? emitMemOptionalIsNone(addr, subjTy) : Val::boolean(false);
+  if (holdsNothing)
+    releaseMemTemps(subjectMark);
   pir::If *s = B.openIf(isNone, /*withElse=*/true);
   B.enter(*s->Then);
   emitArmOrDefault(noneArm);
@@ -498,15 +509,17 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
     Val own = B.localAddr(local, name + ".addr");
     int64_t off =
         optTy && bindTy == inner ? memOptionalPayloadOffset(subjTy) : 0;
-    B.memCopy(own, off ? B.ptrAdd(addr, Val::i64(off), "opt.value.addr") : addr,
-              Val::i64(bl.Size));
-    emitMemRetain(own, bindTy);
+    Val from = off ? B.ptrAdd(addr, Val::i64(off), "opt.value.addr") : addr;
+    B.memCopy(own, from, Val::i64(bl.Size));
+    takeFromMatchSlot(valueArm, own, from, bindTy);
     CurrentScope->declare(name, local, bindTy);
     if (valueArm->getMode() == ast::ParamMode::Inout && place)
       bindInoutArm(valueArm, local, *place, subjTy, bindTy, off,
                    off ? Val::boolean(true) : Val());
     emitArmBody(valueArm);
   } else {
+    if (!holdsNothing)
+      dropMatchSlot(addr, subjTy);
     emitArmOrDefault(valueArm);
   }
   B.leave();

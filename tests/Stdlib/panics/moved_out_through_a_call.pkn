@@ -1,0 +1,24 @@
+// expect-panic: a value moved out of 'id(...).n' is still borrowed
+import ::memory as mem;
+
+class Node {
+  v: int;
+}
+class H {
+  n: mut Node;
+}
+
+fn id(h: shared mut H) -> shared mut H {
+  return h;
+}
+
+// A handle from a call reaches what other handles do.
+fn g(h: shared mut H, n: view Node) -> int {
+  let x = mem::replace(id(h).n, Node(4));
+  return x.v + n.v;
+}
+
+fn main() -> int {
+  h: shared mut H = H(Node(1));
+  return g(h, h.n);
+}

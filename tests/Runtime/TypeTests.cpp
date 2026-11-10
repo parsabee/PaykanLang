@@ -30,8 +30,8 @@ struct PairType {
   int64_t unset[1];
 };
 
-const int64_t kMaybe = (int64_t)offsetof(Pair, maybe) << 1 | 1;
-const int64_t kRef = (int64_t)offsetof(Pair, ref) << 1;
+const int64_t kMaybe = (int64_t)offsetof(Pair, maybe) << 2 | 1;
+const int64_t kRef = (int64_t)offsetof(Pair, ref) << 2;
 const PairType kPair = {
     {sizeof(Pair), alignof(Pair), PAYKAN_KIND_OBJECT, 2, 1},
     {kMaybe, kRef},
@@ -58,8 +58,8 @@ struct UnionType {
 
 const UnionType kUnion = {
     {sizeof(Union), alignof(Union), PAYKAN_KIND_TUPLE, 2, 3},
-    {(int64_t)offsetof(Union, s) << 1 | 1,
-     (int64_t)offsetof(Union, closure) << 1 | 1},
+    {(int64_t)offsetof(Union, s) << 2 | 1,
+     (int64_t)offsetof(Union, closure) << 2 | 1},
     {(int64_t)offsetof(Union, tag), (int64_t)offsetof(Union, s),
      (int64_t)offsetof(Union, code)},
 };
@@ -99,7 +99,7 @@ TEST(PaykanType, UnsetIsANullReferenceThatMayNotBe) {
 // The words that tell storage never set follow the references.
 TEST(PaykanType, UnsetWordsFollowTheReferences) {
   EXPECT_EQ(PaykanType_ref(&kUnion.head, 1),
-            (int64_t)offsetof(Union, closure) << 1 | 1);
+            (int64_t)offsetof(Union, closure) << 2 | 1);
   EXPECT_EQ(PaykanType_unset(&kUnion.head, 0), 0);
   EXPECT_EQ(PaykanType_unset(&kUnion.head, 1), (int64_t)offsetof(Union, s));
   EXPECT_EQ(PaykanType_unset(&kUnion.head, 2), (int64_t)offsetof(Union, code));
@@ -134,7 +134,7 @@ TEST(PaykanType, ZerosAreAValueOfATypeThatNamesNoWord) {
   };
   const EnumType kEnum = {
       {sizeof(Enum), alignof(Enum), PAYKAN_KIND_TUPLE, 1, 0},
-      {(int64_t)offsetof(Enum, s) << 1 | 1}};
+      {(int64_t)offsetof(Enum, s) << 2 | 1}};
   Enum zero = {};
   EXPECT_FALSE(PaykanType_isUnset(&kEnum.head, &zero));
 }

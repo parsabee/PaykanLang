@@ -1212,7 +1212,8 @@ const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
 A `PaykanType` holds a value's `size` and `align`, its `kind`
 (`PaykanTypeKind`: int, float, bool, char, object, optional or tuple), and where it
 holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
-offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  After them come
+offset `<< 2`, `| 1` if it may be `NULL`, `| 2` if it is no unique reference
+(`PaykanType_ref`, `PaykanType_refOffset`).  After them come
 `nunset` words, the byte offsets of the 8-byte words that are all 0 only in
 storage never set (`PaykanType_unset`; `PaykanType_isUnset` tests them): a
 reference that may not be `NULL`, a function value's code word, and a tagged

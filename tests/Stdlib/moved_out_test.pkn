@@ -1,0 +1,316 @@
+// A move out of borrowed storage that nothing else holds passes the check,
+// and what a moved value only shares is not looked into (#368).
+import ::io;
+import ::memory as mem;
+import ::collections as cl;
+
+class Job {
+  id: int;
+}
+class Queue {
+  jobs: cl::List<Job>;
+}
+class Node {
+  v: int;
+}
+class H {
+  n: mut Node;
+}
+struct P {
+  n: Node;
+  k: int;
+}
+class B {
+  p: P;
+}
+class Item {
+  n: int;
+}
+class Shelf {
+  items: cl::List<shared mut Item>;
+  ends: shared mut Item?[2];
+}
+
+fn drain(q: shared mut Queue) -> int {
+  let t = q.jobs.pop();
+  return t.id;
+}
+
+fn swapIn(h: shared mut H) -> int {
+  let o = mem::replace(h.n, Node(2));
+  return o.v;
+}
+
+fn replaceField(b: shared mut B) -> int {
+  let x = mem::replace(b.p, P(Node(9), 1));
+  return x.n.v;
+}
+
+fn take(h: shared mut H) -> Node {
+  return mem::replace(h.n, Node(0));
+}
+
+fn through(h: shared mut H, t: (shared mut H) -> Node) -> int {
+  let x = t(h);
+  return x.v;
+}
+
+fn stock(i: shared mut Item) -> Shelf {
+  l = cl::List<shared mut Item>();
+  l.push(i);
+  return Shelf(move l, [i, None]);
+}
+
+fn shelve(i: shared mut Item, f: (shared mut Item) -> Shelf) -> Shelf {
+  let r = f(i);
+  return move r;
+}
+
+class Tags {
+  names: cl::List<Str>;
+}
+class Q2 {
+  items: cl::List<Tags>;
+}
+class O {
+  o: mut Node?;
+}
+
+// What moves into an object or through a by-value parameter has one
+// owner at once: the place it left holds zeros.
+fn store(b: shared mut B, s: P) -> int {
+  b.p = move s;
+  let x = mem::replace(b.p, P(Node(7), 1));
+  return x.n.v;
+}
+
+fn drainTags(q: shared mut Q2) -> int {
+  let x = q.items.pop();
+  return int(x.names.isEmpty());
+}
+
+fn fromLocals() -> int {
+  q: shared mut Q2 = Q2(cl::List<Tags>());
+  n = cl::List<Str>();
+  q.items.push(Tags(move n));
+  b: shared mut B = B(P(Node(1), 0));
+  s = P(Node(2), 0);
+  let t = (Node(3), 4);
+  let u = move t;
+  return drainTags(q) + store(b, move s) + u.0.v;
+}
+
+// A `view` local's hold ends with its last use.
+fn afterAView(h: shared mut H) -> int {
+  l: view Node = h.n;
+  let a = l.v;
+  let o = mem::replace(h.n, Node(2));
+  return o.v - a;
+}
+
+// Nothing bound: the subject is read for its test alone.
+fn noBinding(h: shared mut O) -> int {
+  match h.o {
+    Node {
+      let t = mem::take(h.o);
+      return 1;
+    }
+    None { return 0; }
+  }
+}
+
+// A part of a moved value outlives the temporary it was in.
+fn partOfMoved() -> int {
+  a = P(Node(5), 0);
+  let n = (move a).n;
+  return n.v;
+}
+
+enum E { A(n: Job), B }
+struct JobBox {
+  j: Job;
+  k: int;
+}
+
+fn makeJob() -> Job? {
+  return Job(5);
+}
+
+// A binding takes over the match's reference: what the arm moves on has
+// one owner.
+fn fromBindings() -> int {
+  q: shared mut Queue = Queue(cl::List<Job>());
+  match makeJob() {
+    j: Job { q.jobs.push(move j); }
+    None { }
+  }
+  let e = E::A(Job(6));
+  match move e {
+    a: A { q.jobs.push(move a.n); }
+    B { }
+  }
+  let p: JobBox? = JobBox(Job(7), 1);
+  match move p {
+    t: JobBox { q.jobs.push(move t.j); }
+    None { }
+  }
+  return drain(q) + drain(q) + drain(q);
+}
+
+struct Named {
+  s: Str;
+}
+struct Parts {
+  c: CopyPart;
+  u: Job;
+}
+struct CopyPart {
+  j: shared Job;
+}
+
+fn tail(p: Named) -> Str {
+  return "x";
+}
+fn firstOf(c: CopyPart, p: Parts) -> int {
+  return c.j.id;
+}
+
+// An earlier operand keeps what a later `move` takes away.
+fn operands() -> int {
+  p = Named("a" + Str(1));
+  let joined = p.s + tail(move p);
+  io::println(joined);
+  q = Parts(CopyPart(Job(5)), Job(1));
+  return firstOf(q.c, move q);
+}
+
+enum State {
+  Running(j: Job),
+  Waiting(j: Job),
+  Idle
+}
+class Machine {
+  s: State;
+}
+
+// An arm that binds nothing lets go of the subject, whatever its siblings do.
+fn step(m: shared mut Machine) -> int {
+  match m.s {
+    r: Running { return r.j.id; }
+    Waiting {
+      let old = mem::replace(m.s, State::Idle);
+      return 2;
+    }
+    Idle { return 0; }
+  }
+}
+
+class InInit {
+  k: int;
+}
+impl InInit {
+  fn __init__(h: shared mut H) {
+    v: view Node = h.n;
+    let a = v.v;
+    let o = mem::replace(h.n, Node(2));
+    self.k = a + o.v;
+  }
+}
+
+class Inner {
+  count: int;
+}
+class Outer {
+  a: mut Inner;
+}
+
+// An `inout` local's hold ends with its last use, a view computed from a
+// view does not keep it.
+fn holds() -> int {
+  h: shared mut Outer = Outer(Inner(1));
+  c: inout = h.a.count;
+  c = c + 1;
+  let o = mem::replace(h.a, Inner(0));
+  k: shared mut H = H(Node(1));
+  v: view Node = k.n;
+  w: view = v.v + 1;
+  let p = mem::replace(k.n, Node(2));
+  return o.count + w + p.v;
+}
+
+fn nextIndex(i: inout int) -> int {
+  i = i + 1;
+  return i;
+}
+
+// The place a swap fills is not evaluated again to check it.
+fn swapOnce() -> int {
+  h: shared mut H = H(Node(1));
+  arr: Node[2] = [Node(10), Node(20)];
+  i = 0;
+  mem::swap(h.n, arr[nextIndex(i)]);
+  return i;
+}
+
+fn lists() -> int {
+  let a: shared mut = cl::LinkedList<shared Job>();
+  let s: shared Job = Job(1);
+  a.pushBack(s);
+  a.pushBack(s);
+  let x = a.popFront();
+  let b: shared mut = cl::LinkedList<JobBox>();
+  b.pushBack(JobBox(Job(2), 3));
+  let d = b.popBack();
+  let c: shared mut = cl::LinkedList<Job?>();
+  c.pushBack(None);
+  c.pushBack(Job(5));
+  let e = c.popBack();
+  let f = c.popFront();
+  let g: shared mut = cl::LinkedList<io::File>();
+  g.pushBack(io::stdin());
+  let h = g.popFront();
+  return x.id + d.k;
+}
+
+fn stepped() -> int {
+  m: shared mut Machine = Machine(State::Waiting(Job(7)));
+  return step(m);
+}
+
+fn main() -> int {
+  io::println(Str(stepped()));
+  io::println(Str(fromBindings()));
+  io::println(Str(operands()));
+  io::println(Str(InInit(H(Node(1))).k));
+  io::println(Str(holds()));
+  io::println(Str(swapOnce()));
+  io::println(Str(lists()));
+  q: shared mut Queue = Queue(cl::List<Job>());
+  q.jobs.push(Job(7));
+  io::println(Str(drain(q)));
+
+  h: shared mut H = H(Node(1));
+  io::println(Str(swapIn(h)));
+  io::println(Str(h.n.v));
+
+  b: shared mut B = B(P(Node(3), 2));
+  io::println(Str(replaceField(b)));
+
+  t: shared mut H = H(Node(4));
+  io::println(Str(through(t, take)));
+
+  // An owned path needs no check, and has its own storage.
+  o: mut H = H(Node(5));
+  let n = mem::replace(o.n, Node(6));
+  io::println(Str(n.v + o.n.v));
+
+  // The shared links of a moved value keep their other references.
+  let i: shared mut Item = Item(8);
+  let s = shelve(i, stock);
+  io::println(Str(i.n) + " " + Str(s.items.len()));
+  io::println(Str(fromLocals()));
+  io::println(Str(afterAView(H(Node(1)))));
+  io::println(Str(noBinding(O(Node(1)))));
+  io::println(Str(partOfMoved()));
+  return 0;
+}

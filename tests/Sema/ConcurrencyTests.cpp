@@ -1017,3 +1017,210 @@ fn main() -> int {
             std::string::npos)
       << r.Diagnostics;
 }
+
+// -- The copy rule on borrowed results and conditionals (#368)
+
+TEST(Concurrency, APartOfAnInoutResultIsAPlace) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+class W { n: N; }
+fn f(w: inout W) -> inout W { return w; }
+fn g(w: inout W) -> int {
+  let x = f(w).n;
+  return x.v;
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {":6:3: error: cannot copy 'f(...).n' (a unique 'N')"});
+}
+
+TEST(Concurrency, ASharedMethodsReceiverIsNoTemporaryWhenBorrowed) {
+  auto r = semaCheck(R"(
+import ::collections as cl;
+class C { v: int; }
+impl C { shared view fn share() -> shared C { return self; } }
+class W { c: C; }
+fn f(w: inout W) -> inout W { return w; }
+fn fromView(l: view cl::List<C>) -> int {
+  let s = l.at(0).share();
+  return s.v;
+}
+fn fromInout(w: inout W) -> int {
+  let s = f(w).c.share();
+  return s.v;
+}
+fn fromConditional(a: C, b: C, p: bool) -> int {
+  let s = (if p then a else b).share();
+  return s.v;
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(r,
+               {":8:11: error: 'share' is a 'shared view fn', which takes its "
+                "receiver as a 'shared C'; 'l.at(...)' is a 'C'",
+                ":12:11: error: 'share' is a 'shared view fn', which takes its "
+                "receiver as a 'shared C'; 'f(...).c' is a 'C'",
+                "'a' is a 'C'", "'b' is a 'C'"});
+}
+
+TEST(Concurrency, ASharedMethodOnATemporaryOrASharedBranchIsAccepted) {
+  auto r = semaCheck(R"(
+class C { v: int; }
+impl C { shared view fn share() -> shared C { return self; } }
+fn g(a: shared C, b: shared C, p: bool) -> int {
+  let s = (if p then a else b).share();
+  let t = C(1).share();
+  return s.v + t.v;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, AFieldIsNotMovedOutThroughAHandle) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+class H { n: N; }
+fn f(h: shared mut H) -> N { return move h.n; }
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {":4:37: error: cannot move 'h.n': 'h' is a 'shared mut H', "
+                   "which other references reach; write 'mem::replace(h.n, "
+                   "v)'"});
+}
+
+TEST(Concurrency, APartOfAConditionalIsAPartOfItsBranches) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+class W { c: mut N; }
+impl N { shared view fn share() -> shared N { return self; } }
+fn f(w: inout W) -> inout W { return w; }
+fn copied(a: mut W, b: mut W, p: bool) -> int {
+  s = (if p then a else b).c;
+  return s.v;
+}
+fn fromInout(a: inout W, b: inout W, p: bool) -> int {
+  let s = (if p then f(a) else f(b)).c;
+  return s.v;
+}
+fn shared1(a: mut W, b: mut W, p: bool) -> int {
+  let s = (if p then a else b).c.share();
+  return s.v;
+}
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {":7:3: error: cannot copy", ":11:3: error: cannot copy",
+                   ":15:11: error: 'share' is a 'shared view fn'"});
+}
+
+TEST(Concurrency, APartOfAConditionalOfTemporariesIsNoPlace) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+class W { c: N; }
+fn mk() -> W { return W(N(1)); }
+fn g(p: bool) -> int {
+  s = (if p then mk() else mk()).c;
+  return s.v;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, AViewResultLendsTheFormOfWhatItWasGiven) {
+  auto r = semaCheck(R"(
+class C { v: int; }
+impl C { shared view fn share() -> shared C { return self; } }
+fn pick<T>(x: view T) -> view T { return x; }
+fn main() -> int {
+  a: shared C = C(1);
+  let s = pick(a).share();
+  return s.v;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, AViewResultOfAUniqueArgumentLendsNoShare) {
+  auto r = semaCheck(R"(
+class C { v: int; }
+impl C { shared view fn share() -> shared C { return self; } }
+fn pick<T>(x: view T) -> view T { return x; }
+fn main() -> int {
+  a: C = C(1);
+  let s = pick(a).share();
+  return s.v;
+}
+)");
+  expectErrors(r, {":7:11: error: 'share' is a 'shared view fn'"});
+}
+
+TEST(Concurrency, AnArityErrorInACallOfAMoveOutMethodIsAnErrorAlone) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+class K { v: int; }
+impl K { fn t(a: inout N) -> N { return N(1); } }
+fn main() -> int {
+  k: mut K = K(1);
+  a: N[1] = [N(1)];
+  let x = k.t(a[0], 1);
+  return 0;
+}
+)");
+  expectErrors(r, {"method 't' expects 1 argument(s), got 2"});
+}
+
+TEST(Concurrency, APartPastATemporaryHandleIsAPlace) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+impl N { shared view fn me() -> shared N { return self; } }
+class H { n: mut N; }
+struct P { n: N; }
+class B { p: P; }
+fn id(h: shared mut H) -> shared mut H { return h; }
+fn same(b: shared B) -> shared B { return b; }
+fn f(x: P) -> int { return x.n.v; }
+fn copied(h: shared mut H) -> int {
+  x: mut N = id(h).n;
+  return x.v;
+}
+fn shared1(h: shared mut H) -> int {
+  let s = id(h).n.me();
+  return s.v;
+}
+fn byValue(b: shared B) -> int { return f(same(b).p); }
+fn main() -> int { return 0; }
+)");
+  expectErrors(r, {":11:3: error: cannot copy", ":15:11: error: 'me' is a",
+                   "error: cannot copy 'same(...).p'"});
+}
+
+TEST(Concurrency, AUniqueTemporarysPartIsNoPlace) {
+  auto r = semaCheck(R"(
+class N { v: int; }
+class H { n: mut N; }
+fn mk() -> H { return H(N(1)); }
+fn g() -> int {
+  x: mut N = mk().n;
+  return x.v;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Concurrency, AViewResultThatMayBeInsideAnArgumentLendsNothing) {
+  auto r = semaCheck(R"(
+class C { v: int; }
+impl C { shared view fn me() -> shared C { return self; } }
+class Holder { c: C; }
+fn first(l: view Holder, x: view C) -> view C { return l.c; }
+fn main() -> int {
+  hh = Holder(C(1));
+  s: shared C = C(2);
+  let k = first(hh, s).me();
+  return k.v;
+}
+)");
+  expectErrors(r, {":9:11: error: 'me' is a 'shared view fn'"});
+}

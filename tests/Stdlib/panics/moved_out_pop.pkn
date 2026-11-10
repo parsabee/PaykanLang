@@ -1,0 +1,21 @@
+// expect-panic: a value moved out of 'q.jobs' is still borrowed
+import ::collections as cl;
+
+class Job {
+  id: int;
+}
+class Queue {
+  jobs: cl::List<Job>;
+}
+
+// 'j' names the job that the pop takes.
+fn look(j: view Job, q: shared mut Queue) -> int {
+  let t = q.jobs.pop();
+  return j.id + t.id;
+}
+
+fn main() -> int {
+  q: shared mut Queue = Queue(cl::List<Job>());
+  q.jobs.push(Job(7));
+  return look(q.jobs.at(0), q);
+}

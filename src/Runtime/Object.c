@@ -31,14 +31,92 @@ void Paykan_freeze(PaykanObject *obj) {
   Paykan_vcall_walk(obj);
 }
 
+// The check of a value moved out of borrowed storage (#368;
+// docs/design/concurrency.md, "Owned paths and borrowed roots"): every
+// object the value uniquely holds has a count of 1, or something else still
+// holds it.  The objects to visit are kept on a stack of the thread's own,
+// on the C heap (never Paykan_malloc, so --track-heap counts are
+// unaffected), so a long chain of unique objects cannot overflow the stack.
+static _Thread_local int g_checking_move; // nonzero in Paykan_moved_unique
+static _Thread_local int g_move_held;     // a count above 1 was met
+#define PAYKAN_MOVE_INLINE 32
+static _Thread_local PaykanObject *g_move_inline[PAYKAN_MOVE_INLINE];
+static _Thread_local PaykanObject **g_move_heap; // past g_move_inline's room
+static _Thread_local size_t g_move_len;
+static _Thread_local size_t g_move_cap;
+
+static void move_visit(PaykanObject *obj) {
+  if (!obj || obj->strong == PAYKAN_REF_MAX)
+    return;
+  if (obj->strong > 1) {
+    g_move_held = 1;
+    return;
+  }
+  if (g_move_len < PAYKAN_MOVE_INLINE) {
+    g_move_inline[g_move_len++] = obj;
+    return;
+  }
+  const size_t past = g_move_len - PAYKAN_MOVE_INLINE;
+  if (past == g_move_cap) {
+    size_t cap = g_move_cap ? g_move_cap * 2 : 64;
+    PaykanObject **grown =
+        (PaykanObject **)realloc(g_move_heap, cap * sizeof(PaykanObject *));
+    if (!grown)
+      Paykan_runtime_panic("out of memory checking a moved value");
+    g_move_heap = grown;
+    g_move_cap = cap;
+  }
+  g_move_heap[past] = obj;
+  ++g_move_len;
+}
+
+static int64_t move_drain(void) {
+  while (g_move_len && !g_move_held) {
+    --g_move_len;
+    Paykan_vcall_walk(g_move_len < PAYKAN_MOVE_INLINE
+                          ? g_move_inline[g_move_len]
+                          : g_move_heap[g_move_len - PAYKAN_MOVE_INLINE]);
+  }
+  g_move_len = 0;
+  g_checking_move = 0;
+  free(g_move_heap); // a long chain's peak is not kept for the thread's life
+  g_move_heap = NULL;
+  g_move_cap = 0;
+  return !g_move_held;
+}
+
+void Paykan_walk_child(PaykanObject *obj, int64_t unique) {
+  if (!g_checking_move)
+    Paykan_freeze(obj);
+  else if (unique)
+    move_visit(obj);
+}
+
 void Paykan_freeze_mem(const void *type, void *value) {
   const PaykanType *t = (const PaykanType *)type;
   for (int64_t k = 0; k < t->nrefs; ++k) {
     const int64_t word = PaykanType_ref(t, k);
     PaykanShared *ref =
-        *(PaykanShared **)((unsigned char *)value + (word >> 1));
-    Paykan_freeze(ref);
+        *(PaykanShared **)((unsigned char *)value + PaykanType_refOffset(word));
+    if (!g_checking_move)
+      Paykan_freeze(ref);
+    else if (!(word & 2))
+      move_visit(ref);
   }
+}
+
+int64_t Paykan_moved_unique(PaykanShared *box) {
+  g_checking_move = 1;
+  g_move_held = 0;
+  move_visit((PaykanObject *)box);
+  return move_drain();
+}
+
+int64_t Paykan_moved_unique_mem(const void *type, void *value) {
+  g_checking_move = 1;
+  g_move_held = 0;
+  Paykan_freeze_mem(type, value);
+  return move_drain();
 }
 
 // -- Constructor / Destructor
@@ -104,6 +182,10 @@ void Paykan_runtime_panic(const char *fmt, ...) {
   fputc('\n', stderr);
   fflush(stderr);
   abort();
+}
+
+void Paykan_panic_moved(const char *place) {
+  Paykan_runtime_panic("a value moved out of '%s' is still borrowed", place);
 }
 
 void Paykan_panic_message(PaykanObject *message) {

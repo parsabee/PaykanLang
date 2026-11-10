@@ -339,8 +339,13 @@ void ModuleLowering::emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
     selfUsable = selfUsable || ma->completesInit();
   }
   const bool outerInit = std::exchange(InInitBody, true);
-  for (size_t i = first; i < stmts.size(); ++i)
+  const auto viewEnds = sema::viewHoldEnds(stmts);
+  for (size_t i = first; i < stmts.size(); ++i) {
     visit(stmts[i]);
+    if (!B.isTerminated())
+      for (const ast::VarDecl *vd : viewEnds[i])
+        endViewHold(vd);
+  }
   InInitBody = outerInit;
   FirstFieldStores.clear();
 }
@@ -445,9 +450,10 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
   return Val();
 }
 
-// `void Class.__walk(obj self)` (the concurrency prototype): freezes what
-// the object holds, for Paykan_freeze: every reference field but a `weak`
-// one, and the references in every field held in memory.
+// `void Class.__walk(obj self)` (the concurrency prototype): shows the
+// runtime what the object holds, for Paykan_freeze and for the check of a
+// moved value (#368): every reference field but a `weak` one, marked if it
+// is a unique one, and the references in every field held in memory.
 void ModuleLowering::emitWalk(ast::ClassDecl *node, ast::ClassType *ct) {
   pir::Function *fn = FuncByName.at(node->getName() + kNameSep + kMethodWalk);
   FunctionStateGuard fnState(*this, fn, nullptr, ct);
@@ -456,14 +462,18 @@ void ModuleLowering::emitWalk(ast::ClassDecl *node, ast::ClassType *ct) {
     if (ast::isMemType(fty)) {
       if (memHoldsRefs(fty))
         callRuntime(kPaykanFreezeMem,
-                    {emitTypeDescriptor(fty),
+                    {emitTypeDescriptor(ASTCtx.getQualifiedType(
+                         ct->findFieldQualifier(fname), fty)),
                      B.fieldAddr(self, ct->getName(), fname, fname + ".addr")});
       continue;
     }
     if (!ast::isRefType(fty) || ct->isWeakField(fname))
       continue;
     Val box = B.fieldLoad(self, ct->getName(), fname, Type::Box, fname);
-    callRuntime(kPaykanFreeze, {emitSharedGet(box, fname + ".obj")});
+    const bool unique =
+        ct->findFieldQualifier(fname).Form == ast::QualForm::Unique;
+    callRuntime(kPaykanWalkChild,
+                {emitSharedGet(box, fname + ".obj"), Val::i64(unique ? 1 : 0)});
   }
   B.emitRetVoid();
 }

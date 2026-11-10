@@ -1,0 +1,23 @@
+// expect-panic: a value moved out of 'h.n' is still borrowed
+import ::memory as mem;
+
+class Leaf {
+  v: int;
+}
+class Node {
+  leaf: Leaf;
+}
+class H {
+  n: mut Node;
+}
+
+// What the moved value holds uniquely is walked too.
+fn g(h: shared mut H, l: view Leaf) -> int {
+  let o = mem::replace(h.n, Node(Leaf(2)));
+  return o.leaf.v + l.v;
+}
+
+fn main() -> int {
+  h: shared mut H = H(Node(Leaf(1)));
+  return g(h, h.n.leaf);
+}

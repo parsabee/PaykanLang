@@ -206,7 +206,7 @@ ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
   if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
       u && u->getOpcode() == ast::UnaryOpcode::Move &&
       !(isMemOptionalWrap(e) && e != UnwrappedExpr))
-    return emitMemRead(u->getOperand());
+    return movesBytes(u) ? emitMemMoved(u) : emitMemRead(u->getOperand());
   // A tuple or a struct made the present value of its optional: the
   // optional, in a temporary.
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
@@ -355,7 +355,7 @@ Val ModuleLowering::emitMemAddress(ast::Expr *e) {
   // is; Sema has ended `v`, whose teardown still drops its own references
   // (a copy of the bytes retains the references among them).
   if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
-      u && u->getOpcode() == ast::UnaryOpcode::Move &&
+      u && u->getOpcode() == ast::UnaryOpcode::Move && !movesBytes(u) &&
       !(isMemOptionalWrap(e) && e != UnwrappedExpr))
     return emitMemAddress(u->getOperand());
   MemValue v = emitMemValue(e);
@@ -646,8 +646,15 @@ void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
     return;
   }
   if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
-      u && u->getOpcode() == ast::UnaryOpcode::Move)
+      u && u->getOpcode() == ast::UnaryOpcode::Move) {
+    if (movesBytes(u)) {
+      if (Val from = emitMemMoved(u).Addr)
+        B.memCopy(dst, from,
+                  Val::i64(memLayout(memTypeOf(u->getOperand())).Size));
+      return;
+    }
     e = u->getOperand();
+  }
   ast::Type *ty = e == UnwrappedExpr ? e->getResolvedType() : memTypeOf(e);
   // A tagged union's variant: its tag, then its fields, in place.
   if (auto *call = ast::dyn_cast<ast::CallExpr>(e);
@@ -773,12 +780,18 @@ void ModuleLowering::declareMemParam(const std::string &name,
                                      ast::ParamMode mode) {
   Val addr(pir::Operand::value(arg), Type::Ptr);
   if (mode == ast::ParamMode::Value) {
-    // The callee's own copy: what it changes, the caller's value keeps.
+    // The callee's own copy: what it changes, the caller's value keeps.  A
+    // value holding a unique reference reaches here only by moving or as a
+    // temporary, so its references are taken over, and the caller's
+    // teardown of its storage finds zeros: nothing is counted twice.
     MemLayout l = memLayout(ty);
     pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
     Val own = B.localAddr(local, name + ".addr");
     B.memCopy(own, addr, Val::i64(l.Size));
-    emitMemRetain(own, ty);
+    if (holdsUnique(ty))
+      B.memZero(addr, Val::i64(l.Size));
+    else
+      emitMemRetain(own, ty);
     CurrentScope->declare(name, local, ty);
     return;
   }

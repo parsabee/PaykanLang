@@ -1,0 +1,23 @@
+// expect-panic: a value moved out of 'h.p' is still borrowed
+import ::memory as mem;
+
+class Node {
+  v: int;
+}
+struct P {
+  n: Node;
+  k: int;
+}
+class H {
+  p: P;
+}
+
+fn g(h: shared mut H, n: view Node) -> int {
+  let x = mem::replace(h.p, P(Node(9), 1));
+  return x.n.v + n.v;
+}
+
+fn main() -> int {
+  h: shared mut H = H(P(Node(1), 2));
+  return g(h, h.p.n);
+}

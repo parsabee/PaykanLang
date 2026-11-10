@@ -238,10 +238,9 @@ bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
 ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
   if (!ty)
     return ty;
-  // A template's qualified type argument (#368): a native instance's, whose
-  // descriptor is its type's (the runtime copies, drops and freezes a
-  // reference whatever its form); every other declaration's type Sema
-  // resolved, its qualifier on the declaration.
+  // A template's qualified type argument (#368): a native instance's
+  // descriptor adds the form back (emitNativeCall); every other
+  // declaration's type Sema resolved, its qualifier on the declaration.
   if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
     return canonicalizeDeclType(qt->getInnerType());
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
@@ -733,13 +732,18 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
       return exprAlreadyShared(expr) && exprProducesFreshBox(ma->getReceiver());
     if (root->isInoutResult())
       return false;
-    return exprAlreadyShared(expr) &&
-           (ast::isa<ast::CallExpr>(root) ||
-            ast::isa<ast::MethodCallExpr>(root) ||
-            ast::isa<ast::CallValueExpr>(root) ||
-            ast::isa<ast::ArrayLiteralExpr>(root) ||
-            ast::isa<ast::TupleLiteralExpr>(root) ||
-            ast::isa<ast::TernaryExpr>(root) || isHeldRead(root));
+    // A `move` that leaves its value in a temporary.
+    const auto *moved = ast::dyn_cast<ast::UnaryExpr>(root);
+    const bool movedBytesOut =
+        moved && moved->getOpcode() == ast::UnaryOpcode::Move &&
+        ast::isMemType(moved->getResolvedType()) && movesBytes(moved);
+    return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
+                                       ast::isa<ast::MethodCallExpr>(root) ||
+                                       ast::isa<ast::CallValueExpr>(root) ||
+                                       ast::isa<ast::ArrayLiteralExpr>(root) ||
+                                       ast::isa<ast::TupleLiteralExpr>(root) ||
+                                       ast::isa<ast::TernaryExpr>(root) ||
+                                       isHeldRead(root) || movedBytesOut);
   }
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
@@ -986,14 +990,12 @@ Val ModuleLowering::visit(ast::ASTNode *node) {
 
 Val ModuleLowering::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
-  for (auto *stmt : node->getStatements())
-    visit(stmt);
+  emitStatements(node->getStatements());
   return Val();
 }
 
 void ModuleLowering::emitBody(ast::CompoundStmt *body) {
-  for (auto *stmt : body->getStatements())
-    visit(stmt);
+  emitStatements(body->getStatements());
 }
 
 Val ModuleLowering::visitDeclStmt(ast::DeclStmt *node) {
@@ -1192,6 +1194,14 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
 }
 
 Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
+  // A value it moves out of what its caller named is the caller's to check.
+  const ast::Expr *savedTail =
+      std::exchange(TailReturn, node->getReturnValue());
+  struct RestoreTail {
+    const ast::Expr *&Slot;
+    const ast::Expr *Saved;
+    ~RestoreTail() { Slot = Saved; }
+  } restoreTail{TailReturn, savedTail};
   // A result held in memory: written where the last parameter points (a
   // temporary of the caller's, which nothing here can reach otherwise).
   if (node->getReturnValue() && ast::isMemType(CurrentFuncReturnASTType) &&
@@ -1958,8 +1968,14 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
   const bool resultByAddress = node.resultByAddress() && ret != Type::Void;
   const pir::Signature csig = sema::nativeSignature(ASTCtx, node);
   std::vector<Val> cargs;
-  for (ast::Type *arg : node.getTypeArgs())
-    cargs.push_back(emitTypeDescriptor(canonicalizeDeclType(arg)));
+  // The runtime copies, drops and freezes a reference whatever its form;
+  // the check of a moved value asks which it is.
+  for (ast::Type *arg : node.getTypeArgs()) {
+    ast::Type *canon = canonicalizeDeclType(arg);
+    auto *qt = ast::dyn_cast<ast::QualifiedType>(arg);
+    cargs.push_back(emitTypeDescriptor(
+        qt ? ASTCtx.getQualifiedType(qt->getQualifier(), canon) : canon));
+  }
   std::optional<pir::LocalId> out;
   const bool viewResult = node.getResultMode() == ast::ParamMode::View;
   if (resultByAddress && !viewResult) {
@@ -2047,6 +2063,14 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   // union's for every variant but the current one: nullable.  What tells a
   // value from storage never set is the type's, not its shape's: an
   // optional function value's shape is a function value's.
+  // A reference that is no unique one: the whole value's form, or a
+  // function value's closure, which its copies share.
+  bool notUnique = false;
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    notUnique = qt->getQualifier().Form != ast::QualForm::Unique;
+    ty = qt->getInnerType();
+  }
+  notUnique = notUnique || ast::isFunctionValue(ty);
   const bool optional =
       ast::isa<ast::OptionalType>(ty) || ast::isPayloadEnum(ty);
   std::vector<int64_t> unset = unsetWords(ty, 0);
@@ -2063,28 +2087,44 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
                  ? static_cast<int64_t>(kNativeKindTuple)
                  : static_cast<int64_t>(nativeTypeKind(ty)),
              0, 0};
-    std::function<void(ast::Type *, int64_t, bool)> refs =
-        [&](ast::Type *e, int64_t off, bool nullable) {
+    std::function<void(ast::Type *, int64_t, bool, bool)> refs =
+        [&](ast::Type *e, int64_t off, bool nullable, bool handle) {
+          if (auto *qt = ast::dyn_cast<ast::QualifiedType>(e)) {
+            handle = handle || qt->getQualifier().Form != ast::QualForm::Unique;
+            e = qt->getInnerType();
+          }
+          handle = handle || ast::isFunctionValue(e);
           const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e) ||
                                  ast::isPayloadEnum(e);
           ast::Type *shape = memShapeOf(e);
-          if (auto *tt = ast::dyn_cast<ast::TupleType>(shape)) {
+          if (auto *st = ast::dyn_cast<ast::StructType>(shape)) {
+            // Before the tuple case, which a struct is too: its fields
+            // carry their qualifiers.
+            for (size_t i = 0; i < st->getArity(); ++i)
+              refs(st->getElementType(i), off + tupleElementOffset(st, i),
+                   maybeNull,
+                   handle || st->findFieldQualifier(st->getFieldName(i)).Form !=
+                                 ast::QualForm::Unique);
+          } else if (auto *tt = ast::dyn_cast<ast::TupleType>(shape)) {
             for (size_t i = 0; i < tt->getArity(); ++i)
               refs(tt->getElementType(i), off + tupleElementOffset(tt, i),
-                   maybeNull);
+                   maybeNull,
+                   handle || tt->getElemQual(i).Form != ast::QualForm::Unique);
           } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(shape)) {
             const int64_t stride = memLayout(ft->getElementType()).Size;
             for (int64_t i = 0; i < ft->getLength(); ++i)
-              refs(ft->getElementType(), off + i * stride, maybeNull);
+              refs(ft->getElementType(), off + i * stride, maybeNull,
+                   handle || ft->getElemQual().Form != ast::QualForm::Unique);
           } else if (ast::isRefType(e)) {
             ++words[3];
-            words.push_back(off << 1 | (maybeNull ? 1 : 0));
+            words.push_back(off << 2 | (handle ? 2 : 0) | (maybeNull ? 1 : 0));
           }
         };
-    refs(ty, 0, optional);
+    refs(ty, 0, optional, notUnique);
   } else if (slot == Type::Box) {
     words[3] = 1;
-    words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
+    words.push_back((notUnique ? 2 : 0) |
+                    (ast::isa<ast::OptionalType>(ty) ? 1 : 0)); // offset 0
   }
   words[4] = static_cast<int64_t>(unset.size());
   words.insert(words.end(), unset.begin(), unset.end());

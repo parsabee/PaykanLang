@@ -222,8 +222,8 @@ TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
   // Not const: the PaykanBuffer_* functions take a PaykanType as a `void *`.
   static LinkType kLink = {
       {sizeof(Link), alignof(Link), PAYKAN_KIND_TUPLE, 3, 1},
-      {(int64_t)offsetof(Link, prev) << 1 | 1,
-       (int64_t)offsetof(Link, leaf) << 1, (int64_t)offsetof(Link, index) << 1},
+      {(int64_t)offsetof(Link, prev) << 2 | 1,
+       (int64_t)offsetof(Link, leaf) << 2, (int64_t)offsetof(Link, index) << 2},
       (int64_t)offsetof(Link, leaf)};
   constexpr int kLen = 300000;
   PaykanShared *prev = nullptr;

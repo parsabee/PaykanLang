@@ -413,11 +413,11 @@ fn main() -> int {
 }
 )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  // The struct's c, the tuple's element and the array's two, and the
-  // struct's o, in the parameters' copies the function makes when it
-  // starts and in the variables' copies.
+  // The struct's c and o, in the parameter's copy the function makes when
+  // it starts and in the variable's copy.  The tuple and the array hold
+  // unique references, which move: nothing is retained for them.
   const std::string copy = function(l.Text, "copyStruct");
-  EXPECT_EQ(count(copy, "retain nonnull %elem."), 2u * 4) << copy;
+  EXPECT_EQ(count(copy, "retain nonnull %elem."), 2u * 1) << copy;
   EXPECT_EQ(count(copy, "retain %elem."), 2u * 1) << copy;
   // The union's copy tests its variant's field; the arm's copy does not.
   const std::string un = function(l.Text, "copyUnion");
@@ -462,20 +462,39 @@ fn arm(o: C?, c: C) -> int {
   return 0;
 }
 
+class H {
+  o: C?;
+  c: C;
+}
+
+fn fields(h: H) -> int {
+  match h.o {
+    x: C { return x.p.a; }
+    None { }
+  }
+  match h.c {
+    y: C { return y.p.a; }
+  }
+  return 0;
+}
+
 fn main() -> int {
-  return arm(None, C(P(1)));
+  return arm(None, C(P(1))) + fields(H(None, C(P(1))));
 }
 )");
   ASSERT_TRUE(l.Ok) << l.Error;
+  // A temporary's reference is the binding's: nothing to retain.
   const std::string arm = function(l.Text, "arm");
-  const size_t pick = arm.find("call @pick(");
-  const size_t same = arm.find("call @same(");
-  ASSERT_NE(pick, std::string::npos) << arm;
-  ASSERT_NE(same, std::string::npos) << arm;
-  const std::string optional = arm.substr(pick, same - pick);
-  EXPECT_EQ(count(optional, "retain %call."), 1u) << arm;
-  EXPECT_EQ(count(optional, "retain nonnull"), 0u) << arm;
-  EXPECT_EQ(count(arm.substr(same), "retain nonnull %call."), 1u) << arm;
+  EXPECT_EQ(count(arm, "retain"), 0u) << arm;
+  // A field's value is retained for the match and for the binding.
+  const std::string f = function(l.Text, "fields");
+  const size_t o = f.find("field.load");
+  const size_t c = f.find("field.load", o + 1);
+  ASSERT_NE(c, std::string::npos) << f;
+  const std::string optional = f.substr(o, c - o);
+  EXPECT_GE(count(optional, "retain %"), 1u) << f;
+  EXPECT_EQ(count(optional, "retain nonnull"), 0u) << f;
+  EXPECT_GE(count(f.substr(c), "retain nonnull %"), 1u) << f;
 }
 
 namespace {
@@ -514,13 +533,12 @@ TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
   const std::string f50 = function(l50.Text, "name");
   const std::string f100 = function(l100.Text, "name");
   EXPECT_LT(count(f100, "\n"), 2.5 * count(f50, "\n"));
-  // Each of the 100 arms' returns releases the subject's copy and the
-  // parameter's, 34 references each: the first 15 values in place (510 of
-  // the 512 releases), the other 185 by a call.  The ends of the match's
-  // scope and of the function's, which no arm reaches, release the two in
-  // place.
-  EXPECT_EQ(count(f100, "release "), (15u + 2) * 34) << f100;
-  EXPECT_EQ(count(f100, "call @.drop.Many("), 2u * 100 - 15) << f100;
+  // Each of the 100 arms' returns releases the parameter's copy, 34
+  // references (an arm binding nothing, the subject is not held): the first
+  // 15 in place (510 of the 512 releases), the other 85 by a call.  The end
+  // of the function, which no arm reaches, releases it in place.
+  EXPECT_EQ(count(f100, "release "), (15u + 1) * 34) << f100;
+  EXPECT_EQ(count(f100, "call @.drop.Many("), 100u - 15) << f100;
   const std::string drop = fullFunction(l100.Text, ".drop.Many");
   EXPECT_NE(drop.find("fn @.drop.Many(%at.1: ptr) -> void {\n"
                       "  %tag.2 = ptr.load i64, %at.1\n"
@@ -534,7 +552,7 @@ TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
   Lowered small = lower(unionOfMany(10));
   ASSERT_TRUE(small.Ok) << small.Error;
   EXPECT_EQ(small.Text.find(".drop."), std::string::npos) << small.Text;
-  EXPECT_EQ(count(function(small.Text, "name"), "release "), 2u * 11 * 4)
+  EXPECT_EQ(count(function(small.Text, "name"), "release "), 11u * 4)
       << function(small.Text, "name");
 }
 
@@ -844,26 +862,26 @@ TEST(Lowering, GenericNativeFunctionDescribesStorageNeverSet) {
   ASSERT_TRUE(l.Ok) << l.Error;
   for (const char *descriptor : {
            // F: the tag at 0, B's Str at 8 (nullable: NULL in an A).
-           "= [16, 8, 6, 1, 2, 17, 0, 8]\n",
+           "= [16, 8, 6, 1, 2, 33, 0, 8]\n",
            // () -> int: the code word at 0, the closure (nullable) at 8.
-           "= [16, 8, 6, 1, 1, 17, 0]\n",
+           "= [16, 8, 6, 1, 1, 35, 0]\n",
            // Its optional: the same 16 bytes, None all zeros.
-           "= [16, 8, 6, 1, 0, 17]\n",
+           "= [16, 8, 6, 1, 0, 35]\n",
            // S: the function value at 8, its code word.
-           "= [24, 8, 6, 1, 1, 33, 8]\n",
+           "= [24, 8, 6, 1, 1, 67, 8]\n",
            // G: zeros are A(0, None).
-           "= [32, 8, 6, 2, 0, 33, 49]\n",
+           "= [32, 8, 6, 2, 0, 65, 97]\n",
            // E: its tag, A's H's tag, then H's X's Str.
-           "= [24, 8, 6, 1, 3, 33, 0, 8, 16]\n",
+           "= [24, 8, 6, 1, 3, 65, 0, 8, 16]\n",
            // Maybe<int>: zeros are Just(0).
            "= [16, 8, 6, 0, 0]\n",
            // P: its Str alone tells, the fewest words.
-           "= [24, 8, 6, 2, 1, 17, 32, 16]\n",
+           "= [24, 8, 6, 2, 1, 33, 64, 16]\n",
        })
     EXPECT_NE(l.Text.find(descriptor), std::string::npos) << descriptor << "\n"
                                                           << l.Text;
   // Maybe<Str> is described as F is: one descriptor for both.
-  EXPECT_EQ(count(l.Text, "= [16, 8, 6, 1, 2, 17, 0, 8]\n"), 1u) << l.Text;
+  EXPECT_EQ(count(l.Text, "= [16, 8, 6, 1, 2, 33, 0, 8]\n"), 1u) << l.Text;
 }
 
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
@@ -2836,13 +2854,13 @@ TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
   EXPECT_EQ(count(m, "select %is."), 2u) << m;
   EXPECT_EQ(count(m, "if %match.open."), 1u) << m;
   EXPECT_NE(m.find("switch %match.arm."), std::string::npos) << m;
-  // The binding is an owned box local: the arm retains the subject box
+  // The binding is an owned box local: the arm takes over the subject box
   // (a call result the match owns) and releases it at arm exit; the match
-  // releases the subject itself once, at the end.
+  // releases what its slot still holds at the end.
   size_t bLocal = m.find("local %b");
   ASSERT_NE(bLocal, std::string::npos) << m;
   EXPECT_NE(m.find(": box", bLocal), std::string::npos) << m;
-  EXPECT_EQ(count(m, "retain"), 1u) << m;
+  EXPECT_EQ(count(m, "retain"), 0u) << m;
   EXPECT_EQ(count(m, "release"), 2u) << m;
 }
 
@@ -3310,8 +3328,9 @@ TEST(Lowering, FixedArraysOfReferencesOwnTheirElements) {
        {"local %xs.0: mem(16, 8)", "local %big.", ": mem(40, 8)",
         "ptr.load box, %", "while {", "cmp lt %i.", ", 5\n"})
     EXPECT_NE(m.find(e), std::string::npos) << e << "\n" << m;
-  // ys's two elements; nothing for pair()'s result or ys[1]'s clone.
-  EXPECT_EQ(count(m, "retain"), 2u) << m;
+  // Nothing: `move xs` moves the bytes, and pair()'s result and ys[1]'s
+  // clone are owned already.
+  EXPECT_EQ(count(m, "retain"), 0u) << m;
   // xs's and ys's two each, unrolled; big's five in one loop.
   EXPECT_EQ(count(m, "release"), 5u) << m;
 }
@@ -5298,4 +5317,271 @@ fn main() -> int {
     ASSERT_FALSE(b.empty()) << fn << "\n" << l.Text;
     EXPECT_NE(b.find("= box "), std::string::npos) << fn << "\n" << b;
   }
+}
+
+// -- The check of a value moved out of borrowed storage (#368)
+
+TEST(Lowering, AMoveOutOfBorrowedStorageIsCheckedByItsCaller) {
+  auto l = lower(R"(
+    import ::memory as mem;
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn borrowed(h: shared mut H) -> int {
+      let o = mem::replace(h.n, Node(2));
+      return o.v;
+    }
+    fn owned() -> int {
+      h: mut H = H(Node(1));
+      let o = mem::replace(h.n, Node(2));
+      return o.v;
+    }
+    fn fromSlot(s: inout Node) -> Node { return mem::replace(s, Node(0)); }
+    fn passedOn(s: inout Node) -> Node { return fromSlot(s); }
+    fn checked(h: shared mut H) -> int {
+      let x = passedOn(h.n);
+      return x.v;
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string check = "Paykan_moved_unique";
+  EXPECT_NE(function(l.Text, "borrowed").find(check), std::string::npos);
+  EXPECT_EQ(function(l.Text, "owned").find(check), std::string::npos);
+  // What a function returns as it moved it is its caller's to check.
+  EXPECT_EQ(function(l.Text, "fromSlot").find(check), std::string::npos);
+  EXPECT_EQ(function(l.Text, "passedOn").find(check), std::string::npos);
+  EXPECT_NE(function(l.Text, "checked").find(check), std::string::npos);
+}
+
+// Past a handle, the caller's slot does not cover what moved: other handles
+// reach it, whatever the path to this one.
+TEST(Lowering, AMoveThroughAHandleIsCheckedWhereItHappens) {
+  auto l = lower(R"(
+    import ::memory as mem;
+    class Node { v: int; }
+    class H { n: mut Node; }
+    class W { h: shared mut H; }
+    fn id(h: shared mut H) -> shared mut H { return h; }
+    fn underOwned(w: inout W) -> Node { return mem::replace(w.h.n, Node(2)); }
+    fn byValue(h: shared mut H) -> Node { return mem::replace(h.n, Node(2)); }
+    fn caller() -> int {
+      w: mut W = W(H(Node(1)));
+      let o = underOwned(w);
+      return o.v;
+    }
+    fn fromCall(h: shared mut H) -> int {
+      let o = mem::replace(id(h).n, Node(2));
+      return o.v;
+    }
+    fn fromConditional(h: shared mut H, k: shared mut H, p: bool) -> int {
+      let o = mem::replace((if p then h else k).n, Node(2));
+      return o.v;
+    }
+    fn fromLambda(h: shared mut H) -> int {
+      let t = fn() -> Node { return mem::replace(h.n, Node(2)); };
+      let o = t();
+      return o.v;
+    }
+    fn local(mk: () -> shared mut H) -> Node {
+      k = mk();
+      return mem::replace(k.n, Node(2));
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string check = "Paykan_moved_unique";
+  for (const char *f :
+       {"underOwned", "byValue", "fromCall", "fromConditional", "local"})
+    EXPECT_NE(function(l.Text, f).find(check), std::string::npos) << f;
+  EXPECT_EQ(function(l.Text, "caller").find(check), std::string::npos);
+  EXPECT_EQ(function(l.Text, "fromLambda").find(check), std::string::npos);
+  // Those five, and the lambda's own.
+  EXPECT_EQ(count(l.Text, "call @$rt.Paykan_moved_unique("), 5u + 1) << l.Text;
+}
+
+// A result that turns shared leaves the unique part of the type in the
+// callee, which checks it: no caller would.
+TEST(Lowering, AResultOfAnotherFormIsCheckedByItsFunction) {
+  auto l = lower(R"(
+    import ::memory as mem;
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn tk(s: inout Node) -> shared Node { return mem::replace(s, Node(0)); }
+    fn g(h: shared mut H) -> int {
+      let x = tk(h.n);
+      return x.v;
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string check = "Paykan_moved_unique";
+  EXPECT_NE(function(l.Text, "tk").find(check), std::string::npos);
+  EXPECT_EQ(function(l.Text, "g").find(check), std::string::npos);
+}
+
+// `mem::swap` of a borrowed slot and an owned one: checked where the value
+// arrives.  Of two owned ones, or two borrowed: nothing to check.
+TEST(Lowering, ASwapFromBorrowedIntoOwnedIsChecked) {
+  auto l = lower(R"(
+    import ::memory as mem;
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn intoOwned(h: shared mut H) -> int {
+      x: mut Node = Node(2);
+      mem::swap(h.n, x);
+      return x.v;
+    }
+    fn bothOwned() -> int {
+      x: mut Node = Node(2);
+      y: mut Node = Node(3);
+      mem::swap(x, y);
+      return x.v;
+    }
+    fn bothBorrowed(h: shared mut H, k: shared mut H) {
+      mem::swap(h.n, k.n);
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string check = "Paykan_moved_unique";
+  EXPECT_NE(function(l.Text, "intoOwned").find(check), std::string::npos);
+  EXPECT_EQ(function(l.Text, "bothOwned").find(check), std::string::npos);
+  EXPECT_EQ(function(l.Text, "bothBorrowed").find(check), std::string::npos);
+  // The body of `replace` is its callers' to check.
+  EXPECT_EQ(fullFunction(l.Text, "$::memory::replace<Node>").find(check),
+            std::string::npos);
+}
+
+// A `view` local's hold ends with its borrow, after the last statement of
+// its block that uses it.
+TEST(Lowering, AViewLocalsHoldEndsAfterItsLastUse) {
+  auto l = lower(R"(
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn g(h: shared mut H) -> int {
+      l: view Node = h.n;
+      let a = l.v;
+      h.n = Node(2);
+      return a;
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string f = function(l.Text, "g");
+  const size_t load = f.find("%v.");
+  const size_t rel = f.find("release ", load);
+  const size_t store = f.find("field.store");
+  ASSERT_NE(load, std::string::npos) << f;
+  EXPECT_LT(rel, store) << f;
+}
+
+// A call that exchanges a borrowed and an owned place is checked in the owned
+// one, evaluated once more only when that runs nothing.
+TEST(Lowering, AnExchangeThroughAFunctionIsCheckedInTheOwnedPlace) {
+  auto l = lower(R"(
+    import ::memory as mem;
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn ex(a: inout Node, b: inout Node) { mem::swap(a, b); }
+    fn nx(i: inout int) -> int { i = i + 1; return i; }
+    fn plain(h: shared mut H) -> int {
+      x: mut Node = Node(2);
+      ex(h.n, x);
+      return x.v;
+    }
+    fn indexed(h: shared mut H) -> int {
+      a: Node[2] = [Node(1), Node(2)];
+      i = 0;
+      ex(h.n, a[nx(i)]);
+      return i;
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string check = "Paykan_moved_unique";
+  EXPECT_NE(function(l.Text, "plain").find(check), std::string::npos);
+  const std::string f = function(l.Text, "indexed");
+  EXPECT_EQ(f.find(check), std::string::npos) << f;
+  EXPECT_EQ(count(f, "call @nx("), 1u) << f;
+}
+
+// An arm binding nothing reads the subject for its test alone.
+TEST(Lowering, AMatchBindingNothingDoesNotHoldItsSubject) {
+  auto l = lower(R"(
+    class Node { v: int; }
+    class H { o: mut Node?; }
+    fn f(h: shared mut H) -> int {
+      match h.o {
+        Node { return 1; }
+        None { return 0; }
+      }
+    }
+    fn g(h: shared mut H) -> int {
+      match h.o {
+        n: Node { return n.v; }
+        None { return 0; }
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_EQ(count(function(l.Text, "f"), "retain"), 0u)
+      << function(l.Text, "f");
+  EXPECT_GE(count(function(l.Text, "g"), "retain"), 1u)
+      << function(l.Text, "g");
+}
+
+TEST(Lowering, ACallThatTakesNothingOutOfItsSlotIsNotChecked) {
+  auto l = lower(R"(
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn fresh(h: shared mut H) -> Node { return Node(h.n.v); }
+    fn caller(h: shared mut H) -> int {
+      let x = fresh(h);
+      return x.v;
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_EQ(function(l.Text, "caller").find("Paykan_moved_unique"),
+            std::string::npos);
+}
+
+TEST(Lowering, ATakeThroughAHandleHoldsWhatTheCallerBorrowsOfIt) {
+  auto l = lower(R"(
+    import ::memory as mem;
+    class Node { v: int; }
+    class H { n: mut Node; }
+    fn take(s: inout Node) -> Node { return mem::replace(s, Node(0)); }
+    fn g(h: shared mut H, n: view Node) -> int {
+      let x = take(h.n);
+      return x.v + n.v;
+    }
+    fn caller(h: shared mut H) -> int { return g(h, h.n); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string f = function(l.Text, "caller");
+  const std::string held = defined(f, "field.load");
+  ASSERT_FALSE(held.empty()) << f;
+  EXPECT_LT(f.find("retain nonnull " + held + "\n"), f.find("call @g(")) << f;
+}
+
+TEST(Lowering, ATypeArgumentsFormIsInANativeInstancesDescriptor) {
+  auto l = lower(R"(
+    native fn keep<T>(v: view T) = "keep";
+    class Item { n: int; }
+    fn main() -> int {
+      i: shared mut Item = Item(1);
+      keep<shared mut Item>(i);
+      j: Item = Item(2);
+      keep<Item>(j);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("= [8, 8, 4, 1, 1, 2, 0]\n"), std::string::npos)
+      << l.Text; // the reference word has the bit: no unique one
+  EXPECT_NE(l.Text.find("= [8, 8, 4, 1, 1, 0, 0]\n"), std::string::npos)
+      << l.Text;
 }

@@ -1,0 +1,26 @@
+// expect-panic: a value moved out of 'self.q.jobs' is still borrowed
+import ::collections as cl;
+
+class Job {
+  id: int;
+}
+class Q {
+  jobs: cl::List<Job>;
+}
+class Worker {
+  q: shared mut Q;
+  // Past the handle: this method's check, though its receiver is owned.
+  fn next() -> Job { return self.q.jobs.pop(); }
+}
+
+fn look(j: view Job, q: shared mut Q) -> int {
+  w: mut Worker = Worker(q);
+  let t = w.next();
+  return j.id + t.id;
+}
+
+fn main() -> int {
+  q: shared mut Q = Q(cl::List<Job>());
+  q.jobs.push(Job(7));
+  return look(q.jobs.at(0), q);
+}

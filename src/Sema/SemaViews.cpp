@@ -159,18 +159,51 @@ bool Sema::checkChangeable(const ast::Expr *e, const std::string &what,
   return false;
 }
 
+bool Sema::lendsForm(const ast::Expr *e, ast::Qualifier want) {
+  const BorrowResult *r = borrowResultOf(e);
+  if (!r || placeBase(e) != e)
+    return false;
+  ast::Type *ty =
+      ast::stripOptional(const_cast<ast::Expr *>(e)->getResolvedType());
+  bool any = false;
+  for (size_t i = 0; i < r->From.size(); ++i) {
+    const ast::Expr *from = r->From[i];
+    if (ast::stripOptional(const_cast<ast::Expr *>(from)->getResolvedType()) !=
+        ty) {
+      // The result may be inside it, in whatever form it is held there.
+      if (r->PastFrom[i])
+        return false;
+      continue;
+    }
+    if (qualifierOf(from) != want)
+      return false;
+    any = true;
+  }
+  return any;
+}
+
 bool Sema::checkSharedReceiver(const ast::MethodCallExpr *call,
-                               const ast::MethodDecl *method) {
+                               const ast::MethodDecl *method,
+                               const ast::Expr *recv) {
   if (!method->isShared())
     return true;
-  const ast::Expr *recv = call->getReceiver();
+  if (!recv)
+    recv = call->getReceiver();
+  // A conditional's receiver is one of its branches.
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(recv)) {
+    bool ok = true;
+    for (const ast::Expr *b : conditionalBranches(te))
+      ok = checkSharedReceiver(call, method, b) && ok;
+    return ok;
+  }
   // A temporary, `Counter().bump()` or `(move c).bump()`: nothing else
-  // holds it, so it may be shared from here on.
-  if (!isCopyPlace(recv))
+  // holds it, so it may be shared from here on.  A borrowed result is no
+  // temporary: something else holds what it names.
+  if (!isCopyPlace(recv) && !borrowResultOf(recv))
     return true;
   const ast::Qualifier want{ast::QualForm::Shared, !method->isView()};
   const ast::Qualifier have = qualifierOf(recv);
-  if (have == want)
+  if (have == want || lendsForm(recv, want))
     return true;
   ast::Type *ty =
       ast::stripOptional(const_cast<ast::Expr *>(recv)->getResolvedType());
@@ -361,6 +394,203 @@ bool Sema::copiesArgumentForm(const ast::Expr *e, ast::Type *ty) {
     if ((arg == ty || arg == inner) && isCopyable(ty))
       return true;
   return false;
+}
+
+bool Sema::onOwnedPath(const ast::Expr *e) {
+  if (e->isInoutResult() || borrowResultOf(e))
+    return false;
+  for (const ast::Expr *p = e;;) {
+    // A conditional's path is each of its branches'.
+    if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(p))
+      return onOwnedPath(te->getTrueExpr()) && onOwnedPath(te->getFalseExpr());
+    // A temporary is owned only when it is unique itself: `id(h).n` names
+    // what the handle `id(h)` names, which other handles reach.
+    if (qualifierOf(p).Form != ast::QualForm::Unique)
+      return false;
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(p)) {
+      if (id->getName() == names::kSelf || isViewBindingSubject(id->getName()))
+        return false;
+      const VarKind kind = varKind(id->getName());
+      return kind == VarKind::Plain || kind == VarKind::Let;
+    }
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p)) {
+      p = ma->getReceiver();
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p)) {
+      // A fixed-size array's element is in place; a slice's is another's.
+      if (!ast::isa<ast::FixedArrayType>(
+              const_cast<ast::Expr *>(se->getArray())->getResolvedType()))
+        return false;
+      p = se->getArray();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p)) {
+      p = ti->getTuple();
+    } else {
+      return true; // a temporary of its own
+    }
+  }
+}
+
+bool Sema::isViewBindingSubject(const std::string &name) const {
+  for (const Scope *s = CurrentScope; s; s = s->Parent)
+    for (const auto &[binding, subject] : s->ViewSubjects)
+      if (const ast::Identifier *root = placeRoot(subject);
+          root && root->getName() == name)
+        return true;
+  return false;
+}
+
+bool Sema::slotIsCallers(const ast::Expr *slot) {
+  // A lambda's caller knows nothing of what it captured.
+  if (!LambdaStack.empty())
+    return false;
+  const ast::Identifier *root = placeRoot(slot);
+  if (!root)
+    return false;
+  // Past a handle, what the caller named is the handle's owner, not this
+  // value: its own path may be owned while other handles reach this.
+  for (const ast::Expr *p = slot; p != root;) {
+    if (qualifierOf(p).Form != ast::QualForm::Unique)
+      return false;
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p)) {
+      p = ma->getReceiver();
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p)) {
+      if (!ast::isa<ast::FixedArrayType>(
+              const_cast<ast::Expr *>(se->getArray())->getResolvedType()))
+        return false;
+      p = se->getArray();
+    } else {
+      p = ast::cast<ast::TupleIndexExpr>(p)->getTuple();
+    }
+  }
+  if (root->getName() == names::kSelf)
+    return true;
+  if (!CurrentResult.Fn || !CurrentScope ||
+      CurrentScope->findOwner(root->getName()) != CurrentResult.Params)
+    return false;
+  for (const ast::Param &p : CurrentResult.Fn->getParams())
+    if (*p.Name == root->getName())
+      return p.Mode == ast::ParamMode::Inout;
+  return false; // a local of the function's outermost scope
+}
+
+bool Sema::inMemoryModuleTake() const {
+  // `replace` and `take` are MovesOut themselves: their callers check.
+  if (!CurrentResult.Fn)
+    return false;
+  const std::string &fn = CurrentResult.Fn->getName();
+  return fn.starts_with("$::memory::replace<") ||
+         fn.starts_with("$::memory::take<");
+}
+
+void Sema::noteExchange(ast::Expr *e, const std::vector<ast::Expr *> &args,
+                        const ast::ParamModes &modes) {
+  const ast::Expr *borrowed = nullptr;
+  const ast::Expr *owned = nullptr;
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (modes.mode(i) != ast::ParamMode::Inout)
+      continue;
+    const ast::Expr *a = args[i];
+    ast::Type *ty = const_cast<ast::Expr *>(a)->getResolvedType();
+    if (!ty)
+      return; // an error in the call
+    if (!sharesStorage(ty) || isCopyablePart(ty, qualifierOf(a)))
+      continue;
+    if (!onOwnedPath(a))
+      borrowed = borrowed ? borrowed : a;
+    else if (!owned && placeRoot(a) && isPurePlace(a))
+      owned = a;
+  }
+  if (borrowed && owned &&
+      const_cast<ast::Expr *>(borrowed)->getResolvedType() ==
+          const_cast<ast::Expr *>(owned)->getResolvedType())
+    e->setMovedFrom(&Ctx.intern(placeText(borrowed)), false, owned);
+}
+
+bool Sema::isPurePlace(const ast::Expr *e) {
+  for (;;) {
+    if (ast::isa<ast::Identifier>(e))
+      return true;
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+      e = ma->getReceiver();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+      e = ti->getTuple();
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
+               se && ast::isa<ast::IntegerLiteral>(se->getIndex())) {
+      e = se->getArray();
+    } else {
+      return false;
+    }
+  }
+}
+
+void Sema::noteMovedFrom(ast::Expr *e) {
+  auto *call = ast::dyn_cast<ast::CallExpr>(e);
+  auto *method = ast::dyn_cast<ast::MethodCallExpr>(e);
+  auto *valueCall = ast::dyn_cast<ast::CallValueExpr>(e);
+  if (!call && !method && !valueCall)
+    return;
+  // What a function exchanges between an `inout` place of its caller's that
+  // is borrowed and one that is owned (`mem::swap`) is checked where it
+  // arrives.
+  if (call && !call->calleeIsValue() && !inMemoryModuleTake())
+    if (const FunctionSig *sig = lookupFunction(call->getCalleeName()))
+      noteExchange(e, call->getArguments(), sig->Modes);
+  // Only a move-only value needs its other holders looked for.
+  ast::Type *ty = e->getResolvedType();
+  if (!ty || !sharesStorage(ty) || e->isInoutResult() || borrowResultOf(e) ||
+      isCopyablePart(ty, qualifierOf(e)))
+    return;
+  // The places the value may come from.
+  std::vector<const ast::Expr *> slots;
+  const std::vector<ast::Expr *> &args = call     ? call->getArguments()
+                                         : method ? method->getArguments()
+                                                  : valueCall->getArguments();
+  {
+    // A by-value handle is no slot of the caller's: what the callee takes
+    // through one it checks itself (slotIsCallers).
+    auto arg = [&](size_t i, ast::ParamMode mode) {
+      if (i < args.size() && mode == ast::ParamMode::Inout)
+        slots.push_back(args[i]);
+    };
+    if (valueCall || (method && method->isFieldCall()) ||
+        (call && call->calleeIsValue())) {
+      for (ast::Expr *a : args)
+        if (a->isChangedByCall())
+          slots.push_back(a);
+    } else if (method) {
+      ast::Type *recvTy = ast::stripOptional(
+          const_cast<ast::Expr *>(method->getReceiver())->getResolvedType());
+      const ast::MethodDecl *md =
+          recvTy ? methodOf(recvTy, method->getMethodName()) : nullptr;
+      if (!md)
+        return;
+      if (!md->isView())
+        slots.push_back(method->getReceiver());
+      for (size_t i = 0; i < args.size() && i < md->getParamTypes().size(); ++i)
+        arg(i, md->getParamModes().mode(i));
+    } else if (const FunctionSig *sig = lookupFunction(call->getCalleeName())) {
+      for (size_t i = 0; i < args.size(); ++i)
+        arg(i, sig->Modes.mode(i));
+    }
+  }
+  // An error in a call left an argument unchecked.
+  for (const ast::Expr *s : slots)
+    if (!s->getResolvedType())
+      return;
+  std::string place;
+  // A result of another form leaves the unique part of the type here: no
+  // caller can check it.
+  const ast::FuncDecl *fn = CurrentResult.Fn;
+  bool callers = fn && fn->getResultQual().Form == ast::QualForm::Unique;
+  for (const ast::Expr *s : slots) {
+    if (onOwnedPath(s))
+      continue;
+    if (!place.empty())
+      place += "' or '";
+    place += placeText(s);
+    callers = callers && slotIsCallers(s);
+  }
+  if (!place.empty())
+    e->setMovedFrom(&Ctx.intern(place), callers, e->getMovedInto());
 }
 
 bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {

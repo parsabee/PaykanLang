@@ -59,6 +59,8 @@ import ::error as err;
 import ::memory as mem;
 
 native fn _panic(message: view Str) = "Paykan_panic_message";
+// The value of `slot`, which is left empty: for a node about to die.
+native fn _moveOut<T>(slot: inout T) -> T = "Paykan_mem_move_out";
 // _panic for where a value is due: it never returns one.
 native fn _fail<T>(message: view Str) -> T = "Paykan_panic_value";
 // _panic for where a `view` is due: it never returns one.
@@ -431,7 +433,7 @@ impl LinkedList<T> {
     n.next = None;
     n.prev = None;
     self.__len = self.__len - 1;
-    return move n.value;
+    return _moveOut<T>(n.value);
   }
 }
 
