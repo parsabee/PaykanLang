@@ -715,14 +715,12 @@ impl Counter {
 fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
-  expectErrors(
-      r, {":26:16: error: 'self.n' is reached through 'self'; it cannot be "
-          "borrowed 'inout' across an 'await'",
-          ":28:15: note: 'c' is used after this 'await'",
-          ":33:16: error: 'self.n' is reached through 'self'",
-          ":34:24: note: 'c' is used after this 'await'",
-          ":38:16: error: 'self.n' is reached through 'self'",
-          ":39:13: note: 'c' is used after this 'await'"});
+  expectErrors(r, {":26:16: error: 'self.n' is reached through 'self'",
+                   ":28:15: note: 'c' is used after this 'await'",
+                   ":33:16: error: 'self.n' is reached through 'self'",
+                   ":34:24: note: 'c' is used after this 'await'",
+                   ":38:16: error: 'self.n' is reached through 'self'",
+                   ":39:13: note: 'c' is used after this 'await'"});
   expectCleanLines(r, {":6:", ":11:", ":16:", ":21:"});
 }
 
@@ -814,8 +812,7 @@ fn owned(k: int) -> int {
 fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
-  expectErrors(r, {":7:11: error: 'self.a' is reached through 'self'; it "
-                   "cannot be borrowed 'inout' across an 'await'",
+  expectErrors(r, {":7:11: error: 'self.a' is reached through 'self'",
                    ":8:31: note: 'o' is used after this 'await'",
                    ":14:11: error: 'self.a' is reached through 'self'",
                    ":21:11: error: 'self.a' is reached through 'self'",
@@ -904,18 +901,16 @@ impl Counter {
 fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
-  expectErrors(r,
-               {":41:16: error: 'self.n' is reached through 'self'",
-                ":43:26: note: 'c' is used after this 'await'",
-                ":49:16: error: 'self.n' is reached through 'self'",
-                ":51:26: note: 'c' is used after this 'await'",
-                ":57:16: error: 'self.n' is reached through 'self'",
-                ":58:14: note: 'c' is used after this 'await'",
-                ":62:16: error: 'self.arr[...]' is reached through 'self'; it "
-                "cannot be borrowed 'inout' across an 'await'",
-                ":62:25: note: 'x' is used after this 'await'",
-                ":67:16: error: 'self.n' is reached through 'self'",
-                ":68:13: note: 'c' is used after this 'await'"});
+  expectErrors(r, {":41:16: error: 'self.n' is reached through 'self'",
+                   ":43:26: note: 'c' is used after this 'await'",
+                   ":49:16: error: 'self.n' is reached through 'self'",
+                   ":51:26: note: 'c' is used after this 'await'",
+                   ":57:16: error: 'self.n' is reached through 'self'",
+                   ":58:14: note: 'c' is used after this 'await'",
+                   ":62:16: error: 'self.arr[...]' is reached through 'self'",
+                   ":62:25: note: 'x' is used after this 'await'",
+                   ":67:16: error: 'self.n' is reached through 'self'",
+                   ":68:13: note: 'c' is used after this 'await'"});
   expectCleanLines(r, {":7:", ":14:", ":22:", ":27:", ":31:", ":35:"});
 }
 
