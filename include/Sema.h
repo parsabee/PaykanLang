@@ -2385,6 +2385,9 @@ private:
   /// Those of the block @p only alone, when given.
   bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
                            const ast::ImplDecl *only = nullptr);
+  /// Whether @p fn, a `__deinit__` of @p owner, is declared as one is (#378):
+  /// a class's plain `fn` with no parameters, no result and a body.
+  bool checkDeinitDecl(const ast::FuncDecl *fn, const ast::Type *owner);
 
   /// Give @p cd, which declares no `__init__`, the default one: it takes the
   /// superclass constructor's arguments and then one per field of the class,

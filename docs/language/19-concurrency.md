@@ -1135,7 +1135,8 @@ effect does not depend on that order. A function is par-safe unless it, or anyth
 - calls a `native fn` other than those of `::math` and the runtime of `Str`, buffers and cells;
 - starts a task;
 - calls a function value, whether held in a variable, a field or an array;
-- makes a virtual call the compiler cannot resolve.
+- makes a virtual call the compiler cannot resolve;
+- destroys an object whose `__deinit__` does one of these.
 
 The compiler follows the calls itself, through recursion and across modules:
 
@@ -1167,6 +1168,14 @@ each override. In a module that others import, a class can still be derived from
 a virtual call on one of its classes is an error; an `impl` block's method is never overridden
 and can be called. `a == b` and `Str(a)` count as calls of `equals` and `toString` on the objects
 `a` holds.
+
+Destroying an object runs its `__deinit__` ([Classes](05-classes.md#deinitializers)), which
+is a call like any other. An object dies in the code that made it or in what that code hands
+it to, so making one counts as a call of its `__deinit__` and of its superclasses' (`a
+'parallel for' body cannot destroy a 'Loud': it runs 'Loud.__deinit__', which calls ...`).
+The one thing a body can destroy that it did not make is what a `locked mut` cell holds:
+taking the contents `inout` counts for every object they may hold, of the classes their
+types name and, as with a virtual call, of the classes derived from those.
 
 ## `locked mut` cells and `lock` blocks
 

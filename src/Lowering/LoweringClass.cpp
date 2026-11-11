@@ -535,6 +535,30 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
       stmts.pop_back();
   }
 
+  // `__deinit__` (#378): the class's own, then each superclass's, while
+  // everything the object holds is still alive.  Each is a class's own
+  // function, called directly: this `destroy` is the object's class's.
+  // They are the program's code: between `Paykan_deinit_begin` and
+  // `Paykan_deinit_end` the object can be referred to, and what they drop
+  // is destroyed where it is dropped (src/Runtime/Shared.c).
+  Val token;
+  for (ast::ClassType *c = ct; c; c = c->getSuperClass()) {
+    if (!c->getDeinitMethod())
+      continue;
+    pir::Function *deinit = lookupOwnMethodFunction(c, kMethodDeinit);
+    if (!deinit) {
+      reportInternalError("no function for '" + c->getName() + "." +
+                          kMethodDeinit + "' called by the destructor of '" +
+                          ct->getName() + "'");
+      continue;
+    }
+    if (!token)
+      token = callRuntime(kPaykanDeinitBegin, {self}, "deinit");
+    B.call(deinit->Name, deinit->Sig, {self});
+  }
+  if (token)
+    callRuntime(kPaykanDeinitEnd, {self, token});
+
   // Release every ref-typed field (null-safe).
   for (auto &[fname, fty] : allFieldsInOrder(ct)) {
     if (ast::isMemType(fty)) {

@@ -214,8 +214,11 @@ bool Sema::checkSharedReceiver(const ast::MethodCallExpr *call,
   const auto *id = ast::dyn_cast<ast::Identifier>(recv);
   if (id && id->getName() == names::kSelf && CurrentClassCtx &&
       !CurrentClassCtx->MethodName.empty() && !CurrentClassCtx->SharedMethod)
-    msg += "; 'self' is borrowed in '" + CurrentClassCtx->MethodName +
-           "': make it a '" + kind + "' too";
+    msg += "; 'self' is borrowed in '" + CurrentClassCtx->MethodName + "'" +
+           // The object is going: nothing hands it on from there.
+           (CurrentClassCtx->MethodName == names::kMethodDeinit
+                ? ", where the object is being destroyed"
+                : ": make it a '" + kind + "' too");
   else if (id && id->getName() == names::kSelf)
     msg += "; 'self' is a '" + qualifiedName(have, ty) + "' here";
   else

@@ -170,6 +170,9 @@ void Sema::warnMissingViewFns() {
     for (const MethodUse *m : families[family]) {
       if (ownerOf(*m) != family.first)
         continue;
+      // `__deinit__` is declared as it is, whatever it does.
+      if (family.second == names::kMethodDeinit)
+        continue;
       ast::SourceLocation loc = m->Decl->getLocation();
       if (!warned.insert({loc.getLineStart(), loc.getColumnStart()}).second)
         continue;

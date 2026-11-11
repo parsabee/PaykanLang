@@ -82,6 +82,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanFreeze, {{kObj}, kVoid}},
     {kPaykanFreezeMem, {{kPtr, kPtr}, kVoid}},
     {kPaykanWalkChild, {{kObj, kI64}, kVoid}},
+    {kPaykanDeinitBegin, {{kObj}, kI64}},
+    {kPaykanDeinitEnd, {{kObj, kI64}, kVoid}},
     {kPaykanMovedUnique, {{kBox}, kI64}},
     {kPaykanMovedUniqueMem, {{kPtr, kPtr}, kI64}},
     {kPaykanPanicMoved, {{kPtr}, kVoid}},

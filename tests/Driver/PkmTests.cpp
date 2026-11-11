@@ -2208,6 +2208,91 @@ TEST(Pkm, AnImportsDroppedImplMethodOfAClassCopy) {
   fs::remove_all(dir);
 }
 
+// A class's `__deinit__` is in its module's interface: an importer's class
+// derived from it runs its own and then the module's, a class that
+// declares none runs the module's, and the par-safe check reads its
+// verdict.
+TEST(Pkm, ADeinitIsInTheModuleFile) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_deinit_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "shapes.pkn",
+            "import ::io;\n"
+            "class Res {\n"
+            "  name: Str;\n"
+            "  fn __deinit__() { io::println(\"res \" + self.name); }\n"
+            "}\n"
+            "class Shape {\n"
+            "  r: Res;\n"
+            "  fn area() -> int;\n"
+            "  fn __deinit__() {\n"
+            "    io::println(\"shape \" + self.r.name + \" \" +\n"
+            "                Str(self.area()));\n"
+            "  }\n"
+            "}\n"
+            "class Quiet { n: int; fn __deinit__() { self.n = 0; } }\n"
+            "class Box<T> { v: T; }\n"
+            "impl Box<T> { fn __deinit__() { io::println(\"box\"); } }\n");
+  writeFile(dir / "main.pkn",
+            "import shapes;\n"
+            "import ::io;\n"
+            "class Sq : shapes::Shape {\n"
+            "  s: int;\n"
+            "  fn area() -> int { return self.s * self.s; }\n"
+            "  fn __deinit__() {\n"
+            "    io::println(\"sq \" + Str(self.s));\n"
+            "    self.s = self.s + 1;\n"
+            "  }\n"
+            "}\n"
+            "class Plain : shapes::Shape { fn area() -> int { return 7; } }\n"
+            "fn main() -> int {\n"
+            "  let a: shapes::Shape = Sq(shapes::Res(\"a\"), 3);\n"
+            "  let p = Plain(shapes::Res(\"p\"));\n"
+            "  let b = shapes::Box<Sq>(Sq(shapes::Res(\"in\"), 2));\n"
+            "  io::println(\"made\");\n"
+            "  return 0;\n}\n");
+  writeFile(dir / "par.pkn", "import shapes;\n"
+                             "fn main() -> int {\n"
+                             "  total: atomic int = 0;\n"
+                             "  parallel for i in 0..4 {\n"
+                             "    let q = shapes::Quiet(i);\n"
+                             "    total += q.n;\n"
+                             "  }\n"
+                             "  parallel for i in 0..4 {\n"
+                             "    let r = shapes::Res(\"x\");\n"
+                             "    total += r.name.len();\n"
+                             "  }\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  auto made = paykan("--emit-pkm --module-name=shapes -o lib/shapes.pkm "
+                     "shapes.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  auto dump = paykan("pkm dump --section=iface lib/shapes.pkm");
+  EXPECT_TRUE(contains(dump.out, "method __deinit__() -> void")) << dump.out;
+  const std::string want = "made\nbox\nsq 2\nshape in 9\nres in\nshape p 7\n"
+                           "res p\nsq 3\nshape a 16\nres a\n";
+  // Twice: the second run links the module's cached code.
+  for (int i = 0; i < 2; ++i) {
+    auto r = paykan("--module-path=lib main.pkn");
+    EXPECT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_EQ(r.out, want);
+  }
+  auto par = paykan("--check-only --error-limit=0 --module-path=lib par.pkn");
+  EXPECT_NE(par.exitCode, 0);
+  EXPECT_TRUE(contains(par.out,
+                       ":9:13: error: a 'parallel for' body cannot destroy a "
+                       "'Res': it runs 'Res.__deinit__', which is not "
+                       "par-safe"))
+      << par.out;
+  EXPECT_FALSE(contains(par.out, "par.pkn:5:")) << par.out;
+  fs::remove_all(dir);
+}
+
 // What an importer checks of an `async fn` it only has the module file of:
 // its arguments' send check, the receiver an async method borrows, that it
 // is no value, and the colour of an override.

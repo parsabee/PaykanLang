@@ -1242,3 +1242,136 @@ TEST(Class, FieldsOfAConditionalReceiver) {
                       "5 bb tbb 7\n3 bb!\nnext bb!\n");
   g.expectNoLeaks("FieldsOfAConditionalReceiver");
 }
+
+// -- Deinitializers (#378)
+
+// `__deinit__` runs once when the object is destroyed, whatever the type
+// of its last reference: the class's own, then each superclass's, while
+// every field is still alive; a class that declares none runs its
+// superclass's.  One in an `impl` block and one of a generic class are the
+// same.
+TEST(Class, DeinitRunsOwnThenEachSuperclasss) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+class Res {
+  name: Str;
+  fn __deinit__() { io::println("res " + self.name); }
+}
+class Base {
+  r: Res;
+  n: int;
+  fn area() -> int { return 0; }
+  fn __deinit__() {
+    io::println("base " + Str(self.n) + " " + self.r.name + " " +
+                Str(self.area()));
+  }
+}
+class Mid : Base { m: int; }
+class Leaf : Mid {
+  fn area() -> int { return self.m * 2; }
+  fn __deinit__() {
+    self.n = self.n + 1;
+    io::println("leaf " + Str(self.n));
+  }
+}
+class Box<T> { v: T; }
+impl Box<T> { fn __deinit__() { io::println("box"); } }
+fn make() -> Base { return Leaf(Res("a"), 1, 2); }
+fn main() -> int {
+  let b = make();
+  io::println("made");
+  {
+    let m = Mid(Res("b"), 5, 6);
+    let x = Box<Res>(Res("c"));
+    io::println("scope");
+  }
+  io::println("end");
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "made\nscope\nbox\nres c\nbase 5 b 0\nres b\nend\n"
+                      "leaf 2\nbase 2 a 4\nres a\n");
+  g.expectNoLeaks("DeinitRunsOwnThenEachSuperclasss");
+}
+
+// A `weak` reference to the object reads `None` while its `__deinit__`
+// runs, and an object a field holds is destroyed after it.
+TEST(Class, DeinitSeesItsFieldsAndNoWeakReference) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+class Reg { seen: int; back: weak mut Node?; }
+class Node {
+  id: int;
+  reg: shared mut Reg;
+  fn __deinit__() {
+    self.reg.seen = self.reg.seen + self.id;
+    io::println("gone " + Str(self.id) + " weak " +
+                Str(self.reg.back == None));
+  }
+}
+fn main() -> int {
+  reg: shared mut = Reg(0, None);
+  {
+    n: shared mut = Node(7, reg);
+    reg.back = n;
+    io::println("live " + Str(reg.back != None));
+  }
+  io::println("seen " + Str(reg.seen));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "live True\ngone 7 weak True\nseen 7\n");
+  g.expectNoLeaks("DeinitSeesItsFieldsAndNoWeakReference");
+}
+
+// A `__deinit__` is the program's code.  The object can be lent while it
+// runs (to a `view` parameter, to `==`, to `io::println`), in a method it
+// calls too, and is destroyed once; no `weak` reference upgrades meanwhile;
+// and what the code drops is destroyed where it is dropped.
+TEST(Class, DeinitRunsAsAnyCodeDoes) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+class Reg {
+  n: int;
+  back: weak mut Node?;
+  view fn note(who: view Node) -> int { return who.id + self.n; }
+}
+class Guard {
+  n: int;
+  fn __deinit__() { io::println("guard " + Str(self.n) + " released"); }
+}
+fn scoped(n: int) { let g = Guard(n); io::println("holding " + Str(n)); }
+fn look(a: view Node, b: view Node) -> bool { return a == b; }
+class Node {
+  id: int;
+  reg: shared mut Reg;
+  view fn describe() -> int { return self.reg.note(self); }
+  fn __deinit__() {
+    io::println("deinit " + Str(self.id) + " " + Str(self.reg.note(self)) +
+                " " + Str(self.describe()) + " " + Str(look(self, self)) +
+                " " + Str(self == self) + " " + Str(self.reg.back == None));
+    self.id = self.id + 1;
+    scoped(self.id);
+    io::println("after scoped");
+  }
+}
+fn main() -> int {
+  let reg: shared mut Reg = Reg(10, None);
+  {
+    let u: shared mut Node = Node(2, reg);
+    reg.back = u;
+  }
+  io::println("end " + Str(reg.back == None));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "deinit 2 12 12 True True True\nholding 3\n"
+                      "guard 3 released\nafter scoped\nend True\n");
+  g.expectNoLeaks("DeinitRunsAsAnyCodeDoes");
+}

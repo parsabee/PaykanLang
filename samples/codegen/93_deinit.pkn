@@ -1,0 +1,87 @@
+// 93 — `__deinit__`: code that runs when an object is destroyed
+// Exercises: a class's `__deinit__` runs once, when the last reference to
+//            the object goes, whatever that reference's type: the object's
+//            own class first, then each superclass that declares one,
+//            while every field is still alive (a field's object is
+//            destroyed after); a class that declares none runs its
+//            superclass's; one in an `impl` block of a generic class; a
+//            `weak` reference to the object reads `None` there; an object
+//            dropped by an assignment runs it at the assignment.
+// expect-stdout: open log
+// expect-stdout: flush 2 lines of log
+// expect-stdout: close log
+// expect-stdout: swap
+// expect-stdout: drop first
+// expect-stdout: gone 7 True
+// expect-stdout: end
+// expect-stdout: cell
+// expect-stdout: drop second
+import ::io;
+
+class Handle {
+  name: Str;
+
+  fn __deinit__() { io::println("close " + self.name); }
+}
+
+class Writer {
+  out: Handle;
+  lines: int;
+
+  fn write() { self.lines += 1; }
+
+  fn __deinit__() {
+    io::println("flush " + Str(self.lines) + " lines of " + self.out.name);
+  }
+}
+
+class Buffered : Writer {
+  size: int;
+}
+
+class Tag {
+  text: Str;
+
+  fn __deinit__() { io::println("drop " + self.text); }
+}
+
+class Seen {
+  back: weak mut Node?;
+}
+
+class Node {
+  id: int;
+  seen: shared mut Seen;
+
+  fn __deinit__() {
+    io::println("gone " + Str(self.id) + " " + Str(self.seen.back == None));
+  }
+}
+
+class Cell<T> {
+  v: T;
+}
+
+impl Cell<T> {
+  fn __deinit__() { io::println("cell"); }
+}
+
+fn main() -> int {
+  {
+    let w: mut Writer = Buffered(Handle("log"), 0, 64);
+    io::println("open " + w.out.name);
+    w.write();
+    w.write();
+  }
+  t: mut = Tag("first");
+  let c = Cell<int>(1);
+  io::println("swap");
+  t = Tag("second");
+  let seen: shared mut = Seen(None);
+  {
+    let n: shared mut = Node(7, seen);
+    seen.back = n;
+  }
+  io::println("end");
+  return 0;
+}

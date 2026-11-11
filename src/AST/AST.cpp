@@ -341,6 +341,11 @@ void ClassType::addMethod(MethodDecl *m) {
     InitMethod = m;
     return;
   }
+  // Nor has __deinit__: the generated `destroy` calls it.
+  if (m->getName() == names::kMethodDeinit) {
+    DeinitMethod = m;
+    return;
+  }
   if (m->isImpl()) {
     ImplMethods.push_back(m);
     return;
@@ -387,6 +392,8 @@ MethodDecl *ClassType::findMethod(const std::string &name) const {
   // __init__ lives outside the vtable.
   if (name == names::kMethodInit)
     return InitMethod; // nullptr if not declared in this class
+  if (name == names::kMethodDeinit)
+    return DeinitMethod; // the class's own, like it
   auto it = VTableIndex.find(name);
   if (it != VTableIndex.end())
     return VTable[it->second];

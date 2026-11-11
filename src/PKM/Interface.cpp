@@ -515,7 +515,7 @@ Status Reader::readDecls(Interface &out) {
       return "an 'impl' block";
     if (m.Name == names::kMethodInit ||
         m.Name == names::kMethodInitModulePrivate ||
-        m.Name == names::kMethodDestroy)
+        m.Name == names::kMethodDestroy || m.Name == names::kMethodDeinit)
       return "a class";
     return nullptr;
   };
@@ -542,7 +542,7 @@ Status Reader::readDecls(Interface &out) {
       if ((m.Flags & kMethodShared) &&
           (ofStruct || m.Name == names::kMethodInit ||
            m.Name == names::kMethodInitModulePrivate ||
-           m.Name == names::kMethodDestroy))
+           m.Name == names::kMethodDestroy || m.Name == names::kMethodDeinit))
         return v.fail("method '" + m.Name + "' of " +
                       (ofStruct ? "a struct" : "a class") +
                       " is marked 'shared fn'");

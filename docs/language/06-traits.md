@@ -638,17 +638,31 @@ reads no such value of the enclosing function either. `impl Sendable for C` is a
 `shared` links stay inside it would cross safely, which the compiler cannot check yet
 ([#377](https://github.com/parsabee/PaykanLang/issues/377)).
 
+## Deinitializable
+
+`Deinitializable` is the trait of the types that run code when a value of them is
+destroyed: `__deinit__` ([Classes](05-classes.md#deinitializers)). Every class is
+Deinitializable, by the `__deinit__` it declares or by none, since an object of it may be of
+a subclass that declares one. No other type is in this version.
+
+The trait has no method a bound can call (`__deinit__` is never called by name), and no
+block implements it: `impl Deinitializable for C` is `'Deinitializable' is built in: every
+class is Deinitializable, by the '__deinit__' it declares or by none, and it cannot be
+implemented`. As a bound it tells a class apart from a value: `T: Deinitializable` takes
+`Node`, `shared Node` and `Str`, and not `int` or a struct.
+
 ## Semantic Checks
 
 | Error | Trigger |
 |-------|---------|
-| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Showable`, `Hashable`, `ValueType`, `Copyable`, `Cloneable`, `Sendable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
-| Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
+| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Showable`, `Hashable`, `ValueType`, `Copyable`, `Cloneable`, `Sendable`, `Deinitializable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
+| Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__`, `__deinit__` or `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Showable`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | `impl Copyable` | `impl Copyable for X`, for a class or a struct: `'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented` (see [Copyable](#copyable)) |
+| `impl Deinitializable` | `impl Deinitializable for X`: `'Deinitializable' is built in: ...` (see [Deinitializable](#deinitializable)) |
 | `impl Sendable`, `impl !Sendable` | `impl Sendable for X`: `'Sendable' is built in: a type is Sendable by what it holds, and cannot be implemented (...)`; `impl !Sendable for X {}` outside the standard library; `impl !Hashable for X {}` (`only 'Sendable' is opted out of`) (see [Sendable](#sendable)) |
 | Not Sendable | A type argument that fails `T: Sendable`; a template that sends a `T`, makes it `atomic shared` or `locked`, or returns it from an `async fn`, without the bound: `'T' is not 'Sendable': declare 'T: Sendable' to send it to a task` |
 | Not Cloneable | `x.clone()` of a class with no `impl Cloneable for` block, of a struct, tuple or array with a part that is not Cloneable, or of an enum whose payloads are not Copyable; a type argument that fails `T: Cloneable` (see [Cloneable](#cloneable)) |

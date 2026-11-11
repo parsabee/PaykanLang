@@ -155,6 +155,25 @@ struct Sema::ParSafety {
                    ast::SourceLocation loc, ast::Qualifier held = {});
   /// What the `clone` an empty `impl Cloneable for` block derives runs.
   void derivedClone(ast::ClassType *ct, ast::SourceLocation loc);
+  /// Destroying an object runs its `__deinit__`s (#378).  An object dies in
+  /// the code that made it or in what that code hands it to, so the ones a
+  /// function may destroy are the ones it makes (makes), and the contents
+  /// of a `locked mut` cell it has `inout` (drops), which were made
+  /// anywhere.
+  ///
+  /// The `__deinit__` of @p c, where it declares one.
+  void deinitOf(ast::ClassType *c, ast::SourceLocation loc);
+  /// An object of exactly @p ct is made at @p loc: its own `__deinit__`
+  /// and its superclasses'.
+  void makes(ast::ClassType *ct, ast::SourceLocation loc);
+  /// A value of type @p ty may be destroyed at @p loc: the `__deinit__`s of
+  /// each object it holds, of the class its type names and of the classes
+  /// derived from it, then of what those objects hold.  Once per type for
+  /// each function and parallel body.
+  void drops(ast::Type *ty, ast::SourceLocation loc);
+  std::set<std::tuple<const std::vector<Use> *, const std::vector<Use> *,
+                      const ast::Type *>>
+      Dropped;
 };
 
 // A class's or a struct's name can stand for another of its kind; what a
@@ -316,6 +335,12 @@ void Sema::ParSafety::recordVerdicts() {
     // A class without an `__init__` of its own has the compiler's.
     if (ast::MethodDecl *init = ct->findMethod(names::kMethodInit))
       init->setParSafe(runsSafely(ct, names::kMethodInit));
+    // Its own `__deinit__`: an importer's object of a class derived from
+    // it runs it too.
+    if (ast::MethodDecl *deinit = ct->getDeinitMethod()) {
+      const ast::FuncDecl *fn = bodyOf(ct->getName(), names::kMethodDeinit);
+      deinit->setParSafe(!fn || !Bad.count(fn));
+    }
   }
 }
 
@@ -373,7 +398,15 @@ bool Sema::ParSafety::report() {
                         u.Loc.getColumnStart()})
                .second)
         continue;
-      S.error(u.Loc, "a 'parallel for' body cannot call " + describe(u));
+      // A destruction is no call the body wrote: it says what is destroyed.
+      const std::string deinit =
+          std::string(names::kNameSep) + names::kMethodDeinit;
+      if (u.Name.ends_with(deinit))
+        S.error(u.Loc, "a 'parallel for' body cannot destroy a '" +
+                           u.Name.substr(0, u.Name.size() - deinit.size()) +
+                           "': it runs " + describe(u));
+      else
+        S.error(u.Loc, "a 'parallel for' body cannot call " + describe(u));
       ok = false;
     }
     S.InstantiationStack.clear();
@@ -416,6 +449,10 @@ void Sema::ParSafety::stmt(ast::Stmt *s) {
     stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::LockStmt>(s)) {
     expr(x->getCell());
+    // What a cell holds was made anywhere: a body that has it `inout` may
+    // destroy it (an assignment over a part, `mem::swap`), whatever it is.
+    if (x->getBinding() && x->getBinding()->getMode() == ast::ParamMode::Inout)
+      drops(x->getBinding()->getType(), x->getLocation());
     stmt(x->getBody());
   } else if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
     expr(x->getSubject());
@@ -526,6 +563,10 @@ void Sema::ParSafety::call(ast::CallExpr *ce) {
            "is a native function outside the par-safe list"});
     return;
   }
+  // An object made here is destroyed here too, or by what this code hands
+  // it to: its `__deinit__`s are this call's (#378).
+  if (ast::ClassType *made = S.Ctx.lookupClassType(name))
+    makes(made, loc);
   if (isLocalType(name)) {
     if (const ast::FuncDecl *init = bodyOf(name, names::kMethodInit))
       add({loc, shown, init, ""});
@@ -612,6 +653,7 @@ void Sema::ParSafety::methodCall(ast::MethodCallExpr *mc) {
 
 void Sema::ParSafety::derivedClone(ast::ClassType *ct,
                                    ast::SourceLocation loc) {
+  makes(ct, loc); // the clone is an object of the class
   for (ast::ClassType *c = ct; c && !c->isBuiltin(); c = c->getSuperClass())
     for (const auto &[field, ty] : c->getFields())
       if (!c->isWeakField(field))
@@ -664,6 +706,91 @@ void Sema::ParSafety::valueMethod(ast::Type *ty, const std::string &name,
       work.push_back({ft->getElementType(), ft->getElemQual()});
     } else if (auto *sl = ast::dyn_cast<ast::SliceType>(t)) {
       work.push_back({sl->getElementType(), {}});
+    }
+  }
+}
+
+void Sema::ParSafety::deinitOf(ast::ClassType *c, ast::SourceLocation loc) {
+  const ast::MethodDecl *md = c->getDeinitMethod();
+  if (!md)
+    return;
+  const std::string shown =
+      c->getName() + names::kNameSep + names::kMethodDeinit;
+  if (const ast::FuncDecl *fn = bodyOf(c->getName(), names::kMethodDeinit))
+    add({loc, shown, fn, ""});
+  else if (!md->isParSafe())
+    add({loc, shown, nullptr, "is not par-safe"});
+}
+
+void Sema::ParSafety::makes(ast::ClassType *ct, ast::SourceLocation loc) {
+  for (ast::ClassType *c = ct; c && !c->isBuiltin(); c = c->getSuperClass())
+    deinitOf(c, loc);
+}
+
+void Sema::ParSafety::drops(ast::Type *ty, ast::SourceLocation loc) {
+  ast::Type *root = ty ? canon(ty) : nullptr;
+  if (!root || ast::isa<ast::BuiltinType>(root) ||
+      !Dropped.insert({Uses, ParallelUses, root}).second)
+    return;
+  std::unordered_set<const ast::Type *> seen;
+  // With each type, whether an object of it is of exactly its class.
+  std::vector<std::pair<ast::Type *, bool>> work = {{root, false}};
+  while (!work.empty()) {
+    auto [part, exact] = work.back();
+    work.pop_back();
+    ast::Type *t = part ? canon(part) : nullptr;
+    if (!t || ast::isa<ast::BuiltinType>(t) || !seen.insert(t).second)
+      continue;
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(t)) {
+      if (ct == S.Ctx.getStrTy())
+        continue;
+      // An object of a class derived from the one named runs that class's
+      // too: the ones this program derives, or any when it may have more.
+      if (!exact && !isExact(ct)) {
+        if (!(Closed && Local.count(ct))) {
+          add({loc, ct->getName() + names::kNameSep + names::kMethodDeinit,
+               nullptr,
+               "a class derived from '" + ct->getName() + "' may declare"});
+          continue;
+        }
+        if (auto sub = Subclasses.find(ct); sub != Subclasses.end())
+          for (ast::ClassType *c : sub->second)
+            work.push_back({c, true});
+      }
+      for (ast::ClassType *c = ct; c && !c->isBuiltin();
+           c = c->getSuperClass()) {
+        deinitOf(c, loc);
+        // Then what it holds, a `weak` field aside.
+        for (const auto &[field, fty] : c->getFields())
+          if (!c->isWeakField(field))
+            work.push_back({fty, false});
+      }
+    } else if (auto *et = ast::dyn_cast<ast::EnumType>(t)) {
+      for (size_t i = 0; i < et->getNumVariants(); ++i)
+        if (ast::StructType *payload = et->getPayload(i))
+          work.push_back({payload, false});
+    } else if (auto *st = ast::dyn_cast<ast::StructType>(t)) {
+      // A buffer holds its elements, which its type names: its one field
+      // is the runtime's buffer object.
+      if (ast::Type *elem = S.bufferElementType(st)) {
+        work.push_back({elem, false});
+        continue;
+      }
+      for (size_t i = 0; i < st->getNumFields(); ++i)
+        work.push_back({st->getElementType(i), false});
+    } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {
+      for (size_t i = 0; i < tt->getArity(); ++i)
+        work.push_back({tt->getElementType(i), false});
+    } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(t)) {
+      work.push_back({ft->getElementType(), false});
+    } else if (auto *at = ast::dyn_cast<ast::ArrayType>(t)) {
+      work.push_back({at->getElementType(), false});
+    } else if (auto *sl = ast::dyn_cast<ast::SliceType>(t)) {
+      work.push_back({sl->getElementType(), false});
+    } else if (auto *tk = ast::dyn_cast<ast::TaskType>(t)) {
+      work.push_back({tk->getInnerType(), false});
+    } else if (auto *ac = ast::dyn_cast<ast::AtomicType>(t)) {
+      work.push_back({ac->getInnerType(), false});
     }
   }
 }
