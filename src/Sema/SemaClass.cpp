@@ -1410,12 +1410,19 @@ bool Sema::checkCloneDerive(const std::string &name, const ast::ClassType *ct,
             typeName(fty).find(names::kArchetypePrefix) != std::string::npos)) {
         std::string inner;
         isCloneable(fty, &inner);
-        error(loc, "'impl Cloneable for " + name +
-                       " {}' cannot derive 'clone': its field '" + fname +
-                       "' ('" +
-                       qualifiedName(ct->findFieldQualifier(fname), fty) +
-                       "') has no clone" + (inner.empty() ? "" : ": " + inner) +
-                       "; write the 'clone' instead");
+        std::string msg = "'impl Cloneable for ";
+        msg += name;
+        msg += " {}' cannot derive 'clone': its field '";
+        msg += fname;
+        msg += "' ('";
+        msg += qualifiedName(ct->findFieldQualifier(fname), fty);
+        msg += "') has no clone";
+        if (!inner.empty()) {
+          msg += ": ";
+          msg += inner;
+        }
+        msg += "; write the 'clone' instead";
+        error(loc, msg);
         return false;
       }
   return true;
