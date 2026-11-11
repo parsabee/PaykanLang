@@ -99,13 +99,14 @@ async fn same<T>(x: T) -> T { return x; }
 // A method of a class or an `impl` block, a `static` one and a requirement of
 // a trait can be `async`.
 TEST(AsyncFn, Methods) {
-  for (const char *src :
-       {"class C { n: int; async fn f() -> int { return 1; } }\n",
-        "class C { n: int; async view fn f() -> int { return 1; } }\n",
-        "class C { n: int; }\nimpl C { async fn f() -> int { return 1; } }\n",
-        "class C { n: int; }\n"
-        "impl C { static async fn f() -> int { return 1; } }\n",
-        "trait T { async fn f() -> int; }\n"})
+  const std::string c = "class C { n: int; }\n";
+  for (const std::string &src :
+       {std::string("class C { n: int; async fn f() -> int { return 1; } }\n"),
+        std::string(
+            "class C { n: int; async view fn f() -> int { return 1; } }\n"),
+        c + "impl C { async fn f() -> int { return 1; } }\n",
+        c + "impl C { static async fn f() -> int { return 1; } }\n",
+        std::string("trait T { async fn f() -> int; }\n")})
     EXPECT_TRUE(parse(src).Ok) << src;
 }
 
