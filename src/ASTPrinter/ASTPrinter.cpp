@@ -750,7 +750,8 @@ void ASTPrinter::visitStructDecl(StructDecl *node) {
 void ASTPrinter::visitImplDecl(ImplDecl *node) {
   header("ImplDecl", node);
   if (node->getTrait())
-    OS << " '" << typeName(node->getTrait()) << "' for";
+    OS << (node->isNegative() ? " !'" : " '") << typeName(node->getTrait())
+       << "' for";
   OS << " '" << node->getTypeName() << "'";
   printTypeParams(OS, node->getTypeParams());
   for (size_t i = 0; i < node->getTypeParamBounds().size(); ++i)

@@ -12,6 +12,7 @@
 // for before that is checked then.
 
 #include "ASTClone.h"
+#include "ModuleName.h"
 #include "Names.h"
 #include "Sema.h"
 
@@ -111,6 +112,9 @@ void Sema::registerBuiltinTraits() {
   // Cloneable, `view fn clone() -> Self` (#369): every Copyable type (the
   // scalars here), `Str`, and an aggregate of Cloneable parts
   // (traitImplOwner); a class opts in with `impl Cloneable for`.
+  // Sendable (#378) by what a type holds: nothing the send check refuses
+  // (traitImplOwner).
+  builtin(names::kTraitSendable, nullptr, nullptr, {});
   std::vector<ast::Type *> cloneable = values;
   cloneable.push_back(Ctx.getStrTy());
   builtin(names::kTraitCloneable, names::kMethodClone,
@@ -319,15 +323,19 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
     }
     return false;
   };
+  auto isBuiltinTrait = [&](const char *name) {
+    return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
+  };
+  // Sendable by structure and by form (#378): what the send check finds
+  // nothing against, a class or a qualified type argument too.
+  if (isBuiltinTrait(names::kTraitSendable))
+    return isSendable(ty) ? ty : nullptr;
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     for (const ast::ClassType *c = ct; c; c = c->getSuperClass())
       if (has(c))
         return c;
     return nullptr;
   }
-  auto isBuiltinTrait = [&](const char *name) {
-    return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
-  };
   // A qualified type argument (#368): Copyable and Cloneable by its form
   // (a `shared Node` copies), never a ValueType, and any other trait as its
   // type has it.
@@ -465,13 +473,13 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
   const std::string trait = traitRefName(*tr);
   const std::string kind = typeKindWord(ty);
   const std::string name = typeName(ty);
-  // Copyable follows from what a type holds (the concurrency prototype).
-  if (tr->Trait->IsBuiltin &&
-      tr->Trait->Decl->getName() == names::kTraitCopyable) {
-    error(im->getLocation(),
-          "'Copyable' is built in: a type is Copyable by what it holds, and "
-          "cannot be implemented");
+  if (!checkImplForm(im, trait, tr->Trait->IsBuiltin, kind + " '" + name + "'"))
     return false;
+  // `impl !Sendable for T {}` (#378): a type its structure would make
+  // Sendable is tied to the thread that made it.
+  if (im->isNegative()) {
+    NotSendable.insert(ty);
+    return true;
   }
   // A class is an object, shared by reference: never a ValueType.  (A
   // struct is one already: reported below as implemented.)
@@ -653,6 +661,54 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
   return ok;
 }
 
+bool Sema::checkImplForm(const ast::ImplDecl *im, const std::string &trait,
+                         bool builtin, const std::string &what) {
+  const bool sendable = builtin && trait == names::kTraitSendable;
+  // `impl !Sendable for T {}` (#378): the standard library's to say, of
+  // its native types.
+  if (im->isNegative()) {
+    if (!sendable) {
+      error(im->getLocation(), "'impl !" + trait +
+                                   " for': only 'Sendable' is opted out of "
+                                   "('impl !Sendable for T {}')");
+      return false;
+    }
+    const bool system =
+        CurrentOrigin ? CurrentOrigin->Module.starts_with(module_name::kSep)
+                      : SystemModule;
+    if (!system) {
+      error(im->getLocation(),
+            "only the standard library opts a type out of 'Sendable': " + what +
+                " is Sendable by what it holds");
+      return false;
+    }
+    if (!im->getMethods().empty()) {
+      error(im->getMethods().front()->getLocation(),
+            "'impl !Sendable for' takes no methods");
+      return false;
+    }
+    return true;
+  }
+  // Copyable follows from what a type holds (the concurrency prototype).
+  if (builtin && trait == names::kTraitCopyable) {
+    error(im->getLocation(),
+          "'Copyable' is built in: a type is Copyable by what it holds, and "
+          "cannot be implemented");
+    return false;
+  }
+  // So does Sendable (#378).  A class whose `shared` and `weak` links stay
+  // inside it could say that it crosses, once the compiler can check that
+  // they do (#377).
+  if (sendable) {
+    error(im->getLocation(),
+          "'Sendable' is built in: a type is Sendable by what it holds, and "
+          "cannot be implemented (a class whose 'shared' links stay inside "
+          "it waits for #377)");
+    return false;
+  }
+  return true;
+}
+
 bool Sema::implBoundsHold(const ast::ImplDecl *im,
                           const std::vector<ast::Type *> &args) {
   const auto &bounds = im->getTypeParamBounds();
@@ -674,9 +730,11 @@ bool Sema::implBoundsHold(const ast::ImplDecl *im,
 bool Sema::archetypeMeets(const ast::Type *arg, const TraitRef &tr) const {
   if (const auto *qt = arg ? ast::dyn_cast<ast::QualifiedType>(arg) : nullptr)
     arg = qt->getInnerType(); // `shared T`: the bound is T's
+  // (`Copyable` and `Sendable` are what its own bounds say: traitImplOwner.)
   return Archetypes && Archetypes->Classes.count(arg) &&
          !(tr.Trait->IsBuiltin &&
-           tr.Trait->Decl->getName() == names::kTraitCopyable);
+           (tr.Trait->Decl->getName() == names::kTraitCopyable ||
+            tr.Trait->Decl->getName() == names::kTraitSendable));
 }
 
 bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
@@ -737,6 +795,11 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
           isCopyable(args[i], &part);
           why = part.empty() ? "a reference, a 'Str' or a task is move-only"
                              : "it holds move-only " + part;
+        } else if (tr->Trait->IsBuiltin &&
+                   tr->Trait->Decl->getName() == names::kTraitSendable) {
+          noteArchetypeSend(loc, args[i],
+                            "for '" + displayName(name) + "', which needs it");
+          why = notSendableReason(args[i]);
         }
         error(loc, "'" + typeName(args[i]) + "' does not implement trait '" +
                        traitRefName(*tr) + "', which '" + displayName(name) +

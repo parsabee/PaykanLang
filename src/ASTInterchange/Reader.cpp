@@ -818,8 +818,10 @@ private:
         return nullptr;
     }
     // `impl Showable for A`: (for TRAIT) after the type's name.
+    // `impl !Sendable for A`: (not TRAIT) in its place.
     Type *trait = nullptr;
-    if (const SExpr *fl = f.optionalList("for")) {
+    const bool negative = f.nextIsList("not");
+    if (const SExpr *fl = f.optionalList(negative ? "not" : "for")) {
       Fields tf(*this, *fl);
       trait = type(tf, "the trait");
       if (!trait || !tf.done())
@@ -836,6 +838,7 @@ private:
     auto *im = Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
                                   std::move(params));
     im->setTypeParamBounds(std::move(bounds));
+    im->setNegative(negative);
     return im;
   }
 

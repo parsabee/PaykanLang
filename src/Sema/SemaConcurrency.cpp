@@ -75,12 +75,23 @@ bool Sema::checkParallelRead(const ast::Expr *node, const std::string &name,
   forEachParallelOutside(owner, [&](ParallelContext &loop) {
     loop.Reads.push_back({node, name});
   });
-  if (isPlainValue(ty) || ast::isa<ast::AtomicType>(ty))
+  // A plain value its module keeps on the thread that made it (`impl
+  // !Sendable`) is not the pool's threads' to read.
+  ast::Type *pinned = nullptr;
+  auto value = [&](ast::Type *t) {
+    if (!isPlainValue(t))
+      return false;
+    if (isSendable(t))
+      return true;
+    pinned = t;
+    return false;
+  };
+  if (ast::isa<ast::AtomicType>(ty) || value(ty))
     return true;
   // A `mem::Buffer<T>` of plain values: read at any index, written at the
   // loop's variable only (checkParallelBufferCall), its object never
   // counted by the body.
-  if (ast::Type *elem = bufferElementType(ty); elem && isPlainValue(elem))
+  if (ast::Type *elem = bufferElementType(ty); elem && value(elem))
     return true;
   // A handle: a `locked` cell or an `atomic shared` object.
   if (const ast::Qualifier q = qualifierOfVar(name);
@@ -93,8 +104,14 @@ bool Sema::checkParallelRead(const ast::Expr *node, const std::string &name,
     elem = f->getElementType();
   else if (auto *s = ast::dyn_cast<ast::SliceType>(ty))
     elem = s->getElementType();
-  if (elem && isPlainValue(elem))
+  if (elem && value(elem))
     return true;
+  if (pinned) {
+    error(loc, "'" + name + "' (a '" + typeName(ty) +
+                   "') cannot be used in a 'parallel for' body: " +
+                   notSendableReason(pinned));
+    return false;
+  }
   error(loc, "'" + name + "' (a '" + typeName(ty) +
                  "') cannot be used in a 'parallel for' body: an iteration "
                  "uses only values, arrays of values and 'atomic' variables "
@@ -417,7 +434,13 @@ bool Sema::checkCrossedClasses(const ast::TranslationUnit *tu) {
         derived = c == ct;
       if (!derived)
         continue;
-      std::string why = uncrossable(other, {}, "");
+      std::string why;
+      {
+        // A subclass of what is sent is sent as it.
+        const bool saved = std::exchange(RecordCrossings, true);
+        why = uncrossable(other, {}, "");
+        RecordCrossings = saved;
+      }
       if (why.empty())
         continue;
       reported.insert(other);
@@ -994,11 +1017,36 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
     return uncrossable(ft->getElementType(),
                        ft->getElemQual().isUnique() ? q : ft->getElemQual(),
                        path);
+  // A type reached again on the way (a list's `next: Node?`, a struct that
+  // holds a container of itself) is being checked already.
+  static thread_local std::vector<const ast::Type *> onTheWay;
+  struct OnTheWay {
+    explicit OnTheWay(const ast::Type *t) { onTheWay.push_back(t); }
+    ~OnTheWay() { onTheWay.pop_back(); }
+    OnTheWay(const OnTheWay &) = delete;
+    OnTheWay &operator=(const OnTheWay &) = delete;
+  };
+  auto already = [&](const ast::Type *t) {
+    return std::find(onTheWay.begin(), onTheWay.end(), t) != onTheWay.end();
+  };
+  // A type its module keeps on the thread that made it (#378).
+  auto pinned = [&](const ast::Type *t, const std::string &name) {
+    return NotSendable.count(t)
+               ? at("is '" + name +
+                    "', which its module keeps on the thread that made it "
+                    "('impl !Sendable')")
+               : std::string();
+  };
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    if (std::string why = pinned(st, st->getName()); !why.empty())
+      return why;
     // `mem::Buffer<T>` crosses when `T` does (the design's table): its one
     // field is the runtime's buffer object, whose walk freezes the
     // elements (PaykanBuffer_walk), so the check is of `T`, by `at`'s
     // result.
+    if (already(st))
+      return "";
+    const OnTheWay walking(st);
     if (ast::Type *elem = bufferElementType(st))
       return uncrossable(elem, {}, path);
     const auto &types = st->getElementTypes();
@@ -1025,6 +1073,9 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
     return "";
   }
   if (auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    if (already(et))
+      return "";
+    const OnTheWay walking(et);
     for (size_t i = 0; i < et->getNumVariants(); ++i)
       if (ast::StructType *p = et->getPayload(i))
         if (std::string why = uncrossable(p, {}, path); !why.empty())
@@ -1042,13 +1093,25 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
     return "";
   if (ct == Ctx.getObjTy())
     return at("is an 'Obj', which may be any class");
-  // A class's own and inherited fields.  A class reached again on the way
-  // (a list's `next: Node?`) is being checked already.
-  static thread_local std::vector<const ast::ClassType *> onTheWay;
-  if (std::find(onTheWay.begin(), onTheWay.end(), ct) != onTheWay.end())
+  for (const ast::ClassType *c = ct; c; c = c->getSuperClass())
+    if (std::string why = pinned(c, c->getName()); !why.empty())
+      return why;
+  // A type parameter in its template's own check (#373): what its bounds
+  // say, `T: Sendable` (#378).
+  if (Archetypes && Archetypes->Classes.count(ct)) {
+    const std::string *param = unsendableArchetype(ct);
+    if (!param)
+      return "";
+    UnsentArchetype = ct;
+    return at("is a '" + *param + "', which is not bounded 'Sendable'");
+  }
+  // A class's own and inherited fields.
+  if (already(ct))
     return "";
-  onTheWay.push_back(ct);
-  CrossedClasses.insert(ct);
+  const OnTheWay walking(ct);
+  // Only what is sent: asking whether a type is Sendable sends nothing.
+  if (RecordCrossings)
+    CrossedClasses.insert(ct);
   std::string why;
   // A value typed as this class may be of a class derived from it.
   for (const auto &[name, other] : Ctx.getClassTypes()) {
@@ -1078,8 +1141,22 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
       if (!why.empty())
         break;
     }
-  onTheWay.pop_back();
   return why;
+}
+
+bool Sema::isSendable(ast::Type *ty) { return uncrossable(ty, {}, "").empty(); }
+
+std::string Sema::notSendableReason(ast::Type *ty) {
+  ast::Qualifier q;
+  ast::Type *inner = ty;
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    q = qt->getQualifier();
+    inner = qt->getInnerType();
+  }
+  std::string why = uncrossable(inner, q, "");
+  // The type is named already: `is 'shared Node': a 'shared' reference ...`.
+  const std::string self = "is '" + qualifiedName(q, inner) + "': ";
+  return why.starts_with(self) ? why.substr(self.size()) : why;
 }
 
 bool Sema::checkAsyncDecl(const ast::FuncDecl *fn, ast::Type *result) {
@@ -1090,16 +1167,73 @@ bool Sema::checkAsyncDecl(const ast::FuncDecl *fn, ast::Type *result) {
                                  name + "(...) -> T => ...'");
     return false;
   }
-  // Its result crosses back to the awaiting thread: the send check.
-  if (std::string why = uncrossable(result, fn->getResultQual(), "");
-      !why.empty()) {
-    error(fn->getLocation(),
-          "the result of 'async fn' '" + name + "' (a '" +
-              qualifiedName(fn->getResultQual(), result) +
-              "') cannot cross to the task's awaiter: " + why);
-    return false;
+  // Its result crosses back to the awaiting thread: the send check.  A
+  // generic type's method is every instance's: one that only the instances
+  // whose arguments cross can have goes in a conditional block.
+  PendingAsyncResult check{fn, result, nullptr, {}, CurrentOrigin, {}};
+  if (!InstantiatingTemplates.empty()) {
+    const ast::Decl *tmpl = InstantiatingTemplates.back().Template;
+    if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+      check.Owner = &cd->getName();
+    else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+      check.Owner = &sd->getName();
+    const std::vector<ast::Type *> *args = CurrentInstanceArgs;
+    if (!MakingInstances.empty() && MakingInstances.back().first == tmpl)
+      args = MakingInstances.back().second;
+    if (check.Owner && args)
+      check.Args = *args;
   }
-  return checkAsyncModes(fn);
+  // What a type holds is known once the module's types and its `impl`
+  // blocks are (an `impl !Sendable` block, a class declared later), and an
+  // instance being made, once it is whole: the check waits for that.  The
+  // archetype check runs after both.
+  if (!Archetypes && (!TraitImplsKnown || MakingInstances.size() > 1)) {
+    check.Frames = InstantiationStack;
+    PendingAsyncResults.push_back(std::move(check));
+    return checkAsyncModes(fn);
+  }
+  return checkAsyncResult(check) && checkAsyncModes(fn);
+}
+
+bool Sema::checkAsyncResult(const PendingAsyncResult &check) {
+  const ast::FuncDecl *fn = check.Fn;
+  std::string why = unsent(check.Result, fn->getResultQual(), fn->getLocation(),
+                           "to return it from an 'async fn'");
+  if (why.empty())
+    return true;
+  // The hint, when a bound would keep the method from this instance.
+  std::string where;
+  if (check.Owner &&
+      std::any_of(check.Args.begin(), check.Args.end(),
+                  [&](ast::Type *arg) { return !isSendable(arg); }))
+    where = "; put the method in an 'impl " + *check.Owner +
+            "<...>' block that bounds the parameter 'Sendable', which only "
+            "the instances that meet the bound have";
+  error(fn->getLocation(),
+        "the result of 'async fn' '" + displayName(fn->getName()) + "' (a '" +
+            qualifiedName(fn->getResultQual(), check.Result) +
+            "') cannot cross to the task's awaiter: " + why + where);
+  return false;
+}
+
+bool Sema::checkPendingAsyncResults() {
+  bool ok = true;
+  // One checked here may ask for an instance, whose own wait in turn.
+  while (!PendingAsyncResults.empty()) {
+    std::vector<PendingAsyncResult> pending =
+        std::exchange(PendingAsyncResults, {});
+    for (PendingAsyncResult &check : pending) {
+      std::vector<InstantiationFrame> saved =
+          std::exchange(InstantiationStack, std::move(check.Frames));
+      {
+        OriginSource inOrigin(*this, check.Origin);
+        if (!checkAsyncResult(check))
+          ok = false;
+      }
+      InstantiationStack = std::move(saved);
+    }
+  }
+  return ok;
 }
 
 bool Sema::checkAsyncModes(const ast::FuncDecl *fn) {
@@ -1160,7 +1294,9 @@ bool Sema::checkAsyncMethodCall(const ast::MethodCallExpr *call,
           return crosses(te->getTrueExpr()) && crosses(te->getFalseExpr());
         ast::Type *ty = const_cast<ast::Expr *>(receiver)->getResolvedType();
         const ast::Qualifier q = qualifierOf(receiver);
-        if (std::string why = uncrossable(ast::stripOptional(ty), q, "");
+        if (std::string why =
+                unsent(ast::stripOptional(ty), q, receiver->getLocation(),
+                       "to call an 'async fn' on it");
             !why.empty()) {
           error(receiver->getLocation(),
                 "the receiver of 'async fn' '" + method->getName() + "' ('" +
@@ -1262,6 +1398,7 @@ bool Sema::checkSendArgs(ast::SourceLocation loc,
           q.Form == ast::QualForm::AtomicShared)
         continue; // a handle: another reference to the same cell or object
       if (place && !moved) {
+        noteArchetypeCopy(arg->getLocation(), ty, "to copy it into a task");
         error(arg->getLocation(),
               "cannot copy '" + text + "' (a unique '" + typeName(ty) +
                   "') into a task: " +
@@ -1272,13 +1409,14 @@ bool Sema::checkSendArgs(ast::SourceLocation loc,
         ok = false;
         continue;
       }
-    } else if (!sharesStorage(ty)) {
-      continue; // a plain value: copied
+    } else if (!sharesStorage(ty) && isSendable(ty)) {
+      continue; // a plain value: copied (one its module pins is not)
     } else if (place && !moved) {
       // A value holding references: a Copyable one (shared parts, handles)
       // copies; one holding a unique part moves.
       std::string part;
       if (!isCopyable(ty, &part)) {
+        noteArchetypeCopy(arg->getLocation(), ty, "to copy it into a task");
         std::string msg = "cannot copy '";
         msg += text;
         msg += "' (";
@@ -1302,7 +1440,9 @@ bool Sema::checkSendArgs(ast::SourceLocation loc,
     }
     // What crosses holds nothing of this thread: no `shared` or `weak`
     // part, no function value, no `Obj`.
-    if (std::string why = uncrossable(ty, q, ""); !why.empty()) {
+    if (std::string why =
+            unsent(ty, q, args[i]->getLocation(), "to send it to a task");
+        !why.empty()) {
       std::string msg = "cannot send '";
       msg += text;
       msg += "' (a '";
@@ -2357,7 +2497,9 @@ bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
       u && u->getOpcode() == ast::UnaryOpcode::Move)
     inner = u->getOperand();
   ast::Type *ty = src->getResolvedType();
-  if (std::string why = uncrossable(ty, sq, ""); !why.empty()) {
+  if (std::string why = unsent(
+          ty, sq, loc, std::string("to make it '") + dst.spelling() + "'");
+      !why.empty()) {
     error(loc, "cannot make '" + placeText(inner) + "' (a '" +
                    qualifiedName(sq, ty) + "') '" + dst.spelling() +
                    "': " + why);

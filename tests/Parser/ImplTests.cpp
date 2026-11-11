@@ -28,6 +28,30 @@ TEST(Impl, BlockParses) {
   EXPECT_EQ(impls[1]->getTypeName(), "geo::Point");
 }
 
+// `impl !Sendable for A {}` (#378): the block of a trait a type is opted
+// out of.  The `!` goes before a trait, which `for` follows.
+TEST(Impl, NegativeBlockParses) {
+  auto [ok, driver] = parse(R"(
+    class A { n: int; }
+    impl !Sendable for A {}
+    impl Hashable for A { view fn hash() -> int { return 1; } }
+  )");
+  ASSERT_TRUE(ok);
+  const auto &impls = driver->getRoot()->getImplDecls();
+  ASSERT_EQ(impls.size(), 2u);
+  EXPECT_TRUE(impls[0]->isNegative());
+  EXPECT_EQ(typeName(impls[0]->getTrait()), "Sendable");
+  EXPECT_EQ(impls[0]->getTypeName(), "A");
+  EXPECT_FALSE(impls[1]->isNegative());
+  for (const char *src :
+       {"impl !A {}", "impl ! for A {}", "impl !Box<T: Sendable> {}",
+        "impl !!Sendable for A {}"}) {
+    auto [bad, _] =
+        parse(std::string(src) + "\nfn main() -> int { return 0; }");
+    EXPECT_FALSE(bad) << src;
+  }
+}
+
 TEST(Impl, MalformedBlocksAreRejected) {
   for (const char *src : {
            "impl { fn f() {} }",               // no type

@@ -205,7 +205,7 @@ traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
 traitMember ::= "async"? "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 
-implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
+implDecl    ::= "impl" ( "!"? typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
 implMember  ::= funcDecl                          -- funcDecl without typeParams
               | "static" "async"? "fn" IDENT "(" paramList? ")"
@@ -268,6 +268,10 @@ free function is generic ...`, `a 'static fn' cannot have type parameters of
 its own: ...`, `frontend::kGenericMethod` and `kGenericStaticFn`).
 A type parameter's bounds (`T: Showable + Into<int>`) name the traits its type
 argument must implement.  `impl Showable for A` implements trait `Showable` for `A`.
+`impl !Sendable for A {}` opts `A` out of a trait its structure gives it
+(`ImplDecl::isNegative`; Sema takes it for `Sendable`, in the standard
+library): the `!` goes before a trait, which `for` follows (`unexpected ...;
+expected a trait's name after 'impl !' ('impl !Sendable for T {}')`).
 A function or method written `=> expression ;` has for its body a block of one
 `return` spanning the expression (`fn double(x: int) -> int => x * 2;` is
 `fn double(x: int) -> int { return x * 2; }`); without a result type, `fn

@@ -1804,6 +1804,18 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       ok = false;
       continue;
     }
+    // What no instance changes is said once, of the template.
+    if (im->getTrait()) {
+      std::string what = std::string(kind) + " '" + name;
+      for (size_t i = 0; i < params.size(); ++i)
+        (what += i ? ", " : "<") += *params[i];
+      what += ">'";
+      if (!checkImplForm(im, traitAnnotationName(im->getTrait()),
+                         namesBuiltinTrait(im->getTrait()), what)) {
+        ok = false;
+        continue;
+      }
+    }
     // A block's bounds (`impl List<T: Cloneable>`) name built-in traits: an
     // instance is made before the module's own traits' blocks are known.
     bool bounded = true;

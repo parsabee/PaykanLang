@@ -986,6 +986,7 @@ int main(int argc, char *argv[]) {
                           driver.getFrontendName());
   sema.setResolver(&resolver);
   sema.setOpenWorld(opts.EmitPkm);
+  sema.setSystemModule(mainName.starts_with(paykan::module_name::kSep));
   // A program that is built or run needs an entry point; --check-only and
   // --emit-pkm also accept a module without one, but still check a declared
   // `main`.

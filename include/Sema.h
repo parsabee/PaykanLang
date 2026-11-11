@@ -417,6 +417,22 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// looked at ("" for the value itself).
   std::string uncrossable(ast::Type *ty, ast::Qualifier q,
                           const std::string &path);
+  /// uncrossable of a value that is sent at @p loc: in the archetype check,
+  /// one that does not cross because of a type parameter that is not
+  /// bounded `Sendable` is recorded as the missing bound, "... " + @p what
+  /// (noteArchetypeSend).
+  /// The classes it walks are recorded as sent (CrossedClasses) unless
+  /// @p sent is false: a bound asked about sends nothing.
+  std::string unsent(ast::Type *ty, ast::Qualifier q, ast::SourceLocation loc,
+                     const std::string &what, bool sent = true);
+  /// Whether uncrossable records the classes it walks in CrossedClasses.
+  bool RecordCrossings = false;
+  /// Whether @p ty implements the built-in trait `Sendable` (#378): the
+  /// send check finds nothing against it.
+  bool isSendable(ast::Type *ty);
+  /// Why @p ty, a type argument, is not Sendable, as the end of a
+  /// diagnostic that has named it.
+  std::string notSendableReason(ast::Type *ty);
   /// The borrowing parameters' arguments: a `view` takes every form of the
   /// object and an `inout` a unique or `shared` one, neither counting it,
   /// and no borrow reaches a `locked` cell.
@@ -1883,6 +1899,8 @@ public:
   void setResolver(modules::ModuleResolver *resolver) { Resolver = resolver; }
   /// See OpenWorld.
   void setOpenWorld(bool open) { OpenWorld = open; }
+  /// See SystemModule.
+  void setSystemModule(bool system) { SystemModule = system; }
 
 private:
   /// Resolve a module path to an absolute file path.
@@ -2653,6 +2671,13 @@ private:
   /// Whether the type arguments @p args of an instance meet the bounds of
   /// its template's `impl` block @p im (`impl List<T: Cloneable>`), which
   /// is part of the instance only then.
+  /// What an `impl TRAIT for` block may say whatever its type is: only
+  /// `Sendable` is opted out of (`impl !Sendable for T {}`), by the standard
+  /// library and with no methods, and neither `Copyable` nor `Sendable` is
+  /// implemented.  @p trait is the trait as written, @p builtin whether it
+  /// is a built-in one, and @p what the type ("struct 'Handle'").
+  bool checkImplForm(const ast::ImplDecl *im, const std::string &trait,
+                     bool builtin, const std::string &what);
   bool implBoundsHold(const ast::ImplDecl *im,
                       const std::vector<ast::Type *> &args);
   /// Whether @p ty has a text: implements the builtin `Showable`, whose
@@ -2737,6 +2762,25 @@ private:
   /// Copyable` allows when T is what shares storage.
   void noteArchetypeCopy(ast::SourceLocation loc, const ast::Type *ty,
                          const std::string &what, bool view = false);
+  /// In the archetype check, the type parameter of the template whose own
+  /// code is being checked that @p archetype stands for, when neither the
+  /// template nor the `impl` block of the method being checked bounds it
+  /// `Sendable` (#378); null when one does, and in any other code.
+  const std::string *unsendableArchetype(const ast::ClassType *archetype);
+  /// The archetype uncrossable last refused for that.
+  const ast::ClassType *UnsentArchetype = nullptr;
+  /// The classes and structs a module opted out of `Sendable` (`impl
+  /// !Sendable for T {}`, the standard library's only): its own, and those
+  /// its imports' interfaces say.
+  std::unordered_set<const ast::Type *> NotSendable;
+  /// Whether the module being checked is one of the standard library's
+  /// (`::name`).
+  bool SystemModule = false;
+  /// In the archetype check, @p ty does not cross at @p loc because it
+  /// holds such an archetype, of a type parameter `T`: recorded as "'T' is
+  /// not 'Sendable': declare 'T: Sendable' " + @p what.
+  void noteArchetypeSend(ast::SourceLocation loc, ast::Type *ty,
+                         const std::string &what);
   /// The instantiations being made (their fields, signatures and `impl`
   /// blocks resolved), innermost last, each with its type arguments:
   /// beside InstantiatingTemplates, for the archetype check, as
@@ -2757,6 +2801,10 @@ private:
     ~MakingInstance() {
       S.MakingInstances.pop_back();
       S.ImplScopeMethod = SavedMethod;
+      // The outermost: every instance it asked for is whole.
+      if (S.MakingInstances.empty() && S.TraitImplsKnown &&
+          !S.PendingAsyncResults.empty())
+        S.checkPendingAsyncResults();
     }
     MakingInstance(const MakingInstance &) = delete;
     MakingInstance &operator=(const MakingInstance &) = delete;
@@ -2919,6 +2967,26 @@ private:
     std::vector<InstantiationFrame> Frames;
   };
   std::vector<PendingBoundCheck> PendingBoundChecks;
+  /// The send check of an `async fn`'s result (checkAsyncDecl).
+  struct PendingAsyncResult {
+    const ast::FuncDecl *Fn;
+    ast::Type *Result;
+    /// The generic class or struct whose instance's method it is, and that
+    /// instance's type arguments: the conditional-block hint is for them.
+    const std::string *Owner;
+    std::vector<ast::Type *> Args;
+    /// Where it was declared: the diagnostic's file and instantiation notes.
+    const ModuleTemplates *Origin;
+    std::vector<InstantiationFrame> Frames;
+  };
+  /// The ones declared before what their types hold was known: a method of
+  /// a class declared before the module's `impl` blocks were recorded, or
+  /// of an instance made while another was.
+  std::vector<PendingAsyncResult> PendingAsyncResults;
+  bool checkAsyncResult(const PendingAsyncResult &check);
+  /// Check those, once the module's types and `impl` blocks are known and
+  /// no instance is being made.
+  bool checkPendingAsyncResults();
   /// The instantiations whose deferred bound check failed (KF-6): made
   /// before the check could run, they would not have been made after it,
   /// so their bodies are not checked, and a bound check of an instantiation

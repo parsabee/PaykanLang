@@ -501,6 +501,31 @@ TEST(Interface, Impls) {
 // (type, trait) sorted and unique; a truncated record or a string index out
 // of range is the byte reader's error.  Bytes after the two strings are a
 // later field's (#147's trait module and arguments) and are ignored.
+// `impl !Sendable for T {}` (#378) is an IMPL record whose trait is
+// `!Sendable`: a type's opt-out, which an importer's send check reads.
+TEST(Interface, OptOutsOfSendable) {
+  Interface i = implSample();
+  i.Impls.push_back({"Key", "!Sendable"});
+  const std::vector<uint8_t> b = writeInterface(i);
+  EXPECT_NE(b, writeInterface(implSample()));
+  StatusOr<Interface> back = readInterface(b, "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, sorted(i));
+  EXPECT_NE(std::find((*back).Impls.begin(), (*back).Impls.end(),
+                      ImplRec{"Key", "!Sendable"}),
+            (*back).Impls.end());
+  // No other trait is opted out of, and `Sendable` itself is implemented
+  // by no block.
+  for (const char *trait : {"!Hashable", "Sendable", "!"}) {
+    Interface bad = implSample();
+    bad.Impls = {{"Key", trait}};
+    EXPECT_NE(readError(writeInterface(bad))
+                  .find("is not a built-in trait an 'impl' block implements"),
+              std::string::npos)
+        << trait;
+  }
+}
+
 TEST(Interface, ImplRecordsAreChecked) {
   const Interface good = implSample();
   auto rejects = [&](std::vector<ImplRec> impls) {

@@ -480,6 +480,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     if (CrossedClasses.count(ct))
       info.ExportedImpls.push_back({name, names::kImplCrosses});
   };
+  // Its opt-out of `Sendable` (#378), which an importer's send check reads.
+  auto exportOptOut = [&](const ast::Type *ty, const std::string &name) {
+    if (NotSendable.count(ty))
+      info.ExportedImpls.push_back({name, names::kImplNotSendable});
+  };
 
   for (auto &[name, ct] : Ctx.getClassTypes()) {
     // The registry holds each class under its canonical name and again
@@ -517,6 +522,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     info.ExportedClasses.push_back(std::move(ci));
     exportImpls(ct, name);
     exportCrossing(ct, name);
+    exportOptOut(ct, name);
   }
 
   // Struct types: fields in declaration order, then `__init__` and the
@@ -543,6 +549,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       si.Methods.push_back(methodInfo(m));
     info.ExportedStructs.push_back(std::move(si));
     exportImpls(st, name);
+    exportOptOut(st, name);
   }
 
   // Enum types: name + variants in declaration order, and those with fields
@@ -1080,6 +1087,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   importSema.ImportDepth = ImportDepth;
   importSema.Resolver = Resolver;
   importSema.setOpenWorld(true);
+  importSema.setSystemModule(canonical.starts_with(module_name::kSep));
 
   auto *importRoot = importDriverPtr->getRoot();
   auto childCtx = importSema.run(importRoot);
@@ -1499,6 +1507,11 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
       if (ii.Trait == names::kImplCrosses) {
         if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty))
           CrossedClasses.insert(ct);
+        continue;
+      }
+      // `impl !Sendable for T {}`: no conformance, an opt-out (#378).
+      if (ii.Trait == names::kImplNotSendable) {
+        NotSendable.insert(ty);
         continue;
       }
       if (t == Traits.end() || !t->second.IsBuiltin ||

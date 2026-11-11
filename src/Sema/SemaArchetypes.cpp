@@ -254,6 +254,93 @@ void Sema::noteArchetypeCopy(ast::SourceLocation loc, const ast::Type *ty,
   }
 }
 
+const std::string *Sema::unsendableArchetype(const ast::ClassType *archetype) {
+  if (!Archetypes || InstantiatingTemplates.empty())
+    return nullptr;
+  // Only in the code of a template's own instance (noteArchetypeCopy).
+  const ast::Decl *tmpl = InstantiatingTemplates.back().Template;
+  auto own = Archetypes->Own.find(tmpl);
+  if (own == Archetypes->Own.end())
+    return nullptr;
+  const std::vector<ast::Type *> *args = CurrentInstanceArgs;
+  if (!MakingInstances.empty() && MakingInstances.back().first == tmpl)
+    args = MakingInstances.back().second;
+  if (!args || std::find(own->second.begin(), own->second.end(), *args) ==
+                   own->second.end())
+    return nullptr;
+  const std::vector<const std::string *> *params = typeParamsOf(tmpl);
+  const ast::TypeParamBounds *bounds = boundsOf(tmpl);
+  if (!params)
+    return nullptr;
+  // A method's names and bounds are also its `impl` block's.
+  const ast::FuncDecl *method = ImplScopeMethod;
+  if (!method)
+    method = CurrentMethodUse ? CurrentMethodUse->Decl : CurrentResult.Fn;
+  for (auto it = LambdaStack.rbegin(); !method && it != LambdaStack.rend();
+       ++it)
+    method = it->OuterUse ? it->OuterUse->Decl : it->OuterFn;
+  const ast::ImplDecl *block = nullptr;
+  if (method)
+    if (auto it = ImplMethodBlocks.find(method); it != ImplMethodBlocks.end())
+      block = it->second;
+  auto sendable = [&](const ast::TypeParamBounds *bs, size_t i) {
+    if (bs && i < bs->size())
+      for (ast::Type *b : (*bs)[i])
+        if (namesBuiltinTrait(b) &&
+            traitAnnotationName(b) == names::kTraitSendable)
+          return true;
+    return false;
+  };
+  for (size_t i = 0; i < args->size() && i < params->size(); ++i) {
+    if ((*args)[i] != archetype)
+      continue;
+    if (sendable(bounds, i) ||
+        (block && sendable(&block->getTypeParamBounds(), i)))
+      return nullptr;
+    if (block && block->getTypeParams().size() == params->size())
+      return block->getTypeParams()[i];
+    return (*params)[i];
+  }
+  return nullptr;
+}
+
+std::string Sema::unsent(ast::Type *ty, ast::Qualifier q,
+                         ast::SourceLocation loc, const std::string &what,
+                         bool sent) {
+  UnsentArchetype = nullptr;
+  const bool saved = std::exchange(RecordCrossings, sent);
+  std::string why = uncrossable(ty, q, "");
+  RecordCrossings = saved;
+  if (!why.empty() && UnsentArchetype)
+    if (const std::string *param = unsendableArchetype(UnsentArchetype)) {
+      std::string msg;
+      // An untyped parameter's type is a parameter no source can name.
+      if (const std::string_view untyped = names::untypedParamOf(*param);
+          !untyped.empty()) {
+        msg = "parameter '";
+        msg += untyped;
+        msg += "' takes any type, which may not be 'Sendable': write its "
+               "type with a type parameter bounded 'Sendable', ";
+      } else {
+        msg = "'" + *param + "' is not 'Sendable': declare '" + *param +
+              ": Sendable' ";
+      }
+      msg += what;
+      const std::string key = std::to_string(loc.getLineStart()) + ":" +
+                              std::to_string(loc.getColumnStart()) + ":" + msg;
+      if (Archetypes->Seen.insert(key).second)
+        Archetypes->Copies.push_back({loc, msg});
+    }
+  UnsentArchetype = nullptr;
+  return why;
+}
+
+void Sema::noteArchetypeSend(ast::SourceLocation loc, ast::Type *ty,
+                             const std::string &what) {
+  if (Archetypes)
+    static_cast<void>(unsent(ty, {}, loc, what, /*sent=*/false));
+}
+
 bool Sema::checkArchetypes() {
   // The module's own templates, in a stable order.
   std::vector<std::pair<std::string, const ast::Decl *>> templates;

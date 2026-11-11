@@ -124,21 +124,34 @@ inline constexpr const char *kTraitCopyable = "Copyable";
 /// clone the copy; so are `Str`, and a struct, tuple, fixed array or
 /// optional of Cloneable parts; a class opts in with `impl Cloneable for`.
 inline constexpr const char *kTraitCloneable = "Cloneable";
+/// No methods: the types whose ownership can move to another thread (#378;
+/// docs/design/concurrency.md, "The send check"): a value, a unique object
+/// or an aggregate whose parts are Sendable, a `locked`, `atomic` or `atomic
+/// shared` handle; not a `shared` or `weak` reference, a function value or
+/// an `Obj`.  Structural, never implemented: what Sema::uncrossable finds
+/// nothing against.
+inline constexpr const char *kTraitSendable = "Sendable";
 inline constexpr const char *kMethodClone = "clone";
 inline constexpr const char *kMethodHash = "hash";
+/// What a module interface records for `impl !Sendable for T {}` (#378),
+/// where a conformance names its trait: the one structural trait a type
+/// can be opted out of.
+inline constexpr const char *kImplNotSendable = "!Sendable";
+/// What a module interface records, in the same place, for a class whose
+/// objects the module's code sends to another thread (a task's argument or
+/// receiver, a frozen value, a cell's): an importer's class derived from it
+/// crosses too, so the importer's send check is of it
+/// (Sema::checkCrossedClasses).
+inline constexpr const char *kImplCrosses = "crosses";
 /// The built-in traits an `impl ... for` block gives a class or a struct, so
 /// the conformances a module interface records (pkm IMPL,
-/// docs/design/pkm.md §3.5).  `Showable` and `ValueType` are not: every class
-/// has `Showable` through `Obj`, and the rest follow from a type's structure
-/// (src/Sema/SemaTraits.cpp, traitImplOwner).
-/// What a module interface records, where a conformance names its trait,
-/// for a class whose objects the module's code sends to another thread (a
-/// task's argument or receiver, a frozen value, a cell's): an importer's
-/// class derived from it crosses too, so the importer's send check is of
-/// it (Sema::checkCrossedClasses).
-inline constexpr const char *kImplCrosses = "crosses";
+/// docs/design/pkm.md §3.5), and the two marks above.  `Showable` and
+/// `ValueType` are not: every class has `Showable` through `Obj`, and the
+/// rest follow from a type's structure (src/Sema/SemaTraits.cpp,
+/// traitImplOwner).
 inline bool isImplBuiltinTrait(std::string_view n) {
-  return n == kTraitHashable || n == kTraitCloneable || n == kImplCrosses;
+  return n == kTraitHashable || n == kTraitCloneable || n == kImplCrosses ||
+         n == kImplNotSendable;
 }
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";

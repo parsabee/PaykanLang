@@ -194,7 +194,7 @@ private:
     if (!d.getTypeParams().empty())
       typeParams(d.getTypeParams(), d.getTypeParamBounds());
     if (d.getTrait()) {
-      open("for");
+      open(d.isNegative() ? "not" : "for");
       type(d.getTrait());
       close();
     }
