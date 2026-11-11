@@ -1,0 +1,13 @@
+// Makes `Box<int>` and `Pair<int, bool>` and calls one method of the pair:
+// its file keeps of these instances only what this code reaches.
+import gen;
+
+fn one(x: int) -> int {
+  let b = gen::Box<int>(x);
+  return b.v;
+}
+
+fn two(x: int) -> int {
+  let p = gen::Pair<int, bool>(x, True);
+  return p.first();
+}

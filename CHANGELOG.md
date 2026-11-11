@@ -403,6 +403,10 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A program that called a method of an `impl` block on an instance of a generic class that an
+  imported module had made for itself, without calling that method, hit an assertion in the
+  lowering on its second run, when the module came from the cache. The calling module now
+  emits such a method itself, as it does for a struct's.
 - A write through a local that borrowed an `inout` arm's binding (`o: inout Open { x: inout =
   o.balance; x = x + 5; }`) was lost: the binding went back to the subject after its own last
   mention, before the write. A borrow of the binding keeps it in use.

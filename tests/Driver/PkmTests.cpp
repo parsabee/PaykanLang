@@ -2152,6 +2152,62 @@ TEST(Pkm, AnOptOutOfSendableIsInTheModuleFile) {
   fs::remove_all(dir);
 }
 
+// A module's file keeps, of an instance it does not expose, only the
+// methods its own code reaches.  The methods of an `impl` block are called
+// directly, so one the module dropped from a generic class's instance is
+// the calling module's to emit: on the first run, and on the second, when
+// the modules come from the cache.  (It was an assertion in the lowering.)
+TEST(Pkm, AnImportsDroppedImplMethodOfAClassCopy) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_dropped_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  writeFile(dir / "gen.pkn",
+            "class Box<T: Copyable> { v: T; }\n"
+            "impl Box<T> {\n"
+            "  view fn plain() -> T { return self.v; }\n"
+            "  fn bump(by: T) -> T { let old = self.v; self.v = by; "
+            "return old; }\n"
+            "  async view fn later() -> T { return self.v; }\n"
+            "}\n");
+  writeFile(dir / "makes.pkn", "import gen;\n"
+                               "fn one(x: int) -> int {\n"
+                               "  let b = gen::Box<int>(x);\n"
+                               "  return b.v;\n}\n");
+  writeFile(dir / "bumps.pkn", "import gen;\n"
+                               "import makes;\n"
+                               "fn three(x: int) -> int {\n"
+                               "  b: mut = gen::Box<int>(x);\n"
+                               "  return b.bump(1) + makes::one(x);\n}\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\n"
+            "import gen;\n"
+            "import makes;\n"
+            "import bumps;\n"
+            "fn main() -> int {\n"
+            "  b: mut = gen::Box<int>(8);\n"
+            "  let s: atomic shared gen::Box<int> = gen::Box<int>(5);\n"
+            "  let sum = b.plain() + makes::one(2) + bumps::three(6) + "
+            "b.bump(9);\n"
+            "  io::println(Str(sum) + \" \" + Str(await s.later()) + \" \" +\n"
+            "              Str(b.v));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  for (const char *args : {"main.pkn", "main.pkn", "-O 2 main.pkn"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, "30 5 9\n") << args;
+  }
+  auto built = paykan("build main.pkn -o prog && ./prog");
+  EXPECT_EQ(built.exitCode, 0) << built.out;
+  EXPECT_EQ(built.out, "30 5 9\n");
+  fs::remove_all(dir);
+}
+
 // What an importer checks of an `async fn` it only has the module file of:
 // its arguments' send check, the receiver an async method borrows, that it
 // is no value, and the colour of an override.

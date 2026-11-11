@@ -366,6 +366,67 @@ void ModuleLowering::emitPureVirtualTrap(pir::Function *fn, ast::ClassType *ct,
   B.emitUnreachable();
 }
 
+void ModuleLowering::lowerClassMethod(ast::ClassDecl *node, ast::ClassType *ct,
+                                      ast::FuncDecl *funcDecl) {
+  if (funcDecl->getName() == kMethodDestroy ||
+      funcDecl->getName() == kMethodWalk)
+    return;
+  auto *md = ct->findMethod(funcDecl->getName());
+  if (!md)
+    return;
+  pir::Function *fn =
+      FuncByName.at(node->getName() + kNameSep + funcDecl->getName());
+  if (md->isPure()) {
+    emitPureVirtualTrap(fn, ct, funcDecl->getName());
+    return;
+  }
+  // The `clone` an empty `impl Cloneable for` block derives (#369).
+  if (funcDecl->isDerivedClone()) {
+    emitDerivedClone(fn, ct);
+    return;
+  }
+  // An `async fn`: the body is its task's, which holds its receiver.
+  ast::Type *resultTy = md->getReturnType();
+  const bool task = funcDecl->isAsync();
+  if (task) {
+    resultTy = canonicalizeDeclType(funcDecl->getReturnType());
+    pir::Function *body = declareAsyncTask(fn, resultTy, AsyncReceiver::Object);
+    body->Params[0].Name = kSelf;
+    nameParams(*body, 1, funcDecl->getParams());
+    emitAsyncStart(*fn, *body, md->getParamTypes(), AsyncReceiver::Object);
+    fn = body;
+  }
+  FunctionStateGuard fnState(*this, fn, resultTy, ct);
+  {
+    ScopeGuard guard(*this);
+    // `self` is a raw object pointer, not ref-counted by the body.
+    pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
+    if (task) {
+      Val box(pir::Operand::value(fn->Params[0]), Type::Box);
+      pir::LocalId held = B.addLocal("self.held", Type::Box);
+      B.store(held, box);
+      CurrentScope->declare("self.held", held, ct);
+      B.store(selfLocal, B.unbox(box, kSelf));
+    } else {
+      B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
+    }
+    CurrentScope->declareUnowned(kSelf, selfLocal, ct);
+    CurrentScope->markStable(kSelf);
+    size_t at = 1;
+    for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
+      at += declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
+                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
+    if (funcDecl->getName() == kMethodInit) {
+      EmittingInit = true;
+      emitInitBody(funcDecl->getBody(), ct, selfLocal);
+      EmittingInit = false;
+    } else {
+      emitBody(funcDecl->getBody());
+    }
+  }
+  emitImplicitReturn(fn->Sig);
+}
+
 Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
   auto *ct = ASTCtx.lookupClassType(node->getName());
   assert(ct && "ClassType must have been registered by Sema");
@@ -373,67 +434,8 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
   pir::Class *cls = getOrCreateClass(ct);
 
   // 1. Method bodies.
-  for (auto *funcDecl : node->getMethods()) {
-    if (funcDecl->getName() == kMethodDestroy ||
-        funcDecl->getName() == kMethodWalk)
-      continue;
-    auto *md = ct->findMethod(funcDecl->getName());
-    if (!md)
-      continue;
-    pir::Function *fn =
-        FuncByName.at(node->getName() + kNameSep + funcDecl->getName());
-    if (md->isPure()) {
-      emitPureVirtualTrap(fn, ct, funcDecl->getName());
-      continue;
-    }
-    // The `clone` an empty `impl Cloneable for` block derives (#369).
-    if (funcDecl->isDerivedClone()) {
-      emitDerivedClone(fn, ct);
-      continue;
-    }
-    // An `async fn`: the body is its task's, which holds its receiver.
-    ast::Type *resultTy = md->getReturnType();
-    const bool task = funcDecl->isAsync();
-    if (task) {
-      resultTy = canonicalizeDeclType(funcDecl->getReturnType());
-      pir::Function *body =
-          declareAsyncTask(fn, resultTy, AsyncReceiver::Object);
-      body->Params[0].Name = kSelf;
-      nameParams(*body, 1, funcDecl->getParams());
-      emitAsyncStart(*fn, *body, md->getParamTypes(), AsyncReceiver::Object);
-      fn = body;
-    }
-    FunctionStateGuard fnState(*this, fn, resultTy, ct);
-    {
-      ScopeGuard guard(*this);
-      // `self` is a raw object pointer, not ref-counted by the body.
-      pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
-      if (task) {
-        Val box(pir::Operand::value(fn->Params[0]), Type::Box);
-        pir::LocalId held = B.addLocal("self.held", Type::Box);
-        B.store(held, box);
-        CurrentScope->declare("self.held", held, ct);
-        B.store(selfLocal, B.unbox(box, kSelf));
-      } else {
-        B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
-      }
-      CurrentScope->declareUnowned(kSelf, selfLocal, ct);
-      CurrentScope->markStable(kSelf);
-      size_t at = 1;
-      for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
-        at +=
-            declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
-                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
-      if (funcDecl->getName() == kMethodInit) {
-        EmittingInit = true;
-        emitInitBody(funcDecl->getBody(), ct, selfLocal);
-        EmittingInit = false;
-      } else {
-        emitBody(funcDecl->getBody());
-      }
-    }
-    emitImplicitReturn(fn->Sig);
-  }
+  for (auto *funcDecl : node->getMethods())
+    lowerClassMethod(node, ct, funcDecl);
 
   // 2. The synthetic destructor (so the destroy slot names it), and the
   //    walk (the concurrency prototype).

@@ -1,0 +1,26 @@
+// A generic class with methods in an `impl` block, which are called
+// directly: an instance's are emitted by the module that calls them.
+class Box<T: Copyable> {
+  v: T;
+}
+
+impl Box<T> {
+  view fn plain() -> T { return self.v; }
+
+  fn bump(by: T) -> T  { let old = self.v; self.v = by; return old; }
+
+  async view fn later() -> T {
+    return self.v;
+  }
+}
+
+class Pair<A: Copyable, B: Copyable> {
+  a: A;
+  b: B;
+}
+
+impl Pair<A, B> {
+  view fn first() -> A  { return self.a; }
+
+  view fn second() -> B { return self.b; }
+}

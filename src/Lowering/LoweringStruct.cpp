@@ -156,11 +156,40 @@ void ModuleLowering::declareDroppedCopyMethods() {
       DroppedCopyFunctions.insert(symbol);
     }
   }
+  // A class copy's `impl` methods, the same way: `gen::Box<int>` made by a
+  // module that calls none of them has none in its file.
+  for (ast::ClassDecl *cd : SemaCtx.ImportedInstanceClasses) {
+    ast::ClassType *ct = ASTCtx.lookupClassType(cd->getName());
+    const std::string *origin = ct ? typeOrigin(cd->getName()) : nullptr;
+    if (!origin || *origin == Mod.Name)
+      continue;
+    auto modIt = PL.ByName.find(*origin);
+    const pir::Module *def = modIt == PL.ByName.end() ? nullptr : modIt->second;
+    for (ast::FuncDecl *funcDecl : cd->getMethods()) {
+      ast::MethodDecl *md = ct->findMethod(funcDecl->getName());
+      if (!md || !md->isImpl() || !funcDecl->getBody() ||
+          ct->implOwner(funcDecl->getName()) != ct)
+        continue;
+      const std::string symbol = cd->getName() + kNameSep + funcDecl->getName();
+      const pir::Function *f = def ? def->findFunction(symbol) : nullptr;
+      if ((f && def->defines(*f)) || FuncByName.count(symbol))
+        continue;
+      pir::Function *fn = getOrCreateFunction(symbol, methodSignature(md));
+      fn->Params[0].Name = kSelf;
+      nameParams(*fn, 1, funcDecl->getParams());
+      Bodies[fn->Name] = funcDecl;
+      BodyOwners[funcDecl] = ct;
+      DroppedClassCopyMethods.emplace_back(cd, funcDecl);
+      DroppedCopyFunctions.insert(symbol);
+    }
+  }
 }
 
 void ModuleLowering::lowerDroppedCopyMethods() {
   for (auto &[sd, funcDecl] : DroppedCopyMethods)
     lowerStructMethod(sd, ASTCtx.lookupStructType(sd->getName()), funcDecl);
+  for (auto &[cd, funcDecl] : DroppedClassCopyMethods)
+    lowerClassMethod(cd, ASTCtx.lookupClassType(cd->getName()), funcDecl);
 }
 
 Val ModuleLowering::lowerStructDecl(ast::StructDecl *sd) {
