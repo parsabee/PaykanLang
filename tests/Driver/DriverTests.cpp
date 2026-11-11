@@ -203,13 +203,26 @@ fn main() -> int {
 }
 )");
   const std::string want = "three\n10 1 42\n";
+  const std::string exe = src + ".exe";
+  // `paykan <opt> build <src> -o <exe> && <exe>`.
+  auto builtAndRun = [&](const char *opt) {
+    std::string cmd = paykanRun();
+    cmd += " ";
+    cmd += opt;
+    cmd += " build ";
+    cmd += src;
+    cmd += " -o ";
+    cmd += exe;
+    cmd += " 2>&1 && ";
+    cmd += exe;
+    cmd += " 2>&1";
+    return run(cmd);
+  };
   for (const char *opt : {"-O0", "-O1", "-O2", "-O3"}) {
     auto [rc, out] = run(paykanRun() + " " + opt + " " + src + " 2>&1");
     EXPECT_EQ(rc, 0) << opt << "\n" << out;
     EXPECT_EQ(out, want) << opt;
-    const std::string exe = src + ".exe";
-    auto [brc, bout] = run(paykanRun() + " " + opt + " build " + src + " -o " +
-                           exe + " 2>&1 && " + exe + " 2>&1");
+    auto [brc, bout] = builtAndRun(opt);
     EXPECT_EQ(brc, 0) << opt << "\n" << bout;
     EXPECT_EQ(bout, want) << opt;
     std::filesystem::remove(exe);
