@@ -1981,6 +1981,192 @@ TEST(Pkm, ParSafeOfWhatAClassInherits) {
   fs::remove_all(dir);
 }
 
+// An `async fn` of another module, an async method, and a value held in
+// memory coming back from one, from the source and from the module file.
+TEST(Pkm, AsyncAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_async_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(
+      dir / "lib.pkn",
+      "class C { n: int; async view fn get() -> int { return self.n; } }\n"
+      "impl C { fn __init__(n: int) { self.n = n; } }\n"
+      "async fn twice(x: int) -> int { return 2 * x; }\n"
+      "async fn pair(x: int) -> (int, Str) { return (x, \"p\"); }\n");
+  writeFile(dir / "main.pkn", "import ::io;\n"
+                              "import lib;\n"
+                              "async fn run() -> int {\n"
+                              "  let c = lib::C(4);\n"
+                              "  let a = await lib::twice(21);\n"
+                              "  let b = await c.get();\n"
+                              "  let p = await lib::pair(9);\n"
+                              "  return a + b + p.0 + p.1.len();\n"
+                              "}\n"
+                              "fn main() -> int {\n"
+                              "  let t = run();\n"
+                              "  io::println(Str(await t));\n"
+                              "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto fromSource = paykan("--no-module-cache main.pkn");
+  ASSERT_EQ(fromSource.exitCode, 0) << fromSource.out;
+  EXPECT_TRUE(contains(fromSource.out, "56\n")) << fromSource.out;
+  ASSERT_EQ(paykan("--emit-pkm lib.pkn").exitCode, 0);
+  fs::remove(dir / "lib.pkn");
+  auto fromFile = paykan("main.pkn");
+  ASSERT_EQ(fromFile.exitCode, 0) << fromFile.out;
+  EXPECT_TRUE(contains(fromFile.out, "56\n")) << fromFile.out;
+  auto dump = paykan("pkm dump --section=iface lib.pkm");
+  EXPECT_TRUE(contains(dump.out, "func twice(int) -> async Task<int>"))
+      << dump.out;
+  fs::remove_all(dir);
+}
+
+// What an importer checks of an `async fn` it only has the module file of:
+// its arguments' send check, the receiver an async method borrows, that it
+// is no value, and the colour of an override.
+TEST(Pkm, AnImportersChecksOfAnAsyncFn) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_asyncr_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn",
+            "class Node { v: int; }\n"
+            "class C { n: int; async view fn get() -> int { return self.n; } "
+            "}\n"
+            "impl C { fn __init__(n: int) { self.n = n; } }\n"
+            "async fn eat(o: Node) -> int { return o.v; }\n");
+  writeFile(dir / "main.pkn",
+            "import lib;\n"
+            "class D : lib::C { view fn get() -> int { return 1; } }\n"
+            "impl D { fn __init__(n: int) { __super__(n); } }\n"
+            "fn main() -> int {\n"
+            "  let nd = lib::Node(1);\n"
+            "  let a = await lib::eat(nd);\n"
+            "  let c = lib::C(2);\n"
+            "  let t = c.get();\n"
+            "  let f = lib::eat;\n"
+            "  return a + await t;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  ASSERT_EQ(paykan("--emit-pkm lib.pkn").exitCode, 0);
+  fs::remove(dir / "lib.pkn");
+  auto r = paykan("--check-only --error-limit=0 main.pkn");
+  EXPECT_NE(r.exitCode, 0);
+  for (const char *want :
+       {"override of 'get' must be an 'async fn', like the method it "
+        "overrides",
+        "cannot copy 'nd' (a unique 'Node') into a task: write 'move nd' to "
+        "transfer it",
+        "'c.get()' lends 'c' to the task it starts: 'await' it where it is "
+        "called",
+        "async function 'lib::eat' is not a value: call it"})
+    EXPECT_TRUE(contains(r.out, want)) << want << "\n" << r.out;
+  fs::remove_all(dir);
+}
+
+// The C of --emit-c runs a task where it is called, so it links no compiled
+// code that has to do with tasks: --list-modules names neither a module
+// that declares an `async fn` nor one that imports it and awaits its tasks
+// (their code is in the C), while one without tasks stays a module file.  A
+// module file with such code and no source is refused.
+TEST(Pkm, TheCOfEmitCLinksNoCompiledTasks) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_asyncc_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "jobs.pkn",
+            "async fn twice(x: int) -> int { return 2 * x; }\n");
+  writeFile(dir / "relay.pkn",
+            "import jobs;\n"
+            "fn quad(x: int) -> int {\n"
+            "  return await jobs::twice(await jobs::twice(x));\n}\n");
+  writeFile(dir / "plain.pkn", "fn inc(x: int) -> int { return x + 1; }\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\nimport relay;\nimport plain;\n"
+            "fn main() -> int {\n"
+            "  io::println(Str(plain::inc(relay::quad(3))));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  // The cache entries, with compiled code, which a run links.
+  auto ran = paykan("main.pkn");
+  ASSERT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_TRUE(contains(ran.out, "13\n")) << ran.out;
+  for (int pass = 0; pass < 2; ++pass) {
+    auto listed = paykan("--list-modules main.pkn");
+    ASSERT_EQ(listed.exitCode, 0) << listed.out;
+    EXPECT_TRUE(contains(listed.out, "plain.pkm")) << listed.out;
+    EXPECT_FALSE(contains(listed.out, "jobs.pkm")) << listed.out;
+    EXPECT_FALSE(contains(listed.out, "relay.pkm")) << listed.out;
+  }
+  auto c = paykan("--emit-c main.pkn");
+  ASSERT_EQ(c.exitCode, 0) << c.out;
+  // The code of both is in the C, as their mangled functions.
+  EXPECT_TRUE(contains(c.out, "twice")) << c.out;
+  EXPECT_TRUE(contains(c.out, "quad")) << c.out;
+  // Without its source, the module file's compiled code is all there is.
+  ASSERT_EQ(paykan("--emit-pkm jobs.pkn").exitCode, 0);
+  fs::remove(dir / "jobs.pkn");
+  fs::remove_all(dir / ".paykan_cache");
+  auto refused = paykan("--emit-c main.pkn");
+  EXPECT_NE(refused.exitCode, 0);
+  EXPECT_TRUE(contains(refused.out,
+                       "has compiled code that starts tasks, and the C of "
+                       "--emit-c runs a task where it is called"))
+      << refused.out;
+  EXPECT_EQ(paykan("main.pkn").exitCode, 0);
+  fs::remove_all(dir);
+}
+
+// A class of a module may be named Task; `f`'s task function is not a method
+// of a type `f`; `async fn main` is only a program's.
+TEST(Pkm, AsyncNamesAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_asyncn_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn",
+            "class Task<T> { v: T; }\n"
+            "impl Task<T> { fn __init__(v: T) { self.v = move v; } }\n"
+            "fn mk() -> Task<int> { return Task<int>(3); }\n"
+            "async fn thing(x: int) -> int { return x + 1; }\n");
+  writeFile(dir / "m2.pkn", "struct thing { a: int; }\n"
+                            "impl thing {\n"
+                            "  fn __init__(a: int) { self.a = a; }\n"
+                            "  view fn get() -> int { return self.a; }\n}\n");
+  writeFile(dir / "main.pkn", "import ::io;\nimport lib;\nimport m2;\n"
+                              "fn main() -> int {\n"
+                              "  let t = m2::thing(3);\n"
+                              "  io::println(Str(lib::mk().v) + \" \" +\n"
+                              "              Str(t.get()) + \" \" +\n"
+                              "              Str(await lib::thing(4)));\n"
+                              "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const char *flags : {"--rebuild-modules main.pkn", "main.pkn"}) {
+    auto r = paykan(flags);
+    EXPECT_EQ(r.exitCode, 0) << flags << "\n" << r.out;
+    EXPECT_TRUE(contains(r.out, "3 3 5\n")) << flags << "\n" << r.out;
+  }
+  writeFile(dir / "entry.pkn", "async fn main() -> int { return 41; }\n");
+  writeFile(dir / "uses.pkn",
+            "import entry;\nfn main() -> int { return 0; }\n");
+  auto refused = paykan("--no-module-cache --check-only uses.pkn");
+  EXPECT_NE(refused.exitCode, 0);
+  EXPECT_TRUE(
+      contains(refused.out, "'async fn main' is a program's entry point"))
+      << refused.out;
+  fs::remove_all(dir);
+}
+
 TEST(Pkm, PureVirtualMethodsAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =

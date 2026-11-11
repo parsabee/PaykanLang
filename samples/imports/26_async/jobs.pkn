@@ -1,0 +1,36 @@
+// A module with tasks: an `async fn`, a private one, an async method that an
+// importer overrides, and a task whose result is a struct.
+
+struct Span {
+  from: int;
+  to: int;
+}
+
+class Shape {
+  size: int;
+
+  async view fn area() -> int {
+    return self.size * self.size;
+  }
+}
+
+impl Shape {
+  fn __init__(size: int) { self.size = size; }
+}
+
+async fn _double(x: int) -> int {
+  return 2 * x;
+}
+
+async fn twice(x: int) -> int {
+  return await _double(x);
+}
+
+async fn span(n: int) -> Span {
+  return Span(n, 2 * n);
+}
+
+// Awaits the method of whatever class the object is, the importer's too.
+fn total(s: Shape) -> int {
+  return await s.area();
+}

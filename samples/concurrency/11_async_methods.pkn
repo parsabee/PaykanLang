@@ -1,0 +1,61 @@
+// The concurrency prototype: `async` methods, and values held in memory going
+// to a task and back (docs/language/19-concurrency.md, "Tasks").  A receiver
+// that is not a handle is lent for the task, so the call is awaited where it
+// is written; a handle's task holds its own reference.
+// expect-stdout: 42 7
+// expect-stdout: sum 9 from (4, "four")
+
+import ::io;
+
+class Shape {
+  size: int;
+
+  async view fn area() -> int {
+    return self.size * self.size;
+  }
+}
+
+impl Shape {
+  fn __init__(size: int) { self.size = size; }
+}
+
+class Doubled : Shape {
+  async view fn area() -> int {
+    return 2 * self.size;
+  }
+}
+
+impl Doubled {
+  fn __init__(size: int) { __super__(size); }
+}
+
+struct Pair {
+  a: int;
+  b: int;
+}
+
+async fn sum(p: Pair) -> int {
+  return p.a + p.b;
+}
+
+async fn label(n: int) -> (int, Str) {
+  return (n, "four");
+}
+
+async fn run() -> int {
+  let total = await sum(Pair(4, 5));
+  n, text = await label(4);
+  io::println("sum " + Str(total) + " from (" + Str(n) + ", \"" + text + "\")");
+  return 0;
+}
+
+fn main() -> int {
+  let shape: Shape = Doubled(21);
+  let area = await shape.area();
+  let frozen: atomic shared = Shape(1);
+  let seven = frozen.area();
+  io::println(Str(area) + " " + Str(await seven + 6));
+  let t = run();
+  await t;
+  return 0;
+}

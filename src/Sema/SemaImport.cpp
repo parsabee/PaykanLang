@@ -103,7 +103,19 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
                                     ast::Qualifier &qual) {
   qual = readExportedQualifier(text, pos);
   ast::Type *ty = nullptr;
-  if (pos < text.size() && text[pos] == '(') {
+  static constexpr std::string_view kTask = "async Task<";
+  if (text.compare(pos, kTask.size(), kTask) == 0) {
+    // A task, as exportedTypeName spells one: what an `async fn` returns.
+    pos += kTask.size();
+    ast::Qualifier resultQual;
+    ast::Type *result = parseExportedType(ctx, text, pos, resultQual);
+    if (!result || pos >= text.size() || text[pos] != '>')
+      return nullptr;
+    ++pos;
+    ty = ctx.getTaskType(resultQual.isUnique()
+                             ? result
+                             : ctx.getQualifiedType(resultQual, result));
+  } else if (pos < text.size() && text[pos] == '(') {
     // `(T1, T2)`, a tuple type, or `(view T1, T2) -> R`, a function type
     // (`() -> R` takes no parameter), as typeName spells them; a function
     // type in parentheses takes a suffix, `((int) -> int)?`.
@@ -165,7 +177,7 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
   } else {
     size_t start = pos;
     while (pos < text.size() && text[pos] != ',' && text[pos] != ')' &&
-           text[pos] != '[' && text[pos] != '?') {
+           text[pos] != '[' && text[pos] != '?' && text[pos] != '>') {
       if (text[pos] == '<') {
         // Instantiation name: skip to the matching '>' (the '>' of a
         // function type's '->' among the arguments is not one).
@@ -267,6 +279,9 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
 /// importer reads it back (splitExportedQualifier).
 static std::string exportedTypeName(ast::Qualifier q, ast::Type *ty) {
   std::string name = ast::typeName(ty);
+  // A class may be named Task: a task's name says what it is.
+  if (ast::isa<ast::TaskType>(ty))
+    name = "async " + name;
   if (q.isUnique())
     return name;
   // One a type argument gave is marked, so the importer's reads it as such
@@ -423,7 +438,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
                              (m->isImpl() ? ast::MethodDecl::Impl : 0) |
                              (m->isShared() ? ast::MethodDecl::Shared : 0) |
                              (m->isPure() ? ast::MethodDecl::Pure : 0) |
-                             (m->isParSafe() ? ast::MethodDecl::ParSafe : 0));
+                             (m->isParSafe() ? ast::MethodDecl::ParSafe : 0) |
+                             (m->isAsync() ? ast::MethodDecl::Async : 0));
     mi.Modes = m->getParamModes();
     return mi;
   };
@@ -540,6 +556,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     fi.Modes = sig.Modes;
     fi.Native = sig.Native;
     fi.ParSafe = sig.ParSafe;
+    fi.Async = sig.Async;
     info.ExportedFunctions.push_back(std::move(fi));
   }
   sortModuleInfo(info);
@@ -552,7 +569,8 @@ static_assert(ast::MethodDecl::Private == pkm::kMethodPrivate &&
                   ast::MethodDecl::Impl == pkm::kMethodImpl &&
                   ast::MethodDecl::Shared == pkm::kMethodShared &&
                   ast::MethodDecl::Pure == pkm::kMethodPure &&
-                  ast::MethodDecl::ParSafe == pkm::kMethodParSafe,
+                  ast::MethodDecl::ParSafe == pkm::kMethodParSafe &&
+                  ast::MethodDecl::Async == pkm::kMethodAsync,
               "the IFACE method flag bits are ast::MethodDecl's");
 
 // The IFACE records' parameter modes (pkm::kMode*, a byte per parameter,
@@ -586,7 +604,8 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
   pkm::Interface iface;
   for (auto &fi : info.ExportedFunctions)
     iface.Functions.push_back({fi.Name, fi.ReturnTypeName, fi.ParamTypeNames,
-                               toModeRecs(fi.Modes), fi.Native, fi.ParSafe});
+                               toModeRecs(fi.Modes), fi.Native, fi.ParSafe,
+                               fi.Async});
   for (auto &ci : info.ExportedClasses) {
     pkm::ClassRec cr;
     cr.Name = ci.Name;
@@ -625,7 +644,7 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   for (auto &fr : iface.Functions)
     info.ExportedFunctions.push_back({fr.Name, fr.ReturnTypeName,
                                       fr.ParamTypeNames, fromModeRecs(fr.Modes),
-                                      fr.Native, fr.ParSafe});
+                                      fr.Native, fr.ParSafe, fr.Async});
   for (auto &cr : iface.Classes) {
     ModuleInfo::ClassInfo ci;
     ci.Name = cr.Name;
@@ -725,7 +744,8 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
         ast::builtinKindOfName(type, kind) || type == names::kObj ||
         type == names::kString)
       return false;
-    if (type.find_first_of("[?(") == std::string::npos)
+    if (type.find_first_of("[?(") == std::string::npos &&
+        type.rfind("async Task<", 0) != 0)
       return true;
     if (composite.count(type))
       return false;
@@ -735,11 +755,6 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
     return false;
   };
   auto unknownType = [](const std::string &what, const std::string &type) {
-    // A task type names an `async fn` of the module (the prototype).
-    if (type.rfind("Task<", 0) == 0)
-      return Status::error(what + " is a task ('" + type +
-                           "'): a module that declares an 'async fn' cannot "
-                           "be imported in the prototype");
     return Status::error(what + " has unknown type '" + type + "'");
   };
   auto signature = [&](const auto &decl, const std::string &ret,
@@ -1126,12 +1141,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
       *qual = q;
     if (resolved)
       return resolved;
-    if (tyName.rfind("Task<", 0) == 0)
-      error(loc, diagPrefix + what + " is a task ('" + tyName +
-                     "'): a module that declares an 'async fn' cannot be "
-                     "imported in the prototype");
-    else
-      error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
+    error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
     return nullptr;
   };
 
@@ -1512,6 +1522,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     sig.ParamQuals = std::move(quals);
     sig.Native = fi.Native;
     sig.ParSafe = fi.ParSafe;
+    sig.Async = fi.Async;
     sig.Imported = true;
     if (fi.Native)
       ImportedNatives.insert(name);

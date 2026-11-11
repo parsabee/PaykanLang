@@ -374,8 +374,10 @@ reads as having no modes and returning copies.  A `FUNC` record of a
 `native fn` (docs/language/03-functions.md, "Native Functions") adds a
 `u8` flags byte after its result mode, bit 0 for a native function, bit 1
 for a par-safe one (Sema::checkParSafety: a `parallel for` body may call
-it; its modes and its result mode are then written too); a reader rejects
-any other bit, and a record without it is neither.  It tells an importer
+it), bit 2 for an `async fn`, whose result type is its task, spelled `async
+Task<T>` (its modes and its result mode are then written too); a reader
+rejects any other bit,
+and a record without it is none of these.  It tells an importer
 what a call of the function does though another module compiles it: it
 keeps nothing it is lent and changes only what its `inout` arguments name,
 so a field read given to it may be lent (#98 part 2, docs/pir.md §7).  Each field of a `CLASS`
@@ -388,7 +390,7 @@ docs/design/visibility.md), bit 1 a `view fn`, bit 2 an `impl` block's
 method, bit 3 a `shared fn` (its `self` is shared, so only a receiver held
 `shared` calls it, docs/language/05-classes.md), bit 4 a pure virtual
 method, docs/language/05-classes.md, the value §3.5 gives `PURE`, bit 5
-par-safe); a reader rejects any other bit, the pure bit on a struct's method, an `impl` block's,
+par-safe, bit 6 an `async fn`); a reader rejects any other bit, the pure bit on a struct's method, an `impl` block's,
 an initializer (`__init__`, `___init__`) or `destroy`, and the shared bit on
 a struct's method, an initializer or `destroy`.  A `CLASS` record lists the complete vtable, so
 an importer works out from the pure bits which classes are abstract; that

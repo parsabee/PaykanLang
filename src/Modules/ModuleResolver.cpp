@@ -81,6 +81,16 @@ struct ModuleResolver::Pending {
 
 namespace {
 
+/// Whether an importer of the module of @p iface can come by a task: the
+/// type of something it declares (a function's or a method's result, a
+/// field) names one, spelled `async Task<T>` (docs/design/pkm.md §3.5).
+bool handsOutTasks(const pkm::Interface &iface) {
+  static constexpr std::string_view kTask = "async Task<";
+  const std::vector<uint8_t> bytes = pkm::writeInterface(iface);
+  return std::search(bytes.begin(), bytes.end(), kTask.begin(), kTask.end()) !=
+         bytes.end();
+}
+
 bool isSystemName(const std::string &canonical) {
   return canonical.starts_with(module_name::kSep);
 }
@@ -454,6 +464,20 @@ Resolution ModuleResolver::load(const std::string &canonical,
     return unusable("has an IFACE section that does not match " + s.message());
   if (Status s = checkLinks((*contents).Code); !s)
     return unusable("has a bad CODE section: " + s.message());
+  // Compiled code that starts or awaits tasks runs them on the async
+  // runtime, which a program that runs a task where it is called is not
+  // made for (ResolverOptions::SequentialTasks).
+  if (Opts.SequentialTasks && (*contents).Object) {
+    if (pir::usesTasks((*contents).Code))
+      return unusable("has compiled code that starts tasks, and the C of "
+                      "--emit-c runs a task where it is called");
+    for (const pkm::Manifest::Dep &d : m.Deps)
+      if (auto it = Entries.find(d.Name);
+          it != Entries.end() && handsOutTasks(it->second->Iface))
+        return unusable("has compiled code and imports module '" + d.Name +
+                        "', which hands out tasks, and the C of --emit-c "
+                        "runs a task where it is called");
+  }
   // A cache entry's code is the active backend's, or it is built again
   // (a prebuilt file's is checked by the backend that links it).
   if (const std::optional<pkm::Object> &o = (*contents).Object;

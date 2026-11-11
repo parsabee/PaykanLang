@@ -798,12 +798,54 @@ cannot copy 'a' (a unique 'Node') into a task: write 'move a' to transfer it
 cannot send 'j' (a 'Job'): field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread
 ```
 
-A deeper part is named by its path (`field 'job.cache' is 'shared Cache'`). An `async fn`'s
-parameters are numbers, references and handles in this version: a struct, a tuple, an array
-or a function value as a parameter is an error (`parameter 'p' of 'async fn' 'plot' has type
-'Point', a value held in memory: the prototype passes numbers, references and handles to a
-task (hold the value in a class)`), and a `shared` result is one too (`the result of 'async
-fn' 'give' (a 'shared Node') cannot cross to the task's awaiter`).
+A deeper part is named by its path (`field 'job.cache' is 'shared Cache'`). A struct, a tuple
+or an array goes to a task as a number does, by value, under the same check, and a function
+value cannot (`cannot send ... : is a function value, whose captures are not known`). A
+`shared` result cannot come back either (`the result of 'async fn' 'give' (a 'shared Node')
+cannot cross to the task's awaiter`).
+
+A method can be `async` too: a class's, an `impl` block's (of a class or a struct), a trait's
+requirement, and a `static fn` (`static async fn`). Its receiver crosses to the task like an
+argument. Unless the receiver is frozen (`atomic shared`, a handle), the task borrows it, so the
+call has to be awaited where it is written:
+
+```pkn
+import ::io;
+
+class Counter {
+  n: int;
+
+  async view fn read() -> int { return self.n; }
+}
+
+impl Counter {
+  fn __init__(n: int) { self.n = n; }
+}
+
+async fn run() -> int {
+  let c = Counter(5);
+  return await c.read();     // c is lent while this function waits
+}
+
+fn main() -> int {
+  let h: atomic shared = Counter(7);
+  let t = h.read();          // a handle: the task holds its own reference
+  let u = run();
+  io::println(Str(await t + await u));
+  return 0;
+}
+```
+
+Output:
+
+```
+12
+```
+
+Writing `let t = c.read();` with a unique `c` is an error (`'c.read()' lends 'c' to the task
+it starts: 'await' it where it is called`). An override keeps the colour of the method it
+overrides, and a method that meets a trait's requirement has the requirement's. `__init__`
+cannot be `async`, nor can a `shared fn`.
 
 ## `parallel for`
 
@@ -1728,12 +1770,21 @@ one.
 
 ## Tasks
 
-- `async fn f(...) -> T` declares a function that runs as a task; its parameters are numbers,
-  `bool`, `char`, references and handles (a struct, a tuple, an array or a function value as
-  a parameter is an error in this version), and its result a number, a `bool`, a `char`, a
-  reference or nothing (`an 'async fn' returns a number, bool, char, a reference or nothing
-  in the prototype, not '(int, int)'`) that passes the send check (`the result of 'async fn'
-  'give' (a 'shared Job') cannot cross to the task's awaiter`).
+- `async fn f(...) -> T` declares a function that runs as a task: a module's, a class's, an
+  `impl` block's (of a class or a struct), a trait's requirement, or a `static async fn`. Its
+  parameters are by value, and its result is a
+  value that passes the send check (`the result of 'async fn' 'give' (a 'shared Job') cannot
+  cross to the task's awaiter`). A struct, a tuple, an array or an optional crosses as a number
+  does; a function value does not.
+- An async method's receiver crosses to the task. A receiver that is not frozen (`atomic shared`)
+  is lent for the task, so the call is awaited where it is written (`'c.read()' lends 'c' to the
+  task it starts: 'await' it where it is called`; an `await` of something else, as in `await
+  c.dup().n`, names the call: `'await' the call itself, '(await c.dup())'`). An override keeps
+  its slot's colour (`override of 'get' must be an 'async fn', like the method it overrides`),
+  and a trait's requirement is met by a method of its colour. `__init__` cannot be `async`,
+  nor can `clone`, `equals`, `hash` and `toString`, which the compiler calls itself, nor a
+  `shared fn`, whose `shared` receiver never crosses (`'keep' cannot be both 'async' and a
+  'shared fn': ...`).
 - Calling an async function starts the task at once, and the call's value is its handle.
   `await h` waits for the task and gives its result; `await f(x)` awaits the call in place.
   `await h` spends the handle: `h` cannot be used again (`'t' was awaited at 10:11; a task
@@ -1741,11 +1792,13 @@ one.
   on every path before its scope ends (`task 't' is not awaited before this 'return': ...`,
   `task 't' may not be awaited when its scope ends: it is spent on some paths only ...`), and
   before its variable takes another (`task 't' is replaced before it is awaited: await it (or
-  move it) first`).
-- `async fn main() -> int` is allowed. In this version `await` is allowed in an ordinary
-  function too, and blocks the thread; an async function cannot be a method, and a module
-  that declares one cannot be imported yet (`return type of function 'slow' is a task
-  ('Task<int>'): a module that declares an 'async fn' cannot be imported in the prototype`).
+  move it) first`). An operand that runs on some paths only (a branch of `if ... then ... else`,
+  the right of `&&` or `||`) cannot spend one (`task 't' would be awaited on some paths only:
+  'await' it before the condition`, `task 't' would be moved on some paths only: move it before
+  the condition`).
+- `async fn main() -> int` is allowed in the program's own file, not in a module others import
+  (`'async fn main' is a program's entry point: a module that others import cannot declare
+  one`). In this version `await` is allowed in an ordinary function too, and blocks the thread.
 - The send check at an async call's arguments: a number, a `bool`, a `char`, a `Str`, a
   handle (`atomic`, `locked`, `atomic shared`) and a unique object, a `T` or a `mut T`,
   whose fields, own and inherited and through structs, tuples, arrays, optionals and enum
@@ -1861,10 +1914,9 @@ one.
 - A task handle has one operation, `await`, which spends it; the compiler requires every
   handle in a variable to be awaited (or moved) before its scope ends, so that no task is
   dropped while it runs, and does not follow one stored in a field, an element or a tuple.
-- An `async fn` is a free function of the program's own module: no async methods, and a
-  module that declares an `async fn` cannot be imported. Its parameters are numbers,
-  references and handles, not a struct, a tuple, an array or a function value, and its result
-  a number, a `bool`, a `char`, a reference or nothing.
+- An async method's receiver that is not frozen (`atomic shared`) has to be awaited where the
+  call is written. The contents of a `locked` object are reached only in a `lock` block, where
+  `await` is not allowed, so no async method runs on them.
 - A part of a type takes some forms only ([Qualifiers in a type](#qualifiers-in-a-type)):
   a `locked` type argument, an `atomic shared` or `locked` element of a tuple or an array,
   and an `atomic shared` or `locked` parameter or result of a function type are errors
@@ -1896,7 +1948,7 @@ one.
 | Copy into a task | `consume(a)` with `a` a unique `Node` |
 | Task handle | `let t = fib(5);` with no `await` before the scope ends or a `return`; `await t` twice; `await t` in one branch only; `t = fib(4)` before `await t` |
 | Part that cannot cross | `move j` with a `shared`, `weak`, function-value or `Obj` part; a `shared` result of an `async fn` |
-| Value as a task parameter | `async fn plot(p: Point)`, `async fn call(f: () -> int)` |
+| Async method | `let t = c.read();` with `c` a unique `Counter` (not awaited where it is called); an override of the other colour; `async fn __init__`; a `view` or `inout` parameter of an `async fn` |
 | Use after move | `move a` then `a.name`; a move in one branch; a move in a loop with no assignment before the next iteration |
 | Move of what is not a unique part | `move h.other` with `other: shared Job`; a move of a viewed variable; a move beside a borrow in one call |
 | Body of a `parallel for` | a reference, a `Str` or a function value of the enclosing function; a write that is not a reduction; an `inout` array written at another index; `break`, `continue`, `return`, `await`, a task started |

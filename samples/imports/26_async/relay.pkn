@@ -1,0 +1,12 @@
+// A module with no `async fn` of its own that awaits another module's
+// tasks.
+import jobs;
+
+fn quad(x: int) -> int {
+  return await jobs::twice(await jobs::twice(x));
+}
+
+fn width(n: int) -> int {
+  let s = await jobs::span(n);
+  return s.to - s.from;
+}

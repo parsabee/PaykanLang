@@ -357,6 +357,178 @@ TEST(Concurrency, ALambdaInDeadCodeLeavesItsStatementOpen) {
   EXPECT_EQ(r.ExitCode, 1);
 }
 
+// The program's own `async fn main` has no function that starts it but
+// the entry point: a call of it in the program starts its task, whichever
+// of the two is declared first.
+TEST(Concurrency, ACallOfAsyncMainStartsItsTask) {
+  for (const char *src : {R"(import ::io;
+    async fn main() -> int {
+      io::println("main");
+      return await again(1);
+    }
+    async fn again(n: int) -> int {
+      if n > 0 { return 0; }
+      return await main();
+    })",
+                          R"(import ::io;
+    async fn again(n: int) -> int {
+      if n > 0 { return 0; }
+      return await main();
+    }
+    async fn main() -> int {
+      io::println("main");
+      return await again(1);
+    })"}) {
+    auto r = compileAndRun(src);
+    EXPECT_TRUE(r.CompileOk) << r.StdErr;
+    EXPECT_EQ(r.ExitCode, 0);
+    EXPECT_EQ(r.StdOut, "main\n");
+  }
+}
+
+// An async method: of a class, dispatched virtually; of a struct; `static`;
+// the receiver of a handle awaited later.  A value held in memory goes in
+// and comes back on the heap.  Every object and block is let go of.
+TEST(Concurrency, AsyncMethodsAndValuesInMemory) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class C {
+      n: int;
+      async view fn get(k: int) -> int { return self.n + k; }
+    }
+    impl C {
+      fn __init__(n: int) { self.n = n; }
+      async view fn twice() -> int { return 2 * await self.get(0); }
+    }
+    class D : C {
+      async view fn get(k: int) -> int { return self.n * 10 + k; }
+    }
+    impl D { fn __init__(n: int) { __super__(n); } }
+    class S { n: int; }
+    impl S { static async fn seven() -> int { return 7; } }
+    class N { v: int; }
+    struct P { x: int; y: int; }
+    impl P { async view fn sum() -> int { return self.x + self.y; } }
+    struct H { n: N; k: int; }
+    async fn mk(a: int) -> (int, Str) { return (a, "one"); }
+    async fn point(a: int) -> P { return P(a, a * 2); }
+    async fn opt(a: int) -> int? { if a > 0 { return a; } return None; }
+    async fn take(p: P, t: (int, Str), xs: int[3]) -> int {
+      return p.x + t.0 + xs[2] + t.1.len();
+    }
+    async fn pass(h: H) -> H { return h; }
+    async fn run() -> int {
+      let c = C(5);
+      let a = await c.get(1);
+      let b = await c.twice();
+      let d: C = D(2);
+      let e = await d.get(3);
+      let p = P(3, 4);
+      let f = await p.sum();
+      let t = await mk(7);
+      let q = await point(8);
+      let z = await take(P(1, 2), (3, "four"), [1, 2, 3]);
+      let s = await S::seven();
+      let h = await pass(H(N(4), 1));
+      let m = H(N(5), 2);
+      let n = await pass(move m);
+      io::println(Str(a) + " " + Str(b) + " " + Str(e) + " " + Str(f) + " "
+                  + Str(t.0) + t.1 + " " + Str(q.y) + " " + Str(z) + " "
+                  + Str(s) + " " + Str(h.n.v + n.n.v));
+      match await opt(1) {
+        v: int { io::println(Str(v)); }
+        None { io::println("none"); }
+      }
+      match await opt(0) {
+        v: int { io::println(Str(v)); }
+        None { io::println("none"); }
+      }
+      return 0;
+    }
+    fn main() -> int {
+      let t = run();
+      await t;
+      let h: atomic shared = C(4);
+      let u = h.get(1);
+      let v = h.get(2);
+      io::println(Str(await u + await v));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "6 10 23 7 7one 16 11 7 9\n1\nnone\n11\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  g.expectNoLeaks("AsyncMethodsAndValuesInMemory");
+}
+
+// A receiver lent to a task, and a temporary it holds, last until the await;
+// a part read from an awaited value is its own.  Each slot of an async body
+// lives in its coroutine's frame, also one used only after the last await.
+TEST(Concurrency, AwaitedTemporariesAndSlotsAcrossAwaits) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class N { v: int; }
+    impl N { fn __init__(v: int) { self.v = v; } }
+    struct S { n: N; }
+    impl S { async view fn rd() -> int { return self.n.v; } }
+    struct T { s: Str; }
+    impl T { async view fn rd() -> int { return self.s.len(); } }
+    class C {
+      n: int;
+      async view fn b() -> int { return self.n; }
+      async view fn a() -> int { return await self.b(); }
+      async view fn pair() -> (int, int) { return (1, self.n); }
+    }
+    struct P { s: Str; }
+    async fn mk() -> P { return P("v" + Str(1)); }
+    async fn tup() -> (int, N) { return (1, N(5)); }
+    fn makeT() -> T { return T("a" + Str(1)); }
+    async fn rec(n: int) -> (int, int) {
+      if n < 2 { return (n, 1); }
+      let x = await rec(n - 1);
+      return (x.0 + 1, x.1);
+    }
+    async fn slot(c: C) -> int {
+      let p = await c.pair();
+      return p.1;
+    }
+    async fn opt(n: int?) -> (int, int) {
+      match n {
+        a: int { return (a, 1); }
+        None { return (0, 0); }
+      }
+    }
+    async fn one() -> int { return 1; }
+    async fn arm(c: bool) -> int {
+      r = 0;
+      match c {
+        True { r = await one(); }
+        _ { }
+      }
+      return r;
+    }
+    fn main() -> int {
+      io::println((await mk()).s);
+      io::println(Str((await tup()).1.v));
+      io::println(Str(await S(N(5)).rd()));
+      io::println(Str(await T("a" + Str(1)).rd()));
+      io::println(Str(await makeT().rd()));
+      s = 0;
+      for i in 0..20000 { s += await C(1).a(); }
+      io::println(Str(s));
+      io::println(Str((await rec(3)).0));
+      io::println(Str(await slot(C(3))));
+      io::println(Str((await opt(2)).0));
+      io::println(Str(await arm(True)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "v1\n5\n5\n2\n2\n20000\n3\n3\n2\n1\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  g.expectNoLeaks("AwaitedTemporariesAndSlotsAcrossAwaits");
+}
+
 TEST(Concurrency, ParallelForWritesAnInoutArrayAtTheLoopsIndex) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;

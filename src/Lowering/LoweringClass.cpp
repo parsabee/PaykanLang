@@ -391,12 +391,32 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       emitDerivedClone(fn, ct);
       continue;
     }
-    FunctionStateGuard fnState(*this, fn, md->getReturnType(), ct);
+    // An `async fn`: the body is its task's, which holds its receiver.
+    ast::Type *resultTy = md->getReturnType();
+    const bool task = funcDecl->isAsync();
+    if (task) {
+      resultTy = canonicalizeDeclType(funcDecl->getReturnType());
+      pir::Function *body =
+          declareAsyncTask(fn, resultTy, AsyncReceiver::Object);
+      body->Params[0].Name = kSelf;
+      nameParams(*body, 1, funcDecl->getParams());
+      emitAsyncStart(*fn, *body, md->getParamTypes(), AsyncReceiver::Object);
+      fn = body;
+    }
+    FunctionStateGuard fnState(*this, fn, resultTy, ct);
     {
       ScopeGuard guard(*this);
       // `self` is a raw object pointer, not ref-counted by the body.
       pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
-      B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
+      if (task) {
+        Val box(pir::Operand::value(fn->Params[0]), Type::Box);
+        pir::LocalId held = B.addLocal("self.held", Type::Box);
+        B.store(held, box);
+        CurrentScope->declare("self.held", held, ct);
+        B.store(selfLocal, B.unbox(box, kSelf));
+      } else {
+        B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
+      }
       CurrentScope->declareUnowned(kSelf, selfLocal, ct);
       CurrentScope->markStable(kSelf);
       size_t at = 1;

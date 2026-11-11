@@ -35,6 +35,10 @@ ast::FunctionType *Sema::functionTypeOf(const FunctionSig &sig) {
 bool Sema::checkFunctionValue(const std::string &name, const FunctionSig &sig,
                               ast::SourceLocation loc) {
   const std::string shown = displayName(name);
+  if (sig.Async) {
+    error(loc, "async function '" + shown + "' is not a value: call it");
+    return false;
+  }
   const ast::ClassType *ct = Ctx.lookupClassType(name);
   if (ct && ct->isAbstract()) {
     // No lambda can construct it either.
@@ -306,6 +310,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
       std::exchange(CurrentResultQual, resultQual);
   LoopDepth = 0;
   CurrentMethodUse = nullptr;
+  // Its body is no operand of what it is written in: an `await` there is
+  // the lambda's own, on every path of it.
+  const unsigned savedConditional = std::exchange(ConditionalOperand, 0);
+  const ast::Expr *savedAwaitOperand = std::exchange(AwaitOperand, nullptr);
   // Its moves are its own: a capture is a read-only copy (the prototype).
   MovedMap savedMoves = std::exchange(MovedVars, {});
   std::vector<LoopMoves> savedLoopMoves = std::exchange(LoopMoveStack, {});
@@ -361,6 +369,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   ReturnLockBase = savedLockBase;
   ReturnParallelBase = savedParallelBase;
   LockLoopBase = savedLockLoopBase;
+  ConditionalOperand = savedConditional;
+  AwaitOperand = savedAwaitOperand;
   MovedVars = std::move(savedMoves);
   LoopMoveStack = std::move(savedLoopMoves);
   FlowEnded = savedFlowEnded;

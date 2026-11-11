@@ -301,6 +301,13 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
   pir::Signature sig;
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
   sig.Ret = retAstTy ? toPIRType(retAstTy) : Type::Void;
+  // What a call of an `async fn` gives is its task (emitAsyncStart).
+  if (startsAsyncTask(node)) {
+    sig.Ret = Type::Ptr;
+    for (auto &p : node->getParams())
+      appendParamTypes(sig.Params, p.ParamType, p.Mode);
+    return sig;
+  }
   const bool inoutResult = node->getResultMode() == ast::ParamMode::Inout;
   if (inoutResult)
     sig.Ret = Type::Ptr; // the address of the storage it names
@@ -320,7 +327,12 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
     return it->second;
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
-  fn->IsAsync = node->isAsync();
+  fn->IsAsync = node->isAsync() && !startsAsyncTask(node);
+  // `async fn main` (the prototype): the task runs under another name, which
+  // a call of `main` in the program starts, and the program's entry point
+  // starts it and awaits its result (emitAsyncMainEntry).
+  if (fn->IsAsync)
+    fn->Name = std::string(names::kMain) + ".async";
   nameParams(*fn, 0, node->getParams());
   if (fn->Sig.Ret != Type::Ptr && ast::isMemType(node->getReturnType()))
     fn->Params.back().Name = "result"; // where the result is written
@@ -580,6 +592,12 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   std::vector<ast::StructDecl *> structs = node->getStructDecls();
   structs.insert(structs.end(), ForeignStructs.begin(), ForeignStructs.end());
   indexSubclasses(classes);
+  // The module's own `main`, when it is the program's: another module's is
+  // an ordinary function.
+  if (Canonical.empty())
+    for (auto *fn : node->getFuncDecls())
+      if (fn->getName() == names::kMain)
+        EntryPoint = fn;
   for (auto *fn : funcs) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
@@ -740,13 +758,15 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     const bool movedBytesOut =
         moved && moved->getOpcode() == ast::UnaryOpcode::Move &&
         ast::isMemType(moved->getResolvedType()) && movesBytes(moved);
-    return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
-                                       ast::isa<ast::MethodCallExpr>(root) ||
-                                       ast::isa<ast::CallValueExpr>(root) ||
-                                       ast::isa<ast::ArrayLiteralExpr>(root) ||
-                                       ast::isa<ast::TupleLiteralExpr>(root) ||
-                                       ast::isa<ast::TernaryExpr>(root) ||
-                                       isHeldRead(root) || movedBytesOut);
+    const bool awaited = moved && moved->getOpcode() == ast::UnaryOpcode::Await;
+    return exprAlreadyShared(expr) &&
+           (awaited || ast::isa<ast::CallExpr>(root) ||
+            ast::isa<ast::MethodCallExpr>(root) ||
+            ast::isa<ast::CallValueExpr>(root) ||
+            ast::isa<ast::ArrayLiteralExpr>(root) ||
+            ast::isa<ast::TupleLiteralExpr>(root) ||
+            ast::isa<ast::TernaryExpr>(root) || isHeldRead(root) ||
+            movedBytesOut);
   }
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isCountedRef(mce->getResolvedType());
@@ -1205,6 +1225,27 @@ Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
     const ast::Expr *Saved;
     ~RestoreTail() { Slot = Saved; }
   } restoreTail{TailReturn, savedTail};
+  // A task's result held in memory, or an optional value: on the heap, which
+  // its `await` frees, as the task's result has only 64 bits.
+  if (B.function()->IsAsync && node->getReturnValue() &&
+      asyncResultOnHeap(CurrentFuncReturnASTType)) {
+    if (ast::isMemType(CurrentFuncReturnASTType)) {
+      Val heap = callRuntime(
+          names::kPaykanMalloc,
+          {Val::i64(memLayout(CurrentFuncReturnASTType).Size)}, "result");
+      emitMemInit(node->getReturnValue(), heap);
+      emitAllScopesCleanup();
+      B.emitRet(heap);
+      return Val();
+    }
+    Val value = coerceTo(emitExpr(node->getReturnValue()),
+                         toPIRType(CurrentFuncReturnASTType));
+    Val heap = callRuntime(names::kPaykanMalloc, {Val::i64(16)}, "result");
+    B.ptrStore(heap, value);
+    emitAllScopesCleanup();
+    B.emitRet(heap);
+    return Val();
+  }
   // A result held in memory: written where the last parameter points (a
   // temporary of the caller's, which nothing here can reach otherwise).
   if (node->getReturnValue() && ast::isMemType(CurrentFuncReturnASTType) &&
@@ -1984,7 +2025,9 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
   case Type::Obj:
     B.emitRet(Val::null(sig.Ret));
     break;
-  case Type::Ptr:
+  case Type::Ptr: // what a body must return: this end is never reached
+    B.emitUnreachable();
+    break;
   case Type::I64:
     B.emitRet(Val::i64(0));
     break;
@@ -2002,12 +2045,19 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
 
 Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   pir::Function *fn = declareFunctionPrototype(node);
-  // `async fn main` (the prototype): the task runs under another name, and
-  // the program's entry point starts it and awaits its result.
-  const bool asyncMain = node->isAsync() && node->getName() == names::kMain;
-  if (asyncMain)
-    fn->Name = std::string(names::kMain) + ".async";
+  // `async fn main` (the prototype): the program's entry point starts its
+  // task and awaits its result.
+  const bool asyncMain = node->isAsync() && node == EntryPoint;
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
+  if (startsAsyncTask(node)) {
+    std::vector<ast::Type *> params;
+    for (const ast::Param &p : node->getParams())
+      params.push_back(canonicalizeDeclType(p.ParamType));
+    pir::Function *task = declareAsyncTask(fn, retAstTy, AsyncReceiver::None);
+    nameParams(*task, 0, node->getParams());
+    emitAsyncStart(*fn, *task, params, AsyncReceiver::None);
+    fn = task;
+  }
   {
     FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
     {
@@ -2026,6 +2076,67 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   if (asyncMain)
     emitAsyncMainEntry(*fn);
   return Val();
+}
+
+bool ModuleLowering::startsAsyncTask(const ast::FuncDecl *fn) const {
+  return fn->isAsync() && fn != EntryPoint;
+}
+
+pir::Function *ModuleLowering::declareAsyncTask(const pir::Function *start,
+                                                ast::Type *result,
+                                                AsyncReceiver receiver) {
+  pir::Signature sig = start->Sig;
+  if (receiver == AsyncReceiver::Object)
+    sig.Params[0] = Type::Box; // a reference of its own
+  sig.Ret = !result || result == ASTCtx.getVoidTy() ? Type::Void
+            : asyncResultOnHeap(result)             ? Type::Ptr
+                                                    : toPIRType(result);
+  pir::Function *task =
+      getOrCreateFunction(start->Name + names::kAsyncTaskSuffix, sig);
+  task->IsAsync = true;
+  return task;
+}
+
+// static
+bool ModuleLowering::asyncResultOnHeap(const ast::Type *result) {
+  return ast::isMemType(result) || ast::isValueOptional(result);
+}
+
+// The start of a task, on the caller's thread: what the task will need after
+// the call has returned is taken here.  A value held in memory, passed by
+// the caller's address, moves to the heap, which the task frees (see
+// declareMemParam); an object receiver is a reference of the task's, which
+// lets go of it as it ends.  The caller's +1 boxes go on to the task.
+void ModuleLowering::emitAsyncStart(pir::Function &start,
+                                    const pir::Function &task,
+                                    const std::vector<ast::Type *> &params,
+                                    AsyncReceiver receiver) {
+  FunctionStateGuard state(*this, &start, nullptr, /*methodClassTy=*/nullptr);
+  std::vector<Val> args;
+  size_t at = 0;
+  const auto param = [&](size_t i) {
+    return Val(pir::Operand::value(start.Params[i]), start.Params[i].Ty);
+  };
+  if (receiver != AsyncReceiver::None) {
+    Val self = param(at++);
+    args.push_back(receiver == AsyncReceiver::Object ? B.box(self, "self.box")
+                                                     : self);
+  }
+  for (ast::Type *ty : params) {
+    Val v = param(at++);
+    if (ast::isMemType(ty)) {
+      MemLayout l = memLayout(ty);
+      Val heap = callRuntime(names::kPaykanMalloc, {Val::i64(l.Size)}, "arg");
+      B.memCopy(heap, v, Val::i64(l.Size));
+      if (holdsUnique(ty))
+        B.memZero(v, Val::i64(l.Size));
+      else
+        emitMemRetain(heap, ty);
+      v = heap;
+    }
+    args.push_back(v);
+  }
+  B.emitRet(B.asyncCall(task.Name, task.Sig, args, "task"));
 }
 
 void ModuleLowering::emitAsyncMainEntry(const pir::Function &task) {

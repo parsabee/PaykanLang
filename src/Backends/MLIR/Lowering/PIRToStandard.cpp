@@ -565,6 +565,19 @@ void FunctionLowering::run() {
     Map.map(l.getSlot(),
             P::AllocaOp::create(B, Loc, size, align, l.getName()).getResult());
     SlotTypes[l.getSlot()] = slot;
+    // A coroutine's split keeps in its frame a slot used on both sides of a
+    // suspension.  One used only after the last stays where it was declared,
+    // past the first suspension, and so does not dominate its uses: a write
+    // the optimizer keeps puts each slot that stays in memory on both sides.
+    // (One that lives in a register is no slot by then.)
+    if (IsAsync && !M.sequential() &&
+        (isa<P::MemType>(slot) ||
+         llvm::any_of(l.getSlot().getUsers(),
+                      [](Operation *u) { return isa<P::LocalAddrOp>(u); })))
+      P::PtrStoreOp::create(
+          B, Loc, Map.lookup(l.getSlot()),
+          arith::ConstantIntOp::create(B, Loc, B.getI8Type(), 0),
+          /*vtable=*/false, /*touch=*/true);
   }
 
   // Without break, continue or an early return, no exit flag is needed.
@@ -975,8 +988,11 @@ Value FunctionLowering::lowerCases(Value v, ArrayRef<int64_t> cases,
   // scf.index_switch keeps its cases in a DenseSet, whose empty and tombstone
   // keys are INT64_MAX and INT64_MIN: a case of either (an i64's) is an
   // scf.if on `v == case` instead, around the dispatch among the others.
-  const auto *key = llvm::find_if(cases, [](int64_t c) {
-    return c == std::numeric_limits<int64_t>::max() ||
+  // An async body's too: the passes that split a coroutine know scf.if and
+  // not the switch.
+  const bool chain = IsAsync && !M.sequential();
+  const auto *key = llvm::find_if(cases, [&](int64_t c) {
+    return chain || c == std::numeric_limits<int64_t>::max() ||
            c == std::numeric_limits<int64_t>::min();
   });
   if (key != cases.end()) {

@@ -101,8 +101,16 @@ void ModuleLowering::lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
     return;
   pir::Function *fn =
       FuncByName.at(sd->getName() + kNameSep + funcDecl->getName());
-  FunctionStateGuard fnState(*this, fn, md->getReturnType(),
-                             /*methodClassTy=*/nullptr);
+  ast::Type *resultTy = md->getReturnType();
+  if (funcDecl->isAsync()) {
+    resultTy = canonicalizeDeclType(funcDecl->getReturnType());
+    pir::Function *task = declareAsyncTask(fn, resultTy, AsyncReceiver::Struct);
+    task->Params[0].Name = kSelf;
+    nameParams(*task, 1, funcDecl->getParams());
+    emitAsyncStart(*fn, *task, md->getParamTypes(), AsyncReceiver::Struct);
+    fn = task;
+  }
+  FunctionStateGuard fnState(*this, fn, resultTy, /*methodClassTy=*/nullptr);
   {
     ScopeGuard guard(*this);
     // `self` names the receiver's storage, as an `inout` parameter of the
@@ -316,8 +324,18 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
   Val result = L.B.call(fn->Name, fn->Sig, args, "mcall");
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
-  if (result && result.Ty == Type::Ptr) // an `inout` result
+  if (result && result.Ty == Type::Ptr &&
+      !ast::isa<ast::TaskType>(node->getResolvedType())) // an `inout` result
     return L.takeInoutResult(result, node, wantAddress, keep, mark, places);
+  // Awaited here, the task reads the receiver until then.
+  if (L.AwaitedCall == node &&
+      ast::isa<ast::TaskType>(node->getResolvedType())) {
+    L.AfterAwait = [&L = L, keep, mark] {
+      L.releaseAfterCall(keep);
+      L.releaseMemTemps(mark);
+    };
+    return result;
+  }
   L.releaseAfterCall(keep);
   L.releaseMemTemps(mark);
   if (slot)

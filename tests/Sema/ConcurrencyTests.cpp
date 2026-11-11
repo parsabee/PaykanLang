@@ -104,25 +104,12 @@ fn main() -> int {
   let v = await nothing();
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
-  const std::string inMemory =
-      "', a value held in memory: the prototype passes numbers, references "
-      "and handles to a task (hold the value in a class)";
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
   const std::string outlives = "': a task outlives the call that starts it";
-  const std::string returns =
-      ": error: an 'async fn' returns a number, bool, char, a reference or "
-      "nothing in the prototype, not '";
   expectErrors(
       r, {":5:1: error: the result of 'async fn' 'giveShared' (a 'shared "
           "Job') cannot cross to the task's awaiter: is 'shared Job': a "
           "'shared' reference is aliased on its own thread",
-          (":6:15: error: parameter 'p' of 'async fn' 'plot' has type 'Point" +
-           inMemory)
-              .c_str(),
-          (":7:15: error: parameter 'f' of 'async fn' 'call' has type '() -> "
-           "int" +
-           inMemory)
-              .c_str(),
           (":8:18: error: parameter 'n' of 'async fn' 'byInout' cannot be "
            "'inout" +
            outlives)
@@ -131,14 +118,275 @@ fn main() -> int {
            "'view" +
            outlives)
               .c_str(),
-          (":10:1" + returns + "(int, int)'").c_str(),
-          (":11:1" + returns + "int?'").c_str(),
           ":13:3: error: initializer of type 'Task<int>' does not match "
           "declared type 'Str' for variable 's'",
           ":14:11: error: 'await' takes a task (the result of calling an "
           "'async fn'), not a 'int'",
           ":15:3: error: variable 'v' cannot have type 'void' (the expression "
           "produces no value)"});
+}
+
+// An async method: its colour is its slot's, `__init__` has none, and its
+// receiver crosses to the task.  What it lends is lent while the caller
+// waits, so the call is awaited where it is written unless the receiver is
+// a handle.
+TEST(Concurrency, AsyncMethodRules) {
+  auto r = semaCheck(R"(class C {
+  n: int;
+  async view fn get() -> int { return self.n; }
+  view fn plain() -> int { return self.n; }
+}
+impl C {
+  fn __init__(n: int) { self.n = n; }
+  async fn __nope() -> int { return 1; }
+}
+class D : C {
+  view fn get() -> int { return 1; }
+  async view fn plain() -> int { return 1; }
+}
+impl D { fn __init__(n: int) { __super__(n); } }
+class E { }
+impl E { async fn __init__() { } }
+class F {
+  s: shared C;
+  async view fn get() -> int { return 1; }
+}
+async fn run(f: F) -> int {
+  let c = C(1);
+  let t = c.get();
+  let a = await t;
+  let b = await c.get();
+  let g = await f.get();
+  return a + b + g;
+}
+fn main() -> int {
+  let h: atomic shared = C(4);
+  let u = h.get();
+  parallel for i in 0..2 { let x = h.get(); }
+  return await u;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":11:3: error: override of 'get' must be an 'async fn', like the "
+       "method it overrides",
+       ":12:3: error: override of 'plain' cannot be an 'async fn': the "
+       "method it overrides is not",
+       ":16:10: error: '__init__' cannot be 'async': constructing gives the "
+       "object at once",
+       ":23:11: error: 'c.get()' lends 'c' to the task it starts: 'await' it "
+       "where it is called",
+       ":26:17: error: the receiver of 'async fn' 'get' ('f', a 'F') cannot "
+       "cross to its task: field 's' is 'shared C': a 'shared' reference is "
+       "aliased on its own thread",
+       ":32:36: error: a task cannot be started in a 'parallel for' body"});
+  expectCleanLines(r, {":25:", ":31:"});
+}
+
+// A value held in memory goes to a task and comes back: a parameter and a
+// result of an `async fn`, under the send check.
+TEST(Concurrency, AsyncFnTakesAndReturnsValuesInMemory) {
+  auto r = semaCheck(R"(struct Point { x: int; y: int; }
+async fn plot(p: Point, t: (int, Str), xs: int[3]) -> Point { return p; }
+async fn pair() -> (int, Str) { return (1, "a"); }
+async fn maybe() -> int? { return None; }
+async fn call(f: () -> int) -> int { return f(); }
+async fn run() -> int {
+  let p = await plot(Point(1, 2), (1, "s"), [1, 2, 3]);
+  let q = await pair();
+  let m = await maybe();
+  let c = await call(fn() -> int { return 1; });
+  return p.x + q.0;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":10:22: error: cannot send"});
+}
+
+// What cannot be a task, or is not one where it stands: an inferred result,
+// a function value of an `async fn`, a method the compiler calls itself, a
+// call whose task nobody holds, and a task awaited on one path of a
+// condition.  A conditional receiver is each of its branches.
+TEST(Concurrency, AsyncFnLimits) {
+  auto r = semaCheck(R"(class C {
+  n: int;
+  async view fn get() -> int { return self.n; }
+}
+impl C { fn __init__(n: int) { self.n = n; } }
+struct S { n: int; }
+impl S { async view fn clone() -> S { return S(1); } }
+async fn inferred() => 1;
+async fn f() -> int { return 1; }
+fn main() -> int {
+  let g = f;
+  f();
+  let t = f();
+  let a = True && await t == 1;
+  let u = f();
+  let b = if True then await u else 2;
+  let h: atomic shared = C(1);
+  c: mut = C(2);
+  let v = (if True then h else c).get();
+  return 0;
+}
+)");
+  expectErrors(
+      r, {":7:10: error: 'clone' cannot be 'async': the compiler calls it, and "
+          "waits for no task",
+          ":8:1: error: the result type of 'async fn' 'inferred' is not "
+          "inferred",
+          ":11:11: error: async function 'f' is not a value: call it",
+          ":12:3: error: this task is never awaited",
+          ":14:19: error: task 't' would be awaited on some paths only",
+          ":16:24: error: task 'u' would be awaited on some paths only",
+          ":19:11: error: '(if ... then h else c).get()' lends"});
+}
+
+// A `move` inside an argument writes what it moves, as a direct one does.
+TEST(Concurrency, AMoveInsideAnArgumentConflictsWithTheReceiver) {
+  auto r = semaCheck(R"(struct S { name: Str; }
+impl S { view fn eat(o: S) -> int { return 1; } }
+fn id(s: S) -> S { return s; }
+fn main() -> int {
+  s = S("a");
+  return s.eat(id(move s));
+}
+)");
+  expectErrors(r, {":6:16: error: 's' is the receiver of 'view fn eat'; it "
+                   "cannot also be moved in argument 1"});
+}
+
+// A `move` inside an argument that Sema refused (an element leaves by
+// `mem::take`) is reported once, and the checks of the calls around it go
+// on; two moves of one variable in one argument are a use after a move, not
+// a conflict of the argument with itself.
+TEST(Concurrency, ARefusedMoveInsideAnArgument) {
+  auto r = semaCheck(R"(struct S { name: Str; }
+fn id(s: S) -> S { return s; }
+fn two(a: S, b: S) -> S { return a; }
+fn main() -> int {
+  xs = [S("x"), S("y")];
+  let i = id(id(move xs[0]));
+  a = S("a");
+  let j = id(two(move a, move a));
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  expectErrors(r, {":6:17: error: cannot move 'xs[0]': an element leaves by "
+                   "'mem::replace' or 'mem::take'",
+                   ":8:31: error: 'a' was moved at 8:18"});
+}
+
+// A trait's async requirement is met by an async method whose result has
+// the requirement's form, a type argument's too; a method of the other
+// colour is named as written.  A requirement's parameters and result are by
+// value, like every `async fn`'s, and none is a `shared fn`.
+TEST(Concurrency, AsyncRequirements) {
+  auto r = semaCheck(R"(class Node { v: int; }
+trait AGen<T> { async fn agen() -> T; }
+trait Maker { async view fn make() -> atomic shared Node; }
+trait Count { async view fn count() -> int; }
+class B { h: atomic shared Node; }
+impl AGen<atomic shared Node> for B {
+  async fn agen() -> atomic shared Node { return self.h; }
+}
+impl Maker for B {
+  async view fn make() -> atomic shared Node { return Node(1); }
+}
+impl Count for B {
+  view fn count() -> int { return 1; }
+}
+trait Bad {
+  async view fn peek(x: view Node) -> int;
+  async fn poke() -> view Node;
+  async shared fn keep() -> int;
+}
+class K { n: int; }
+impl K { async shared fn keep() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":13:3: error: 'view fn count() -> int' of class 'B' does not match "
+       "'async view fn count() -> int' of trait 'Count'",
+       ":16:22: error: parameter 'x' of 'async fn' 'peek' cannot be 'view': a "
+       "task outlives the call that starts it",
+       ":17:3: error: an 'async fn' returns a value: its result cannot be "
+       "'view' or 'inout'",
+       ":18:3: error: 'keep' cannot be both 'async' and a 'shared fn': a "
+       "'shared' receiver is aliased on its own thread, and cannot cross to "
+       "the task",
+       ":21:10: error: 'keep' cannot be both 'async' and a 'shared fn'"});
+  expectCleanLines(r, {":6:", ":7:", ":9:", ":10:"});
+}
+
+// A task is spent on every path: `await move t` and `move t` in an operand
+// that runs on some paths only are refused as `await t` is, once.  What is
+// awaited there and is no task says so.  A lambda's body is no operand of
+// the expression it is written in.
+TEST(Concurrency, ATaskIsSpentOnEveryPath) {
+  auto r = semaCheck(R"(async fn work(x: int) -> int { return x + 1; }
+fn apply(f: (int) -> int, x: int) -> int { return f(x); }
+fn main() -> int {
+  let c = False;
+  let t = work(1);
+  let b = if c then await move t else 2;
+  let u = work(2);
+  let d = c && await move u == 3;
+  let v = work(3);
+  let w = if c then move v else work(4);
+  let n = 3;
+  let e = if c then await n else 2;
+  let ok = c && apply(fn(x: int) -> int { let k = work(x); return await k; },
+                      2) == 3;
+  return await w;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  expectErrors(
+      r, {":6:21: error: task 't' would be awaited on some paths only: "
+          "'await' it before the condition",
+          ":8:16: error: task 'u' would be awaited on some paths only",
+          ":10:21: error: task 'v' would be moved on some paths only: move it "
+          "before the condition",
+          ":12:21: error: 'await' takes a task (the result of calling an "
+          "'async fn'), not a 'int'"});
+  expectCleanLines(r, {":13:", ":14:"});
+}
+
+// What the call of an async method says: an `await` of something else than
+// the call names the call, a unique argument copied is copied into a task,
+// and a `mut` result stays `mut` through the `await`.
+TEST(Concurrency, AsyncMethodCalls) {
+  auto r = semaCheck(R"(class Node { v: int; }
+class C {
+  n: int;
+  async view fn dup() -> C { return C(self.n); }
+  async view fn eat(o: Node) -> int { return o.v + self.n; }
+  async view fn made() -> mut Node { return Node(self.n); }
+}
+fn main() -> int {
+  let u = C(2);
+  let n = await u.dup().n;
+  let nd = Node(1);
+  let a = await u.eat(nd);
+  m = await u.made();
+  m.v = 3;
+  let k = (await u.dup()).n;
+  return n + a + k;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  expectErrors(
+      r, {":10:17: error: 'u.dup()' lends 'u' to the task it starts: 'await' "
+          "the call itself, '(await u.dup())'",
+          ":12:23: error: cannot copy 'nd' (a unique 'Node') into a task: "
+          "write 'move nd' to transfer it"});
+  expectCleanLines(r, {":13:", ":14:", ":15:"});
 }
 
 // -- The send check

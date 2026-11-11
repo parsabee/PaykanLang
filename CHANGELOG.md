@@ -13,6 +13,14 @@ samples/concurrency/README.md.
 
 ### Added
 
+- A method can be `async`: a class's, an `impl` block's, a trait's requirement and a `static fn`
+  (#368). An override keeps its slot's colour. The receiver crosses to the task under the send
+  check, and unless it is frozen (`atomic shared`) the call is awaited where it is written. A
+  module that declares an `async fn` can be imported (but not one that declares `async fn main`,
+  a program's entry point), and a task's parameter or result can be a struct, a tuple, an array
+  or an optional. The C of `--emit-c` runs a task where it is called, so it keeps the code of a
+  module that has to do with tasks instead of linking its compiled code, and `--list-modules`
+  does not name it (docs/c-backend.md).
 - `continue` ends an iteration of a `parallel for`, and a loop in its body has its own `break` and
   `continue` (#368). A `break` of the `parallel for` itself stays an error.
 - A `parallel for` body calls only par-safe functions (#368; docs/language/19-concurrency.md, "What

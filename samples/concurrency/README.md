@@ -9,10 +9,11 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 |---|---|
 | `01_parallel_for.pkn` | `parallel for` with a reduction, an `inout` array written at the loop's index, and an `atomic int` counter |
 | `02_async_await.pkn` | `async fn`, `await`, tasks started by calling an async function, `move` of a reference into a task, `async fn main` |
+| `11_async_methods.pkn` | `async` methods, virtual and on a handle; a tuple or struct going to a task and coming back |
 | `err_03_first_checks.pkn` | the first checks: copying a unique reference into a task, use after `move`, sending a `shared` reference, writing anything but a reduction in a parallel body |
 | `04_qualifiers.pkn` | the qualifiers on places: the bare type (unique, immutable), `mut`, `shared`, `shared mut`; the conversions between them; a `view` parameter taking every form |
 | `05_locked.pkn` | a `locked mut` cell shared by tasks, written in `lock c as v: inout { }` and read in `: view` blocks |
-| `06_atomic_shared_const.pkn` | an `atomic shared` object frozen with everything it holds, read by every task without a count |
+| `06_atomic_shared.pkn` | an `atomic shared` object frozen with everything it holds, read by every task without a count |
 | `07_atomic.pkn` | `atomic` on every number type, `bool` and `char`; `atomic` fields of a class; `exchange` and `compareExchange`; handles |
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
@@ -20,7 +21,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `errors/err_qualifiers.pkn` | the conversions a qualifier refuses (`shared` into unique, `mut` gained without `move`, `shared mut` into `shared`), writes through an immutable reference and an immutable field, `mut` on a value |
 | `errors/err_strict_copies.pkn` | the copy rule: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
-| `errors/err_atomic_shared_const.pkn` | writing through a frozen `atomic shared` object, converting it back, qualifying a value |
+| `errors/err_atomic_shared.pkn` | writing through a frozen `atomic shared` object, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
 | `errors/err_atomic_spellings.pkn` | the spellings the parser rejects: `const` in any form, `atomic shared mut`, `atomic mut`, `mut shared`, a second qualifier |
 | `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
@@ -210,7 +211,7 @@ build/bin/paykan --check-only samples/concurrency/errors/err_strict_copies.pkn
 build/bin/paykan --emit-pir samples/concurrency/05_locked.pkn
 build/bin/paykan --emit-mlir=scf samples/concurrency/02_async_await.pkn
 build/bin/paykan --emit-mlir=llvm samples/concurrency/01_parallel_for.pkn
-build/bin/paykan build samples/concurrency/06_atomic_shared_const.pkn -o cfg
+build/bin/paykan build samples/concurrency/06_atomic_shared.pkn -o cfg
 ```
 
 `--emit-c` of every program compiles as strict C11 against the runtime
@@ -219,21 +220,15 @@ a program) and prints the same output.
 
 ## What is not (on purpose)
 
-Channels, `task::spawnOn`, event loops pinned per thread, cancellation,
-task-handle typestate, the migration tool, holds across an `await`,
-`locked` type arguments and `atomic shared` or `locked`
-tuple and array elements (`List<shared Node>` and `(int, shared Node)`
-are there), the archetype check of templates (a copy of an unbounded
-`T` is caught per instance only), `match`
-bindings' qualifiers, the run-time check of a move out of borrowed
-storage, a value held in memory (a struct, tuple or array) as a task
-parameter, async methods, importing a module that declares an `async fn`
-(`... is a task ('Task<int>'): a module that declares an 'async fn' cannot
-be imported in the prototype`), a task whose result is a tuple, a struct
-or an optional value (`an 'async fn' returns a number, bool, char, a
-reference or nothing in the prototype`), task handles in fields, elements
-or tuples (not followed by the await check), and the diagnostics' final
-wording.  A program with an `async fn` is compiled with the `-O1` pipeline
+Postponed to v0.5 with the async runtime (#362): channels, `task::spawn`
+and `task::spawnOn`, event loops pinned per thread, cancellation, timers,
+and the task-handle typestate beyond `await` (a task handle in a field, an
+element or a tuple is not followed by the await check).
+
+Not in yet: the migration tool, holds across an `await`, and the
+diagnostics' final wording.  A `locked` type argument and an `atomic
+shared` or `locked` tuple or array element are errors (`List<shared Node>`
+and `(int, shared Node)` are there).  A program with an `async fn` is compiled with the `-O1` pipeline
 under `-O0` (the coroutines of MLIR's async runtime do not survive an
 unoptimized split; the design's own runtime replaces the lowering).
 Non-atomic

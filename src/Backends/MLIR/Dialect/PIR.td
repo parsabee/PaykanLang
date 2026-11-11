@@ -644,9 +644,12 @@ def PIR_PtrStoreOp : PIR_Op<"ptr_store", [MemoryEffects<[MemWrite]>]> {
   let description = [{
     `vtable`: the value is an object's vtable pointer (a new object's, or
     the one an `__init__` gives it), which C writes as Runtime.h's
-    `PaykanMethod *` (the `vtable` of `pir.ptr_load`).
+    `PaykanMethod *` (the `vtable` of `pir.ptr_load`).  `touch`: a write the
+    optimizer keeps, which holds a slot of an async body in its coroutine's
+    frame.
   }];
-  let arguments = (ins PIR_PtrType:$ptr, PIR_Value:$value, UnitAttr:$vtable);
+  let arguments = (ins PIR_PtrType:$ptr, PIR_Value:$value, UnitAttr:$vtable,
+                       UnitAttr:$touch);
   let assemblyFormat = "$value `,` $ptr attr-dict `:` type($value)";
 }
 

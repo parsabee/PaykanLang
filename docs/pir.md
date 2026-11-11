@@ -116,7 +116,7 @@ extern fn @add(i64, i64) -> i64 module "lib::math" ; defined in another PIR modu
 extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
 shared fn @Box<int>.get(%self: obj) -> i64 { ... }  ; an instantiation's copy
 extern fn @count() -> i64 module "lib" uses @Box<int>.get ; in module lib's compiled code
-async fn @fib(%n: i64) -> i64 { ... }               ; a task's body, started by `async_call` (§6)
+async fn @fib$task(%n: i64) -> i64 { ... }          ; a task's body, started by `async_call` (§6)
 ```
 
 Locals are declared at the top of the function body (the lowering hoists them,
@@ -173,18 +173,26 @@ program that keeps the function keeps them (§12); a compiled class keeps
 its layout and its vtable's description, which the compiled code defines.
 
 **Async functions.**  An `async fn` (the concurrency prototype,
-docs/design/concurrency.md; samples/concurrency/README.md) is the body of
-a task: the lowering marks a Paykan `async fn f(...) -> T` as `async fn
-@f`, with the signature an ordinary `fn f` would have (`-> void` for one
-returning nothing) and a body lowered as any other.  It is never
-`call`ed: an `async_call` of it (§6) starts it as a task and yields a
-`ptr`, the task, whose `await` is the function's result.  The mark is the
-function's `IsAsync` (`PIR.h`), function flag bit 5 in the binary form
-(§11).  `async fn main` lowers to `async fn @main.async() -> i64` and an
-ordinary `@main` that `async_call`s it and `await`s the result, so the
-entry point keeps its signature (§4).  The parser reads `extern async
-fn` (and `extern shared async fn`), but the prototype has no async
-function across modules, so the lowering declares none.
+docs/design/concurrency.md; samples/concurrency/README.md) lowers to two
+functions.  `async fn @f$task` is the body of the task: the signature an
+ordinary `fn f` would have (`-> void` for one returning nothing) and a body
+lowered as any other, except that a result held in memory or an optional
+value is returned as a `ptr` to a block of the heap holding it, since a
+task's result has 64 bits.  It is never `call`ed: an `async_call` of it (§6)
+starts it as a task and yields a `ptr`, the task, whose `await` is the
+function's result.  The mark is the function's `IsAsync` (`PIR.h`), function
+flag bit 5 in the binary form (§11).  `fn @f`, with `f`'s parameters and the
+result `ptr`, is what a program `call`s: it `async_call`s `@f$task` and
+returns the task.  It is an ordinary function, so a method's is in its
+class's vtable and another module declares it `extern fn @f(...) -> ptr
+module "lib" uses @f$task`.  It takes what the task needs after the call has
+returned: a parameter held in memory, passed by its caller's address, is
+copied to a block of the heap, which the task frees, and an object receiver
+is `box`ed, a reference of the task's own.  The program's own `async fn
+main` is the one exception: it lowers to `async fn @main.async() -> i64` and
+an ordinary `@main` that `async_call`s it and `await`s the result, so the
+entry point keeps its signature (§4).  The parser reads `extern async fn`
+(and `extern shared async fn`), which the lowering never declares.
 
 **Runtime names.**  Runtime externs (`extern fn` without a `module`, `extern
 obj`, `extern vtable`), and only they, are named `$rt.<C symbol>`:
@@ -660,18 +668,29 @@ included; its result is always the task, a `ptr`, which PIR keeps in a
 `ptr` local like any other pointer and never retains or releases: the
 backend's runtime owns it.  An `await` takes the task and writes its
 result's type, the callee's result type (any but `void`, `mem` and `weak`,
-§9; the prototype's tasks return no optional and take no value held in
-memory), or an `i64` for a task of a function returning `void`, since an
-`await` has a result (its value is nothing).  The lowering starts a task
-where a program calls an `async fn` and awaits it at its `await`
+§9), or an `i64` for a task of a function returning `void`, since an
+`await` has a result (its value is nothing).  A task whose result is held in
+memory or is an optional value gives a `ptr` to a block of the heap, which
+the awaiter copies out of and frees.  The lowering starts a task in the
+function a program calls for an `async fn` (§3) and awaits it at its `await`
 (`samples/concurrency/02_async_await.pkn`):
 
 ```
-%task.7 = async_call @fib(%sub.6)
-store %a.1, %task.7                       ; a: a task in a ptr local
+fn @fib(%n.1: i64) -> ptr {
+  %task.2 = async_call @fib$task(%n.1)
+  ret %task.2
+}
+...
+%call.7 = call @fib(%sub.6)
+store %a.1, %call.7                       ; a: a task in a ptr local
 ...
 %a.11 = load %a.1
 %awaited.12 = await i64, %a.11
+...
+%call.4 = call @swap(%res.addr.3)         ; a task whose result is a struct
+%awaited.5 = await ptr, %call.4
+mem.copy %res.addr.6, %awaited.5, 16
+call @$rt.Paykan_free(%awaited.5)
 ```
 
 **ARC and objects**

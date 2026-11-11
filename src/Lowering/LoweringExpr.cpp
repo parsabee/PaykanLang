@@ -21,6 +21,16 @@ using pir::CmpPred;
 using pir::Opcode;
 using pir::Type;
 
+namespace {
+
+/// Whether @p e is a call of an `async fn`, whose `ptr` result is its task.
+bool isTask(const ast::Expr *e) {
+  return ast::dyn_cast<ast::TaskType>(
+             const_cast<ast::Expr *>(e)->getResolvedType()) != nullptr;
+}
+
+} // namespace
+
 // -- Dispatch
 
 Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
@@ -378,12 +388,34 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
   // The concurrency prototype: `await t` is the task's result; `move x` is
   // x's box, which x no longer holds (a value is read as it is).
   if (node->getOpcode() == ast::UnaryOpcode::Await) {
+    const ast::Expr *savedCall =
+        std::exchange(L.AwaitedCall, node->getOperand());
     Val task = visit(node->getOperand());
+    L.AwaitedCall = savedCall;
     if (!task)
       return Val();
+    std::function<void()> afterAwait = std::exchange(L.AfterAwait, nullptr);
     ast::Type *ty = node->getResolvedType();
+    if (ty && asyncResultOnHeap(ty)) {
+      // On the heap (visitReturnStmt): the value leaves its block here.
+      Val heap = L.B.await(task, Type::Ptr, "awaited");
+      Val result;
+      if (ast::isMemType(ty)) {
+        result = L.emitMemResultSlot(ty);
+        L.B.memCopy(result, heap, Val::i64(L.memLayout(ty).Size));
+      } else {
+        result = L.B.ptrLoad(heap, L.toPIRType(ty), "awaited");
+      }
+      L.callRuntime(names::kPaykanFree, {heap});
+      if (afterAwait)
+        afterAwait();
+      return result;
+    }
     Type t = ty && ty != L.ASTCtx.getVoidTy() ? L.toPIRType(ty) : Type::I64;
-    return L.B.await(task, t, "awaited");
+    Val result = L.B.await(task, t, "awaited");
+    if (afterAwait)
+      afterAwait();
+    return result;
   }
   if (node->getOpcode() == ast::UnaryOpcode::Move) {
     // `move x.f` (the prototype): the field's reference leaves its slot,
@@ -1229,11 +1261,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     L.releaseMemTemps(fixedMark);
     return L.emitMoveOutCheck(node, slot);
   }
-  // An `async fn` (the prototype): the call starts a task of its result.
+  // Every `async fn` but the program's own `main` is called by the plain
+  // function that starts its task (emitAsyncStart); `main`'s task is started
+  // here.
   Val result = callee->IsAsync
                    ? L.B.asyncCall(callee->Name, callee->Sig, args, "task")
                    : L.B.call(callee->Name, callee->Sig, args, "call");
-  if (!callee->IsAsync && result && result.Ty == Type::Ptr) // an `inout` result
+  if (result && result.Ty == Type::Ptr && !isTask(node)) // an `inout` result
     return L.takeInoutResult(result, node, wantAddress, keep, fixedMark,
                              places);
   L.releaseAfterCall(keep);
@@ -1738,9 +1772,18 @@ Val ModuleLowering::ExprEmitter::emitClassMethodCall(ast::MethodCallExpr *node,
   }
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
-  if (result && result.Ty == Type::Ptr) // an `inout` result
+  if (result && result.Ty == Type::Ptr && !isTask(node)) // an `inout` result
     return L.takeInoutResult(result, node, wantAddress, keep, fixedMark, places,
                              recvOwned);
+  // Awaited here, the task runs on what the receiver holds until then.
+  if (isTask(node) && L.AwaitedCall == node) {
+    L.AfterAwait = [&L = L, keep, fixedMark, recvOwned] {
+      L.releaseAfterCall(keep);
+      L.releaseMemTemps(fixedMark);
+      L.releaseIfOwned(recvOwned);
+    };
+    return result;
+  }
   L.releaseAfterCall(keep);
   L.releaseMemTemps(fixedMark);
   L.releaseIfOwned(recvOwned);

@@ -458,6 +458,9 @@ inline constexpr const char *kSelf = "self"; ///< Receiver parameter in methods
 /// destructors (`K.w`, `K.destroy`, `K.__init__`).  '.' cannot occur in a
 /// Paykan identifier, so these never clash with a user function (`fn K_w`).
 inline constexpr const char *kNameSep = ".";
+/// What an `async fn` named `f` runs as a task: `f` itself is the plain
+/// function that starts it (ModuleLowering::emitAsyncStart).
+inline constexpr const char *kAsyncTaskSuffix = "$task";
 
 /// The type a PIR function of a type is named after: @p name up to its
 /// first '.' or "::" outside `<...>` and `(...)` (`Box<int>.get`,

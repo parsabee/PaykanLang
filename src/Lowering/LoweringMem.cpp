@@ -153,6 +153,16 @@ void ModuleLowering::emitMemOptionalWrap(ast::Expr *e, const Val &dst) {
   UnwrappedExpr = saved;
 }
 
+namespace {
+
+/// `await t`, whose value held in memory is a temporary, as a call's is.
+bool isAwait(const ast::Expr *e) {
+  const auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+  return u && u->getOpcode() == ast::UnaryOpcode::Await;
+}
+
+} // namespace
+
 ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   MemValue v = emitMemRead(e);
   // A slice's elements are copied by their number (emitSliceArg).
@@ -297,7 +307,7 @@ ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
   // A call's result, in the temporary the call wrote, or for an `inout`
   // result the storage it names, which is not the consumer's to drop.
   if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e) ||
-      ast::isa<ast::CallValueExpr>(e))
+      ast::isa<ast::CallValueExpr>(e) || isAwait(e))
     return {emitExpr(e), /*Temp=*/!e->isInoutResult()};
   if (ast::isa<ast::ArrayLiteralExpr>(e) ||
       ast::isa<ast::TupleLiteralExpr>(e)) {
@@ -344,7 +354,7 @@ ast::Expr *ModuleLowering::memValueVisitsFirst(ast::Expr *e) {
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
     return ma->getReceiver();
   if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e) ||
-      ast::isa<ast::CallValueExpr>(e))
+      ast::isa<ast::CallValueExpr>(e) || isAwait(e))
     return e->isInoutResult() && ast::isMemType(e->getResolvedType()) ? nullptr
                                                                       : e;
   return nullptr;
@@ -788,6 +798,12 @@ void ModuleLowering::declareMemParam(const std::string &name,
     pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
     Val own = B.localAddr(local, name + ".addr");
     B.memCopy(own, addr, Val::i64(l.Size));
+    if (B.function()->IsAsync) {
+      // A task's own already (emitAsyncStart): only its block is left.
+      callRuntime(names::kPaykanFree, {addr});
+      CurrentScope->declare(name, local, ty);
+      return;
+    }
     if (holdsUnique(ty))
       B.memZero(addr, Val::i64(l.Size));
     else

@@ -13,12 +13,60 @@
 #include "Sema.h"
 
 #include <algorithm>
+#include <functional>
 #include <optional>
 
 namespace paykan {
 namespace sema {
 
 namespace {
+
+/// The `move`s in @p e, a call's argument that is not itself one.
+std::vector<const ast::UnaryExpr *> movesIn(const ast::Expr *e) {
+  std::vector<const ast::UnaryExpr *> found;
+  const std::function<void(const ast::Expr *)> walk = [&](const ast::Expr *x) {
+    if (!x || ast::isa<ast::LambdaExpr>(x))
+      return;
+    if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(x)) {
+      if (u->getOpcode() == ast::UnaryOpcode::Move)
+        found.push_back(u);
+      walk(u->getOperand());
+    } else if (const auto *b = ast::dyn_cast<ast::BinaryExpr>(x)) {
+      walk(b->getLHS());
+      walk(b->getRHS());
+    } else if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(x)) {
+      walk(t->getCondition());
+      walk(t->getTrueExpr());
+      walk(t->getFalseExpr());
+    } else if (const auto *c = ast::dyn_cast<ast::CallExpr>(x)) {
+      for (const ast::Expr *a : c->getArguments())
+        walk(a);
+    } else if (const auto *m = ast::dyn_cast<ast::MethodCallExpr>(x)) {
+      walk(m->getReceiver());
+      for (const ast::Expr *a : m->getArguments())
+        walk(a);
+    } else if (const auto *v = ast::dyn_cast<ast::CallValueExpr>(x)) {
+      walk(v->getCallee());
+      for (const ast::Expr *a : v->getArguments())
+        walk(a);
+    } else if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(x)) {
+      walk(ma->getReceiver());
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(x)) {
+      walk(se->getArray());
+      walk(se->getIndex());
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(x)) {
+      walk(ti->getTuple());
+    } else if (const auto *al = ast::dyn_cast<ast::ArrayLiteralExpr>(x)) {
+      for (const ast::Expr *a : al->getElements())
+        walk(a);
+    } else if (const auto *tl = ast::dyn_cast<ast::TupleLiteralExpr>(x)) {
+      for (const ast::Expr *a : tl->getElements())
+        walk(a);
+    }
+  };
+  walk(e);
+  return found;
+}
 
 /// The storage @p e names when it is a variable or a chain of fields and
 /// fixed-size array elements on one (`k`, `self.n`, `a.b.n`, `xs[1].n`); ""
@@ -411,10 +459,11 @@ void Sema::borrowedPaths(const ast::Expr *e, std::vector<std::string> &out) {
   } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
     // A fixed-size array's element, or the whole of what holds it (a
     // slice's, a string's, or an `inout` result's).
-    std::string path =
-        ast::isa<ast::FixedArrayType>(se->getArray()->getResolvedType())
-            ? placePath(e)
-            : std::string();
+    // (An array that was not typed is an error reported already.)
+    ast::Type *arrayTy = se->getArray()->getResolvedType();
+    std::string path = arrayTy && ast::isa<ast::FixedArrayType>(arrayTy)
+                           ? placePath(e)
+                           : std::string();
     if (!path.empty())
       out.push_back(std::move(path));
     else
@@ -511,6 +560,33 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
         ok = false;
       }
       continue;
+    }
+    // A `move` inside an argument (`s.eat(id(move s))`) writes it all the
+    // same.  The moves of one argument are checked against the other
+    // arguments, not each other: a second move of one variable is a use
+    // after its move, reported where it is.
+    if (std::vector<const ast::UnaryExpr *> nested = movesIn(arg);
+        !nested.empty()) {
+      std::vector<CallUse> mine;
+      for (const ast::UnaryExpr *m : nested) {
+        // A move that was refused has an operand without a type.
+        if (!m->getOperand()->getResolvedType())
+          continue;
+        std::vector<std::string> paths;
+        borrowedPaths(m->getOperand(), paths);
+        for (std::string &path : paths)
+          mine.push_back({std::move(path),
+                          "moved in argument " + std::to_string(i + 1),
+                          modes.name(i), true});
+      }
+      std::string msg = conflictWith(uses, mine);
+      uses.push_back(std::move(mine));
+      if (!msg.empty()) {
+        error(arg->getLocation(), msg);
+        reported.push_back(i);
+        ok = false;
+        continue;
+      }
     }
     if (modes.mode(i) == ast::ParamMode::View) {
       // The lowering keeps what the argument is part of alive for the call

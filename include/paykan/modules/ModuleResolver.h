@@ -104,6 +104,14 @@ struct ResolverOptions {
   /// file whose code fails is unusable, so a cache entry is rebuilt and a
   /// prebuilt file rejected.
   ObjectCheck CheckObject;
+  /// The program runs a task where it is called (the C of --emit-c, and
+  /// --list-modules, which names the objects it links): compiled code that
+  /// starts or awaits a task on the async runtime does not go with it.  A
+  /// module file with compiled code is then unusable when its code has to
+  /// do with tasks (pir::usesTasks), or a module it imports hands tasks
+  /// out (its interface names one): a cache entry is rebuilt, its code
+  /// staying in the program, and a prebuilt file is rejected.
+  bool SequentialTasks = false;
   /// How the frontend reads its part of a module file (FrontendRead), or
   /// unset: that part is read when the module is imported, and a file it
   /// is bad in is an error there, not unusable.
