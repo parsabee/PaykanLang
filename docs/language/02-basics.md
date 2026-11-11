@@ -509,7 +509,7 @@ Output:
   see [Parsing a string](04-strings-and-conversions.md#parsing-a-string).  An `f32` or `f16`
   from a text with a fraction or an exponent, a literal's or a parse's, is the `float`
   nearest the text rounded to the type.
-- **Methods and traits.**  Every numeric type has `toString()` and is `Show` and
+- **Methods and traits.**  Every numeric type has `toString()` and is `Showable` and
   `ValueType`; the integer types have `hash()` and are `Hashable`, so a `u32` is a
   `HashMap` key; an `unsigned` also has `u.toInt()`, its value as an `int?` (`None` above
   9223372036854775807).  A sized type has an optional (`u8?`), is a `match` subject with literal

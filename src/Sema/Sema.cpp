@@ -631,7 +631,7 @@ void Sema::errorNoToString(ast::SourceLocation loc, ast::Type *ty,
                            const std::string &why) {
   error(loc, "no method '" + std::string(names::kMethodToString) +
                  "' on type '" + typeName(ty) +
-                 "', which does not implement trait '" + names::kTraitShow +
+                 "', which does not implement trait '" + names::kTraitShowable +
                  "'" + (why.empty() ? "" : ": " + why));
 }
 
@@ -3450,7 +3450,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
 
   // A method cannot be called on an optional receiver (it may be None),
-  // but for the builtin `Show`'s `toString()` of an optional whose value
+  // but for the builtin `Showable`'s `toString()` of an optional whose value
   // has a text: "None", or the value's text.
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
     // `o.clone()`: None, or the value's clone (the builtin `Cloneable`).
@@ -3517,7 +3517,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
 
   // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
   // or on an enum (its variant, and its fields), each part of which has a
-  // text: the builtin `Show`; `n.hash()` on an int, bool or char, and
+  // text: the builtin `Showable`; `n.hash()` on an int, bool or char, and
   // `s.hash()` on a Str: the builtin `Hashable`; `s.toInt()` & co. on a Str:
   // its parses, each the optional of its type; `u.toInt()` on an `unsigned`:
   // its value as an `int?`, None above the `int` range.
@@ -4869,8 +4869,9 @@ bool Sema::textConversion(ast::Type *source, ast::SourceLocation loc,
     const std::string why = noTextReason(source);
     error(loc, std::string("'") + names::kString +
                    "' cannot convert a value of type '" + name +
-                   "', which does not implement trait '" + names::kTraitShow +
-                   "'" + (why.empty() ? "" : ": " + why));
+                   "', which does not implement trait '" +
+                   names::kTraitShowable + "'" +
+                   (why.empty() ? "" : ": " + why));
     return false;
   }
   pair = {names::kString, name, std::string(names::kString) + "<" + name + ">"};

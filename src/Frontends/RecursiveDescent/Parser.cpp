@@ -1099,7 +1099,8 @@ ImplDecl *Parser::parseImplDecl() {
     return parseTypeParamList(typeParams, &bounds) &&
            expect(Tok::Greater, "to close the type parameter list");
   };
-  // `impl Show for A`: the trait (`Into<int>`, `fmt::Show`) comes first.
+  // `impl Showable for A`: the trait (`Into<int>`, `fmt::Showable`) comes
+  // first.
   Type *trait = nullptr;
   Type *target = nullptr;
   const char *after = "after 'impl'";

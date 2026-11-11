@@ -313,8 +313,8 @@ no task called 'walk the dog'
   (`"None"` or the value's text), and `match` on it. Everything else (fields, other methods,
   subscripts, `+`) needs a `match` first.
 - A field of type `T?` is `None` unless `__init__` assigns it.
-- A `T?` is not an object: it never becomes an `Obj`, but an optional of a `Show` type is
-  `Show` itself, so `io::println(maybe)` prints `None` or the value.
+- A `T?` is not an object: it never becomes an `Obj`, but an optional of a `Showable` type is
+  `Showable` itself, so `io::println(maybe)` prints `None` or the value.
 
 ---
 
@@ -591,8 +591,8 @@ own.
 An optional is a value that may be absent, not an object: a `T?` never converts to `Obj`, so
 `o: Obj = maybe` (and passing, returning or storing it where an `Obj` is expected) is an error,
 `cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match`. It
-still shows itself: an optional of a `Show` type implements `Show` (its `toString()` is
-`"None"` or the value's text), so `io::println` and any other `T: Show` function take one as
+still shows itself: an optional of a `Showable` type implements `Showable` (its `toString()` is
+`"None"` or the value's text), so `io::println` and any other `T: Showable` function take one as
 it is:
 
 ```pkn

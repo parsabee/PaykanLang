@@ -6,8 +6,8 @@
 // block's methods join A like those of any `impl` block (populateImplMethods),
 // and a requirement may also be met by a method A already has.  A class
 // implements what its superclasses implement, and every class implements the
-// builtin `Show` through `Obj`.  The bounds of a template's type parameters
-// (`<T: Show>`) are checked when it is instantiated: once the module's
+// builtin `Showable` through `Obj`.  The bounds of a template's type parameters
+// (`<T: Showable>`) are checked when it is instantiated: once the module's
 // `impl ... for` blocks are recorded, so an instantiation an annotation asks
 // for before that is checked then.
 
@@ -82,13 +82,13 @@ void Sema::registerBuiltinTraits() {
     if (ast::BuiltinType::isIntegerKind(kind))
       integers.push_back(Ctx.getBuiltinType(kind));
   }
-  // Show is implemented by Obj, the scalars (whose `toString` is their `Str`
-  // conversion) and the tuples (traitImplOwner).
+  // Showable is implemented by Obj, the scalars (whose `toString` is their
+  // `Str` conversion) and the tuples (traitImplOwner).
   std::vector<ast::Type *> show{Ctx.getObjTy()};
   show.insert(show.end(), numerics.begin(), numerics.end());
   show.push_back(Ctx.getBoolTy());
   show.push_back(Ctx.getCharTy());
-  builtin(names::kTraitShow, names::kMethodToString, Ctx.getStrTy(), show);
+  builtin(names::kTraitShowable, names::kMethodToString, Ctx.getStrTy(), show);
   // Hashable by the integer types, bool, char and Str (whose `hash` is the
   // runtime's PaykanInt_hash / PaykanString_hash); a class implements it
   // with an `impl Hashable for` block.  Not a float, whose `==` is not an
@@ -246,8 +246,16 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
   if (it == Traits.end()) {
     if (isFailedImportUse(name))
       return std::nullopt;
-    if (Ctx.lookupType(name) || ClassTemplates.count(name) ||
-        StructTemplates.count(name) || EnumTemplates.count(name))
+    const bool type = Ctx.lookupType(name) || ClassTemplates.count(name) ||
+                      StructTemplates.count(name) || EnumTemplates.count(name);
+    // The built-in traits are named as adjectives (#378).  A type of the
+    // program's own named `Show` is that type, and not a trait.
+    if (name == names::kTraitShowableWas && !type) {
+      error(loc, std::string("'") + names::kTraitShowableWas + "' is now '" +
+                     names::kTraitShowable + "'");
+      return std::nullopt;
+    }
+    if (type)
       error(loc, "'" + name + "' is not a trait");
     else if (!reportPrivateImport(name, loc))
       error(loc, "unknown trait '" + name + "'");
@@ -340,11 +348,11 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
     return isCloneable(ty) ? ty : nullptr;
   // An optional shows "None" or its value's text, a tuple its elements, a
   // struct its fields and an enum its variant and its fields (the builtin
-  // `Show`), when each of them has a text.  Before the struct case.
+  // `Showable`), when each of them has a text.  Before the struct case.
   const bool aggregate = ast::isa<ast::OptionalType>(ty) ||
                          ast::isa<ast::TupleType>(ty) ||
                          ast::isa<ast::EnumType>(ty);
-  if (aggregate && isBuiltinTrait(names::kTraitShow))
+  if (aggregate && isBuiltinTrait(names::kTraitShowable))
     return hasText(ty) ? ty : nullptr;
   if (ast::isa<ast::OptionalType>(ty))
     return nullptr;
@@ -374,10 +382,10 @@ bool Sema::hasText(ast::Type *ty, std::string *why, TextQuery &query) {
   // An optional has its value's text, and "None".
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return hasText(ot->getInnerType(), why, query);
-  // A type without parts has a text when it implements `Show`: a number,
+  // A type without parts has a text when it implements `Showable`: a number,
   // bool and char, and an object through `Obj`.
   if (!ast::isa<ast::TupleType>(ty) && !ast::isa<ast::EnumType>(ty)) {
-    const TraitRef show{&Traits.find(names::kTraitShow)->second, {}};
+    const TraitRef show{&Traits.find(names::kTraitShowable)->second, {}};
     return traitImplOwner(ty, show) != nullptr;
   }
   // Decided already, by another path to it.
@@ -510,7 +518,7 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
   // A struct's `toString` is built in: one that does not show itself has a
   // part with no text, and cannot have one.
   if (ast::isa<ast::StructType>(ty) && tr->Trait->IsBuiltin &&
-      tr->Trait->Decl->getName() == names::kTraitShow) {
+      tr->Trait->Decl->getName() == names::kTraitShowable) {
     error(im->getLocation(),
           "struct '" + name + "' cannot implement '" + trait +
               "' (its 'toString' is built in): " + noTextReason(ty));
@@ -719,7 +727,7 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
         // the part that does not.
         std::string why;
         if (tr->Trait->IsBuiltin &&
-            tr->Trait->Decl->getName() == names::kTraitShow)
+            tr->Trait->Decl->getName() == names::kTraitShowable)
           why = noTextReason(args[i]);
         else if (tr->Trait->IsBuiltin &&
                  tr->Trait->Decl->getName() == names::kTraitCopyable) {

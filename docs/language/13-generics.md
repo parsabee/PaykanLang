@@ -4,7 +4,7 @@ Generic classes and functions are written once for any type. A `Stack<T>` works 
 `Stack<int>`, a `Stack<Str>` or a `Stack<Task>`, each fully type-checked. This chapter
 shows how to declare and use them, gives `tasks` an undo history built on a generic stack,
 and then states the rules: type arguments, inference, how generic bodies are checked, and
-generics across modules. A type parameter's bounds (`<T: Show>`) are covered in
+generics across modules. A type parameter's bounds (`<T: Showable>`) are covered in
 [Traits](06-traits.md); variance is not supported.
 
 ## Generic classes
@@ -110,8 +110,8 @@ not there. `three` makes its elements with `clone()`, which every `Cloneable` ty
 ## How generic code is checked
 
 A type parameter can name the traits its type argument must implement, as a **bound**:
-`fn show<T: Show>(x: T)` accepts only types with a `toString()`, and `io::println` is
-declared just so. A trait such as `Show` or `Hashable` is built in, and a program declares
+`fn show<T: Showable>(x: T)` accepts only types with a `toString()`, and `io::println` is
+declared just so. A trait such as `Showable` or `Hashable` is built in, and a program declares
 its own with `trait` (see [Traits](06-traits.md)). A call with a type that lacks the trait
 is an error at the call (`'Task' does not implement trait 'Named', which 'f' requires of
 'T'`). That error is the only one: the instantiation's body is not checked, nor are the
@@ -193,7 +193,7 @@ The message names the parameter as the code does, an `impl R<U>` block's `U` inc
 Only copies are reported. Everything else an archetype lacks (`+`, `Str(x)`, a method) is
 checked per instance, as before. The check runs only when the module has no other error.
 
-A parameter bounded by a trait other than `Copyable` (`K: Hashable`, `T: Show`,
+A parameter bounded by a trait other than `Copyable` (`K: Hashable`, `T: Showable`,
 `T: ValueType`) is an archetype too, which meets the bound. Its copies are checked the same
 way: a value type that holds a unique object is move-only, so `twice<T: ValueType>` copies
 only with `T: ValueType + Copyable`.
@@ -575,7 +575,7 @@ m = ident<Node?>(n);               // optional type argument
 
 A tuple type argument is a value like any tuple: `Box<(int, Str)>`'s field
 holds the tuple's elements in place, a `T` parameter is a copy of one, and a
-tuple meets a `T: Show` bound when its elements do (`(int, Str)` does, a tuple
+tuple meets a `T: Showable` bound when its elements do (`(int, Str)` does, a tuple
 holding a function value does not).
 
 Because each instantiation is checked separately, a `T?` in a template is

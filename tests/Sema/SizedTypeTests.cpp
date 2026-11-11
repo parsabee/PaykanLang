@@ -326,7 +326,7 @@ TEST(SizedTypes, TheConversionSetIsClosedAndListed) {
 // -- methods, traits, generics
 
 TEST(SizedTypes, BuiltinMethodsAndTraits) {
-  expectOk("fn show<T: Show>(v: T) -> Str { return v.toString(); }\n"
+  expectOk("fn show<T: Showable>(v: T) -> Str { return v.toString(); }\n"
            "fn key<T: Hashable>(v: T) -> int { return v.hash(); }\n"
            "fn copy<T: ValueType>(v: T) -> T { return v; }\n" +
            inMain(R"(

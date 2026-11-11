@@ -1292,7 +1292,7 @@ CodeGen enforced, now in one place.
   a `float?`), `None` there is `none`, `x == None` is `not (is_some x)`, two
   of them are equal when their `is_some` agree and, both present, their
   `unwrap`s are `==`, and a `match` arm binding the primitive is its
-  `unwrap`.  An optional's `toString()` (optionals are `Show`) is a branch
+  `unwrap`.  An optional's `toString()` (optionals are `Showable`) is a branch
   on `is_some`: the value's text (`PaykanString_from_int` & co. for a
   primitive) when present, `"None"` otherwise.  An
   element of an `int?[n]` & co. is the optional itself, the optional's size

@@ -16,6 +16,6 @@ fn scale<T: Copyable>(by: T) -> (T) -> T {
   return fn(x: T) => x * by;
 }
 
-fn labeler<T: Show>(prefix: shared Str) -> (view T) -> Str {
+fn labeler<T: Showable>(prefix: shared Str) -> (view T) -> Str {
   return fn(x: view T) -> Str => prefix + x.toString();
 }

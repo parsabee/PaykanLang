@@ -166,6 +166,13 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- **Breaking:** the built-in trait `Show` is `Showable` (#378), so the built-in traits are all
+  named as adjectives (`Copyable`, `Cloneable`, `Hashable`, `Showable`). Nothing else about it
+  changes. The old name is an error that names the new one (`'Show' is now 'Showable'`), in a
+  bound and in an `impl ... for` block; a trait or a type of the program's own named `Show` is
+  its own. A class, struct, enum, function or trait of a program named `Showable` is now an
+  error, as the name of a built-in trait is (`'Showable' is a builtin trait and cannot be
+  redeclared`).
 - **Breaking:** every vtable's layout: `__walk` is the fourth slot of every class
   (`PAYKAN_SLOT_WALK` 3, after `equals`; `PAYKAN_OBJECT_SLOTS` 4), so `Str`'s `length` and
   `concat` are slots 4 and 5 and `File`'s 4 to 7 (src/Runtime/Runtime.h; docs/pir.md §5).

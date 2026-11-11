@@ -76,7 +76,7 @@ plain value like an `int`: copied on assignment, never allocated.
   arithmetic on enums.
 - The only operators are `==` and `!=`, and both sides must be the **same** enum type.
 - An enum's one method is the builtin `toString()`: its variant's name, `"North"`, so it
-  implements `Show` and prints with `io::println`; it implements `ValueType` too, but not
+  implements `Showable` and prints with `io::println`; it implements `ValueType` too, but not
   `Hashable` ([Traits](06-traits.md)).
 - Enums are **value types**: stack-allocated, copied on assignment, no reference counting.
 - A variant may have fields, `Rect(w: int, h: int)`, made with `Shape::Rect(2, 3)` and bound
@@ -435,7 +435,7 @@ the ones every `match` arm has ([Borrowing the subject](08-match.md#borrowing-th
 
 `toString()`, and so `io::println`, gives the variant's name followed by its fields as a struct
 shows them, `Rect(w: 2, h: 3)`, or the bare name for a variant without fields, `Empty`. An
-enum with a variant field that does not implement `Show`, a function value, does not either,
+enum with a variant field that does not implement `Showable`, a function value, does not either,
 whatever its value's variant: `io::println(e)` and `e.toString()` are errors naming the field
 (`its field 'h' of variant 'F' has type '(int) -> int', which does not implement it`). `==`
 and `!=` compare two values of the same tagged union: equal when they are the same variant

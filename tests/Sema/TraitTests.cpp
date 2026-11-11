@@ -3,7 +3,7 @@
 // Sema tests: traits (#216).  `impl Trait for A` must give A every method the
 // trait requires, with its signature (a method A already has counts); a
 // class implements what its superclasses do, and every class implements the
-// builtin `Show` through `Obj`.  A trait is not a type.  A type parameter's
+// builtin `Showable` through `Obj`.  A trait is not a type.  A type parameter's
 // bounds are checked where the template is instantiated.
 
 #include "TestUtils.h"
@@ -52,12 +52,56 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
 }
 
+// `Showable` was `Show` through 0.3: the old name is an error that names
+// the new one, in a bound and in an `impl ... for` block, unless the program
+// declares a trait of that name itself.
+TEST(Traits, TheOldNameOfShowable) {
+  auto r = semaCheck(R"(class A { n: int; }
+struct P { x: int; }
+fn show<T: Show>(v: view T) -> Str { return v.toString(); }
+fn both<T: Hashable + Show>(v: view T) -> Str { return v.toString(); }
+fn ok<T: Showable>(v: view T) -> Str { return v.toString(); }
+impl Show for P { view fn text() -> Str { return "p"; } }
+fn main() -> int { return ok(A(1)).len(); }
+)");
+  EXPECT_EQ(r.ErrorCount, 3) << r.Diagnostics;
+  for (const char *at : {":3:1:", ":4:1:", ":6:1:"})
+    EXPECT_NE(r.Diagnostics.find(std::string(at) +
+                                 " error: 'Show' is now 'Showable'"),
+              std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  auto own = semaCheck(R"(trait Show { view fn text() -> Str; }
+class A { n: int; }
+impl Show for A { view fn text() -> Str { return "a"; } }
+fn t<T: Show>(v: view T) -> Str { return v.text(); }
+fn main() -> int { return t(A(1)).len(); }
+)");
+  EXPECT_TRUE(own.Ok) << own.Diagnostics;
+  // A type of the program's own named `Show`, a template too, is no trait.
+  for (const char *decl :
+       {"class Show { n: int; }", "class Show<T> { v: T; }",
+        "struct Show<T> { v: T; }", "enum Show<T> { One(value: T), Zero }"}) {
+    auto ty = semaCheck(std::string(decl) + R"(
+fn t<T: Show>(v: view T) -> int { return 0; }
+fn main() -> int { return 0; }
+)");
+    EXPECT_NE(ty.Diagnostics.find(":2:1: error: 'Show' is not a trait"),
+              std::string::npos)
+        << decl << "\n"
+        << ty.Diagnostics;
+    EXPECT_EQ(ty.Diagnostics.find("is now"), std::string::npos)
+        << decl << "\n"
+        << ty.Diagnostics;
+  }
+}
+
 TEST(Traits, DeclarationsAreChecked) {
   auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
 trait Named { fn x(); }
 trait Shape { fn __init__(); fn area() -> int; fn area() -> int; }
 trait Bad { fn f() -> Nope; }
-class Show {}
+class Showable {}
 class Named {}
 fn main() -> int { return 0; }
 )");
@@ -66,7 +110,7 @@ fn main() -> int { return 0; }
                 "a trait cannot require '__init__'",
                 "duplicate method 'area' in trait 'Shape'",
                 "method 'f' of trait 'Bad' has unknown class type 'Nope'",
-                "'Show' is a builtin trait and cannot be redeclared",
+                "'Showable' is a builtin trait and cannot be redeclared",
                 "'Named' is already declared as a trait"});
 }
 
@@ -87,7 +131,7 @@ class C { n: int; }
 impl C { fn __init__() { self.n = 0; } }
 impl Named for C {}
 impl Into for C {}
-impl Show for C {}
+impl Showable for C {}
 impl Nope for C {}
 impl Str for C {}
 impl Named for int {}
@@ -103,7 +147,7 @@ fn main() -> int { return 0; }
                 "class 'C' does not implement 'view fn name() -> Str' of trait "
                 "'Named'",
                 "trait 'Into' expects 1 type argument(s), got 0",
-                "class 'C' already implements 'Show' (through 'Obj')",
+                "class 'C' already implements 'Showable' (through 'Obj')",
                 "unknown trait 'Nope'", "'Str' is not a trait",
                 "'int' is a built-in type"});
 }
@@ -157,7 +201,7 @@ fn main() -> int { return 0; }
 }
 
 // Bounds on functions and classes, met by a subclass through its superclass,
-// by every class (`Show`), and checked for a class field once the impl
+// by every class (`Showable`), and checked for a class field once the impl
 // blocks are known.
 TEST(Traits, BoundsAreChecked) {
   auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
@@ -173,7 +217,7 @@ class B : A {}
 impl B { fn __init__() { __super__(); } }
 class C { n: int; }
 impl C { fn __init__() { self.n = 0; } }
-fn greet<T: Named + Show>(x: view T) -> Str { return x.name() + x.toString(); }
+fn greet<T: Named + Showable>(x: view T) -> Str { return x.name() + x.toString(); }
 fn conv<T, S: Into<T>>(s: view S) -> T { return s.into(); }
 fn bad<T: Nope>(x: T) {}
 fn main() -> int {
@@ -364,11 +408,11 @@ TEST(Traits, AFailedDeferredBoundIsTheOneError) {
   }
 }
 
-// int, float, bool and char implement `Show`: `n.toString()` is a `Str`.  So
+// int, float, bool and char implement `Showable`: `n.toString()` is a `Str`. So
 // does an enum: its variant's name.
 TEST(Traits, ScalarsImplementShow) {
   auto r = semaCheck(R"(enum Color { Red }
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
 fn main() -> int {
   n = 3;
   s: Str = n.toString() + 2.5.toString() + True.toString() + 'c'.toString();
@@ -385,8 +429,8 @@ fn main() -> int {
 
 // A tuple, struct, enum or optional shows itself when every part does.  A
 // function value does not, so one holding a function value (directly, as an
-// optional, or inside another aggregate) does not implement `Show`: no
-// print function, no `T: Show` bound and no `toString()` takes it, and the
+// optional, or inside another aggregate) does not implement `Showable`: no
+// print function, no `T: Showable` bound and no `toString()` takes it, and the
 // message names the part.  They implemented it and printed the closure's
 // code address and environment.
 TEST(Traits, AnAggregateHoldingAFunctionValueIsNotShow) {
@@ -396,7 +440,7 @@ struct Outer { n: int; s: S; }
 struct O { g: ((int) -> int)?; }
 enum E { F(h: (int) -> int), N }
 enum Maybe<X> { Just(v: X), Nothing }
-fn show<X: Show>(x: view X) -> Str { return x.toString(); }
+fn show<X: Showable>(x: view X) -> Str { return x.toString(); }
 fn main() -> int {
   k = 5;
   s = S(fn(x: int) => x + k);
@@ -426,29 +470,31 @@ fn main() -> int {
   const std::string fn = "has type '(int) -> int', which does not implement it";
   const std::string println = "which 'io::println' requires of 'T': its ";
   const std::string noToString = "no method 'toString' on type ";
-  const std::string notShow = "which does not implement trait 'Show': its ";
-  expect("'S' does not implement trait 'Show', " + println + "field 'f' " + fn);
+  const std::string notShow = "which does not implement trait 'Showable': its ";
+  expect("'S' does not implement trait 'Showable', " + println + "field 'f' " +
+         fn);
   expect(noToString + "'S', " + notShow + "field 'f' " + fn);
-  expect("'(int, (int) -> int)' does not implement trait 'Show', " + println +
-         "element 1 " + fn);
+  expect("'(int, (int) -> int)' does not implement trait 'Showable', " +
+         println + "element 1 " + fn);
   expect(noToString + "'(int, S)', " + notShow +
          "element 1 has type 'S', whose field 'f' " + fn);
-  expect("'Outer' does not implement trait 'Show', " + println +
+  expect("'Outer' does not implement trait 'Showable', " + println +
          "field 's' has type 'S', whose field 'f' " + fn);
   expect(noToString + "'O', " + notShow +
          "field 'g' has type '((int) -> int)?', which does not implement it");
-  expect("'E' does not implement trait 'Show', " + println +
+  expect("'E' does not implement trait 'Showable', " + println +
          "field 'h' of variant 'F' " + fn);
   expect(noToString + "'E', " + notShow + "field 'h' of variant 'F' " + fn);
-  expect("'S?' does not implement trait 'Show', " + println + "field 'f' " +
+  expect("'S?' does not implement trait 'Showable', " + println + "field 'f' " +
          fn);
   expect(noToString + "'S?', " + notShow + "field 'f' " + fn);
-  expect("'S' does not implement trait 'Show', which 'show' requires of 'X': "
-         "its field 'f' " +
-         fn);
+  expect(
+      "'S' does not implement trait 'Showable', which 'show' requires of 'X': "
+      "its field 'f' " +
+      fn);
   expect(noToString + "'Maybe<(int) -> int>', " + notShow +
          "field 'v' of variant 'Just' " + fn);
-  expect("'((int) -> int)?' does not implement trait 'Show', which "
+  expect("'((int) -> int)?' does not implement trait 'Showable', which "
          "'io::println' requires of 'T'\n");
   EXPECT_EQ(r.ErrorCount, 13) << r.Diagnostics;
 }
@@ -473,7 +519,7 @@ fn main() -> int {
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find(
-                "'E2' does not implement trait 'Show', which 'io::println' "
+                "'E2' does not implement trait 'Showable', which 'io::println' "
                 "requires of 'T': its field 'x' of variant 'A' has type 'E1', "
                 "whose field 'x' of variant 'A' has type 'E0', whose field 'g' "
                 "of variant 'Y' has type 'F', whose field 'f' has type '(int) "
@@ -483,7 +529,7 @@ fn main() -> int {
 }
 
 // The aggregates whose parts all show themselves do, through every form:
-// printed, `toString()`, an optional of one, a `T: Show` bound, nested.  A
+// printed, `toString()`, an optional of one, a `T: Showable` bound, nested.  A
 // function value inside a class does not matter: an object shows itself
 // through `Obj`.
 TEST(Traits, AnAggregateOfShowPartsIsShow) {
@@ -494,7 +540,7 @@ struct P { x: int; name: Str; h: Handler; }
 struct Q { p: P; at: (float, char?); }
 enum E { A(q: Q), B(n: int?), N }
 enum Maybe<X> { Just(v: X), Nothing }
-fn show<X: Show>(x: view X) -> Str { return x.toString(); }
+fn show<X: Showable>(x: view X) -> Str { return x.toString(); }
 fn mkQ(n: int) -> Q { return Q(P(n, "p", Handler()), (2.5, None)); }
 fn main() -> int {
   p = P(1, "p", Handler());
@@ -516,20 +562,21 @@ fn main() -> int {
 }
 
 // A struct's `toString` is built in, so one with a part that has no text
-// cannot implement `Show` with an impl block; one whose parts all have one
+// cannot implement `Showable` with an impl block; one whose parts all have one
 // already does.
 TEST(Traits, AStructWithoutATextCannotImplementShow) {
   auto r = semaCheck(R"(struct S { f: (int) -> int; }
 struct P { x: int; }
-impl Show for S {}
-impl Show for P {}
+impl Showable for S {}
+impl Showable for P {}
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"struct 'S' cannot implement 'Show' (its 'toString' is built "
-                "in): its field 'f' has type '(int) -> int', which does not "
-                "implement it",
-                "struct 'P' already implements 'Show'"});
+  expectAll(r,
+            {"struct 'S' cannot implement 'Showable' (its 'toString' is built "
+             "in): its field 'f' has type '(int) -> int', which does not "
+             "implement it",
+             "struct 'P' already implements 'Showable'"});
   EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
 }
 

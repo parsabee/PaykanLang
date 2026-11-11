@@ -266,8 +266,8 @@ methods of a generic class or struct use its), and `<` after their name is a
 syntax error there (`a method cannot have type parameters of its own: only a
 free function is generic ...`, `a 'static fn' cannot have type parameters of
 its own: ...`, `frontend::kGenericMethod` and `kGenericStaticFn`).
-A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
-argument must implement.  `impl Show for A` implements trait `Show` for `A`.
+A type parameter's bounds (`T: Showable + Into<int>`) name the traits its type
+argument must implement.  `impl Showable for A` implements trait `Showable` for `A`.
 A function or method written `=> expression ;` has for its body a block of one
 `return` spanning the expression (`fn double(x: int) -> int => x * 2;` is
 `fn double(x: int) -> int { return x * 2; }`); without a result type, `fn

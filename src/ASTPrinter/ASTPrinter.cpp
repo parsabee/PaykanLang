@@ -131,7 +131,7 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   }
 }
 
-// Render `<T: Show + Eq, U>` for a generic declaration's type parameters.
+// Render `<T: Showable + Eq, U>` for a generic declaration's type parameters.
 static void printTypeParams(std::ostream &os,
                             const std::vector<const std::string *> &params,
                             const TypeParamBounds &bounds = {}) {

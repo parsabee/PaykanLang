@@ -217,7 +217,7 @@ TEST(Struct, ImplBlocksTraitsAndGenerics) {
     impl Hashable for Point { view fn hash() -> int { return (self.x * 31 + self.y).hash(); } }
     trait Named { view fn name() -> Str; }
     impl Named for Point { view fn name() -> Str { return "Point"; } }
-    fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+    fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
     fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
     fn greet<T: Named>(x: view T) -> Str { return x.name(); }
     fn hashOf<T: Hashable>(x: view T) -> bool { return x.hash() == x.hash(); }
@@ -327,7 +327,7 @@ TEST(Struct, GenericStructsInstantiateLikeClasses) {
     fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }
     fn mkBox<T>(v: T) -> Box<T> { return Box(move v); }
     fn greet<T: Named>(x: view T) -> Str { return x.name(); }
-    fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+    fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
     fn main() -> int {
       p = Pair(1, "one");               // inferred Pair<int, Str>
       q: Pair<int, Str> = Pair<int, Str>(2, "two");

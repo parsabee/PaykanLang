@@ -77,14 +77,14 @@ TEST(Struct, OneFieldOnOneLine) {
 
 TEST(Struct, GenericStruct) {
   auto dump = dumpAST(R"(
-struct Pair<A, B: Show> {
+struct Pair<A, B: Showable> {
   first: A;
   second: B;
 }
 fn main() -> int { return 0; }
 )");
   ASSERT_FALSE(dump.empty());
-  EXPECT_NE(dump.find("StructDecl <2:1-5:2> 'Pair' <A, B: Show>"),
+  EXPECT_NE(dump.find("StructDecl <2:1-5:2> 'Pair' <A, B: Showable>"),
             std::string::npos)
       << dump;
 }

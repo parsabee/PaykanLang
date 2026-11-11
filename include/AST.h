@@ -525,7 +525,7 @@ ParamModes paramModes(const std::vector<Param> &params);
 // Forward declaration for FuncDecl body.
 class CompoundStmt;
 
-/// The traits each type parameter must implement (`<T: Show + Eq>`), as
+/// The traits each type parameter must implement (`<T: Showable + Eq>`), as
 /// written: empty, or one (possibly empty) list per type parameter.
 using TypeParamBounds = std::vector<std::vector<Type *>>;
 
@@ -2335,8 +2335,8 @@ public:
 
 // `impl A { ... }` (#216): methods added to an existing type and dispatched
 // statically, and its `static fn`s.  TypeName is the type as written
-// (`A`, `geo::Point`).  `impl Show for A { ... }` implements a trait, the
-// annotation Trait (`Show`, `Into<int>`); null for a plain `impl` block.
+// (`A`, `geo::Point`).  `impl Showable for A { ... }` implements a trait, the
+// annotation Trait (`Showable`, `Into<int>`); null for a plain `impl` block.
 class ImplDecl : public Decl {
   const std::string *TypeName; // interned
   std::vector<FuncDecl *> Methods;
@@ -2367,7 +2367,7 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
 };
 
-// `trait Show { view fn toString() -> Str; }` (#216): the methods a type
+// `trait Showable { view fn toString() -> Str; }` (#216): the methods a type
 // implementing it must have.  Its methods are signatures only (no body);
 // `Self` in them is the implementing type.
 class TraitDecl : public Decl {

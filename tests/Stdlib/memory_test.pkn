@@ -21,7 +21,7 @@ fn codeOf<T>(r: view res::Result<T, err::Error>) -> Str {
 }
 
 /// The text of @p r's value, or the name of its error's code.
-fn shown<T: Show>(r: view res::Result<T, err::Error>) -> Str {
+fn shown<T: Showable>(r: view res::Result<T, err::Error>) -> Str {
   match r {
     v: Ok { return v.value.toString(); }
     e: Err { return code(e.error); }

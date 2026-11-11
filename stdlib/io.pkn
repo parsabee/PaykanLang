@@ -1,6 +1,6 @@
 // ::io: printing, files and the standard input.
 //
-// The print functions take any value that shows itself (`T: Show`: an
+// The print functions take any value that shows itself (`T: Showable`: an
 // object, a Str, a number, a bool, a char, and a tuple, struct, enum or
 // optional whose parts all do, None printing as "None") and write its
 // `toString()` to stdout or stderr, `println` and `printerrln` with a
@@ -29,19 +29,19 @@ native fn _printerr(s: view Str) = "Paykan_printerr";
 native fn _printerrln(s: view Str) = "Paykan_printerrln";
 
 /// Writes `value.toString()` to stdout.
-fn print<T: Show>(value: view T) {
+fn print<T: Showable>(value: view T) {
   _print(value.toString());
 }
 /// Writes `value.toString()` and a newline to stdout.
-fn println<T: Show>(value: view T) {
+fn println<T: Showable>(value: view T) {
   _println(value.toString());
 }
 /// Writes `value.toString()` to stderr.
-fn printerr<T: Show>(value: view T) {
+fn printerr<T: Showable>(value: view T) {
   _printerr(value.toString());
 }
 /// Writes `value.toString()` and a newline to stderr.
-fn printerrln<T: Show>(value: view T) {
+fn printerrln<T: Showable>(value: view T) {
   _printerrln(value.toString());
 }
 

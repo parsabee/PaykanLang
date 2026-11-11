@@ -256,8 +256,8 @@ TEST(Tuple, PrintedAndShown) {
 
 TEST(Tuple, SatisfiesAShowBound) {
   auto r = semaCheck(R"(
-    fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-    class Box<T: Show> {
+    fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
+    class Box<T: Showable> {
       item: T;
       view fn text() -> Str { return self.item.toString(); }
     }

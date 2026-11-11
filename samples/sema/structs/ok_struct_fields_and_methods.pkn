@@ -42,7 +42,7 @@ class Shape {
 fn bump(n: inout int) {
   n = n + 1;
 }
-fn show<T: Show>(x: view T) -> Str {
+fn show<T: Showable>(x: view T) -> Str {
   return x.toString();
 }
 fn twice<T: ValueType + Copyable>(x: T) -> (T, T) {

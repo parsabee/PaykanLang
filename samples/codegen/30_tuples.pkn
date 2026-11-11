@@ -5,7 +5,7 @@
 //            (`[(0, "k"); 3]` included) / generic type arguments,
 //            multiple return with destructuring `q, r = divmod(7, 2);`
 //            (`_` skips an element), element-wise `==` / `!=`, `toString`
-//            rendering `(1, a)`, a tuple meeting a `T: Show` bound, and
+//            rendering `(1, a)`, a tuple meeting a `T: Showable` bound, and
 //            covariant elements (`(int, Str)` where `(int, Obj)` is expected).
 // A tuple is a value held in place, like `T[n]`: its elements sit side by side
 // in the variable, field or array slot that holds it.  A tuple with a
@@ -55,7 +55,7 @@ impl Box<T> {
   fn __init__(v: T) { self.v = move v; }
 }
 
-fn bracket<T: Show>(x: view T) -> Str {
+fn bracket<T: Showable>(x: view T) -> Str {
   return "[" + x.toString() + "]";
 }
 
@@ -111,7 +111,7 @@ fn main() -> int {
   a = (0, "reset");
   io::println(m.1 + a.1);                     // sreset
 
-  // Filled arrays, generic type arguments and `Show`.
+  // Filled arrays, generic type arguments and `Showable`.
   let keys: (int, Str)[3] = [(0, "k"); 3];
   io::println(keys[2]);                       // (0, k)
   let bx = Box<(Str, int)>(("seven", 7));

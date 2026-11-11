@@ -591,7 +591,7 @@ TEST(Conversion, StrOfAStrReadsAView) {
              inMain(""));
   }
   // A generic `view T` at `T` = `Str` reads it the same way.
-  expectOk("fn show<T: Show>(x: view T) -> Str => Str(x);\n" +
+  expectOk("fn show<T: Showable>(x: view T) -> Str => Str(x);\n" +
            inMain("a = show(1); b = show(\"s\");"));
 }
 
@@ -658,36 +658,38 @@ TEST(Conversion, StrOfAValueWithoutATextNamesThePart) {
   };
   only("x = Str(fn(n: int) => n);",
        "'Str' cannot convert a value of type '(int) -> int', which does not "
-       "implement trait 'Show'");
-  only("x = Str(F(1, fn(n: int) => n));",
-       "'Str' cannot convert a value of type 'F', which does not implement "
-       "trait 'Show': its field 'f' has type '(int) -> int', which does not "
-       "implement it");
-  only("x = Str<F>(F(1, fn(n: int) => n));",
-       "'Str' cannot convert a value of type 'F', which does not implement "
-       "trait 'Show': its field 'f' has type '(int) -> int', which does not "
-       "implement it");
+       "implement trait 'Showable'");
+  only(
+      "x = Str(F(1, fn(n: int) => n));",
+      "'Str' cannot convert a value of type 'F', which does not implement "
+      "trait 'Showable': its field 'f' has type '(int) -> int', which does not "
+      "implement it");
+  only(
+      "x = Str<F>(F(1, fn(n: int) => n));",
+      "'Str' cannot convert a value of type 'F', which does not implement "
+      "trait 'Showable': its field 'f' has type '(int) -> int', which does not "
+      "implement it");
   only("xs: int[3] = [1, 2, 3]; x = Str(xs);",
        "'Str' cannot convert a value of type 'int[3]', which does not "
-       "implement trait 'Show'");
+       "implement trait 'Showable'");
   only("x = Str((1, fn() {}));",
        "'Str' cannot convert a value of type '(int, () -> void)', which does "
-       "not implement trait 'Show': its element 1 has type '() -> void', "
+       "not implement trait 'Showable': its element 1 has type '() -> void', "
        "which does not implement it");
   only("x = Str(G::A);",
        "'Str' cannot convert a value of type 'G', which does not implement "
-       "trait 'Show': its field 'f' of variant 'B' has type '() -> void', "
+       "trait 'Showable': its field 'f' of variant 'B' has type '() -> void', "
        "which does not implement it");
   expectOneErrorIn("fn s(v: view int[]) -> Str { return Str(v); }\n" +
                        inMain(""),
                    "'Str' cannot convert a value of type 'int[]', which does "
-                   "not implement trait 'Show'");
+                   "not implement trait 'Showable'");
   // Checked per instantiation: the note names it.
   auto g = semaCheck(decls + inMain("x = show(fn() {});"));
   EXPECT_EQ(g.ErrorCount, 1u) << g.Diagnostics;
   EXPECT_NE(g.Diagnostics.find("error: 'Str' cannot convert a value of type "
                                "'() -> void', which does not implement trait "
-                               "'Show'\n"),
+                               "'Showable'\n"),
             std::string::npos)
       << g.Diagnostics;
   EXPECT_NE(g.Diagnostics.find("note: in instantiation of 'show<() -> void>'"),

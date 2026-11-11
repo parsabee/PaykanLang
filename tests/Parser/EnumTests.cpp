@@ -90,7 +90,7 @@ TEST(EnumParse, MalformedVariantsRejected) {
 // A generic enum: type parameters (with bounds) after its name; a variant
 // with type arguments, `M<int>::B` or `M<int>::A(1)`.
 TEST(EnumParse, GenericEnum) {
-  auto [ok, driver] = parse(withMain("enum M<T, U: Show> {\n"
+  auto [ok, driver] = parse(withMain("enum M<T, U: Showable> {\n"
                                      "  A(x: T, y: U),\n"
                                      "  B\n"
                                      "}\n"

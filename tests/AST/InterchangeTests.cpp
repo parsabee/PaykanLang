@@ -1768,8 +1768,8 @@ TEST(Interchange, TraitsRoundTrip) {
                            "impl Into<int> for A {\n"
                            "  view fn into() -> int { return 1; }\n"
                            "}\n"
-                           "fn show<T: Show + Into<int>, U>(x: T) {}\n"
-                           "class Box<T: Show> { v: T; }\n";
+                           "fn show<T: Showable + Into<int>, U>(x: T) {}\n"
+                           "class Box<T: Showable> { v: T; }\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
@@ -1798,7 +1798,7 @@ TEST(Interchange, ImplBlockRoundTrips) {
                            "  view fn read() -> int { return self.n; }\n"
                            "  static fn make() -> A { return A(); }\n"
                            "}\n"
-                           "impl Show for Pair<K, V> {}\n";
+                           "impl Showable for Pair<K, V> {}\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
@@ -2071,7 +2071,7 @@ TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
        "(methods (fn \"f\" (type-params \"T\") (params) _ _)))))",
        method},
       {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"f\" (type-params "
-       "(bound \"T\" (named-type \"Show\"))) (params) _ (block))))))",
+       "(bound \"T\" (named-type \"Showable\"))) (params) _ (block))))))",
        method},
       {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"id\" (type-params "
        "\"T\") (params (param \"y\" (named-type \"T\"))) (named-type \"T\") "

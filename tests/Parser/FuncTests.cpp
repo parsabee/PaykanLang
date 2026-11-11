@@ -34,18 +34,19 @@ TEST(Func, VoidFunction) {
 // Only a free function's parameters may leave out their types.
 TEST(Func, UntypedParameters) {
   auto [ok, driver] = parse(R"(fn add(a, b) => a + b;
-fn pick<T: Show>(a: T, b) -> T { return a; }
+fn pick<T: Showable>(a: T, b) -> T { return a; }
 fn show(label: Str, v) { }
 fn twice(x, x) => 1;
 fn main() -> int { return 0; }
 )");
   ASSERT_TRUE(ok);
   std::string d = dumpAST(*driver);
-  for (const char *e : {"FuncDecl <1:1-1:23> 'add' <typeof(a), typeof(b)> "
-                        "inferred\n",
-                        "FuncDecl <2:1-2:45> 'pick' <T: Show, typeof(b)> ->\n",
-                        "FuncDecl <3:1-3:27> 'show' <typeof(v)>\n",
-                        "FuncDecl <4:1-4:21> 'twice' <typeof(x)> inferred\n"})
+  for (const char *e :
+       {"FuncDecl <1:1-1:23> 'add' <typeof(a), typeof(b)> "
+        "inferred\n",
+        "FuncDecl <2:1-2:49> 'pick' <T: Showable, typeof(b)> ->\n",
+        "FuncDecl <3:1-3:27> 'show' <typeof(v)>\n",
+        "FuncDecl <4:1-4:21> 'twice' <typeof(x)> inferred\n"})
     EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 
   const auto &generic = driver->getRoot()->getGenericFuncDecls();
