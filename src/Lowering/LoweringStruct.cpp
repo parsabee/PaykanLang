@@ -304,6 +304,13 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
   Val self = L.emitMemAddress(node->getReceiver());
   if (!self)
     return Val();
+  // An awaited `view fn` of storage another task may change while this one
+  // waits is lent the value it has now (Sema::checkAsyncMethodCall).
+  if (node->snapshotsReceiver()) {
+    self = L.copyToTemporary(self, st, "lent");
+    if (L.memHoldsRefs(st))
+      L.MemTemps.emplace_back(self, st);
+  }
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;

@@ -88,6 +88,10 @@ struct ModuleLowering::BorrowedReads {
     Builtin,
   };
 
+  /// The call an `await` being evaluated awaits where it is written: its
+  /// task uses what the call was given until the wait is over.
+  const ast::Expr *Awaited = nullptr;
+
   explicit BorrowedReads(ModuleLowering &l) : L(l) {}
 
   void statement(ast::Stmt *s);
@@ -847,6 +851,10 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
           recv->isChangedByCall() || !mc->isInoutResult() ? recv : nullptr,
           recv->isChangedByCall() && r.Borrowed);
       owners.insert(owners.end(), places.begin(), places.end());
+      // Awaited where it is called, its task uses the receiver's storage
+      // until the wait is over.
+      if (mc == Awaited)
+        call(Effect::unknown(), mc);
     });
     return result(mc, place, std::move(owners));
   }
@@ -870,6 +878,9 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
         ct && ct->isBuiltin() ? Callee::Builtin : Callee::Program,
         reachesObject(rt), ct ? L.methodEffect(ct, name) : Effect::unknown());
     owners.insert(owners.end(), places.begin(), places.end());
+    // (As a struct's: the task has the receiver until the wait is over.)
+    if (mc == Awaited)
+      call(Effect::unknown(), mc);
   });
   return result(mc, place, std::move(owners));
 }
@@ -922,6 +933,18 @@ ModuleLowering::BorrowedReads::eval(ast::Expr *e, bool place) {
     return {};
   }
   if (auto *ue = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    // A wait (docs/design/concurrency.md, "Borrows across a wait"): what
+    // runs meanwhile, the task awaited among it, may let go of any
+    // reference and store anywhere, as a call that does what is not known.
+    // The call awaited keeps its receiver in use through the wait
+    // (methodCall).
+    if (ue->getOpcode() == ast::UnaryOpcode::Await) {
+      const ast::Expr *saved = std::exchange(Awaited, ue->getOperand());
+      eval(ue->getOperand());
+      Awaited = saved;
+      call(Effect::unknown(), ue);
+      return {};
+    }
     eval(ue->getOperand());
     return {};
   }
@@ -1356,8 +1379,13 @@ void ModuleLowering::EffectScan::expr(ast::Expr *e) {
       ast::isa<ast::EnumValueExpr>(e) ||
       ast::isa<ast::LambdaExpr>(e)) // a lambda's body runs when it is called
     return;
-  if (auto *x = ast::dyn_cast<ast::UnaryExpr>(e))
+  if (auto *x = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    // A function that waits lets other tasks run: it does what is not
+    // known.
+    if (x->getOpcode() == ast::UnaryOpcode::Await)
+      return unknown();
     return expr(x->getOperand());
+  }
   if (auto *x = ast::dyn_cast<ast::BinaryExpr>(e)) {
     expr(x->getLHS());
     expr(x->getRHS());

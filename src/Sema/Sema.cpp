@@ -2527,6 +2527,9 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
                   typeName(t) + "'");
       return nullptr;
     }
+    // Other tasks run while this one waits: what it borrowed `inout` from
+    // storage it does not own may change under it.
+    S.checkBorrowsAcrossWait(node);
     // `await t` spends the variable's handle (the prototype's typestate):
     // a second await, or any use after, is an error, as after a move.
     if (const auto *id = ast::dyn_cast<ast::Identifier>(operand);

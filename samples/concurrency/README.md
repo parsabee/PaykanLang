@@ -229,8 +229,7 @@ and `task::spawnOn`, event loops pinned per thread, cancellation, timers,
 and the task-handle typestate beyond `await` (a task handle in a field, an
 element or a tuple is not followed by the await check).
 
-Not in yet: the migration tool, holds across an `await`, and the
-diagnostics' final wording.  A `locked` type argument and an `atomic
+Not in yet: the migration tool and the diagnostics' final wording.  A `locked` type argument and an `atomic
 shared` or `locked` tuple or array element are errors (`List<shared Node>`
 and `(int, shared Node)` are there).
 Non-atomic

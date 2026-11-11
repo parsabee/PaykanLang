@@ -2149,8 +2149,58 @@ private:
     bool Inout;
     const std::vector<ast::Stmt *> *Block;
     size_t End;
+    /// An `inout` borrow of storage the function does not own
+    /// (reachedThrough): how the place, as written (Place, at At), is
+    /// reached; "" for storage of the frame's.
+    std::string Reached;
+    std::string Place;
+    ast::SourceLocation At;
+    /// Reported as live across an `await` already.
+    bool AcrossWait = false;
+    /// An `inout` arm's binding: a copy of the subject that goes back to
+    /// it after the binding's last use, or on the way out of the arm.
+    bool WritesBack = false;
   };
   std::vector<Borrow> Borrows;
+  /// How what each `view` local and `view` arm binding views is reached,
+  /// by varKey, and whether a way there is one something may write
+  /// (reachOf): a view of the frame's own storage is the frame's.
+  std::unordered_map<std::string, std::pair<std::string, bool>> ViewLocalReach;
+  /// How each `inout` local reaches storage the function does not own, by
+  /// varKey ("" for storage of the frame's): a borrow of the local reaches
+  /// it the same way.
+  std::unordered_map<std::string, std::string> InoutLocalReach;
+  /// The statement being checked of each block being checked, the innermost
+  /// last (visitStatements).
+  std::vector<std::pair<const std::vector<ast::Stmt *> *, size_t>> StmtCursor;
+  /// How the storage @p place names is reached when the function's frame
+  /// does not own it (docs/design/concurrency.md, "Borrows across a wait"):
+  /// `through 'self'`, `through 'shared mut' reference 's'`, `through 'view'
+  /// parameter 'h'`; "" for an owned path, the frame's own `inout`
+  /// parameter (which its caller checked) and a struct method's `self`,
+  /// followed by unique fields and elements.  The slot a place names is
+  /// where the place is, whatever reference it holds; a part of what a
+  /// `shared` reference names is in that object.  @p stable is set when
+  /// every way there that the frame does not own goes through an object
+  /// nothing writes, a frozen one or a `shared` one.
+  std::string reachedThrough(const ast::Expr *place, bool *stable = nullptr);
+  std::string reachOf(const ast::Expr *p, bool through, bool &written);
+  /// The exclusivity records of startBorrow: one for each variable the
+  /// place is rooted in.
+  void borrowRoots(const ast::Expr *place, const std::string &by, bool inout,
+                   const std::vector<ast::Stmt *> *block, size_t end);
+  /// Whether the borrow @p b is used after the wait of @p wait, which is
+  /// being checked: in a later statement of its block, or, in the statement
+  /// of its last use, in what runs after the wait there (a later statement
+  /// of a block inside it, a loop around the wait, the statement the wait
+  /// is in but for what it and the `await`s before it awaited), on the
+  /// paths that do not leave first (`return`, `break`, `continue`).  An
+  /// `inout` arm's binding is used where it is written back.
+  bool usedAfterWait(const Borrow &b, const ast::UnaryExpr *wait) const;
+  /// The `await` @p wait: no `inout` borrow of storage the function does not
+  /// own is live across it, as another task may change that storage while
+  /// this one waits, and the borrow's update would be lost.
+  bool checkBorrowsAcrossWait(const ast::UnaryExpr *wait);
   /// The (variable, line) pairs reported by checkNotBorrowed.
   std::set<std::pair<std::string, unsigned>> BorrowedUsesReported;
   /// Check @p stmts in order, starting each local borrow after its
@@ -2161,7 +2211,9 @@ private:
   bool visitBody(const std::vector<ast::Stmt *> &stmts);
   /// Start the borrow of the place @p place by @p by (a local borrow, a
   /// `match` arm's binding), live until statement @p end of @p block.
-  void startBorrow(const ast::Expr *place, const std::string &by, bool inout,
+  /// False when the place itself waits: an `await` in the place of an
+  /// `inout` borrow of storage the function does not own (reported).
+  bool startBorrow(const ast::Expr *place, const std::string &by, bool inout,
                    const std::vector<ast::Stmt *> *block, size_t end);
   /// Check the body of @p arm, a match over @p subject, its binding
   /// borrowing the subject when it is `n: view T` or `n: inout T` until its
