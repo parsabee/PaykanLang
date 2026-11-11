@@ -21,6 +21,8 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringSet.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Conversion/ArithToLLVM/ArithToLLVM.h>
 #include <mlir/Conversion/AsyncToLLVM/AsyncToLLVM.h>
@@ -931,6 +933,28 @@ translateToLLVMIR(ModuleOp module, llvm::LLVMContext &ctx,
          f.getName() == "__resume") &&
         !f.isDeclaration())
       f.setLinkage(llvm::GlobalValue::InternalLinkage);
+  // A task's body is the region of an async.execute, which the async passes
+  // outline into a coroutine whose first block starts it on a worker and
+  // suspends: the body's slots, declared at its top, are in the block after
+  // that suspension.  LLVM keeps in a coroutine's frame the slots of its
+  // entry block that are used on both sides of a suspension, and takes any
+  // other for one of the stack of the part it is in, so a slot declared
+  // after one suspension and used after another dominates no use of it once
+  // the coroutine is split.  Every slot goes to the entry block.
+  for (llvm::Function &f : *llvmModule) {
+    if (!f.isPresplitCoroutine() || f.isDeclaration())
+      continue;
+    llvm::BasicBlock &entry = f.getEntryBlock();
+    std::vector<llvm::AllocaInst *> slots;
+    for (llvm::BasicBlock &block : f)
+      if (&block != &entry)
+        for (llvm::Instruction &i : block)
+          if (auto *slot = llvm::dyn_cast<llvm::AllocaInst>(&i);
+              slot && llvm::isa<llvm::ConstantInt>(slot->getArraySize()))
+            slots.push_back(slot);
+    for (llvm::AllocaInst *slot : slots)
+      slot->moveBefore(entry.getFirstInsertionPt());
+  }
   // Paykan_malloc returns a block of its own every time (Runtime.h), which
   // LLVM knows only from the declaration's attributes: without `noalias` it
   // cannot tell two objects apart, so a store to one object's field forces

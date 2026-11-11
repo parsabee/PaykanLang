@@ -14,6 +14,9 @@
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Linker/Linker.h>
@@ -336,6 +339,40 @@ compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
   return linked;
 }
 
+namespace {
+
+// The inliner marks the lifetime of each slot of a function it inlines, and
+// the coroutine split takes a slot whose marked lifetime spans no
+// suspension for one of the stack.  The address of a part of such a slot
+// that the optimizer computes ahead of the lifetime (out of a loop) and
+// merges in a phi is then kept in the coroutine's frame, where it names the
+// stack of the part that suspended.  Without the marks the split goes by
+// the slot's uses, the hoisted ones too.  Run once a function's calls are
+// inlined, before it is simplified and split.
+struct DropCoroutineLifetimesPass
+    : llvm::PassInfoMixin<DropCoroutineLifetimesPass> {
+  llvm::PreservedAnalyses run(llvm::Function &f,
+                              llvm::FunctionAnalysisManager &) {
+    if (!f.isPresplitCoroutine())
+      return llvm::PreservedAnalyses::all();
+    bool changed = false;
+    for (llvm::Instruction &i :
+         llvm::make_early_inc_range(llvm::instructions(f)))
+      if (auto *ii = llvm::dyn_cast<llvm::IntrinsicInst>(&i);
+          ii && ii->isLifetimeStartOrEnd()) {
+        ii->eraseFromParent();
+        changed = true;
+      }
+    if (!changed)
+      return llvm::PreservedAnalyses::all();
+    llvm::PreservedAnalyses kept;
+    kept.preserveSet<llvm::CFGAnalyses>();
+    return kept;
+  }
+};
+
+} // namespace
+
 void optimizeModule(llvm::Module &module, unsigned level) {
   static const llvm::OptimizationLevel levels[] = {
       llvm::OptimizationLevel::O0,
@@ -344,19 +381,14 @@ void optimizeModule(llvm::Module &module, unsigned level) {
       llvm::OptimizationLevel::O3,
   };
   llvm::OptimizationLevel lvl = levels[level < 4 ? level : 3];
-  // At -O0 nothing is optimized, except a module with a coroutine (an
-  // `async fn` on the MLIR async runtime, the concurrency prototype),
-  // which takes the O1 pipeline: the coroutines must be split, and a frame
-  // split with every local in its stack slot (the O0 pipeline, mem2reg or
-  // not) is resumed on a worker with the caller's slots gone.  The design's
-  // own runtime (#362) replaces this lowering.
-  if (lvl == llvm::OptimizationLevel::O0) {
-    if (llvm::none_of(module, [](const llvm::Function &f) {
-          return f.isPresplitCoroutine();
-        }))
-      return;
-    lvl = llvm::OptimizationLevel::O1;
-  }
+  // At -O0 nothing is optimized.  A module with a coroutine (an `async fn`
+  // on the MLIR async runtime, the concurrency prototype) still has them
+  // split, which LLVM's O0 pipeline does and nothing else.
+  const bool unoptimized = lvl == llvm::OptimizationLevel::O0;
+  if (unoptimized && llvm::none_of(module, [](const llvm::Function &f) {
+        return f.isPresplitCoroutine();
+      }))
+    return;
 
   llvm::LoopAnalysisManager LAM;
   llvm::FunctionAnalysisManager FAM;
@@ -364,14 +396,30 @@ void optimizeModule(llvm::Module &module, unsigned level) {
   llvm::ModuleAnalysisManager MAM;
 
   llvm::PassBuilder PB;
+  PB.registerCGSCCOptimizerLateEPCallback([](llvm::CGSCCPassManager &pm,
+                                             llvm::OptimizationLevel) {
+    pm.addPass(
+        llvm::createCGSCCToFunctionPassAdaptor(DropCoroutineLifetimesPass()));
+  });
   PB.registerModuleAnalyses(MAM);
   PB.registerCGSCCAnalyses(CGAM);
   PB.registerFunctionAnalyses(FAM);
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(lvl);
+  llvm::ModulePassManager MPM = unoptimized
+                                    ? PB.buildO0DefaultPipeline(lvl)
+                                    : PB.buildPerModuleDefaultPipeline(lvl);
   MPM.run(module, MAM);
+  // The O0 pipeline leaves in the function that starts a task the slots the
+  // split moved to the frame, used by nothing: they would be reserved on
+  // the starting thread's stack.
+  if (unoptimized)
+    for (llvm::Function &f : module)
+      for (llvm::Instruction &i :
+           llvm::make_early_inc_range(llvm::instructions(f)))
+        if (llvm::isa<llvm::AllocaInst>(i) && i.use_empty())
+          i.eraseFromParent();
 }
 
 } // namespace paykan::llvm_codegen

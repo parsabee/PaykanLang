@@ -21,6 +21,8 @@ samples/concurrency/README.md.
   or an optional. The C of `--emit-c` runs a task where it is called, so it keeps the code of a
   module that has to do with tasks instead of linking its compiled code, and `--list-modules`
   does not name it (docs/c-backend.md).
+- `-O0` leaves a program with an `async fn` unoptimized (#368): it was compiled with the `-O1`
+  pipeline, as its coroutines did not survive an unoptimized split.
 - `continue` ends an iteration of a `parallel for`, and a loop in its body has its own `break` and
   `continue` (#368). A `break` of the `parallel for` itself stays an error.
 - A `parallel for` body calls only par-safe functions (#368; docs/language/19-concurrency.md, "What
@@ -373,6 +375,13 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
+  several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
+  variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is
+  declared.
+- At `-O3`, a task that called a method the compiler inlined (a container's `push`) in a loop with
+  an `await` could crash: the address of the method's result was kept across the wait while the
+  result itself stayed on the stack.
 - A task awaited, or a value moved, in a `while` loop's condition was checked as if the condition
   ran once: the program awaited the task again, or used the moved value, on the next iteration.
   It is now an error, as in the loop's body (`'t' is awaited in the loop at 7:3 and not assigned

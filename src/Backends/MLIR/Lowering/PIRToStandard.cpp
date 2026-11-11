@@ -565,15 +565,15 @@ void FunctionLowering::run() {
     Map.map(l.getSlot(),
             P::AllocaOp::create(B, Loc, size, align, l.getName()).getResult());
     SlotTypes[l.getSlot()] = slot;
-    // A coroutine's split keeps in its frame a slot used on both sides of a
-    // suspension.  One used only after the last stays where it was declared,
-    // past the first suspension, and so does not dominate its uses: a write
-    // the optimizer keeps puts each slot that stays in memory on both sides.
-    // (One that lives in a register is no slot by then.)
-    if (IsAsync && !M.sequential() &&
-        (isa<P::MemType>(slot) ||
-         llvm::any_of(l.getSlot().getUsers(),
-                      [](Operation *u) { return isa<P::LocalAddrOp>(u); })))
+    // A coroutine's split keeps in its frame, on the heap, the slots used
+    // on both sides of a suspension, and leaves any other on the stack of
+    // the part that uses it.  The runtime resumes a task that awaited
+    // inside the task that finished, so a chain of tasks waiting on each
+    // other is a chain of calls on one thread's stack: a value held in
+    // memory (an array, a struct) there would be on it once for each.  A
+    // write the optimizer keeps, before the body's first wait, puts each
+    // such slot in the frame.
+    if (IsAsync && !M.sequential() && isa<P::MemType>(slot))
       P::PtrStoreOp::create(
           B, Loc, Map.lookup(l.getSlot()),
           arith::ConstantIntOp::create(B, Loc, B.getI8Type(), 0),

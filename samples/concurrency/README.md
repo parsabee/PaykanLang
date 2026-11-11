@@ -178,7 +178,11 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   `omp.wsloop`, scheduled dynamically one chunk at a time: on a hybrid
   CPU a static split lets an efficiency core set the loop's time,
   `benchmarks/README.md`), `async-func-to-async-runtime`, `async-to-async-runtime`
-  and `convert-async-to-llvm`, and translates OpenMP to LLVM IR.  The C
+  and `convert-async-to-llvm`, and translates OpenMP to LLVM IR.  A task's
+  body is a coroutine, whose slots the translation moves to its entry
+  block: LLVM's split keeps in the coroutine's frame the slots there that
+  are used on both sides of a wait, at `-O0` as at any level, and a value
+  held in memory always.  The C
   path (`--emit-c`) lowers the same ops sequentially: a task is the
   function's result carried in a pointer, a parallel loop a plain loop.
 * **Runtimes**: tasks run on MLIR's async runtime (`libmlir_async_runtime`:
@@ -228,9 +232,7 @@ element or a tuple is not followed by the await check).
 Not in yet: the migration tool, holds across an `await`, and the
 diagnostics' final wording.  A `locked` type argument and an `atomic
 shared` or `locked` tuple or array element are errors (`List<shared Node>`
-and `(int, shared Node)` are there).  A program with an `async fn` is compiled with the `-O1` pipeline
-under `-O0` (the coroutines of MLIR's async runtime do not survive an
-unoptimized split; the design's own runtime replaces the lowering).
+and `(int, shared Node)` are there).
 Non-atomic
 reference counts are only safe because the checks keep references on one
 thread; a program that calls into non-thread-safe runtime pieces from a
