@@ -373,6 +373,15 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A task awaited, or a value moved, in a `while` loop's condition was checked as if the condition
+  ran once: the program awaited the task again, or used the moved value, on the next iteration.
+  It is now an error, as in the loop's body (`'t' is awaited in the loop at 7:3 and not assigned
+  again before the next iteration`).
+- A module's send check did not see the classes its importers derive from the classes it sends, so
+  an importer's subclass with a `shared` field crossed to a task. A module's interface now names
+  the classes its code sends to another thread, and a class derived from one in an importing
+  module is checked there (`class 'Doubled' extends 'Shape', which is sent to another thread:
+  ...`).
 - A cell's contents are reached only in a `lock` block: `lock a.inner` with `a` itself `locked`, a `view`
   or `inout` local or a `view` result of a cell, and `==`, `+` or `Str(s)` of a `locked Str` read them
   with no lock (the last three corrupted memory). `lock` of an optional cell is an error: it segfaulted

@@ -2125,6 +2125,118 @@ TEST(Pkm, TheCOfEmitCLinksNoCompiledTasks) {
   fs::remove_all(dir);
 }
 
+// A module's interface names the classes whose objects its code sends to
+// another thread: an importer's class derived from one crosses with it, so
+// the importer's send check is of that class, as it would be in the module
+// itself.  (A task then read a `shared mut` object on a worker while the
+// program wrote it.)
+TEST(Pkm, AnImportersSubclassOfAClassAModuleSends) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_crosses_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn",
+            "class Shape {\n"
+            "  size: int;\n"
+            "  async view fn area() -> int { return self.size; }\n"
+            "}\n"
+            "impl Shape { fn __init__(size: int) { self.size = size; } }\n"
+            "class Kept { n: int; }\n"
+            "async fn run(s: Shape) -> int { return await s.area(); }\n"
+            "fn during(s: Shape) -> int {\n"
+            "  let t = run(move s);\n"
+            "  return await t;\n}\n");
+  writeFile(
+      dir / "main.pkn",
+      "import lib;\n"
+      "class Cache { name: Str; }\n"
+      "class Doubled : lib::Shape {\n"
+      "  cache: shared mut Cache;\n"
+      "}\n"
+      "impl Doubled {\n"
+      "  fn __init__(c: shared mut Cache) { __super__(1); self.cache = c; "
+      "}\n}\n"
+      "class Local : lib::Kept { cache: shared mut Cache; }\n"
+      "class Plain : lib::Shape { extra: int; }\n"
+      "fn main() -> int {\n"
+      "  let c: shared mut = Cache(\"c\");\n"
+      "  return lib::during(Doubled(c));\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  const std::string want =
+      "main.pkn:3:1: error: class 'Doubled' extends 'Shape', which is sent to "
+      "another thread: field 'cache' is 'shared mut Cache': a 'shared' "
+      "reference is aliased on its own thread";
+  // From the source, from the cache entry and from the module file.
+  for (const char *flags : {"--no-module-cache", "--rebuild-modules", ""}) {
+    auto r = paykan(std::string(flags) + " --check-only main.pkn");
+    EXPECT_NE(r.exitCode, 0) << flags;
+    EXPECT_TRUE(contains(r.out, want)) << flags << "\n" << r.out;
+    EXPECT_FALSE(contains(r.out, "'Local'")) << r.out;
+    EXPECT_FALSE(contains(r.out, "'Plain'")) << r.out;
+  }
+  ASSERT_EQ(paykan("--emit-pkm lib.pkn").exitCode, 0);
+  auto dump = paykan("pkm dump --section=iface lib.pkm");
+  EXPECT_TRUE(contains(dump.out, "impl crosses for Shape")) << dump.out;
+  EXPECT_FALSE(contains(dump.out, "impl crosses for Kept")) << dump.out;
+  fs::remove(dir / "lib.pkn");
+  fs::remove_all(dir / ".paykan_cache");
+  auto fromFile = paykan("--check-only main.pkn");
+  EXPECT_TRUE(contains(fromFile.out, want)) << fromFile.out;
+  fs::remove_all(dir);
+}
+
+// A task's type inside another type keeps its spelling in a module's
+// interface (a function that returns a function starting a task), and the
+// task an async method of a generic struct runs as stays with the function
+// that starts it when another module's copy of the instance has neither
+// (the second run reads that module from its cache entry).
+TEST(Pkm, TasksInAModulesTypesAndCopies) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_asynct_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn", "async fn count(n: int) -> int { return n; }\n"
+                             "fn starter() => fn(n: int) => count(n);\n"
+                             "fn twice(n: int) -> int { return 2 * n; }\n");
+  writeFile(dir / "gen.pkn",
+            "struct W<T: Copyable> { v: T; }\n"
+            "impl W<T> {\n"
+            "  async view fn get() -> T { return self.v; }\n}\n");
+  writeFile(dir / "a.pkn", "import gen;\n"
+                           "fn one(x: int) -> int {\n"
+                           "  let w = gen::W<int>(x);\n"
+                           "  return w.v;\n}\n");
+  writeFile(dir / "b.pkn", "import gen;\nimport a;\n"
+                           "fn two(x: int) -> int {\n"
+                           "  let w = gen::W<int>(x);\n"
+                           "  return await w.get() + a::one(1);\n}\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\nimport lib;\nimport b;\n"
+            "fn main() -> int {\n"
+            "  let s = lib::starter();\n"
+            "  io::println(Str(lib::twice(4)) + \" \" + Str(await s(3)) + "
+            "\" \" +\n"
+            "              Str(b::two(2)));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  for (const char *flags : {"--no-module-cache main.pkn", "main.pkn",
+                            "main.pkn", "build main.pkn -o prog && ./prog"}) {
+    auto r = paykan(flags);
+    EXPECT_EQ(r.exitCode, 0) << flags << "\n" << r.out;
+    EXPECT_TRUE(contains(r.out, "8 3 3\n")) << flags << "\n" << r.out;
+  }
+  ASSERT_EQ(paykan("--emit-pkm lib.pkn").exitCode, 0);
+  auto dump = paykan("pkm dump --section=iface lib.pkm");
+  EXPECT_TRUE(contains(dump.out, "(int) -> async Task<int>")) << dump.out;
+  fs::remove_all(dir);
+}
+
 // A class of a module may be named Task; `f`'s task function is not a method
 // of a type `f`; `async fn main` is only a program's.
 TEST(Pkm, AsyncNamesAcrossModules) {

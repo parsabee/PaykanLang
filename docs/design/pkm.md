@@ -375,8 +375,9 @@ reads as having no modes and returning copies.  A `FUNC` record of a
 `u8` flags byte after its result mode, bit 0 for a native function, bit 1
 for a par-safe one (Sema::checkParSafety: a `parallel for` body may call
 it), bit 2 for an `async fn`, whose result type is its task, spelled `async
-Task<T>` (its modes and its result mode are then written too); a reader
-rejects any other bit,
+Task<T>` (its modes and its result mode are then written too; a task is
+spelled so wherever it is in a type, `(int) -> async Task<int>`, as a class
+may be named `Task`); a reader rejects any other bit,
 and a record without it is none of these.  It tells an importer
 what a call of the function does though another module compiles it: it
 keeps nothing it is lent and changes only what its `inout` arguments name,
@@ -418,7 +419,13 @@ are sorted by `(for, trait)` and unique, after the `CLASS` records and
 before the `FUNC` records, so a module without a conformance has the
 records it had before.  #147 appends `Str traitModule; uleb k; Str
 args[k]`; a record without them names a built-in trait with no arguments,
-so #147's record extends this one rather than replacing it.
+so #147's record extends this one rather than replacing it.  One name in
+the trait's place is no trait: `crosses` (`names::kImplCrosses`) marks a
+class whose objects the module's code sends to another thread (a task's
+argument or receiver, a frozen value, a cell's), its own class or one it
+imports.  An importer's class derived from it crosses with it, so the
+importer's send check is of that class too (`Sema::checkCrossedClasses`:
+`class 'Doubled' extends 'Shape', which is sent to another thread: ...`).
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing

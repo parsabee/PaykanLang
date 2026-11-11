@@ -389,6 +389,77 @@ fn main() -> int {
   expectCleanLines(r, {":13:", ":14:", ":15:"});
 }
 
+// A unique result's `mut` is no part of a task's type: tasks of a `mut Node`
+// and of a `Node` are one type in a variable, a conditional, an override
+// and a requirement, and an `await` where the call is written keeps the
+// `mut`.  `hash`, `clone` and `toString` are the compiler's to call only
+// with the parameters it calls them with.
+TEST(Concurrency, ATasksTypeAndTheNamesTheCompilerCalls) {
+  auto r = semaCheck(R"(class Node { id: int; }
+async fn fresh(id: int) -> mut Node { return Node(id); }
+async fn plain(id: int) -> Node { return Node(id); }
+trait AMaker { async view fn amake() -> Node; }
+class Base {
+  k: int;
+  async view fn amake() -> Node { return Node(self.k); }
+  view fn hash(salt: int) -> int { return salt; }
+  async view fn clone(depth: int) -> Base { return Base(self.k); }
+  async view fn toString() -> Str { return "b"; }
+}
+impl Base { fn __init__(k: int) { self.k = k; } }
+class Der : Base {
+  async view fn amake() -> mut Node { return Node(2); }
+}
+impl Der { fn __init__() { __super__(0); } }
+class F {
+  n: int;
+  async view fn amake() -> mut Node { return Node(4); }
+}
+impl AMaker for F {}
+fn main() -> int {
+  t = fresh(1);
+  let a = await t;
+  t = plain(2);
+  let b = await t;
+  let u = if a.id > 0 then fresh(3) else plain(4);
+  let c = await u;
+  m = await fresh(5);
+  m.id = 6;
+  let d = Der();
+  n = await d.amake();
+  n.id = 7;
+  return a.id + b.id + c.id + (await d.clone(1)).k;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":10:3: error: 'toString' cannot be 'async': the compiler "
+                   "calls it, and waits for no task"});
+}
+
+// A `while` loop's condition runs before every iteration: a task awaited or
+// a value moved there is spent in the loop, once.
+TEST(Concurrency, AWhileConditionRunsEveryIteration) {
+  auto r = semaCheck(R"(class Job { n: int; }
+async fn f(x: int) -> int { return x + 1; }
+fn eat(j: Job) -> int { return j.n; }
+fn main() -> int {
+  let t = f(10);
+  n = 0;
+  while await t > 5 && n < 2 { n += 1; }
+  let j = Job(1);
+  while eat(move j) > 0 && n < 4 { n += 1; }
+  while await f(n) < 9 { n += 1; }
+  return n;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  expectErrors(r, {":7:9: error: 't' is awaited in the loop at 7:3 and not "
+                   "assigned again before the next iteration",
+                   ":9:13: error: 'j' is moved in the loop at 9:3 and not "
+                   "assigned again before the next iteration"});
+  expectCleanLines(r, {":10:", ":11:"});
+}
+
 // -- The send check
 
 // At an async call's arguments: a unique reference (a `Str` too) read from

@@ -804,6 +804,13 @@ value cannot (`cannot send ... : is a function value, whose captures are not kno
 `shared` result cannot come back either (`the result of 'async fn' 'give' (a 'shared Node')
 cannot cross to the task's awaiter`).
 
+An object sent as a class may be of a class derived from it, so every class derived from one
+that is sent has to cross too (`cannot send 's' (a 'Shape'): field 'cache' is 'shared Cache':
+... (of class 'Doubled', derived from 'Shape')`). A module says in its interface which
+classes its code sends, and a class of an importing module derived from one of them is
+checked where it is declared (`class 'Doubled' extends 'Shape', which is sent to another
+thread: field 'cache' is 'shared mut Cache': ...`).
+
 A method can be `async` too: a class's, an `impl` block's (of a class or a struct), a trait's
 requirement, and a `static fn` (`static async fn`). Its receiver crosses to the task like an
 argument. Unless the receiver is frozen (`atomic shared`, a handle), the task borrows it, so the
@@ -1792,7 +1799,9 @@ one.
   on every path before its scope ends (`task 't' is not awaited before this 'return': ...`,
   `task 't' may not be awaited when its scope ends: it is spent on some paths only ...`), and
   before its variable takes another (`task 't' is replaced before it is awaited: await it (or
-  move it) first`). An operand that runs on some paths only (a branch of `if ... then ... else`,
+  move it) first`). A `while` loop's condition runs before every iteration, so a task awaited
+  there is awaited in the loop (`'t' is awaited in the loop at 7:3 and not assigned again
+  before the next iteration`). An operand that runs on some paths only (a branch of `if ... then ... else`,
   the right of `&&` or `||`) cannot spend one (`task 't' would be awaited on some paths only:
   'await' it before the condition`, `task 't' would be moved on some paths only: move it before
   the condition`).

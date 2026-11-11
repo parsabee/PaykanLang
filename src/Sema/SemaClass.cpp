@@ -952,10 +952,14 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                                    "gives the object at once");
       return nullptr;
     }
-    // The compiler calls these itself, and has no task to wait for.
+    // The compiler calls these itself, and has no task to wait for: the
+    // ones it calls, by their parameters (a `hash(salt: int)` is the
+    // program's own).
     for (const char *implicit : {names::kMethodClone, names::kMethodEquals,
                                  names::kMethodHash, names::kMethodToString})
-      if (method->getName() == implicit) {
+      if (method->getName() == implicit &&
+          method->getParams().size() ==
+              (method->getName() == names::kMethodEquals ? 1u : 0u)) {
         error(method->getLocation(),
               "'" + method->getName() +
                   "' cannot be 'async': the compiler calls it, and waits for "

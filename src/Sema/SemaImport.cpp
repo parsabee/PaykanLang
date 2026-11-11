@@ -277,11 +277,28 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
 /// type's alone for the bare form.  The qualifier is part of the type of a
 /// parameter, a field or a result (docs/language/19-concurrency.md), so an
 /// importer reads it back (splitExportedQualifier).
+/// ast::typeName of @p ty, with a task spelled `async Task<T>` wherever it
+/// is: a class may be named Task, so a task's name says what it is.  A
+/// task is a call's result, a function type's (`(int) -> async Task<int>`)
+/// and an optional function type's too.
+static std::string exportedSpelling(ast::Type *ty) {
+  if (auto *tt = ast::dyn_cast<ast::TaskType>(ty))
+    return "async Task<" + exportedSpelling(tt->getInnerType()) + ">";
+  if (auto *fnt = ast::dyn_cast<ast::FunctionType>(ty)) {
+    // typeName ends with the result's.
+    const std::string whole = ast::typeName(ty);
+    const std::string result = ast::typeName(fnt->getReturnType());
+    return whole.substr(0, whole.size() - result.size()) +
+           exportedSpelling(fnt->getReturnType());
+  }
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty);
+      ot && ast::isa<ast::FunctionType>(ot->getInnerType()))
+    return "(" + exportedSpelling(ot->getInnerType()) + ")?";
+  return ast::typeName(ty);
+}
+
 static std::string exportedTypeName(ast::Qualifier q, ast::Type *ty) {
-  std::string name = ast::typeName(ty);
-  // A class may be named Task: a task's name says what it is.
-  if (ast::isa<ast::TaskType>(ty))
-    name = "async " + name;
+  std::string name = exportedSpelling(ty);
   if (q.isUnique())
     return name;
   // One a type argument gave is marked, so the importer's reads it as such
@@ -456,6 +473,13 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
           names::isImplBuiltinTrait(tr.Trait->Decl->getName()))
         info.ExportedImpls.push_back({name, tr.Trait->Decl->getName()});
   };
+  // A class the module's code sends to another thread (CrossedClasses, its
+  // own and its imports'): an importer's class derived from it is sent as
+  // one, so the importer's send check is of that class too.
+  auto exportCrossing = [&](const ast::ClassType *ct, const std::string &name) {
+    if (CrossedClasses.count(ct))
+      info.ExportedImpls.push_back({name, names::kImplCrosses});
+  };
 
   for (auto &[name, ct] : Ctx.getClassTypes()) {
     // The registry holds each class under its canonical name and again
@@ -492,6 +516,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       ci.Methods.push_back(methodInfo(m));
     info.ExportedClasses.push_back(std::move(ci));
     exportImpls(ct, name);
+    exportCrossing(ct, name);
   }
 
   // Struct types: fields in declaration order, then `__init__` and the
@@ -1466,6 +1491,14 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
         error(loc, says + ", but it describes no class or struct '" +
                        ii.TypeName + "'");
         ok = false;
+        continue;
+      }
+      // No conformance: the module sends objects of the class to another
+      // thread, so what this module derives from it crosses too
+      // (checkCrossedClasses).
+      if (ii.Trait == names::kImplCrosses) {
+        if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+          CrossedClasses.insert(ct);
         continue;
       }
       if (t == Traits.end() || !t->second.IsBuiltin ||

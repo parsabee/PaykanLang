@@ -129,8 +129,14 @@ inline constexpr const char *kMethodHash = "hash";
 /// docs/design/pkm.md §3.5).  `Show` and `ValueType` are not: every class
 /// has `Show` through `Obj`, and the rest follow from a type's structure
 /// (src/Sema/SemaTraits.cpp, traitImplOwner).
+/// What a module interface records, where a conformance names its trait,
+/// for a class whose objects the module's code sends to another thread (a
+/// task's argument or receiver, a frozen value, a cell's): an importer's
+/// class derived from it crosses too, so the importer's send check is of
+/// it (Sema::checkCrossedClasses).
+inline constexpr const char *kImplCrosses = "crosses";
 inline bool isImplBuiltinTrait(std::string_view n) {
-  return n == kTraitHashable || n == kTraitCloneable;
+  return n == kTraitHashable || n == kTraitCloneable || n == kImplCrosses;
 }
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";

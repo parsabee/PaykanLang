@@ -210,15 +210,22 @@ bool ModuleLowering::processImports(ast::TranslationUnit *tu) {
 void ModuleLowering::markShared() {
   for (pir::Class &c : Classes_)
     c.Shared = c.Name.find('<') != std::string::npos;
+  auto shared = [&](const std::string &name) {
+    const std::string owner(ownerTypeName(name));
+    return (name.starts_with(kHiddenQualPrefix) &&
+            name.find('<') != std::string::npos) ||
+           (owner.find('<') != std::string::npos && OwnTypes.count(owner)) ||
+           DroppedCopyFunctions.count(name);
+  };
   for (pir::Function &f : Funcs) {
     if (f.IsExtern)
       continue; // an extern is as shared as its definition (declareExternFrom)
-    const std::string owner(ownerTypeName(f.Name));
-    f.Shared =
-        (f.Name.starts_with(kHiddenQualPrefix) &&
-         f.Name.find('<') != std::string::npos) ||
-        (owner.find('<') != std::string::npos && OwnTypes.count(owner)) ||
-        DroppedCopyFunctions.count(f.Name);
+    // The task an `async fn` runs as goes with the function that starts it
+    // (emitAsyncStart): both are kept as code, or neither.
+    const std::string_view task(names::kAsyncTaskSuffix);
+    f.Shared = shared(f.Name) ||
+               (f.Name.ends_with(task) &&
+                shared(f.Name.substr(0, f.Name.size() - task.size())));
   }
 }
 

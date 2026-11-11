@@ -5116,7 +5116,7 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
 
   // Each of the module's templates once more, with a move-only class for
   // each parameter without bounds: its copies need `T: Copyable` (#368).
-  if (ok && !hasErrors() && !checkCrossedClasses())
+  if (ok && !hasErrors() && !checkCrossedClasses(node))
     ok = false;
   if (ok && !hasErrors() && !checkArchetypes())
     ok = false;
@@ -5693,18 +5693,27 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
 }
 
 bool Sema::visitWhileStmt(ast::WhileStmt *node) {
+  // The condition runs before every iteration, so what it moves or awaits
+  // is moved in the loop: it is checked inside the loop's moves.
+  beginLoopMoves(node->getLocation());
   // Type-check the condition — must be bool.
   auto *condTy = resolveExprType(node->getCondition());
-  if (!condTy)
-    return false;
-  if (condTy != Ctx.getBoolTy()) {
+  if (condTy && condTy != Ctx.getBoolTy()) {
     error(node->getCondition()->getLocation(),
           "while condition must be 'bool', got '" + typeName(condTy) + "'");
+    condTy = nullptr;
+  }
+  if (!condTy) {
+    FlowEnded = true; // nothing of the loop is checked
+    finishLoopMoves();
+    FlowEnded = false;
     return false;
   }
 
+  // The loop ends after its condition has run, an iteration or none.
+  LoopMoveStack.back().NoIteration = MovedVars;
+
   // Type-check the body inside a loop context.
-  beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool ok = visit(node->getBody());
   --LoopDepth;

@@ -522,6 +522,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The scope the loop stands in: a `break` or `continue` spends the
     /// task handles of the scopes inside it (checkTasksAwaitedUpTo).
     Scope *Outer = nullptr;
+    /// What is moved when the loop ends without an iteration, when that is
+    /// more than Entry: a `while`'s condition has run.
+    std::optional<MovedMap> NoIteration = std::nullopt;
   };
   std::vector<LoopMoves> LoopMoveStack;
   /// The (variable, loop) pairs reported as moved and not assigned again.
@@ -693,7 +696,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The classes the send check let cross: every class derived from one,
   /// the instances too, is checked once the module's are all known.
   std::unordered_set<const ast::ClassType *> CrossedClasses;
-  bool checkCrossedClasses();
+  /// Each class of the module @p tu that extends a class whose objects are
+  /// sent to another thread, by this module or by one it imports (its
+  /// interface says so, names::kImplCrosses), crosses with it: the send
+  /// check is of that class too.
+  bool checkCrossedClasses(const ast::TranslationUnit *tu);
   /// What a `return`, `break` or `continue` may not leave: a lambda's body
   /// and a loop inside a `lock` block are the block's own.
   unsigned ReturnLockBase = 0;
