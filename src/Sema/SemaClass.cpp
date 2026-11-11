@@ -1126,11 +1126,18 @@ static const ast::ClassType *methodOwner(const ast::ClassType *ct,
   return ct;
 }
 
-bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
+bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
+                               const ast::ImplDecl *only) {
   static const std::vector<ast::ImplDecl *> kNone;
   auto it = ImplsByClass.find(cd->getName());
   bool ok = true;
-  for (auto *im : it == ImplsByClass.end() ? kNone : it->second) {
+  // By index: a method's signature may ask for an instance, whose blocks
+  // are added to the table this vector is in.
+  const std::vector<ast::ImplDecl *> impls =
+      it == ImplsByClass.end() ? kNone : it->second;
+  for (auto *im : impls) {
+    if (only && im != only)
+      continue;
     // A `Cloneable` block's `clone` is virtual, not final like the other
     // methods of an `impl` block: each class clones as its own type, so a
     // subclass's overrides its superclass's (#369).
@@ -1181,33 +1188,18 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
     // builds a new object from the class's fields (a unique one cloned, a
     // Copyable, `shared` or `weak` one the same).
     if (cloneable && !hasClone) {
-      // Every field, the superclasses' too, has a clone, or is the same
-      // object (`shared`, `weak`) or a value (an `atomic` field gets a
-      // cell of its own).
-      std::string why;
-      for (const ast::ClassType *c = ct; c && why.empty();
-           c = c->getSuperClass())
+      // Whether every field has a clone is known once each field's type is
+      // whole: until then the check waits (checkPendingCloneDerives).
+      bool whole = true;
+      for (const ast::ClassType *c = ct; c && whole; c = c->getSuperClass())
         for (const auto &[fname, fty] : c->getFields())
-          if (!ct->isWeakField(fname) && !ast::isa<ast::AtomicType>(fty) &&
-              !isCloneablePart(fty, ct->findFieldQualifier(fname)) &&
-              // An archetype stands for any type: whether a `T` has a
-              // `clone` is each instance's question (#368), in a part too.
-              !(Archetypes && typeName(fty).find(names::kArchetypePrefix) !=
-                                  std::string::npos)) {
-            std::string inner;
-            isCloneable(fty, &inner);
-            why = "its field '" + fname + "' ('" +
-                  qualifiedName(ct->findFieldQualifier(fname), fty) +
-                  "') has no clone" + (inner.empty() ? "" : ": " + inner);
-            break;
-          }
+          whole = whole && isWhole(fty);
       // Reported, the method is still declared: its uses are not errors too.
-      if (!why.empty()) {
-        error(im->getLocation(), "'impl Cloneable for " + cd->getName() +
-                                     " {}' cannot derive 'clone': " + why +
-                                     "; write the 'clone' instead");
+      if (!whole)
+        PendingCloneDerives.push_back({cd->getName(), ct, im->getLocation(),
+                                       CurrentOrigin, InstantiationStack});
+      else if (!checkCloneDerive(cd->getName(), ct, im->getLocation()))
         ok = false;
-      }
       auto *fn = Ctx.make<ast::FuncDecl>(
           im->getLocation(), Ctx.intern(names::kMethodClone),
           std::vector<ast::Param>{}, ct, nullptr);
@@ -1392,6 +1384,227 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
     InstantiationStack.pop_back();
   }
   PendingTraitImpls.clear();
+  // What implements a trait is known: the bounded blocks of the instances
+  // made so far join the ones that meet their bounds, and then a derived
+  // `clone` can be told of its fields.
+  ConformancesKnown = true;
+  if (!joinLateImpls())
+    ok = false;
+  if (!checkPendingCloneDerives())
+    ok = false;
+  return ok;
+}
+
+bool Sema::checkCloneDerive(const std::string &name, const ast::ClassType *ct,
+                            ast::SourceLocation loc) {
+  // Every field, the superclasses' too, has a clone, or is the same object
+  // (`shared`, `weak`) or a value (an `atomic` field gets a cell of its
+  // own).
+  for (const ast::ClassType *c = ct; c; c = c->getSuperClass())
+    for (const auto &[fname, fty] : c->getFields())
+      if (!ct->isWeakField(fname) && !ast::isa<ast::AtomicType>(fty) &&
+          !isCloneablePart(fty, ct->findFieldQualifier(fname)) &&
+          // An archetype stands for any type: whether a `T` has a `clone`
+          // is each instance's question (#368), in a part too.
+          !(Archetypes &&
+            typeName(fty).find(names::kArchetypePrefix) != std::string::npos)) {
+        std::string inner;
+        isCloneable(fty, &inner);
+        error(loc, "'impl Cloneable for " + name +
+                       " {}' cannot derive 'clone': its field '" + fname +
+                       "' ('" +
+                       qualifiedName(ct->findFieldQualifier(fname), fty) +
+                       "') has no clone" + (inner.empty() ? "" : ": " + inner) +
+                       "; write the 'clone' instead");
+        return false;
+      }
+  return true;
+}
+
+bool Sema::checkPendingCloneDerives() {
+  bool ok = true;
+  std::vector<PendingCloneDerive> pending =
+      std::exchange(PendingCloneDerives, {});
+  for (PendingCloneDerive &p : pending) {
+    std::vector<InstantiationFrame> saved =
+        std::exchange(InstantiationStack, std::move(p.Frames));
+    {
+      OriginSource inOrigin(*this, p.Origin);
+      if (!checkCloneDerive(p.Name, p.Class, p.Loc))
+        ok = false;
+    }
+    InstantiationStack = std::move(saved);
+  }
+  return ok;
+}
+
+bool Sema::isWhole(const ast::Type *ty) const {
+  if (!ty)
+    return true;
+  if (const auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+    return isWhole(qt->getInnerType());
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return isWhole(ot->getInnerType());
+  if (const auto *tk = ast::dyn_cast<ast::TaskType>(ty))
+    return isWhole(tk->getInnerType());
+  if (const auto *at = ast::dyn_cast<ast::ArrayType>(ty))
+    return isWhole(at->getElementType());
+  if (const auto *fa = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return isWhole(fa->getElementType());
+  if (const auto *sl = ast::dyn_cast<ast::SliceType>(ty))
+    return isWhole(sl->getElementType());
+  const std::string *name = nullptr;
+  const std::vector<ast::Type *> *args = nullptr;
+  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    if (ct->isBuiltin() || (Archetypes && Archetypes->Classes.count(ct)))
+      return true;
+    name = &ct->getName();
+    if (auto it = ClassInstantiationInfo.find(const_cast<ast::ClassType *>(ct));
+        it != ClassInstantiationInfo.end())
+      args = &it->second.Args;
+  } else if (const auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    name = &st->getName();
+    if (auto it =
+            StructInstantiationInfos.find(const_cast<ast::StructType *>(st));
+        it != StructInstantiationInfos.end())
+      args = &it->second.Args;
+  } else if (const auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    name = &et->getName();
+    if (auto it = EnumInstantiationInfos.find(const_cast<ast::EnumType *>(et));
+        it != EnumInstantiationInfos.end())
+      args = &it->second.Args;
+  }
+  // (A struct is a tuple with a name: asked by its name, above.)
+  if (const auto *tt = name ? nullptr : ast::dyn_cast<ast::TupleType>(ty)) {
+    const auto &elems = tt->getElementTypes();
+    return std::all_of(elems.begin(), elems.end(),
+                       [&](const ast::Type *e) { return isWhole(e); });
+  }
+  if (!name)
+    return true; // a number, a function value: nothing waits
+  // Until the module's `impl` blocks are recorded, a type of the module may
+  // get a field or a conformance yet, and so may any instance: its own
+  // `impl ... for` blocks are checked with the module's, and its template's
+  // fields may name a class that has none of its own yet.
+  if (!ConformancesKnown)
+    return !args && ImportedTypeOrigins.count(*name) != 0;
+  if (!args)
+    return true;
+  if (HalfMade.count(ty))
+    return false;
+  for (size_t i = LateImplsDone; i < LateImpls.size(); ++i)
+    if (LateImpls[i].Inst == *name)
+      return false;
+  return std::all_of(args->begin(), args->end(),
+                     [&](const ast::Type *a) { return isWhole(a); });
+}
+
+bool Sema::joinsLater(const ast::ImplDecl *im, bool ofClass,
+                      const std::vector<ast::Type *> &args) const {
+  // The archetype check asks of its own stand-ins.
+  if (Archetypes)
+    return false;
+  bool bounded = false;
+  for (const auto &bs : im->getTypeParamBounds())
+    bounded = bounded || !bs.empty();
+  if (!bounded)
+    return false;
+  if (ofClass && im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
+      traitAnnotationName(im->getTrait()) == names::kTraitCloneable)
+    return false;
+  if (std::any_of(im->getMethods().begin(), im->getMethods().end(),
+                  [](const ast::FuncDecl *fn) {
+                    return fn->getName() == names::kMethodInit;
+                  }))
+    return false;
+  return !std::all_of(args.begin(), args.end(),
+                      [&](const ast::Type *a) { return isWhole(a); });
+}
+
+ast::ImplDecl *Sema::cloneImplFor(ast::ImplDecl *im,
+                                  const std::string &instName,
+                                  const std::vector<ast::Type *> &args,
+                                  bool foreign) {
+  // By the block's own names for the type parameters.
+  Subst s;
+  for (size_t i = 0; i < args.size(); ++i)
+    s[*im->getTypeParams()[i]] = args[i];
+  ast::ASTCloner c(Ctx, std::move(s), nullptr, foreign);
+  c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
+  ast::ImplDecl *copy = c.cloneImplDecl(im, instName);
+  ImplsByClass[instName].push_back(copy);
+  noteImplTypeParams(im, copy);
+  return copy;
+}
+
+void Sema::instancesMade() {
+  if (JoiningLateImpls || !ConformancesKnown)
+    return;
+  joinLateImpls();
+  checkPendingCloneDerives();
+  if (TraitImplsKnown) {
+    checkPendingBounds();
+    checkPendingAsyncResults();
+  }
+}
+
+bool Sema::joinLateImpls() {
+  if (JoiningLateImpls)
+    return true;
+  JoiningLateImpls = true;
+  bool ok = true;
+  // A block that joins may ask for an instance, whose own blocks wait in
+  // turn: at the end of the list, which is done in order.
+  {
+    for (; LateImplsDone < LateImpls.size(); ++LateImplsDone) {
+      LateImpl l = std::move(LateImpls[LateImplsDone]);
+      if (!l.Base)
+        continue; // the instance was not made
+      ast::ClassType *ct = nullptr;
+      ast::StructType *st = nullptr;
+      if (l.Base->Class) {
+        auto it = ClassInstantiations.find(l.Inst);
+        ct = it == ClassInstantiations.end() ? nullptr : it->second;
+      } else {
+        auto it = StructInstantiations.find(l.Inst);
+        st = it == StructInstantiations.end() ? nullptr : it->second;
+      }
+      ast::Type *type = ct ? static_cast<ast::Type *>(ct) : st;
+      if (!type)
+        continue;
+      // As where the instance was made: in its module's file, under the
+      // instantiations in progress there.
+      std::vector<InstantiationFrame> savedStack =
+          std::exchange(InstantiationStack, std::move(l.Frames));
+      std::vector<InstantiatingTemplate> savedTemplates =
+          std::exchange(InstantiatingTemplates, l.Base->Templates);
+      ast::ImplDecl *copy = nullptr;
+      {
+        OriginSource inOrigin(*this, l.Origin);
+        MakingInstance making(*this, l.Template, l.Args);
+        if (implBoundsHold(l.Impl, l.Args)) {
+          copy = cloneImplFor(l.Impl, l.Inst, l.Args, l.Origin != nullptr);
+          const std::vector<const std::string *> &typeParams =
+              ct ? ast::cast<ast::ClassDecl>(l.Template)->getTypeParams()
+                 : ast::cast<ast::StructDecl>(l.Template)->getTypeParams();
+          TypeParamScope params(*this, typeParams);
+          if (!(ct ? populateImplMethods(l.Base->Class, ct, copy)
+                   : populateImplMethods(l.Base->Struct, st, copy)))
+            ok = false;
+          if (copy->getTrait() && !checkTraitImpl(copy, type))
+            ok = false;
+        }
+      }
+      InstantiatingTemplates = std::move(savedTemplates);
+      InstantiationStack.pop_back(); // the instance's own request
+      if (copy)
+        declareInstantiationStatics(l.Inst, type, *l.Base, copy);
+      InstantiationStack = std::move(savedStack);
+    }
+  }
+  LateImpls.clear();
+  LateImplsDone = 0;
+  JoiningLateImpls = false;
   return ok;
 }
 
@@ -2318,23 +2531,23 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::ClassDecl *clone = cloner.cloneClassDecl(tmpl, instName);
   // And its `impl` blocks, each by its own names for the type parameters.
-  std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
+  const InstantiationFrame request = frameAt(instName, loc);
+  const size_t late = LateImpls.size();
   if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
     for (auto *im : it->second) {
       // A block bounded on its parameters (`impl List<T: Cloneable>`) joins
-      // only the instances whose arguments meet the bounds (#369).
-      if (!implBoundsHold(im, args))
+      // only the instances whose arguments meet the bounds (#369): now, or
+      // once what the bounds ask can be told (joinLateImpls).
+      if (joinsLater(im, /*ofClass=*/true, args)) {
+        LateImpls.push_back(
+            {tmpl, im, instName, args, origin, InstantiationStack, {}});
+        LateImpls.back().Frames.push_back(request);
         continue;
-      Subst s;
-      for (size_t i = 0; i < args.size(); ++i)
-        s[*im->getTypeParams()[i]] = args[i];
-      ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
-      c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
-      impls.push_back(c.cloneImplDecl(im, instName));
-      noteImplTypeParams(im, impls.back());
+      }
+      if (implBoundsHold(im, args))
+        cloneImplFor(im, instName, args, origin != nullptr);
     }
 
-  const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
   const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
@@ -2376,6 +2589,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   // resolves to this very type instead of recursing.
   ClassInstantiations[instName] = ct;
   ClassInstantiationInfo[ct] = InstantiationInfo{tmpl, args};
+  HalfMade.insert(ct);
   // Another module's template makes a class of that module: so its
   // importers see it, wherever it was instantiated.
   if (origin)
@@ -2388,7 +2602,10 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     if (ok)
       declareConstructor(clone, ct);
   }
-  for (auto *im : ImplsByClass[instName]) {
+  // A copy: checking one may ask for an instance, whose blocks join the
+  // table this list is in.
+  const std::vector<ast::ImplDecl *> traitImpls = ImplsByClass[instName];
+  for (auto *im : traitImpls) {
     if (!ok || !im->getTrait())
       continue;
     if (!ImplsChecked)
@@ -2396,6 +2613,26 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     else if (!checkTraitImpl(im, ct))
       ok = false;
   }
+
+  PendingInstantiation pending;
+  pending.Class = clone;
+  pending.Name = instName;
+  pending.Depth = instantiationDepth();
+  pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
+  for (auto *p : tmpl->getTypeParams())
+    pending.TypeParams.insert(*p);
+  pending.Args = args;
+  pending.Templates = InstantiatingTemplates;
+  // Its blocks that wait are its own from here: before the outermost
+  // instance is whole (making), which joins them.
+  if (ok)
+    for (size_t i = late; i < LateImpls.size(); ++i)
+      if (LateImpls[i].Inst == instName)
+        LateImpls[i].Base = pending;
+  HalfMade.erase(ct);
   making.reset();
   InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
@@ -2405,19 +2642,6 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     return nullptr;
   }
 
-  PendingInstantiation pending;
-  pending.Class = clone;
-  pending.Name = instName;
-  pending.Depth = instantiationDepth() + 1;
-  pending.RequestLoc = loc;
-  pending.Origin = origin;
-  pending.RequestFile = request.File;
-  pending.RequestLines = request.Lines;
-  for (auto *p : tmpl->getTypeParams())
-    pending.TypeParams.insert(*p);
-  pending.Args = args;
-  pending.Templates = InstantiatingTemplates;
-  pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
       .push_back(clone);
@@ -2429,10 +2653,14 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
 
 void Sema::declareInstantiationStatics(const std::string &instName,
                                        ast::Type *type,
-                                       const PendingInstantiation &base) {
-  auto it = ImplsByClass.find(instName);
-  if (it == ImplsByClass.end())
+                                       const PendingInstantiation &base,
+                                       const ast::ImplDecl *only) {
+  auto found = ImplsByClass.find(instName);
+  if (found == ImplsByClass.end())
     return;
+  // A copy: a signature may ask for an instance, whose blocks join the
+  // table this list is in.
+  const std::vector<ast::ImplDecl *> impls = found->second;
   // Declared in the template's module, as the bodies are checked.
   InstantiationStack.push_back(
       {base.Name, base.RequestLoc, base.RequestFile, base.RequestLines});
@@ -2442,8 +2670,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
   std::optional<MakingInstance> making;
   if (!base.Templates.empty())
     making.emplace(*this, base.Templates.back().Template, base.Args);
-  for (auto *im : it->second) {
-    if (im->getTrait())
+  for (auto *im : impls) {
+    if (im->getTrait() || (only && im != only))
       continue;
     for (auto *fn : im->getMethods()) {
       if (!fn->isStatic())

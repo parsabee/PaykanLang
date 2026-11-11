@@ -326,13 +326,19 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
   return ok;
 }
 
-bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st) {
+bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st,
+                               const ast::ImplDecl *only) {
   auto it = ImplsByClass.find(sd->getName());
   if (it == ImplsByClass.end())
     return true;
   bool ok = true;
-  for (auto *im : it->second)
+  // A copy: a method's signature may ask for an instance, whose blocks are
+  // added to the table this list is in.
+  const std::vector<ast::ImplDecl *> impls = it->second;
+  for (auto *im : impls)
     for (auto *fn : im->getMethods()) {
+      if (only && im != only)
+        break;
       if (fn->isStatic())
         continue; // the module's function `S::f` (checkImplDecls)
       if (rejectReservedDestroy(fn, st)) {
@@ -551,23 +557,23 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::StructDecl *clone = cloner.cloneStructDecl(tmpl, instName);
-  std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
+  const InstantiationFrame request = frameAt(instName, loc);
+  const size_t late = LateImpls.size();
   if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
     for (auto *im : it->second) {
       // A block bounded on its parameters (`impl List<T: Cloneable>`) joins
-      // only the instances whose arguments meet the bounds (#369).
-      if (!implBoundsHold(im, args))
+      // only the instances whose arguments meet the bounds (#369): now, or
+      // once what the bounds ask can be told (joinLateImpls).
+      if (joinsLater(im, /*ofClass=*/false, args)) {
+        LateImpls.push_back(
+            {tmpl, im, instName, args, origin, InstantiationStack, {}});
+        LateImpls.back().Frames.push_back(request);
         continue;
-      Subst s;
-      for (size_t i = 0; i < args.size(); ++i)
-        s[*im->getTypeParams()[i]] = args[i];
-      ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
-      c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
-      impls.push_back(c.cloneImplDecl(im, instName));
-      noteImplTypeParams(im, impls.back());
+      }
+      if (implBoundsHold(im, args))
+        cloneImplFor(im, instName, args, origin != nullptr);
     }
 
-  const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
   const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
@@ -580,6 +586,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   // instantiation resolves to the stub, and is then reported below.
   StructInstantiations[instName] = st;
   StructInstantiationInfos[st] = StructInstantiationInfo{tmpl, args};
+  HalfMade.insert(st);
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;
 
@@ -590,7 +597,10 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     if (ok)
       declareConstructor(clone, st);
   }
-  for (auto *im : impls) {
+  // A copy: checking one may ask for an instance, whose blocks join the
+  // table this list is in.
+  const std::vector<ast::ImplDecl *> traitImpls = ImplsByClass[instName];
+  for (auto *im : traitImpls) {
     if (!ok || !im->getTrait())
       continue;
     if (!ImplsChecked)
@@ -598,6 +608,26 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     else if (!checkTraitImpl(im, st))
       ok = false;
   }
+
+  PendingInstantiation pending;
+  pending.Struct = clone;
+  pending.Name = instName;
+  pending.Depth = instantiationDepth();
+  pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
+  for (auto *p : tmpl->getTypeParams())
+    pending.TypeParams.insert(*p);
+  pending.Args = args;
+  pending.Templates = InstantiatingTemplates;
+  // Its blocks that wait are its own from here: before the outermost
+  // instance is whole (making), which joins them.
+  if (ok)
+    for (size_t i = late; i < LateImpls.size(); ++i)
+      if (LateImpls[i].Inst == instName)
+        LateImpls[i].Base = pending;
+  HalfMade.erase(st);
   making.reset();
   InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
@@ -608,19 +638,6 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     return nullptr;
   }
 
-  PendingInstantiation pending;
-  pending.Struct = clone;
-  pending.Name = instName;
-  pending.Depth = instantiationDepth() + 1;
-  pending.RequestLoc = loc;
-  pending.Origin = origin;
-  pending.RequestFile = request.File;
-  pending.RequestLines = request.Lines;
-  for (auto *p : tmpl->getTypeParams())
-    pending.TypeParams.insert(*p);
-  pending.Args = args;
-  pending.Templates = InstantiatingTemplates;
-  pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
@@ -720,6 +737,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   ast::EnumType *et = Ctx.registerEnumType(instName, loc);
   EnumInstantiations[instName] = et;
   EnumInstantiationInfos[et] = EnumInstantiationInfo{tmpl, args};
+  HalfMade.insert(et);
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;
 
@@ -758,6 +776,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
         ok = false;
       }
   }
+  HalfMade.erase(et);
   making.reset();
   InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();

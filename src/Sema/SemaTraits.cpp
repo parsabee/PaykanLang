@@ -760,7 +760,13 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
     if (!ok)
       return false;
   }
-  if (!TraitImplsKnown) {
+  // What an argument implements is known once the module's `impl` blocks
+  // are recorded, and once the argument is whole: a conformance it gets
+  // from a bounded block may be waiting (joinLateImpls).
+  if (!TraitImplsKnown ||
+      (!CheckingPendingBounds && !Archetypes &&
+       !std::all_of(args.begin(), args.end(),
+                    [&](const ast::Type *a) { return isWhole(a); }))) {
     PendingBoundChecks.push_back({tmpl, &params, &bounds, name, args, loc,
                                   CurrentOrigin, InstantiationStack});
     return true;
@@ -814,7 +820,12 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
 bool Sema::checkPendingBounds() {
   TraitImplsKnown = true;
   bool ok = true;
-  for (auto &pc : PendingBoundChecks) {
+  // The checks here are made now, whatever they ask of: one made while
+  // another runs waits its turn in a list of its own.
+  std::vector<PendingBoundCheck> pending =
+      std::exchange(PendingBoundChecks, {});
+  const bool saved = std::exchange(CheckingPendingBounds, true);
+  for (auto &pc : pending) {
     const std::string instName = instanceNameOf(pc.Template, pc.Name, pc.Args);
     // Asked for in an instantiation whose bounds failed: one a check made
     // at the request would not have made (KF-6).
@@ -829,7 +840,7 @@ bool Sema::checkPendingBounds() {
     }
     // Checked as where it was asked for: in that module's file, under the
     // instantiations in progress there.
-    std::vector<InstantiationFrame> saved =
+    std::vector<InstantiationFrame> savedStack =
         std::exchange(InstantiationStack, std::move(pc.Frames));
     {
       OriginSource inOrigin(*this, pc.Origin);
@@ -839,9 +850,9 @@ bool Sema::checkPendingBounds() {
         ok = false;
       }
     }
-    InstantiationStack = std::move(saved);
+    InstantiationStack = std::move(savedStack);
   }
-  PendingBoundChecks.clear();
+  CheckingPendingBounds = saved;
   return ok;
 }
 
