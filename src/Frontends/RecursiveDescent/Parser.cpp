@@ -326,6 +326,7 @@ void Parser::skipToTopLevelBoundary() {
     case Tok::KwFn:
     case Tok::KwNative:
     case Tok::KwClass:
+    case Tok::KwFinal:
     case Tok::KwStruct:
     case Tok::KwEnum:
     case Tok::KwImpl:
@@ -500,6 +501,20 @@ TranslationUnit *Parser::parseTranslationUnit() {
         ok = false;
       break;
     case Tok::KwClass:
+      if (auto *d = parseClassDecl())
+        (d->isGeneric() ? genericClasses : classes).push_back(d);
+      else
+        ok = false;
+      break;
+    case Tok::KwFinal:
+      // `final class Name { ... }`: a class no class extends.
+      if (kind(1) != Tok::KwClass) {
+        errorAtCurrent("expected 'class' after 'final': only a class can be "
+                       "'final' (one no class extends)");
+        consume();
+        ok = false;
+        break;
+      }
       if (auto *d = parseClassDecl())
         (d->isGeneric() ? genericClasses : classes).push_back(d);
       else
@@ -803,7 +818,9 @@ void Parser::weakPrefixError() {
 }
 
 ClassDecl *Parser::parseClassDecl() {
-  SourceLocation start = consume().Loc; // "class"
+  SourceLocation start = cur().Loc;
+  const bool final = accept(Tok::KwFinal); // `final class`
+  consume();                               // "class"
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a class name after 'class'");
     return nullptr;
@@ -899,6 +916,7 @@ ClassDecl *Parser::parseClassDecl() {
       span(start), name, intern(superName), std::move(body.Fields),
       std::move(body.Methods), std::move(typeParams));
   cd->setTypeParamBounds(std::move(bounds));
+  cd->setFinal(final);
   return cd;
 }
 

@@ -381,7 +381,10 @@ may be named `Task`); a reader rejects any other bit,
 and a record without it is none of these.  It tells an importer
 what a call of the function does though another module compiles it: it
 keeps nothing it is lent and changes only what its `inout` arguments name,
-so a field read given to it may be lent (#98 part 2, docs/pir.md §7).  Each field of a `CLASS`
+so a field read given to it may be lent (#98 part 2, docs/pir.md §7).  A `CLASS` record's
+own flags byte, after its superclass's name, has bit 0 for a class the module declares
+itself and bit 1 for a `final class`, from which an importer derives no class
+(docs/language/05-classes.md, "Final classes").  Each field of a `CLASS`
 record carries a flags byte after its type name (bit 0: a `weak` field,
 docs/design/weak-references.md); a `STRUCT` record's fields have none.  A
 method of a `CLASS` or `STRUCT` record carries one after its signature,

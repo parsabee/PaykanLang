@@ -2293,6 +2293,63 @@ TEST(Pkm, ADeinitIsInTheModuleFile) {
   fs::remove_all(dir);
 }
 
+// A `final class` is final in the module's file: an importer derives no
+// class from it and may move a field out of its objects, which it may not
+// out of an object of a class of the module that another could extend.
+TEST(Pkm, AFinalClassIsFinalForAnImporter) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_final_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "shapes.pkn",
+            "final class Leaf { name: Str; }\n"
+            "class Open { name: Str; }\n"
+            "fn leaf(s: Str) -> Leaf { return Leaf(move s); }\n"
+            "fn name(l: Leaf) -> Str { return move l.name; }\n");
+  writeFile(dir / "main.pkn",
+            "import shapes;\n"
+            "import ::io;\n"
+            "fn main() -> int {\n"
+            "  let l = shapes::leaf(\"leaf\");\n"
+            "  let n = move l.name;\n"
+            "  io::println(n + shapes::name(shapes::Leaf(\"!\")));\n"
+            "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn",
+            "import shapes;\n"
+            "class Sub : shapes::Leaf { n: int; }\n"
+            "fn open(c: shapes::Open) -> Str { return move c.name; }\n"
+            "fn main() -> int { return 0; }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  auto made = paykan("--emit-pkm --module-name=shapes -o lib/shapes.pkm "
+                     "shapes.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  auto dump = paykan("pkm dump --section=iface lib/shapes.pkm");
+  EXPECT_TRUE(contains(dump.out, "  final class Leaf super")) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "\n  class Open super")) << dump.out;
+  for (const char *args :
+       {"--module-path=lib main.pkn", "--module-path=lib main.pkn"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, "leaf!\n") << args;
+  }
+  auto bad = paykan("--check-only --module-path=lib bad.pkn");
+  EXPECT_NE(bad.exitCode, 0) << bad.out;
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:2:1: error: cannot inherit from "
+                                "'shapes::Leaf': class is final"))
+      << bad.out;
+  EXPECT_TRUE(contains(bad.out,
+                       "bad.pkn:3:42: error: cannot move 'c.name' out of 'c': "
+                       "a class another module derives from 'Open' may "
+                       "declare a '__deinit__', which runs on the whole "
+                       "object; write 'mem::replace(c.name, v)'"))
+      << bad.out;
+  fs::remove_all(dir);
+}
+
 // A struct's `__deinit__` is in its module's interface: a value of it has
 // its byte more in the importer too, which runs the module's `__deinit__`
 // where the value is destroyed, in what the importer builds around it, in

@@ -498,6 +498,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     ModuleInfo::ClassInfo ci;
     ci.Name = name;
     ci.IsLocal = localClasses.count(name) != 0;
+    ci.Final = ct->isFinal();
     ci.OriginModule = ci.IsLocal ? moduleName : lookupOrigin(name);
     if (ct->getSuperClass()) {
       ci.SuperClassName = ct->getSuperClass()->getName();
@@ -650,6 +651,7 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
     cr.Name = ci.Name;
     cr.SuperClassName = ci.SuperClassName;
     cr.IsLocal = ci.IsLocal;
+    cr.Final = ci.Final;
     cr.OriginModule = ci.OriginModule;
     for (auto &f : ci.Fields)
       cr.Fields.push_back({f.FieldName, f.TypeName, f.Weak});
@@ -689,6 +691,7 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
     ci.Name = cr.Name;
     ci.SuperClassName = cr.SuperClassName;
     ci.IsLocal = cr.IsLocal;
+    ci.Final = cr.Final;
     ci.OriginModule = cr.OriginModule;
     for (auto &f : cr.Fields)
       ci.Fields.push_back({f.FieldName, f.TypeName, f.Weak});
@@ -764,7 +767,7 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
           ++it;
           continue;
         }
-        ctx.preRegisterClassType((*it)->Name, super);
+        ctx.preRegisterClassType((*it)->Name, super)->setFinal((*it)->Final);
         it = pending.erase(it);
         progress = true;
       }
@@ -1391,7 +1394,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           ++it; // superclass not registered yet — retry next round
           continue;
         }
-        Ctx.preRegisterClassType(ci.Name, super);
+        Ctx.preRegisterClassType(ci.Name, super)->setFinal(ci.Final);
         created.push_back(&ci);
         it = pending.erase(it);
         progress = true;

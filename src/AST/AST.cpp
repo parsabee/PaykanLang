@@ -968,10 +968,12 @@ ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
   for (auto *m : cd->getMethods())
     methods.push_back(cloneFuncDecl(m, m->getName()));
   const std::string &super = cd->getSuperClassName();
-  return Ctx.make<ClassDecl>(
+  auto *copy = Ctx.make<ClassDecl>(
       cd->getLocation(), in(newName),
       in(Names && !super.empty() ? Names->type(super) : super),
       std::move(fields), std::move(methods));
+  copy->setFinal(cd->isFinal());
+  return copy;
 }
 
 StructDecl *ASTCloner::cloneStructDecl(StructDecl *sd,

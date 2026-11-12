@@ -143,6 +143,8 @@ struct ClassRec {
   std::string Name;
   std::string SuperClassName; ///< "" -> implicit Object root
   bool IsLocal = true;
+  /// A `final class`: no class extends it, in any module.
+  bool Final = false;
   std::string OriginModule;
   std::vector<Field> Fields;
   std::vector<Method> Methods;
