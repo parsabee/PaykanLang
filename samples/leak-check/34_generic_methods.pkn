@@ -1,0 +1,37 @@
+// A generic method takes a lambda that captures references, and makes and
+// returns values of its own type parameter: every instantiation releases
+// what it was given and what it made.
+// expect-stdout: (a!, b!) 2 ab 2
+import ::io;
+
+class Shelf<T> {
+  a: T;
+  b: T;
+}
+
+impl Shelf<T> {
+  // `f` of each item.
+  view fn both<U>(f: (view T) -> U) -> (U, U) { return (f(self.a), f(self.b)); }
+
+  // `f` applied to `seed` and each item in turn.
+  view fn fold<U>(seed: U, f: (U, view T) -> U) -> U {
+    return f(f(move seed, self.a), self.b);
+  }
+
+  // A shelf of what `f` makes of each item.
+  static fn of<U>(a: U, b: U, f: (U) -> T) -> Shelf<T> {
+    return Shelf<T>(f(move a), f(move b));
+  }
+}
+
+fn main() -> int {
+  let shelf = Shelf<Str>("a", "b");
+  let mark: shared = "!";
+  let marked = shelf.both(fn(s: view Str) => s + mark);
+  let count = shelf.fold(0, fn(n: int, s: view Str) => n + s.len());
+  let joined = shelf.fold<Str>("", fn(acc: Str, s: view Str) => acc + s);
+  let made = Shelf<Str>::of<int>(1, 22, fn(n: int) => Str(n) + mark);
+  io::println(marked.toString() + " " + Str(count) + " " + joined + " "
+      + Str(made.fold(0, fn(n: int, s: view Str) => n + s.len()) - 3));
+  return 0;
+}

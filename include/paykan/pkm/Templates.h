@@ -27,11 +27,14 @@ namespace paykan::pkm {
 inline constexpr uint32_t kTmplVersion = kVersionNumber;
 
 struct Templates {
-  /// Which template an `impl` block of the unit belongs to.
-  enum class OwnerKind : uint8_t { Class = 1, Struct = 2 };
+  /// Which template an `impl` block of the unit belongs to; Type: none,
+  /// but the class or struct the block names, which is not generic, and
+  /// the block holds its generic methods and generic `static fn`s only.
+  enum class OwnerKind : uint8_t { Class = 1, Struct = 2, Type = 3 };
   struct Impl {
     OwnerKind Kind = OwnerKind::Class;
-    /// Index among the unit's generic classes (or structs), in order.
+    /// Index among the unit's generic classes (or structs), in order; 0
+    /// for a Type block.
     uint32_t Owner = 0;
     bool operator==(const Impl &) const = default;
   };

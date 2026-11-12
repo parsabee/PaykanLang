@@ -658,6 +658,20 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
+    // A generic method (#353) is an `impl` block's: its name is taken, in
+    // the class and below it.
+    if (std::string has; method->getName() != names::kMethodInit && !deinit &&
+                         methodTemplateOwner(ct, method->getName(), has)) {
+      error(method->getLocation(),
+            has == ct->getName()
+                ? "class '" + cd->getName() + "' already has a method '" +
+                      method->getName() + "'"
+                : "method '" + method->getName() + "' of '" + has +
+                      "' is declared in an 'impl' block and cannot be "
+                      "overridden");
+      ok = false;
+      continue;
+    }
     // A method without a body is pure virtual: a vtable slot that a
     // subclass implements (no class body's method is native: every
     // frontend's grammar keeps `native fn` at the top level).  `__init__`
@@ -939,7 +953,8 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   // A public method of a public type cannot hand an importer a type it
   // could not name (an instantiation's methods are the template's).
   if (!DeclaringDefaultInit && !names::isPrivateName(method->getName()) &&
-      !isModuleOwnName(className) && className.find('<') == std::string::npos) {
+      !isModuleOwnName(className) && className.find('<') == std::string::npos &&
+      method->getName().find('<') == std::string::npos) {
     const std::string who = "method '" + method->getName() + "' of '" +
                             className + "' is public but ";
     bool pub = checkPublicSurface(who + "its result", "method", retTy,
@@ -1146,6 +1161,11 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
   for (auto *im : impls) {
     if (only && im != only)
       continue;
+    // An instance's copy of a block leaves the block's generic methods
+    // (#353) out: they join the instance as templates, by name.
+    if (auto of = ImplCopyOf.find(im);
+        of != ImplCopyOf.end() && !joinGenericMembers(ct, of->second))
+      ok = false;
     // A `Cloneable` block's `clone` is virtual, not final like the other
     // methods of an `impl` block: each class clones as its own type, so a
     // subclass's overrides its superclass's (#369).
@@ -1169,6 +1189,26 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
         ok = false;
         continue;
       }
+      // A generic method (#353) is a template of the class: declared by
+      // its instantiations, where it is called.
+      if (!fn->getTypeParams().empty()) {
+        std::string has;
+        if (ct->findMethod(name))
+          has = methodOwner(ct, name)->getName();
+        if (!has.empty() || methodTemplateOwner(ct, name, has)) {
+          error(fn->getLocation(),
+                "class '" + cd->getName() + "' already has a method '" + name +
+                    "'" +
+                    (has == ct->getName() ? "" : " (from '" + has + "')"));
+          ok = false;
+        } else if (!checkMethodTemplate(cd->getName(), fn, im)) {
+          ok = false;
+        } else {
+          noteMethodTemplate(fn, im, nullptr);
+          MethodTemplates[ct->getName()][name] = MethodTemplate{fn, im};
+        }
+        continue;
+      }
       // __init__ is the same here as in the class body: the class's own,
       // never inherited or called through the vtable.  So is __deinit__.
       const bool init =
@@ -1182,6 +1222,13 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
               "class '" + cd->getName() + "' already has a method '" + name +
                   "'" +
                   (owner == ct ? "" : " (from '" + owner->getName() + "')"));
+        ok = false;
+        continue;
+      }
+      if (std::string has; methodTemplateOwner(ct, name, has)) {
+        error(fn->getLocation(),
+              "class '" + cd->getName() + "' already has a method '" + name +
+                  "'" + (has == ct->getName() ? "" : " (from '" + has + "')"));
         ok = false;
         continue;
       }
@@ -1319,6 +1366,7 @@ bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
 }
 
 bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
+  StringSet plainStatics; // `Type::name` of each `static fn` not generic
   StringSet localTypes;
   for (auto *cd : tu->getClassDecls())
     localTypes.insert(cd->getName());
@@ -1380,14 +1428,35 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
         ok = false;
         continue;
       }
-      if (methodOf(target, fn->getName())) {
+      if (std::string has; methodOf(target, fn->getName()) ||
+                           methodTemplateOwner(target, fn->getName(), has)) {
         error(fn->getLocation(), std::string(typeKindWord(target)) + " '" +
                                      name + "' already has a method '" +
                                      fn->getName() + "'");
         ok = false;
         continue;
       }
+      // A generic one (#353) is a template of the type: the function
+      // `Type::name<args>` of each of its instantiations.
+      if (!fn->getTypeParams().empty()) {
+        // (A `static fn` of the name that is not generic is a function
+        // already, which no method table has.)
+        if (plainStatics.count(name + names::kQualSep + fn->getName())) {
+          error(fn->getLocation(), std::string(typeKindWord(target)) + " '" +
+                                       name + "' already has a method '" +
+                                       fn->getName() + "'");
+          ok = false;
+        } else if (!checkMethodTemplate(name, fn, im)) {
+          ok = false;
+        } else {
+          noteMethodTemplate(fn, im, nullptr);
+          MethodTemplates[typeName(target)][fn->getName()] =
+              MethodTemplate{fn, im};
+        }
+        continue;
+      }
       fn->setName(Ctx.intern(name + names::kQualSep + fn->getName()));
+      plainStatics.insert(fn->getName());
       tu->addFuncDecl(fn);
     }
   }
@@ -1583,6 +1652,7 @@ ast::ImplDecl *Sema::cloneImplFor(ast::ImplDecl *im,
   ast::ASTCloner c(Ctx, std::move(s), nullptr, foreign);
   c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
   ast::ImplDecl *copy = c.cloneImplDecl(im, instName);
+  ImplCopyOf[copy] = im;
   ImplsByClass[instName].push_back(copy);
   noteImplTypeParams(im, copy);
   return copy;
@@ -2128,8 +2198,493 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       }
     }
     TemplateImpls[tmpl].push_back(im);
+    // Its generic methods are the template's (#353): one template for
+    // every instance.
+    const ast::TypeParamBounds *ownerBounds = nullptr;
+    if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+      ownerBounds = &cd->getTypeParamBounds();
+    else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+      ownerBounds = &sd->getTypeParamBounds();
+    // (Which of them an instance has, and under which names, is settled
+    // where the block joins it: joinGenericMembers.)
+    for (ast::FuncDecl *fn : im->getMethods()) {
+      if (fn->getTypeParams().empty())
+        continue;
+      if (!checkMethodTemplate(name, fn, im)) {
+        ok = false;
+        continue;
+      }
+      noteMethodTemplate(fn, im, ownerBounds);
+      TemplateMethodTemplates[tmpl].push_back({fn, im});
+    }
   }
   return ok;
+}
+
+// -- Generic methods (#353)
+
+std::string Sema::FoundMethodTemplate::ownerName() const {
+  return Class ? Class->getName() : Struct->getName();
+}
+
+void Sema::noteMethodTemplate(ast::FuncDecl *fn, const ast::ImplDecl *im,
+                              const ast::TypeParamBounds *ownerBounds) {
+  // The names its code sees: the block's, then its own.
+  MethodTemplateNames names;
+  const ast::TypeParamBounds &blockBounds = im->getTypeParamBounds();
+  for (size_t i = 0; i < im->getTypeParams().size(); ++i) {
+    names.Params.push_back(im->getTypeParams()[i]);
+    std::vector<ast::Type *> bs;
+    if (i < blockBounds.size())
+      bs = blockBounds[i];
+    if (ownerBounds && i < ownerBounds->size())
+      bs.insert(bs.end(), (*ownerBounds)[i].begin(), (*ownerBounds)[i].end());
+    names.Bounds.push_back(std::move(bs));
+    names.Own.emplace_back();
+  }
+  const ast::TypeParamBounds &own = fn->getTypeParamBounds();
+  for (size_t i = 0; i < fn->getTypeParams().size(); ++i) {
+    names.Params.push_back(fn->getTypeParams()[i]);
+    names.Bounds.push_back(i < own.size() ? own[i]
+                                          : std::vector<ast::Type *>{});
+    names.Own.push_back(names.Bounds.back());
+  }
+  MethodTemplateParams[fn] = std::move(names);
+}
+
+bool Sema::checkMethodTemplate(const std::string &ownerName,
+                               const ast::FuncDecl *fn,
+                               const ast::ImplDecl *im) {
+  const std::string &name = fn->getName();
+  std::string what = fn->isStatic() ? "generic function '" : "generic method '";
+  if (fn->isStatic())
+    what += ownerName + names::kQualSep;
+  what += name + "'";
+  bool ok = true;
+  // Its own type parameters: no name twice, none a type's, none the
+  // block's (inside the method `T` would mean one or the other).
+  StringSet seen;
+  for (const std::string *p : fn->getTypeParams()) {
+    std::string msg;
+    if (!seen.insert(*p).second) {
+      msg = "duplicate type parameter '" + *p + "' in " + what;
+    } else if (std::any_of(im->getTypeParams().begin(),
+                           im->getTypeParams().end(),
+                           [&](const std::string *b) { return *b == *p; })) {
+      msg = "type parameter '" + *p + "' of " + what +
+            " shadows type parameter '" + *p + "' of the 'impl' block for '" +
+            im->getTypeName() + "'";
+    } else if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
+               ClassTemplates.count(*p) || StructTemplates.count(*p) ||
+               EnumTemplates.count(*p)) {
+      msg = "type parameter '" + *p + "' of " + what +
+            " shadows a type of the same name";
+    }
+    if (!msg.empty()) {
+      error(fn->getLocation(), msg);
+      ok = false;
+    }
+  }
+  // A public member of a public type cannot hand an importer a type it
+  // could not name: by its written signature, once, here (the type
+  // arguments of an instantiation are whoever's make it).
+  if (!names::isPrivateName(name) && !isModuleOwnName(ownerName)) {
+    std::string who =
+        fn->isStatic() ? "function '" + ownerName + names::kQualSep + name + "'"
+                       : "method '" + name + "' of '" + ownerName + "'";
+    who += " is public but ";
+    const char *fix = fn->isStatic() ? "function" : "method";
+    auto written = [&](ast::Type *ty, const std::string &part) {
+      const std::string priv = privateTypeIn(ty);
+      // (A type parameter is no type of the module's, whatever its name.)
+      if (priv.empty() || seen.count(priv) ||
+          std::any_of(im->getTypeParams().begin(), im->getTypeParams().end(),
+                      [&](const std::string *b) { return *b == priv; }))
+        return;
+      error(fn->getLocation(), who + part + " names the private type '" + priv +
+                                   "'; make the " + fix +
+                                   " private or the type public");
+      ok = false;
+    };
+    written(fn->getReturnType(), "its result");
+    for (const ast::Param &p : fn->getParams())
+      written(p.ParamType, "parameter '" + p.getName() + "'");
+  }
+  return ok;
+}
+
+bool Sema::joinGenericMembers(ast::Type *type, const ast::ImplDecl *block) {
+  bool ok = true;
+  const std::string owner = typeName(type);
+  auto *ct = ast::dyn_cast<ast::ClassType>(type);
+  for (ast::FuncDecl *fn : block->getMethods()) {
+    // (One rejected where it is declared was not recorded.)
+    if (!MethodTemplateParams.count(fn))
+      continue;
+    const std::string &name = fn->getName();
+    // The name is the instance's to give once: to a method, its own or an
+    // inherited one, or to one generic member.
+    std::string has;
+    if (ct && ct->findMethod(name))
+      has = methodOwner(ct, name)->getName();
+    else if (!ct && ((name == names::kMethodToString && !fn->isStatic()) ||
+                     methodOf(type, name)))
+      has = owner;
+    const bool taken = !has.empty();
+    if (taken || methodTemplateOwner(type, name, has)) {
+      // The archetype check's instance meets every bound, so it gets one
+      // name from each of two bounded blocks: the first stands, and each
+      // member is still checked on its own (checkArchetypes).
+      if (Archetypes && !taken && has == owner)
+        continue;
+      std::string msg = typeKindWord(type);
+      msg += " '";
+      msg += owner;
+      msg += "' already has a method '";
+      msg += name;
+      msg += "'";
+      if (has != owner) {
+        msg += " (from '";
+        msg += has;
+        msg += "')";
+      }
+      error(fn->getLocation(), msg);
+      ok = false;
+      continue;
+    }
+    MethodTemplates[owner][name] = MethodTemplate{fn, block};
+  }
+  return ok;
+}
+
+const StringMap<Sema::MethodTemplate> *
+Sema::methodTemplatesOf(ast::ClassType *ct, ast::StructType *st,
+                        std::vector<ast::Type *> &ownerArgs,
+                        ast::SourceLocation loc) {
+  ownerArgs.clear();
+  const std::string &name = st ? st->getName() : ct->getName();
+  // Another module's type: its generic members are in that module's
+  // templates, which this module may not have asked for yet (a type an
+  // import's interface gives, of a module it does not import itself).
+  if (auto origin = ImportedTypeOrigins.find(name);
+      origin != ImportedTypeOrigins.end())
+    seeTemplatesOf(origin->second, loc);
+  const ast::Decl *tmpl = nullptr;
+  const ast::Type *type = st ? static_cast<const ast::Type *>(st) : ct;
+  if (st) {
+    if (const StructInstantiationInfo *info = structInstantiationInfo(st)) {
+      tmpl = info->Template;
+      ownerArgs = info->Args;
+    }
+  } else if (const InstantiationInfo *info = instantiationInfo(ct)) {
+    tmpl = info->Template;
+    ownerArgs = info->Args;
+  }
+  // An instance another module made had no block join it here: it has the
+  // generic members of the blocks whose bounds its arguments meet, which
+  // that module checked.
+  if (tmpl && !InstancesMadeHere.count(type) &&
+      ImportedInstancesJoined.insert(name).second)
+    if (auto of = TemplateMethodTemplates.find(tmpl);
+        of != TemplateMethodTemplates.end())
+      for (const MethodTemplate &mt : of->second)
+        if (implBoundsHold(mt.Impl, ownerArgs))
+          MethodTemplates[name].try_emplace(mt.Fn->getName(), mt);
+  auto t = MethodTemplates.find(name);
+  return t == MethodTemplates.end() ? nullptr : &t->second;
+}
+
+bool Sema::findMethodTemplate(ast::ClassType *ct, ast::StructType *st,
+                              const std::string &name, FoundMethodTemplate &out,
+                              bool statics, ast::SourceLocation loc) {
+  // The declaring class is the owner: a subclass inherits the method, and
+  // its `self` there is the class that declares it.
+  for (ast::ClassType *c = ct; c || st; c = c->getSuperClass()) {
+    std::vector<ast::Type *> ownerArgs;
+    if (const auto *of = methodTemplatesOf(c, st, ownerArgs, loc))
+      if (auto it = of->find(name);
+          it != of->end() && it->second.Fn->isStatic() == statics) {
+        out.T = it->second;
+        out.Class = c;
+        out.Struct = st;
+        out.OwnerArgs = std::move(ownerArgs);
+        return true;
+      }
+    if (st || statics)
+      break; // a `static fn` is its type's own
+  }
+  return false;
+}
+
+bool Sema::methodTemplateOwner(ast::Type *ty, const std::string &name,
+                               std::string &owner) {
+  auto *ct = ty ? ast::dyn_cast<ast::ClassType>(ty) : nullptr;
+  auto *st = ty ? ast::dyn_cast<ast::StructType>(ty) : nullptr;
+  if (!ct && !st)
+    return false;
+  FoundMethodTemplate found;
+  if (!findMethodTemplate(ct, st, name, found) &&
+      !findMethodTemplate(ct, st, name, found, /*statics=*/true))
+    return false;
+  owner = found.ownerName();
+  return true;
+}
+
+const ast::FuncDecl *Sema::genericStaticNamed(const std::string &callee) {
+  const size_t sep = callee.rfind(names::kQualSep);
+  if (sep == std::string::npos)
+    return nullptr;
+  const std::string owner = callee.substr(0, sep);
+  const std::string member = callee.substr(sep + 2);
+  const ast::Decl *tmpl = nullptr;
+  if (auto c = ClassTemplates.find(owner); c != ClassTemplates.end())
+    tmpl = c->second;
+  else if (auto s = StructTemplates.find(owner); s != StructTemplates.end())
+    tmpl = s->second;
+  if (tmpl) {
+    // Of a template: whichever block declares it (an instance has the one
+    // whose bounds it meets).
+    if (auto t = TemplateMethodTemplates.find(tmpl);
+        t != TemplateMethodTemplates.end())
+      for (const MethodTemplate &mt : t->second)
+        if (mt.Fn->isStatic() && mt.Fn->getName() == member)
+          return mt.Fn;
+    return nullptr;
+  }
+  if (isOthersPrivateType(owner))
+    return nullptr;
+  ast::ClassType *ct = Ctx.lookupClassType(owner);
+  ast::StructType *st = ct ? nullptr : Ctx.lookupStructType(owner);
+  FoundMethodTemplate found;
+  return (ct || st) &&
+                 findMethodTemplate(ct, st, member, found, /*statics=*/true)
+             ? found.T.Fn
+             : nullptr;
+}
+
+const Sema::MemberInstance *
+Sema::instantiateMember(const FoundMethodTemplate &found,
+                        const std::vector<ast::Type *> &args,
+                        ast::SourceLocation loc, const ast::ASTNode *written) {
+  ast::FuncDecl *tmpl = found.T.Fn;
+  const bool isStatic = tmpl->isStatic();
+  const std::string owner = found.ownerName();
+  // Named as the member of its owner the program sees: `Box<int>.map`,
+  // `Point::make`.
+  std::string shown = owner;
+  shown += isStatic ? names::kQualSep : names::kNameSep;
+  shown += tmpl->getName();
+  if (!checkTypeArgs(shown, args, loc))
+    return nullptr;
+  if (args.size() != tmpl->getTypeParams().size()) {
+    error(loc,
+          std::string(isStatic ? "generic function '" : "generic method '") +
+              shown + "' expects " +
+              std::to_string(tmpl->getTypeParams().size()) +
+              " type argument(s), got " + std::to_string(args.size()));
+    return nullptr;
+  }
+  // Its own bounds, which may name its block's parameters (`U: Keyed<T>`):
+  // resolved with both lists.  (The owner's held where the owner was made,
+  // and its block's where the block joined.)
+  const MethodTemplateNames &names = MethodTemplateParams.at(tmpl);
+  std::vector<ast::Type *> allArgs = found.OwnerArgs;
+  allArgs.insert(allArgs.end(), args.begin(), args.end());
+  if (!checkBounds(tmpl, shown, names.Params, names.Own, allArgs, loc))
+    return nullptr;
+
+  // The instantiation's name is its owner's and its own: one per program,
+  // whichever module asks for it.
+  const std::string memberName = instantiationName(tmpl->getName(), args);
+  std::string instName = owner;
+  instName += isStatic ? names::kQualSep : names::kNameSep;
+  instName += memberName;
+  noteInstantiationRequest(instName);
+  if (auto it = MemberInstantiations.find(instName);
+      it != MemberInstantiations.end()) {
+    if (it->second.Fn)
+      return &it->second;
+    ++SuppressedFollowOns; // reported at its first request
+    return nullptr;
+  }
+  auto failed = [&] {
+    MemberInstantiations[instName] = MemberInstance{};
+    return nullptr;
+  };
+  ast::Type *ownerTy = found.Class ? static_cast<ast::Type *>(found.Class)
+                                   : static_cast<ast::Type *>(found.Struct);
+  if (instantiationDepth() >= kMaxInstantiationDepth) {
+    error(loc, "instantiating '" + instName +
+                   "' exceeds the maximum instantiation depth (" +
+                   std::to_string(kMaxInstantiationDepth) + ")");
+    return failed();
+  }
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc))
+    return failed();
+
+  // One copy, with the owner's arguments (by the block's names for them)
+  // and the member's own put in together.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  std::unordered_map<std::string, ast::Type *> subst;
+  for (size_t i = 0; i < names.Params.size() && i < allArgs.size(); ++i)
+    subst[*names.Params[i]] = allArgs[i];
+  ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  // (Its written type arguments are followed by its own parameters, which
+  // are what its name is measured by: argumentNestings.)
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
+  ast::FuncDecl *clone =
+      cloner.cloneFuncDecl(tmpl, isStatic ? instName : memberName);
+
+  const InstantiationFrame request = frameAt(instName, loc);
+  InstantiationStack.push_back(request);
+  const InstantiatingTemplate self{tmpl, &Ctx.intern(instName), argParams};
+  InstantiatingTemplates.push_back(self);
+  bool ok = true;
+  ast::MethodDecl *md = nullptr;
+  {
+    OriginSource inOrigin(*this, origin);
+    TypeParamScope scope(*this, names.Params);
+    MakingInstance making(*this, tmpl, allArgs);
+    if (isStatic)
+      ok = declareFunctionSignature(clone);
+    else
+      md = declareMethod(clone, ownerTy, nullptr, ast::MethodDecl::Impl, ok);
+  }
+  InstantiatingTemplates.pop_back();
+  InstantiationStack.pop_back();
+  if (!ok || (!isStatic && !md))
+    return failed();
+
+  PendingInstantiation pending;
+  pending.Name = instName;
+  pending.Depth = instantiationDepth() + 1;
+  pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
+  for (const std::string *p : names.Params)
+    pending.TypeParams.insert(*p);
+  pending.Args = std::move(allArgs);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(self);
+  if (isStatic) {
+    // Another module's template's: the instantiation's, not this module's
+    // to export (declareInstantiationStatics).
+    if (origin)
+      ImportedTypeOrigins[clone->getName()] = origin->Module;
+    pending.Func = clone;
+    (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
+        .push_back(clone);
+  } else {
+    if (found.Class)
+      found.Class->addMethod(md);
+    else
+      found.Struct->addMethod(md);
+    // Its body is checked as a method of its owner: a declaration of the
+    // owner holding this method alone, which is never the one a walk of
+    // the owner's methods is in.
+    if (found.Class) {
+      pending.Class = Ctx.make<ast::ClassDecl>(
+          clone->getLocation(), Ctx.intern(owner), Ctx.intern(""),
+          std::vector<ast::VarDecl *>{}, std::vector<ast::FuncDecl *>{clone});
+    } else {
+      pending.Struct =
+          Ctx.make<ast::StructDecl>(clone->getLocation(), Ctx.intern(owner),
+                                    std::vector<ast::VarDecl *>{});
+      pending.Struct->addMethod(clone);
+    }
+    InstantiatedMethods.push_back({owner, clone, md, ownerTy});
+  }
+  if (origin)
+    noteForeignSource(clone, *origin);
+  queueInstantiation(std::move(pending));
+  return &(MemberInstantiations[instName] = MemberInstance{clone, md});
+}
+
+bool Sema::inferMemberTypeArgs(const FoundMethodTemplate &found,
+                               const std::vector<ast::Expr *> &argExprs,
+                               const std::vector<ast::Type *> &argTypes,
+                               ast::Type *expected, ast::SourceLocation loc,
+                               std::vector<ast::Type *> &out) {
+  // The member's own parameters, from the arguments, the result and the
+  // type the call flows into; the owner's are the receiver's, or written.
+  ast::FuncDecl *tmpl = found.T.Fn;
+  const bool isStatic = tmpl->isStatic();
+  std::string shown = found.ownerName();
+  shown += isStatic ? names::kQualSep : names::kNameSep;
+  shown += tmpl->getName();
+  std::unordered_map<std::string, ast::Type *> ownerSubst;
+  const auto &blockParams = found.T.Impl->getTypeParams();
+  for (size_t i = 0; i < blockParams.size() && i < found.OwnerArgs.size(); ++i)
+    ownerSubst[*blockParams[i]] = found.OwnerArgs[i];
+  ast::ASTCloner inOwner(Ctx, std::move(ownerSubst), nullptr,
+                         foreignOrigin(tmpl) != nullptr);
+  std::vector<ast::Type *> paramTypes;
+  for (const ast::Param &p : tmpl->getParams())
+    paramTypes.push_back(inOwner.cloneType(p.ParamType));
+  ast::Type *result = tmpl->getReturnType()
+                          ? inOwner.cloneType(tmpl->getReturnType())
+                          : nullptr;
+  const auto forms = inferenceForms(argExprs, [&](size_t i) {
+    return i < tmpl->getParams().size() ? tmpl->getParams()[i].Mode
+                                        : ast::ParamMode::Value;
+  });
+  return inferTypeArgs(shown, tmpl->getTypeParams(), paramTypes, argTypes, loc,
+                       out, isStatic ? "" : tmpl->getName() + "<...>(...)",
+                       result, expected, forms);
+}
+
+bool Sema::resolveGenericStatic(ast::CallExpr *node,
+                                const FoundMethodTemplate &found,
+                                std::vector<ast::Type *> typeArgs,
+                                const std::vector<ast::Type *> &argTypes,
+                                ast::Type *expected) {
+  const ast::SourceLocation loc = node->getLocation();
+  if (typeArgs.empty() &&
+      !inferMemberTypeArgs(found, node->getArguments(), argTypes, expected, loc,
+                           typeArgs))
+    return false;
+  const MemberInstance *made = instantiateMember(
+      found, typeArgs, loc, node->hasTypeArgs() ? node : nullptr);
+  if (!made)
+    return false;
+  node->setCalleeName(made->Fn->getName()); // interned by the ASTContext
+  return true;
+}
+
+ast::MethodDecl *
+Sema::resolveGenericMethodCall(ast::MethodCallExpr *node, ast::ClassType *ct,
+                               ast::StructType *st,
+                               const std::vector<ast::Type *> &argTypes,
+                               ast::Type *expected, bool &failed) {
+  failed = false;
+  FoundMethodTemplate found;
+  if (!findMethodTemplate(ct, st, node->getMethodName(), found))
+    return nullptr;
+  failed = true;
+  const ast::SourceLocation loc = node->getLocation();
+  std::vector<ast::Type *> typeArgs;
+  for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
+    ast::Type *t = resolveTypeArgument(
+        node->getTypeArgs()[i], loc,
+        "type argument " + std::to_string(i + 1) + " of '" + found.ownerName() +
+            names::kNameSep + found.T.Fn->getName() + "'");
+    if (!t)
+      return nullptr;
+    typeArgs.push_back(t);
+  }
+  if (typeArgs.empty() &&
+      !inferMemberTypeArgs(found, node->getArguments(), argTypes, expected, loc,
+                           typeArgs))
+    return nullptr;
+  const MemberInstance *made = instantiateMember(
+      found, typeArgs, loc, node->hasTypeArgs() ? node : nullptr);
+  if (!made)
+    return nullptr;
+  node->setMethodName(made->Method->getName());
+  failed = false;
+  return made->Method;
 }
 
 // static
@@ -2251,21 +2806,26 @@ Sema::writtenArgParams(const ast::ASTNode *written) const {
   if (it == WrittenTypeArgs.end())
     return nullptr;
   const ast::WrittenTypeArgs &w = it->second;
+  const std::vector<uint64_t> &params =
+      written == OwnerListOf ? w.OwnerParams : w.Params;
   // Written with no type parameter (`L0<int>`), it names the same types
   // wherever it is; with one, the parameters are its copy's, which must be
   // the instantiation it is requested in.
-  if (std::all_of(w.Params.begin(), w.Params.end(),
+  if (std::all_of(params.begin(), params.end(),
                   [](uint64_t p) { return p == 0; }) ||
       (!InstantiatingTemplates.empty() &&
        InstantiatingTemplates.back().Name == w.Copy))
-    return &w.Params;
+    return &params;
   return nullptr;
 }
 
 // static
 std::vector<size_t> Sema::argumentNestings(const std::string &name) {
   std::vector<size_t> nestings;
-  const size_t args = name.find('<');
+  // A generic method's or `static fn`'s instantiation (#353) is measured by
+  // its own arguments, after its owner's name (`Box<int>.map<Str>`).
+  const size_t owner = names::ownerTypeName(name).size();
+  const size_t args = name.find('<', owner < name.size() ? owner : 0);
   if (args == std::string::npos)
     return nestings;
   size_t open = 0;
@@ -2389,7 +2949,9 @@ bool Sema::checkGrowingInstantiation(const ast::Decl *tmpl,
   while ((static_cast<unsigned char>(shown[cut]) & 0xC0) == 0x80)
     --cut;
   const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl);
-  const char *kind = fn                                ? "function"
+  const bool method = fn && !fn->isStatic() && MethodTemplateParams.count(fn);
+  const char *kind = method                            ? "method"
+                     : fn                              ? "function"
                      : ast::isa<ast::ClassDecl>(tmpl)  ? "class"
                      : ast::isa<ast::StructDecl>(tmpl) ? "struct"
                                                        : "enum";
@@ -2670,6 +3232,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   // resolves to this very type instead of recursing.
   ClassInstantiations[instName] = ct;
   ClassInstantiationInfo[ct] = InstantiationInfo{tmpl, args};
+  InstancesMadeHere.insert(ct);
   HalfMade.insert(ct);
   // Another module's template makes a class of that module: so its
   // importers see it, wherever it was instantiated.
@@ -2762,7 +3325,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
         ErroneousNames.insert(name); // its calls are follow-ons
         continue;
       }
-      if (methodOf(type, fn->getName())) {
+      if (std::string has; methodOf(type, fn->getName()) ||
+                           methodTemplateOwner(type, fn->getName(), has)) {
         error(fn->getLocation(), std::string(typeKindWord(type)) + " '" +
                                      instName + "' already has a method '" +
                                      fn->getName() + "'");
@@ -3303,6 +3867,19 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       return false;
     typeArgs.push_back(t);
   }
+  // And the ones written after the owner type (`Box<int>::of(1)`, #353),
+  // which are the owner's.
+  std::vector<ast::Type *> ownerArgs;
+  const size_t ownerSep = callee.rfind(names::kQualSep);
+  for (size_t i = 0; i < node->getOwnerTypeArgs().size(); ++i) {
+    auto *t =
+        resolveTypeArgument(node->getOwnerTypeArgs()[i], loc,
+                            "type argument " + std::to_string(i + 1) + " of '" +
+                                displayName(callee.substr(0, ownerSep)) + "'");
+    if (!t)
+      return false;
+    ownerArgs.push_back(t);
+  }
 
   // A parameter type of another module's template, as this context spells
   // it (inference compares it with this context's types).
@@ -3449,7 +4026,9 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     const std::string owner = callee.substr(0, sep);
     const std::string member = callee.substr(sep + 2);
     const bool isClass = ClassTemplates.count(owner) != 0;
-    if (typeArgs.empty()) {
+    // The owner's arguments are written after the owner (`Box<int>::of(1)`),
+    // never inferred, and not after the function, where its own go.
+    if (ownerArgs.empty()) {
       error(loc, "'" + displayName(callee) + "' is a function of the generic " +
                      (isClass ? "class" : "struct") + " '" +
                      displayName(owner) + "': write '" + displayName(owner) +
@@ -3457,16 +4036,37 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       return false;
     }
     std::string instName;
-    if (isClass) {
-      auto *ct = instantiateClass(owner, typeArgs, loc, node);
-      if (!ct)
+    ast::ClassType *ownerClass = nullptr;
+    ast::StructType *ownerStruct = nullptr;
+    {
+      const ast::ASTNode *outer = std::exchange(OwnerListOf, node);
+      if (isClass) {
+        ownerClass = instantiateClass(owner, ownerArgs, loc, node);
+        instName = ownerClass ? ownerClass->getName() : std::string();
+      } else {
+        ownerStruct = instantiateStruct(owner, ownerArgs, loc, node);
+        instName = ownerStruct ? ownerStruct->getName() : std::string();
+      }
+      OwnerListOf = outer;
+      if (instName.empty())
         return false;
-      instName = ct->getName();
-    } else {
-      auto *st = instantiateStruct(owner, typeArgs, loc, node);
-      if (!st)
-        return false;
-      instName = st->getName();
+    }
+    // A private one is its type's own, as a method is.
+    if (names::isPrivateName(member) &&
+        !checkMemberAccess(ownerClass ? static_cast<ast::Type *>(ownerClass)
+                                      : static_cast<ast::Type *>(ownerStruct),
+                           member, loc))
+      return false;
+    // A generic `static fn` (#353): the function's own arguments, written
+    // after its name or inferred.
+    if (FoundMethodTemplate found; findMethodTemplate(
+            ownerClass, ownerStruct, member, found, /*statics=*/true))
+      return resolveGenericStatic(node, found, std::move(typeArgs), argTypes,
+                                  expected);
+    if (!typeArgs.empty()) {
+      error(loc, "'" + displayName(instName) + names::kQualSep + member +
+                     "' is not generic and takes no type arguments");
+      return false;
     }
     // Declared with the instantiation here, or imported with the one an
     // imported module made (`m::Box<int>::of`, qualified as its functions
@@ -3488,6 +4088,27 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     }
     node->setCalleeName(Ctx.intern(fn));
     return true;
+  }
+
+  // `Point::make<int>(1)`: a generic `static fn` of a class or struct that
+  // is not generic (#353).
+  if (ownerSep != std::string::npos) {
+    const std::string owner = callee.substr(0, ownerSep);
+    const bool others = isOthersPrivateType(owner);
+    ast::ClassType *ct = others ? nullptr : Ctx.lookupClassType(owner);
+    ast::StructType *st = ct || others ? nullptr : Ctx.lookupStructType(owner);
+    if (FoundMethodTemplate found;
+        (ct || st) && findMethodTemplate(ct, st, callee.substr(ownerSep + 2),
+                                         found, /*statics=*/true)) {
+      if (!ownerArgs.empty()) {
+        error(loc, "'" + displayName(owner) + "' is not a generic " +
+                       (ct ? "class" : "struct") +
+                       " and takes no type arguments");
+        return false;
+      }
+      return resolveGenericStatic(node, found, std::move(typeArgs), argTypes,
+                                  expected);
+    }
   }
 
   // Explicit type arguments on something that is not a template.
@@ -3623,6 +4244,38 @@ bool Sema::checkPendingInstantiationBodies(
 }
 
 void Sema::injectInstantiations(ast::TranslationUnit *tu) {
+  // A generic method's instantiations are methods of their owners, lowered
+  // with them (#353): added here, once no walk of an owner's methods is in
+  // progress.
+  for (const MadeMethod &m : InstantiatedMethods) {
+    auto named = [&](const auto &decls) {
+      for (auto *d : decls)
+        if (d->getName() == m.Owner) {
+          d->addMethod(m.Fn);
+          return true;
+        }
+      return false;
+    };
+    if (named(tu->getClassDecls()) || named(InstantiatedClassDecls) ||
+        named(ForeignInstantiatedClassDecls) || named(tu->getStructDecls()) ||
+        named(InstantiatedStructDecls) || named(ForeignInstantiatedStructDecls))
+      continue;
+    // Its owner is another module's to emit: the method is this module's,
+    // in a declaration of its own by the owner's name.
+    if (named(ForeignMethodClassDecls) || named(ForeignMethodStructDecls))
+      continue;
+    if (ast::isa<ast::ClassType>(m.Type)) {
+      ForeignMethodClassDecls.push_back(Ctx.make<ast::ClassDecl>(
+          m.Fn->getLocation(), Ctx.intern(m.Owner), Ctx.intern(""),
+          std::vector<ast::VarDecl *>{}, std::vector<ast::FuncDecl *>{m.Fn}));
+    } else {
+      ForeignMethodStructDecls.push_back(
+          Ctx.make<ast::StructDecl>(m.Fn->getLocation(), Ctx.intern(m.Owner),
+                                    std::vector<ast::VarDecl *>{}));
+      ForeignMethodStructDecls.back()->addMethod(m.Fn);
+    }
+  }
+  InstantiatedMethods.clear();
   // A struct's functions are all declared before any body is emitted, and
   // a struct holds another only after it: creation order is fine.
   for (auto *sd : InstantiatedStructDecls)

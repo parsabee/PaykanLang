@@ -436,6 +436,12 @@ struct's; `toString` is built in and cannot be declared (`struct 'A' already has
 'toString'`), and `equals` is not a method of a struct (`no method 'equals' on type 'A'`:
 compare with `==`).  A method's parameter `other: view Self` names the struct itself.
 
+A struct's methods are all `impl` methods, called directly, so any of them, and any
+`static fn`, may have type parameters of its own: `fn add<U>(by: U, weigh: (U) -> int)`,
+called as `tally.add("abc", f)` or `tally.add<int>(4, f)`, and
+`Tally::of<Str>("xyz", f)` ([Generic Methods](13-generics.md#generic-methods)).  A generic
+method that changes `self` needs a receiver it can change, like any method.
+
 ---
 
 ## Running code when a value is destroyed: `__deinit__`
@@ -782,7 +788,10 @@ What a struct cannot hold, an instantiation cannot either: `struct Node<T> { v: 
 Node<T>; }` is reported when it is instantiated (`struct 'Node<int>' contains itself:
 field 'next' holds a 'Node<int>'`), as is a fixed-size array type argument.  A `static fn`
 in a generic struct's `impl` block is the instantiation's, called as
-`Pair<int, Str>::make(1, "a")`, like a generic class's.
+`Pair<int, Str>::make(1, "a")`, like a generic class's.  A method or a `static fn` of the
+block may add type parameters of its own to the struct's (`view fn fold<U>(seed: U, f: (U,
+view A) -> U) -> U`, `Pair<int, Str>::keyed<K>(...)`), bounded like a free function's
+(`K: Hashable`): see [Generic Methods](13-generics.md#generic-methods).
 
 ---
 

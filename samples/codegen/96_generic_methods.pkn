@@ -1,0 +1,106 @@
+// OK: generic methods and generic `static fn`s (#353).  A method of an
+// `impl` block, and a `static fn`, may have type parameters of its own next
+// to its type's: written after its name at a call, or inferred.  Each
+// instantiation is an `impl` method of its owner (`Box<int>.map<Str>`) or a
+// function of it (`Box<int>::withTag<Str>`), called directly; a subclass
+// inherits a generic method and nothing overrides it.  (An `async` one is
+// in samples/concurrency/12_generic_async_methods.pkn.)
+// expect-stdout: n=21 2.5 7 seven
+// expect-stdout: 8 2.5
+// expect-stdout: 2.25 m2
+// expect-stdout: 4 12 12
+// expect-stdout: 3 5
+// expect-stdout: a type argument list stays on one line42
+// expect-stdout: and a method's does too/42/12
+import ::io;
+
+class Box<T> {
+  v: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T)                          { self.v = move v; }
+
+  // `U` is the method's own type parameter; `T` is the class's.
+  view fn map<U>(f: (view T) -> U) -> Box<U> { return Box<U>(f(self.v)); }
+
+  // A `static fn` with a type parameter of its own.
+  static fn withTag<U>(v: T, tag: U) -> (Box<T>, U) {
+    return (Box<T>(move v), move tag);
+  }
+}
+
+class Shape {
+  view fn area() -> float;     // virtual: a vtable slot
+}
+
+impl Shape {
+  // Called directly; a subclass inherits it and cannot override it.
+  view fn measured<U>(unit: view U, show: (float, view U) -> Str) -> Str {
+    return show(self.area(), unit);
+  }
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+// A struct's generic method changes `self` like any method of it.
+struct Tally {
+  n: int;
+}
+
+impl Tally {
+  fn add<U>(by: U, weigh: (U) -> int) -> int {
+    self.n = self.n + weigh(move by);
+    return self.n;
+  }
+  view fn total<U>(unit: view U) -> view int { return self.n; }
+
+  // A type that is not generic has generic `static fn`s too.
+  static fn of<U>(first: U, weigh: (U) -> int) -> Tally {
+    return Tally(weigh(move first));
+  }
+}
+
+// Two type parameters, for calls that write both out.
+fn pick<A: Showable, B: Showable>(a: view A, b: view B) -> Str {
+  return a.toString() + b.toString();
+}
+
+impl Tally {
+  view fn pair<A: Showable, B: Showable>(a: view A, b: view B) -> Str {
+    return a.toString() + "/" + b.toString() + "/" + Str(self.n);
+  }
+}
+
+fn main() -> int {
+  let b = Box<int>(20);
+  let s = b.map(fn(n: view int) => "n=" + Str(n + 1));     // U = Str, inferred
+  let f = b.map<float>(fn(n: view int) => float(n) / 8.0);  // U written out
+  let t = Box<int>::withTag<Str>(7, "seven");               // both lists written
+  io::println(s.v + " " + Str(f.v) + " " + Str(t.0.v) + " " + t.1);
+  let u = Box<int>::withTag(8, 2.5);                        // U = float, inferred
+  io::println(Str(u.0.v) + " " + Str(u.1));
+
+  let q = Square(1.5);
+  io::println(q.measured("m2", fn(a: float, unit: view Str) => Str(a) + " "
+      + unit));
+
+  tally = Tally(1);
+  let first = tally.add("abc", fn(s: Str) => s.len());
+  let second = tally.add<int>(4, fn(n: int) => n * 2);
+  io::println(Str(first) + " " + Str(second) + " " + Str(tally.total(1.5)));
+  let made = Tally::of<Str>("xyz", fn(s: Str) => s.len());
+  let also = Tally::of(2.5, fn(x: float) => int(x * 2.0));
+  io::println(Str(made.n) + " " + Str(also.n));
+
+  // A line that is too long never breaks inside a type argument list.
+  let pickedOutOfTwo =
+      pick<Str, int>("a type argument list stays on one line", 42);
+  let pairedWithTheTally = tally.pair<Str, int>("and a method's does too", 42);
+  io::println(pickedOutOfTwo);
+  io::println(pairedWithTheTally);
+  return 0;
+}

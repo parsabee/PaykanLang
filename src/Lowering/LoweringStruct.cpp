@@ -133,7 +133,17 @@ void ModuleLowering::lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
 // not define is this module's to emit, from the copy Sema checked, as a
 // shared copy of its own: the program keeps one of each.
 void ModuleLowering::declareDroppedCopyMethods() {
-  for (ast::StructDecl *sd : SemaCtx.ImportedInstanceStructs) {
+  // And the instantiations of generic methods (#353) on a type another
+  // module defines, which are this module's to emit the same way: a module
+  // that made the same one defines it, and any other leaves it to its
+  // callers.
+  std::vector<ast::StructDecl *> structs = SemaCtx.ImportedInstanceStructs;
+  structs.insert(structs.end(), SemaCtx.ForeignMethodStructs.begin(),
+                 SemaCtx.ForeignMethodStructs.end());
+  std::vector<ast::ClassDecl *> classes = SemaCtx.ImportedInstanceClasses;
+  classes.insert(classes.end(), SemaCtx.ForeignMethodClasses.begin(),
+                 SemaCtx.ForeignMethodClasses.end());
+  for (ast::StructDecl *sd : structs) {
     ast::StructType *st = ASTCtx.lookupStructType(sd->getName());
     const std::string *origin = st ? typeOrigin(sd->getName()) : nullptr;
     if (!origin || *origin == Mod.Name)
@@ -158,7 +168,7 @@ void ModuleLowering::declareDroppedCopyMethods() {
   }
   // A class copy's `impl` methods, the same way: `gen::Box<int>` made by a
   // module that calls none of them has none in its file.
-  for (ast::ClassDecl *cd : SemaCtx.ImportedInstanceClasses) {
+  for (ast::ClassDecl *cd : classes) {
     ast::ClassType *ct = ASTCtx.lookupClassType(cd->getName());
     const std::string *origin = ct ? typeOrigin(cd->getName()) : nullptr;
     if (!origin || *origin == Mod.Name)

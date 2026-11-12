@@ -97,6 +97,7 @@ add_executable(sema_tests
     Sema/BorrowedResultTests.cpp
     Sema/StructTests.cpp
     Sema/GenericStructTests.cpp
+    Sema/GenericMethodTests.cpp
     Sema/FunctionTypeTests.cpp
     Sema/VisibilityTests.cpp
     Sema/SizedTypeTests.cpp

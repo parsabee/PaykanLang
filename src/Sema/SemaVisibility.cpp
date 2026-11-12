@@ -134,6 +134,12 @@ bool Sema::checkStaticMemberUse(const std::string &qualified,
   return checkMemberAccess(owner, base.substr(sep + 2), loc);
 }
 
+bool Sema::isOthersPrivateType(const std::string &name) const {
+  return names::isModulePrivateName(name) &&
+         name.find(names::kQualSep) == std::string::npos &&
+         ImportedTypeOrigins.count(name) != 0;
+}
+
 std::string Sema::privateTypeIn(ast::Type *ty) {
   if (!ty)
     return "";

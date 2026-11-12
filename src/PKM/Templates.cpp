@@ -6,7 +6,7 @@
 //   "PKMT" u32 version u32 flags(0)
 //   Str file
 //   uleb n ; Str uses[n]
-//   uleb n ; { u8 owner kind (1 class, 2 struct); uleb owner index }[n]
+//   uleb n ; { u8 owner kind (1 class, 2 struct, 3 type); uleb owner index }[n]
 //   Str ast
 //
 // Str is a uleb length and UTF-8 bytes.  Nothing may follow.
@@ -70,8 +70,11 @@ StatusOr<Templates> readTemplates(std::span<const uint8_t> bytes) {
     uint8_t kind = 0;
     if (!r.u8(kind) || !r.uleb32(im.Owner))
       return fail(detail::readerError(r));
-    if (kind != 1 && kind != 2)
+    if (kind < 1 || kind > 3)
       return fail("bad impl owner kind " + std::to_string(kind));
+    if (kind == 3 && im.Owner != 0)
+      return fail("an impl block of a type names template " +
+                  std::to_string(im.Owner));
     im.Kind = static_cast<Templates::OwnerKind>(kind);
   }
   // The bodies are as long as a module's source: no string limit.

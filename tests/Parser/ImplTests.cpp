@@ -131,27 +131,48 @@ TEST(Impl, StaticCallParsesAsAQualifiedCall) {
   ASSERT_TRUE(ok);
 }
 
-// An `impl` block's method or `static fn` cannot have type parameters of
-// its own: they were parsed and ignored (`static fn id<T>(y: T) -> T` was
-// `unknown class type 'T'`).  Only a free function is generic; the methods
-// of a generic type's `impl` block use the block's.
-TEST(Impl, MethodsAndStaticFnsAreNotGeneric) {
+// An `impl` block's method and a `static fn` can have type parameters of
+// their own (#353), with bounds, next to the block's.  A constructor and a
+// method of an `impl ... for` block cannot: an error at the `<`.
+TEST(Impl, MethodsAndStaticFnsAreGeneric) {
+  auto [ok, driver] = parse("impl A {\n"
+                            "  fn f<T>(x: T) {}\n"
+                            "  static fn id<T: Showable, U>(y: T) -> T { "
+                            "return y; }\n"
+                            "  view fn g() -> int => 1;\n"
+                            "}\n"
+                            "impl Box<T> {\n"
+                            "  view fn map<U>(f: (view T) -> U) -> Box<U> { "
+                            "return Box<U>(f(self.v)); }\n"
+                            "}\n"
+                            "fn main() -> int { return 0; }\n");
+  ASSERT_TRUE(ok);
+  const auto &impls = driver->getRoot()->getImplDecls();
+  ASSERT_EQ(impls.size(), 2u);
+  const auto &methods = impls[0]->getMethods();
+  ASSERT_EQ(methods.size(), 3u);
+  ASSERT_EQ(methods[0]->getTypeParams().size(), 1u);
+  EXPECT_EQ(*methods[0]->getTypeParams()[0], "T");
+  EXPECT_TRUE(methods[1]->isStatic());
+  ASSERT_EQ(methods[1]->getTypeParams().size(), 2u);
+  EXPECT_EQ(methods[1]->getTypeParamBounds()[0].size(), 1u);
+  EXPECT_TRUE(methods[2]->getTypeParams().empty());
+  ASSERT_EQ(impls[1]->getMethods()[0]->getTypeParams().size(), 1u);
+  EXPECT_EQ(*impls[1]->getMethods()[0]->getTypeParams()[0], "U");
+
   auto r = parseWithDiags("impl A {\n"
-                          "  fn f<T>(x: T) {}\n"
-                          "  static fn id<T>(y: T) -> T { return y; }\n"
-                          "  view fn g() -> int => 1;\n"
+                          "  fn __init__<T>(x: T) {}\n"
+                          "}\n"
+                          "impl Showable for A {\n"
+                          "  view fn toString<T>() -> Str { return \"\"; }\n"
                           "}\n"
                           "fn main() -> int { return 0; }\n");
   EXPECT_FALSE(r.Ok);
   ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
-  EXPECT_EQ(r.Diags[0].Message, paykan::frontend::kGenericMethod);
+  EXPECT_EQ(r.Diags[0].Message, paykan::frontend::kGenericInit);
   EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
-  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u);
-  EXPECT_EQ(r.Diags[1].Message, paykan::frontend::kGenericStaticFn);
-  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u);
-  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 15u);
-  auto [ok, _] = parse("impl Box<T> { static fn of(v: T) -> Box<T> { return "
-                       "Box<T>(v); } view fn get() -> T { return self.v; } }\n"
-                       "fn main() -> int { return 0; }\n");
-  EXPECT_TRUE(ok);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 14u);
+  EXPECT_EQ(r.Diags[1].Message, paykan::frontend::kGenericTraitImplMethod);
+  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 5u);
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 19u);
 }
