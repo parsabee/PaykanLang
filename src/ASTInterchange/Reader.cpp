@@ -830,7 +830,9 @@ private:
     std::vector<FuncDecl *> methods;
     {
       Nested body(*this, e);
-      if (!body.ok() || !methodList(f, methods, FuncKind::ImplMethod))
+      if (!body.ok() ||
+          !methodList(f, methods,
+                      trait ? FuncKind::TraitImplMethod : FuncKind::ImplMethod))
         return nullptr;
     }
     if (!f.done())
@@ -867,8 +869,11 @@ private:
   /// Where a function is declared, which decides what may stand where its
   /// body goes and whether it may be a `static fn`.
   enum class FuncKind {
-    Free,        ///< a top-level function: a block, or a native's C symbol
-    ImplMethod,  ///< an `impl` block's method or `static fn`: a block
+    Free,       ///< a top-level function: a block, or a native's C symbol
+    ImplMethod, ///< an `impl` block's method or `static fn`: a block
+    /// A method of an `impl ... for` block: as ImplMethod, with no type
+    /// parameters of its own.
+    TraitImplMethod,
     Requirement, ///< a trait's method: `_`
     ClassMethod, ///< a class body's: a block, or `_` for a pure virtual one
   };
@@ -1176,7 +1181,8 @@ private:
       view = v->Text == "view";
       isStatic = !view;
     }
-    if (isStatic && kind != FuncKind::ImplMethod)
+    if (isStatic && kind != FuncKind::ImplMethod &&
+        kind != FuncKind::TraitImplMethod)
       return fail(e, "function '" + *name +
                          "' has (qual static): only an 'impl' block's "
                          "method can (a 'static fn')"),
@@ -1190,12 +1196,20 @@ private:
     const SExpr *shared = f.optionalList("shared");
     if (shared && !shared->Items.empty())
       return fail(*shared, "(shared) takes no fields"), nullptr;
-    // Only a free function is generic, as the grammar has it.
-    if (!tparams.empty() &&
-        (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod))
-      return fail(e, std::string(isStatic ? frontend::kGenericStaticFn
-                                          : frontend::kGenericMethod)),
-             nullptr;
+    // A free function, an `impl` block's method and a `static fn` are
+    // generic, as the grammar has it (#353): a class body's method, a
+    // constructor and an `impl ... for` block's method are not.
+    if (!tparams.empty()) {
+      std::string_view why;
+      if (kind == FuncKind::ClassMethod)
+        why = frontend::kGenericMethod;
+      else if (kind != FuncKind::Free && *name == names::kMethodInit)
+        why = frontend::kGenericInit;
+      else if (kind == FuncKind::TraitImplMethod && !isStatic)
+        why = frontend::kGenericTraitImplMethod;
+      if (!why.empty())
+        return fail(e, std::string(why)), nullptr;
+    }
     // `fn double(x: int) => x * 2;`: a trailing (inferred), as a lambda's.
     const SExpr *inferred = f.optionalList("inferred");
     if (inferred) {
@@ -2143,18 +2157,39 @@ private:
       std::vector<Type *> targs;
       if (!tl->Items.empty() && !typeArgs(*tl, targs))
         return nullptr;
+      // `Box<int>::of(1)`: the owner type's arguments, in a list of their
+      // own after the function's (#353), there when there are any.
+      std::vector<Type *> oargs;
+      if (const SExpr *ol = f.optionalList("owner-args")) {
+        if (ol->Items.empty())
+          return fail(*ol, "(owner-args) of a call needs a type"), nullptr;
+        if (!typeArgs(*ol, oargs))
+          return nullptr;
+      }
       std::vector<Expr *> args;
       if (!exprs(f, e, args))
         return nullptr;
-      out = Ctx.make<CallExpr>(loc, *callee, std::move(args), std::move(targs));
+      out = Ctx.make<CallExpr>(loc, *callee, std::move(args), std::move(targs),
+                               std::move(oargs));
     } else if (t == "method-call") {
       Link link(*this, e);
       Expr *recv = operand(f, e, "the receiver", Operand::Receiver);
       const std::string *name = recv ? f.name("the method's name") : nullptr;
+      // `b.map<float>(f)`: a generic method's type arguments (#353), there
+      // when there are any.
+      std::vector<Type *> targs;
+      if (const SExpr *tl = name ? f.optionalList("type-args") : nullptr) {
+        if (tl->Items.empty())
+          return fail(*tl, "(type-args) of a method call needs a type"),
+                 nullptr;
+        if (!typeArgs(*tl, targs))
+          return nullptr;
+      }
       std::vector<Expr *> args;
       if (!name || !exprs(f, e, args) || !link.ok())
         return nullptr;
-      out = Ctx.make<MethodCallExpr>(loc, recv, *name, std::move(args));
+      out = Ctx.make<MethodCallExpr>(loc, recv, *name, std::move(args),
+                                     std::move(targs));
     } else if (t == "ternary") {
       Nested inner(*this, e);
       Expr *c = inner.ok() ? operand(f, e, "the condition", Operand::Condition)

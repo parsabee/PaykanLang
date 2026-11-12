@@ -10,6 +10,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `01_parallel_for.pkn` | `parallel for` with a reduction, an `inout` array written at the loop's index, and an `atomic int` counter |
 | `02_async_await.pkn` | `async fn`, `await`, tasks started by calling an async function, `move` of a reference into a task, `async fn main` |
 | `11_async_methods.pkn` | `async` methods, virtual and on a handle; a tuple or struct going to a task and coming back |
+| `12_generic_async_methods.pkn` | a generic method that is `async`: each instantiation is a task of its own, and its own type parameter is what it bounds `Sendable` |
 | `err_03_first_checks.pkn` | the first checks: copying a unique reference into a task, use after `move`, sending a `shared` reference, writing anything but a reduction in a parallel body |
 | `04_qualifiers.pkn` | the qualifiers on places: the bare type (unique, immutable), `mut`, `shared`, `shared mut`; the conversions between them; a `view` parameter taking every form |
 | `05_locked.pkn` | a `locked mut` cell shared by tasks, written in `lock c as v: inout { }` and read in `: view` blocks |

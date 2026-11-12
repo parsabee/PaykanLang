@@ -266,6 +266,18 @@ bool Sema::ParSafety::run(ast::TranslationUnit *tu) {
     addClass(cd, true);
   for (const ast::ClassDecl *cd : S.ForeignInstantiatedClassDecls)
     addClass(cd, true);
+  // A generic method's instantiations on another module's type (#353) are
+  // this module's code, though the type is not.
+  for (const ast::StructDecl *sd : S.ForeignMethodStructDecls)
+    if (ast::StructType *st = S.Ctx.lookupStructType(sd->getName()))
+      for (const ast::FuncDecl *fn : sd->getMethods())
+        index(fn, st, sd->getName() + names::kNameSep + fn->getName(), fn,
+              true);
+  for (const ast::ClassDecl *cd : S.ForeignMethodClassDecls)
+    if (ast::ClassType *ct = S.Ctx.lookupClassType(cd->getName()))
+      for (const ast::FuncDecl *fn : cd->getMethods())
+        index(fn, ct, cd->getName() + names::kNameSep + fn->getName(), fn,
+              true);
   for (const ast::StructDecl *sd : S.ImportedInstanceStructDecls)
     addStruct(sd, false);
   for (const ast::ClassDecl *cd : S.ImportedInstanceClassDecls)

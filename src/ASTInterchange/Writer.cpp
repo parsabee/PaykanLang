@@ -733,6 +733,12 @@ private:
       for (const Type *t : c->getTypeArgs())
         type(t);
       close();
+      if (c->hasOwnerTypeArgs()) {
+        open("owner-args");
+        for (const Type *t : c->getOwnerTypeArgs())
+          type(t);
+        close();
+      }
       exprs(c->getArguments());
       close();
       return;
@@ -742,6 +748,12 @@ private:
       open("method-call", m);
       expr(m->getReceiver());
       str(m->getMethodName());
+      if (m->hasTypeArgs()) {
+        open("type-args");
+        for (const Type *t : m->getTypeArgs())
+          type(t);
+        close();
+      }
       exprs(m->getArguments());
       close();
       return;

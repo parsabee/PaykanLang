@@ -365,9 +365,76 @@ TEST(Generics, StaticFnOfAnInstantiation) {
   auto *call = firstCall(driver->getRoot());
   ASSERT_NE(call, nullptr);
   EXPECT_EQ(call->getCalleeName(), "Box::of");
-  ASSERT_EQ(call->getTypeArgs().size(), 1u);
-  EXPECT_TRUE(isa<BuiltinType>(call->getTypeArgs()[0]));
+  // The arguments written after the owner type are the owner's (#353).
+  ASSERT_EQ(call->getOwnerTypeArgs().size(), 1u);
+  EXPECT_TRUE(isa<BuiltinType>(call->getOwnerTypeArgs()[0]));
+  EXPECT_TRUE(call->getTypeArgs().empty());
   EXPECT_EQ(call->getNumArguments(), 1u);
+}
+
+// A generic method's call names its type arguments after the method's name,
+// and a generic `static fn`'s after the function's, next to the owner's:
+// the same rule as `f<int>(x)`, so `a.b < c` stays a comparison.
+TEST(Generics, MethodAndStaticFnTypeArguments) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int {
+      t = Box<int>::withTag<Str, Box<u8>>(7, "seven");
+      p = Point::make<int>(1);
+      q = m::Box<int>::withTag<Str>(1, "a");
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(ok);
+  const auto &stmts =
+      driver->getRoot()->getFuncDecls()[0]->getBody()->getStatements();
+  auto callOf = [&](size_t i) {
+    return cast<CallExpr>(cast<AssignStmt>(stmts[i])->getValue());
+  };
+  EXPECT_EQ(callOf(0)->getCalleeName(), "Box::withTag");
+  EXPECT_EQ(callOf(0)->getOwnerTypeArgs().size(), 1u);
+  EXPECT_EQ(callOf(0)->getTypeArgs().size(), 2u);
+  EXPECT_EQ(callOf(1)->getCalleeName(), "Point::make");
+  EXPECT_TRUE(callOf(1)->getOwnerTypeArgs().empty());
+  EXPECT_EQ(callOf(1)->getTypeArgs().size(), 1u);
+  EXPECT_EQ(callOf(2)->getCalleeName(), "m::Box::withTag");
+  EXPECT_EQ(callOf(2)->getOwnerTypeArgs().size(), 1u);
+  EXPECT_EQ(callOf(2)->getTypeArgs().size(), 1u);
+
+  auto [ok2, d2] = parse(R"(
+    fn main() -> int {
+      a = x.m<int>(1);
+      b = x.m<A, B>(1).n<Box<u8>>(y) >> 2;
+      c = x.m < y;
+      d = x.f < a && b > (c);
+      e = g(a.b < c, d > (e));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(ok2);
+  const auto &s2 = d2->getRoot()->getFuncDecls()[0]->getBody()->getStatements();
+  auto valueOf = [&](size_t i) { return cast<AssignStmt>(s2[i])->getValue(); };
+  auto *a = dyn_cast<MethodCallExpr>(valueOf(0));
+  ASSERT_NE(a, nullptr);
+  EXPECT_EQ(a->getTypeArgs().size(), 1u);
+  // `x.m<A, B>(1).n<Box<u8>>(y) >> 2`: the `>>` closes the list.
+  auto *shift = dyn_cast<BinaryExpr>(valueOf(1));
+  ASSERT_NE(shift, nullptr);
+  auto *n = dyn_cast<MethodCallExpr>(shift->getLHS());
+  ASSERT_NE(n, nullptr);
+  EXPECT_EQ(n->getTypeArgs().size(), 1u);
+  EXPECT_EQ(cast<MethodCallExpr>(n->getReceiver())->getTypeArgs().size(), 2u);
+  // Comparisons stay comparisons.
+  EXPECT_TRUE(isa<BinaryExpr>(valueOf(2)));
+  EXPECT_TRUE(isa<BinaryExpr>(valueOf(3)));
+  // The one shape that changes meaning, as `g(a < b, c > (d))` did for a
+  // function: a generic method's call.
+  auto *g = dyn_cast<CallExpr>(valueOf(4));
+  ASSERT_NE(g, nullptr);
+  ASSERT_EQ(g->getNumArguments(), 1u);
+  auto *inner = dyn_cast<MethodCallExpr>(g->getArguments()[0]);
+  ASSERT_NE(inner, nullptr);
+  EXPECT_EQ(inner->getMethodName(), "b");
+  EXPECT_EQ(inner->getTypeArgs().size(), 2u);
 }
 
 TEST(Generics, StaticFnOfAnImportedInstantiation) {
@@ -378,7 +445,7 @@ TEST(Generics, StaticFnOfAnImportedInstantiation) {
   auto *call = firstCall(driver->getRoot());
   ASSERT_NE(call, nullptr);
   EXPECT_EQ(call->getCalleeName(), "m::Pair::make");
-  ASSERT_EQ(call->getTypeArgs().size(), 2u);
+  ASSERT_EQ(call->getOwnerTypeArgs().size(), 2u);
   EXPECT_EQ(call->getNumArguments(), 2u);
 }
 

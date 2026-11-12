@@ -504,16 +504,20 @@ uint64_t ASTCloner::paramsNamed(const Type *ty) const {
 }
 
 void ASTCloner::noteTypeArgs(const ASTNode *node,
-                             const std::vector<Type *> &args) {
+                             const std::vector<Type *> &args, bool owner) {
   if (!Written || args.empty())
     return;
-  WrittenTypeArgs written{WrittenCopy, {}};
-  written.Params.reserve(args.size());
+  std::vector<uint64_t> params;
+  params.reserve(args.size());
   for (const Type *a : args)
-    written.Params.push_back(paramsNamed(a));
+    params.push_back(paramsNamed(a));
   // A GenericType that names none is shared by every copy (cloneType),
   // and names none in each: the first copy's entry stands.
-  Written->try_emplace(node, std::move(written));
+  auto it = Written->try_emplace(node, WrittenTypeArgs{WrittenCopy, {}, {}});
+  std::vector<uint64_t> &slot =
+      owner ? it.first->second.OwnerParams : it.first->second.Params;
+  if (slot.empty())
+    slot = std::move(params);
 }
 
 Type *ASTCloner::cloneType(Type *ty) {
@@ -661,8 +665,14 @@ Expr *ASTCloner::cloneLink(Expr *link, Expr *operand) {
   }
   case ASTNode::NK_MethodCallExpr: {
     auto *m = cast<MethodCallExpr>(link);
-    return Ctx.make<MethodCallExpr>(loc, operand, in(m->getMethodName()),
-                                    cloneArgs(m->getArguments()));
+    std::vector<Type *> typeArgs;
+    for (auto *t : m->getTypeArgs())
+      typeArgs.push_back(cloneType(t));
+    auto *copy = Ctx.make<MethodCallExpr>(loc, operand, in(m->getMethodName()),
+                                          cloneArgs(m->getArguments()),
+                                          std::move(typeArgs));
+    noteTypeArgs(copy, m->getTypeArgs());
+    return copy;
   }
   case ASTNode::NK_MemberAccessExpr:
     return Ctx.make<MemberAccessExpr>(
@@ -724,14 +734,17 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     std::vector<Expr *> args;
     for (auto *a : c->getArguments())
       args.push_back(cloneExpr(a));
-    std::vector<Type *> typeArgs;
+    std::vector<Type *> typeArgs, ownerArgs;
     for (auto *t : c->getTypeArgs())
       typeArgs.push_back(cloneType(t));
+    for (auto *t : c->getOwnerTypeArgs())
+      ownerArgs.push_back(cloneType(t));
     const std::string &callee = c->getCalleeName();
-    auto *copy =
-        Ctx.make<CallExpr>(loc, in(Names ? Names->callee(callee) : callee),
-                           std::move(args), std::move(typeArgs));
+    auto *copy = Ctx.make<CallExpr>(
+        loc, in(Names ? Names->callee(callee) : callee), std::move(args),
+        std::move(typeArgs), std::move(ownerArgs));
     noteTypeArgs(copy, c->getTypeArgs());
+    noteTypeArgs(copy, c->getOwnerTypeArgs(), /*owner=*/true);
     return copy;
   }
   case ASTNode::NK_TernaryExpr: {
@@ -1033,11 +1046,15 @@ EnumDecl *ASTCloner::cloneTemplate(EnumDecl *ed) {
   return out;
 }
 
-ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,
-                                   const std::string &newTypeName) {
+ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im, const std::string &newTypeName,
+                                   bool keepGeneric) {
   std::vector<FuncDecl *> methods;
-  for (auto *m : im->getMethods())
-    methods.push_back(cloneFuncDecl(m, m->getName()));
+  for (auto *m : im->getMethods()) {
+    if (m->getTypeParams().empty())
+      methods.push_back(cloneFuncDecl(m, m->getName()));
+    else if (keepGeneric)
+      methods.push_back(cloneTemplate(m));
+  }
   auto *out = Ctx.make<ImplDecl>(im->getLocation(), in(newTypeName),
                                  std::move(methods), cloneType(im->getTrait()));
   out->setTypeParamBounds(cloneBounds(im->getTypeParamBounds()));
@@ -1046,7 +1063,7 @@ ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,
 }
 
 ImplDecl *ASTCloner::cloneTemplate(ImplDecl *im) {
-  ImplDecl *copy = cloneImplDecl(im, im->getTypeName());
+  ImplDecl *copy = cloneImplDecl(im, im->getTypeName(), /*keepGeneric=*/true);
   std::vector<const std::string *> params;
   for (auto *p : im->getTypeParams())
     params.push_back(&in(*p));

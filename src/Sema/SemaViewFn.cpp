@@ -90,10 +90,18 @@ void Sema::warnMissingViewFns() {
   // calls a family that could be one too (a fixed point, so that a getter
   // calling another getter is found in one compile).  A struct's method is
   // a family of its own (a struct inherits nothing).
+  // A generic method's instantiations (`map<Str>`, `map<int>`, #353) are
+  // one method, by its template's name: called directly and never
+  // overridden, it is a family of its own in the class that declares it.
   using Family = std::pair<ast::Type *, std::string>;
   auto familyOf = [](const MethodUse &use, const std::string &name) -> Family {
+    const size_t args = name.find('<');
     if (use.Struct)
-      return {use.Struct, name};
+      return {use.Struct, name.substr(0, args)};
+    if (args != std::string::npos) {
+      ast::ClassType *owner = use.Class->implOwner(name);
+      return {owner ? owner : use.Class, name.substr(0, args)};
+    }
     return {introducingClass(use.Class, name), name};
   };
   auto ownerOf = [](const MethodUse &use) -> ast::Type * {
@@ -108,7 +116,14 @@ void Sema::warnMissingViewFns() {
     // class's method, another module's template) keeps its marker: there is
     // nothing to suggest.
     const auto *intro = methodOf(family.first, family.second);
-    if (ImportedTypeOrigins.count(typeName(family.first)))
+    FoundMethodTemplate generic;
+    const bool isGeneric =
+        !intro &&
+        findMethodTemplate(ast::dyn_cast<ast::ClassType>(family.first),
+                           ast::dyn_cast<ast::StructType>(family.first),
+                           family.second, generic);
+    if (ImportedTypeOrigins.count(typeName(family.first)) ||
+        (isGeneric && foreignOrigin(generic.T.Fn)))
       continue;
     bool introducedHere = false;
     bool changes = false;
@@ -119,7 +134,8 @@ void Sema::warnMissingViewFns() {
       // not: it is no family to suggest the marker for.
       changes |= m->Decl->isShared();
     }
-    if (introducedHere && !changes && intro && !intro->isView())
+    if (introducedHere && !changes &&
+        (intro ? !intro->isView() : isGeneric && !generic.T.Fn->isView()))
       could.insert(family);
   }
   // A generic type's instances share their template's declarations: its
@@ -176,7 +192,9 @@ void Sema::warnMissingViewFns() {
       ast::SourceLocation loc = m->Decl->getLocation();
       if (!warned.insert({loc.getLineStart(), loc.getColumnStart()}).second)
         continue;
-      bool overridden = families[family].size() > 1;
+      // (A generic method's members are its instantiations.)
+      bool overridden = families[family].size() > 1 &&
+                        m->Decl->getName().find('<') == std::string::npos;
       warning(loc, "'" + family.second +
                        "' never changes 'self': make it a 'view fn'" +
                        (overridden ? " (and its overrides)" : "") +

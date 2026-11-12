@@ -329,6 +329,13 @@ bool Sema::isPlaceChain(const ast::Expr *e) {
   return false;
 }
 
+bool Sema::movesPlace(const ast::Expr *e) {
+  while (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    e = ma->getReceiver();
+  const auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+  return u && u->getOpcode() == ast::UnaryOpcode::Move;
+}
+
 bool Sema::isElementOfPlace(const ast::Expr *e) {
   const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
   return se && isPlaceChain(se->getArray());

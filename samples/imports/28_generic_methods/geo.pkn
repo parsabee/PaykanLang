@@ -1,0 +1,55 @@
+// A class that is not generic, with generic methods and a generic `static
+// fn`, and a generic struct with a generic method: an importer makes the
+// instantiations it calls from the module's templates.
+
+class Point {
+  x: int;
+  view fn area() -> float { return 0.0; }
+}
+
+impl Point {
+  view fn scaled<U>(k: U, f: (int, U) -> int) -> Point {
+    return Point(f(self.x, move k));
+  }
+  static fn make<U>(v: U, f: (U) -> int) -> Point { return Point(f(move v)); }
+
+  // A private one, and what the module's own functions are to it.
+  view fn __weight<U>(u: view U) -> int           { return self.x; }
+  view fn weighed<U>(u: view U) -> int {
+    return self.__weight(u) + bonus();
+  }
+
+  // Calls the receiver's own `area` through the vtable.
+  view fn measured<U>(unit: view U, show: (float, view U) -> Str) -> Str {
+    return show(self.area(), unit);
+  }
+}
+
+fn bonus() -> int {
+  return 100;
+}
+
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+
+impl Pair<A, B> {
+  view fn fold<U>(seed: U, f: (U, view A) -> U) -> U {
+    let step = fn(u: U, a: view A) => f(move u, a);
+    return step(move seed, self.a);
+  }
+  fn first<C>(c: C, pick: (C) -> A) { self.a = pick(move c); }
+}
+
+fn pair() -> Pair<int, Str> {
+  return Pair<int, Str>(4, "four");
+}
+
+// The same `Point.scaled<int>` and `Pair<int, Str>.fold<int>` as its
+// importers make: the program keeps one of each.
+fn twice() -> int {
+  let p = Point(4);
+  return p.scaled<int>(2, fn(a: int, b: int) => a * b).x
+      + pair().fold(10, fn(u: int, a: view int) => u + a);
+}

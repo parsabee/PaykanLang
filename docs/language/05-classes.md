@@ -710,7 +710,9 @@ The rest of this chapter gives the precise rules.
 - Every class transitively extends `Obj`. There is no multiple inheritance. A `final class`
   is extended by none ([Final classes](#final-classes)).
 - **All methods declared inside a class are virtual**: dispatched through the vtable.
-  Methods of an `impl` block are called directly (see [`impl` Blocks](#impl-blocks)).
+  Methods of an `impl` block are called directly (see [`impl` Blocks](#impl-blocks)), and
+  one of those may have type parameters of its own, `view fn map<U>(...)`
+  ([Generic Methods](13-generics.md#generic-methods)).
 - A method **borrows** its object: it cannot return, pass, store or capture `self`. A
   **`shared fn`** can: its `self` is `shared mut` (a `shared view fn`'s is `shared`), and it
   is called on a receiver held that way or on a new object (see
@@ -1132,6 +1134,10 @@ fn main() -> int {
 - No method may reuse a name that the class or one of its superclasses already has, and
   a subclass cannot override an `impl` method (`method 'g' of 'A' is declared in an 'impl'
   block and cannot be overridden`).
+- A method of an `impl` block, and a `static fn`, may have type parameters of its own:
+  `view fn measured<U>(unit: view U, ...)`, called as `s.measured("m2", ...)` or
+  `s.measured<Str>("m2", ...)`. A class body's method may not: it is virtual, and a generic
+  method has no vtable slot (see [Generic Methods](13-generics.md#generic-methods)).
 - `__init__` goes in an `impl` block, not the class body: it is the class's constructor,
   not a virtual method, and a class has one.
 - An `impl` block can only add to a class of its own module; built-in types and enums
@@ -1486,6 +1492,6 @@ created for that argument list. See [Generics](13-generics.md).
 | Assigning `self` | `self = C(1)` in a method: `self` names the object the method was called on (`cannot assign to 'self'`) |
 | Binding `self` | A declaration, `for` loop variable, `match` binding (`self: C { … }`) or destructuring target named `self` in a method's body (`'self' cannot be used as a variable name in method 'm' of class 'C'; it is the implicit receiver`) |
 | `__init__` in the class body | `class A { fn __init__() { … } }`; it goes in `impl A { … }` |
-| Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` (a syntax error): `a method cannot have type parameters of its own: only a free function is generic (the methods of a generic class or struct use its type parameters)`, or `a 'static fn' cannot ...` ([Generics](13-generics.md#declaring-a-generic-function)) |
+| Generic method in a class body | A class body's method declares type parameters of its own, `view fn map<U>(x: U) -> U` (a syntax error): `a class body's method cannot have type parameters of its own: its methods are virtual, and a generic method has no vtable slot; declare it in an 'impl' block, whose methods are called directly`; `__init__` takes none either ([Generic Methods](13-generics.md#generic-methods)) |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |
 | `impl` for another type | The block names a built-in type, an enum, or a class of another module |
