@@ -621,6 +621,11 @@ private:
   /// is a method of: this module emits them, as shared copies
   /// (declareDroppedCopyMethods, lowerDroppedCopyMethods).
   std::vector<std::pair<ast::StructDecl *, ast::FuncDecl *>> DroppedCopyMethods;
+  /// The same of the class copies: the methods of their `impl` blocks,
+  /// which are called directly (a class body's are its vtable's, which the
+  /// exporting module always defines).
+  std::vector<std::pair<ast::ClassDecl *, ast::FuncDecl *>>
+      DroppedClassCopyMethods;
   /// The functions of DroppedCopyMethods, shared like this module's copies
   /// (markShared).
   std::unordered_set<std::string> DroppedCopyFunctions;
@@ -1250,6 +1255,10 @@ private:
   /// Emit the bodies: each method, and the constructor (zero the value,
   /// then `__init__`).
   Val lowerStructDecl(ast::StructDecl *sd);
+  /// Emit the body of @p funcDecl, a method of @p node's class @p ct, into
+  /// the function declareClass declared for it.
+  void lowerClassMethod(ast::ClassDecl *node, ast::ClassType *ct,
+                        ast::FuncDecl *funcDecl);
   /// Emit the body of @p funcDecl, a method of @p sd's struct @p st, into
   /// the function declareStruct declared for it.
   void lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,

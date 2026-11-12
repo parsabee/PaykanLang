@@ -1,0 +1,8 @@
+// Calls a method of `Box<int>` that `makes` does not.
+import gen;
+import makes;
+
+fn three(x: int) -> int {
+  let b: mut = gen::Box<int>(x);
+  return b.bump(1) + makes::one(x);
+}

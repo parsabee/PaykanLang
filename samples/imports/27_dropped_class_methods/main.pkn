@@ -1,0 +1,23 @@
+// OK: the methods of an `impl` block that an import's file dropped from a
+// generic class's instance.  `makes` instantiates `Box<int>` and `Pair<int,
+// bool>` for itself and calls only `Pair.first`, so its compiled code has
+// none of the other methods; this program and `bumps` call them (`plain`,
+// `bump`, an `async` one, `second`) and each emits what it calls as a
+// shared copy.  It was an assertion in the lowering on the second run,
+// when `makes` came from the module cache.
+// expect-stdout: 33 False 5 9
+import ::io;
+import gen;
+import makes;
+import bumps;
+
+fn main() -> int {
+  let b: mut = gen::Box<int>(8);
+  let p = gen::Pair<int, bool>(4, False);
+  let s: atomic shared gen::Box<int> = gen::Box<int>(5);
+  let sum = b.plain() + makes::one(2) + makes::two(3) + bumps::three(6)
+      + b.bump(9);
+  io::println(Str(sum) + " " + Str(p.second()) + " " + Str(await s.later())
+      + " " + Str(b.v));
+  return 0;
+}
