@@ -167,6 +167,130 @@ static std::vector<std::string> runBackends() {
   return out;
 }
 
+// -- Tasks at every optimization level
+
+// A program with an `async fn` at every level, run and built.  A task's body
+// keeps its variables in its coroutine's frame: one first used after the
+// last `await`, in a loop and before one of several `return`s, is there
+// when the task goes on.  -O0 optimizes nothing (such a program took the
+// -O1 pipeline): `pick`'s sum is not folded.
+TEST(Driver, AsyncProgramsAtEveryLevel) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+class N { v: int; }
+async fn one(i: int) -> int { return i; }
+fn noisy(i: int) -> int { if i == 3 { io::println("three"); } return i % 7; }
+fn pick() -> int { a = 40; b = 2; return a + b; }
+async fn run(n: int) -> int {
+  let k = await one(n);
+  cnt = 0;
+  best: N? = None;
+  for i in 0..k {
+    if noisy(i) > 2 { best = N(i); cnt += 1; }
+  }
+  r = cnt;
+  match best { v: N { r += v.v; } None { } }
+  return r;
+}
+async fn early(i: int) -> int {
+  let a = await one(i);
+  if a < 0 { return -1; }
+  return a;
+}
+fn main() -> int {
+  io::println(Str(await run(10)) + " " + Str(await early(1)) + " " + Str(pick()));
+  return 0;
+}
+)");
+  const std::string want = "three\n10 1 42\n";
+  const std::string exe = src + ".exe";
+  // `paykan <opt> build <src> -o <exe> && <exe>`.
+  auto builtAndRun = [&](const char *opt) {
+    std::string cmd = paykanRun();
+    cmd += " ";
+    cmd += opt;
+    cmd += " build ";
+    cmd += src;
+    cmd += " -o ";
+    cmd += exe;
+    cmd += " 2>&1 && ";
+    cmd += exe;
+    cmd += " 2>&1";
+    return run(cmd);
+  };
+  for (const char *opt : {"-O0", "-O1", "-O2", "-O3"}) {
+    auto [rc, out] = run(paykanRun() + " " + opt + " " + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << opt << "\n" << out;
+    EXPECT_EQ(out, want) << opt;
+    auto [brc, bout] = builtAndRun(opt);
+    EXPECT_EQ(brc, 0) << opt << "\n" << bout;
+    EXPECT_EQ(bout, want) << opt;
+    std::filesystem::remove(exe);
+  }
+  auto [rc0, o0] = run(paykanRun() + " -O0 --emit-llvm " + src + " 2>&1");
+  EXPECT_EQ(rc0, 0) << o0;
+  EXPECT_EQ(o0.find("i64 42"), std::string::npos) << o0;
+  auto [rc1, o1] = run(paykanRun() + " -O1 --emit-llvm " + src + " 2>&1");
+  EXPECT_EQ(rc1, 0) << o1;
+  EXPECT_NE(o1.find("i64 42"), std::string::npos) << o1;
+  std::filesystem::remove(src);
+}
+
+// Where a task's slots are.  The address of a slot of an inlined method (a
+// container's `push`) that the optimizer computes ahead of a loop with an
+// `await` is good after the wait: the slot is in the frame, not on the
+// stack of the part that suspended (it crashed at -O3).  A value held in
+// memory is in the frame, on the heap, even when it is used only after the
+// last `await`: a chain of 3000 tasks waiting on each other, which the
+// runtime resumes inside one another, does not put 3000 such values on one
+// stack.
+TEST(Driver, ATasksSlotsAcrossAWait) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+import ::collections as cl;
+async fn one(i: int) -> int { return i; }
+async fn f(n: int) -> int {
+  acc = n;
+  q = cl::Queue<int>();
+  names = cl::List<Str>();
+  a = [7; 8];
+  v = 0;
+  if n > 0 { v = await f((n - 1) / 2); }
+  for i in 0..4 {
+    q.enqueue(a[v % 8]);
+    names.push("s" + Str(acc % 100));
+    names.push("s" + Str(a[i % 8]));
+    names.push("s" + Str(a[v % 8]));
+    acc = (acc + await one(i)) % 100003;
+  }
+  return (acc + v) % 100003;
+}
+async fn rec(n: int) -> int {
+  if n == 0 { return 0; }
+  let sub = await rec(n - 1);
+  buf = [0; 1024];
+  for i in 0..1024 { buf[i] = sub + i; }
+  return buf[n % 1024] - n % 1024 + 1;
+}
+fn main() -> int {
+  io::println(Str(await f(5)) + " " + Str(await rec(3000)));
+  return 0;
+}
+)");
+  for (const char *opt : {"-O0", "-O1", "-O2", "-O3"}) {
+    auto [rc, out] = run(paykanRun() + " " + opt + " " + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << opt << "\n" << out;
+    EXPECT_EQ(out, "25 3000\n") << opt;
+  }
+  const std::string exe = src + ".exe";
+  auto [brc, bout] = run(paykanRun() + " -O3 build " + src + " -o " + exe +
+                         " 2>&1 && " + exe + " 2>&1");
+  EXPECT_EQ(brc, 0) << bout;
+  EXPECT_EQ(bout, "25 3000\n");
+  std::filesystem::remove(exe);
+  std::filesystem::remove(src);
+}
+
 // -- The --check-only flag
 
 TEST(Driver, CheckOnlySucceedsOnValidInput) {

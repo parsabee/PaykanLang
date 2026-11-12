@@ -179,7 +179,8 @@ runProgramMLIR(const pir::Program &program,
   if (!module)
     return {-1, "", module.status().message(), false};
   // As the driver's `run` (MLIRBackend.cpp): the host layout and the LLVM
-  // pipeline at -O0, which still splits the coroutines of an `async fn`.
+  // pipeline at -O0, which optimizes nothing and splits the coroutines of
+  // an `async fn`.
   if (Status s = llvm_codegen::prepareForJIT(**module, /*optLevel=*/0); !s)
     return {-1, "", s.message(), false};
   return runJITModule(std::move(*module), std::move(llvmCtx), args);

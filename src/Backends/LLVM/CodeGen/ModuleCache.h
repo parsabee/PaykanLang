@@ -98,7 +98,8 @@ linkModules(const pir::Program &program,
             std::vector<std::unique_ptr<llvm::Module>> parts,
             const std::string &name);
 
-/// Run LLVM's default pipeline for -O@p level (none for -O0).
+/// Run LLVM's default pipeline for -O@p level: none for -O0, but for a
+/// module with a coroutine (an `async fn`), which the O0 pipeline splits.
 void optimizeModule(llvm::Module &module, unsigned level);
 
 } // namespace paykan::llvm_codegen

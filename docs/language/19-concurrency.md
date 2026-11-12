@@ -1917,9 +1917,7 @@ one.
 - A program that calls into runtime pieces that are not thread-safe from a task (standard
   input) is not protected.
 - No channels, no cancellation, no event loop of the program's own, and no `join`: `await` in
-  ordinary code blocks the thread. A program with an `async fn` is compiled with the `-O1`
-  pipeline under `-O0`: the coroutines of MLIR's async runtime do not survive an unoptimized
-  split in this version.
+  ordinary code blocks the thread.
 - A task handle has one operation, `await`, which spends it; the compiler requires every
   handle in a variable to be awaited (or moved) before its scope ends, so that no task is
   dropped while it runs, and does not follow one stored in a field, an element or a tuple.
