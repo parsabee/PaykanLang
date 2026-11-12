@@ -2293,6 +2293,75 @@ TEST(Pkm, ADeinitIsInTheModuleFile) {
   fs::remove_all(dir);
 }
 
+// A struct's `__deinit__` is in its module's interface: a value of it has
+// its byte more in the importer too, which runs the module's `__deinit__`
+// where the value is destroyed, in what the importer builds around it, in
+// an instance of the module's generic struct, and for a value the module's
+// own code made and handed over.
+TEST(Pkm, AStructsDeinitIsInTheModuleFile) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_vdeinit_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "guards.pkn",
+            "import ::io;\n"
+            "struct Guard { id: int; tag: Str; }\n"
+            "impl Guard {\n"
+            "  fn __deinit__() {\n"
+            "    io::println(\"release \" + Str(self.id) + self.tag);\n"
+            "  }\n"
+            "}\n"
+            "struct Wrap<T> { v: T; n: int; }\n"
+            "impl Wrap<T> { fn __deinit__() { io::println(\"wrap\"); } }\n"
+            "class Keeper { g: Guard; }\n"
+            "fn make(i: int) -> Guard { return Guard(i, \"!\"); }\n"
+            "fn keep(g: Guard) -> Keeper { return Keeper(move g); }\n"
+            "fn eat(g: Guard) -> int { return g.id; }\n");
+  writeFile(dir / "main.pkn",
+            "import guards;\n"
+            "import ::io;\n"
+            "struct Mine { g: guards::Guard; n: int; }\n"
+            "impl Mine { fn __deinit__() { io::println(\"mine\"); } }\n"
+            "fn main() -> int {\n"
+            "  {\n"
+            "    let a = guards::make(1);\n"
+            "    let m = Mine(guards::Guard(2, \"\"), 0);\n"
+            "    let w = guards::Wrap<guards::Guard>(guards::make(3), 1);\n"
+            "    let arr = [guards::make(4), guards::make(5)];\n"
+            "    io::println(\"scope \" + Str(arr[1].id + m.n + w.n));\n"
+            "  }\n"
+            "  let k = guards::keep(guards::make(6));\n"
+            "  io::println(\"kept \" + Str(k.g.id));\n"
+            "  let n = guards::eat(guards::make(7));\n"
+            "  io::println(\"ate \" + Str(n));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  auto made = paykan("--emit-pkm --module-name=guards -o lib/guards.pkm "
+                     "guards.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  auto dump = paykan("pkm dump --section=iface lib/guards.pkm");
+  EXPECT_TRUE(contains(dump.out, "method __deinit__() -> void")) << dump.out;
+  const std::string want =
+      "scope 6\nrelease 4!\nrelease 5!\nwrap\nrelease 3!\nmine\nrelease 2\n"
+      "release 1!\nkept 6\nrelease 7!\nate 7\nrelease 6!\n";
+  // Twice: the second run links the module's cached code.
+  for (const char *args :
+       {"--module-path=lib main.pkn", "--module-path=lib main.pkn",
+        "-O 2 --module-path=lib main.pkn"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, want) << args;
+  }
+  auto built = paykan("build --module-path=lib main.pkn -o prog && ./prog");
+  EXPECT_EQ(built.exitCode, 0) << built.out;
+  EXPECT_EQ(built.out, want);
+  fs::remove_all(dir);
+}
+
 // What an importer checks of an `async fn` it only has the module file of:
 // its arguments' send check, the receiver an async method borrows, that it
 // is no value, and the colour of an override.

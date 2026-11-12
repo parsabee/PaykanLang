@@ -80,6 +80,9 @@ copied around like a number. A struct can be generic, like a class
 - Methods: `impl Point { fn shift(d: int) { self.x = self.x + d; } }`.  In a method
   `self` **is the receiver's storage**: `p.shift(1)` changes `p`.  A `view fn` reads
   `self` only; a `static fn` is called as `Point::origin()`.
+- `fn __deinit__() { ... }` in an `impl` block runs once when a value of the struct is
+  destroyed ([below](#running-code-when-a-value-is-destroyed-__deinit__)).  A struct that
+  declares one is **move-only**, whatever its fields are.
 - `==` / `!=` compare **field by field**; `toString()` (and `io::println`) renders
   `Point(x: 1, y: 2)`.  Every struct implements `ValueType`, and `Showable` when each field
   does (not one holding a function value);
@@ -435,6 +438,172 @@ compare with `==`).  A method's parameter `other: view Self` names the struct it
 
 ---
 
+## Running code when a value is destroyed: `__deinit__`
+
+A struct that has something to do when a value of it goes away, such as giving back what it
+took, declares `fn __deinit__()` in an `impl` block. It takes nothing and returns nothing,
+as a class's does ([Classes](05-classes.md#deinitializers)), and runs once for each value,
+where the value's storage ends, while its fields are still alive.
+
+```pkn
+import ::io;
+import ::memory as mem;
+
+struct Lock { name: Str; }
+
+impl Lock {
+  fn __deinit__() { io::println("unlock " + self.name); }
+}
+
+class Session { held: Lock; user: Str; }
+
+fn hold(l: Lock) { io::println("holding " + l.name); }
+
+fn main() -> int {
+  let a = Lock("a");
+  {
+    let b = Lock("b");
+    io::println("inner");
+  }                                      // b's scope ends
+  hold(move a);                          // a moves into hold, and ends there
+  c = Lock("c");
+  c = Lock("d");                         // the value assigned over
+  let s: mut = Session(move c, "ann");   // d moves into the object
+  let old = mem::replace(s.held, Lock("e"));
+  io::println("done");
+  return 0;                              // old (d), then s and the lock it holds (e)
+}
+```
+
+Output:
+
+```
+inner
+unlock b
+holding a
+unlock a
+unlock c
+done
+unlock d
+unlock e
+```
+
+**One value.** A struct with a `__deinit__` is move-only, whatever its fields are: a copy
+would be a second value to destroy. `q = p` is an error (`cannot copy 'p' (a 'Lock'); write
+'move p' to transfer it`), and so is passing it by copy, or capturing it (`cannot capture 'p'
+(a unique 'Lock'): a function captures by copy`). `move`, a `return` of
+the variable and a `mem::replace` hand the one value on, and it is destroyed where it ends
+up, not where it was. The struct is not `Copyable`, and it is `Cloneable` only with a
+`clone` of its own, since only its own code can say what a second value is:
+
+```pkn
+struct Slot { id: int; }
+
+impl Slot {
+  fn __deinit__() { }
+}
+
+impl Cloneable for Slot {
+  view fn clone() -> Self { return Slot(self.id + 1); }
+}
+
+fn main() -> int {
+  let a = Slot(1);
+  let b = a.clone();
+  return b.id - a.id - 1;
+}
+```
+
+A struct, a tuple, a fixed-size array, an optional or an enum that holds one is move-only
+with it (`cannot copy 'p': 'Pair' holds unique field 'g' ('Guard')`), and each but the enum
+is Cloneable when it is: its `clone` calls the struct's.
+
+**Where it runs.** A value is destroyed where its storage ends:
+
+- a variable's, when its scope ends: a scope's variables go in the reverse of the order they
+  were declared in, objects and values alike;
+- a parameter's, when the function returns (a `view` or `inout` parameter is the caller's
+  value, and ends nothing);
+- a temporary's, once the expression that made it has used it. A part read out of a
+  temporary into a variable, a field or an element leaves it (`let l = pair().first;`): the
+  part is the variable's, and the rest of the temporary goes;
+- the value an assignment replaces, once the new one is in its place (`c = Lock("d")`
+  above): a `__deinit__` that reaches the storage its value was in finds the new value
+  there;
+- a field's, an element's or a payload's, when the object or the value that holds it is
+  destroyed, or the optional or enum holding it is assigned another value.
+
+The struct's own `__deinit__` runs first, and its fields are released after it, in order: a
+field that is a struct with a `__deinit__` runs its own then. An object's `__deinit__`s run
+before those of the values in its fields. A value that was moved runs nothing where it was.
+As with a class's, a panic aborts the program and runs none.
+
+**In `__deinit__`**, `self` is the value's storage, as in any method: the code reads and
+changes the fields, calls the struct's other methods, and lends `self` to a `view`
+parameter and its fields to `inout` ones. It cannot hand the value on (`cannot copy 'self'
+(a 'Lock'); a method borrows its receiver`), `await` (`'await' cannot be used in
+'__deinit__': a value is destroyed where its storage ends, which waits for no task`), or be
+called by name (`'__deinit__' cannot be called directly; it runs when the value is
+destroyed`).
+
+What a method of such a struct is called on stays the value it is: no method of it lends
+`self` whole to an `inout` parameter or an `inout` local, or returns it `inout`, which
+could put another value there (`'self' cannot be passed to 'inout' parameter 'slot': a
+'Lock' has a '__deinit__', and what a method is called on stays the value it is (lend its
+fields)`). In `__deinit__`
+that would hand on the value being destroyed, and leave one that is never destroyed.
+
+**While a `match` binding reads it.** A binding of a value in a variable or a field
+(`match o { l: Lock { ... } None { } }`) looks at the value where it is. Nothing counts a
+value, so what the binding reads is not replaced until its arm ends: `o = None` in that arm
+is `'o' cannot be assigned here: 'match' binding 'l' reads a value of it that runs a
+'__deinit__' where it is replaced, until its arm ends`, and so is writing the field,
+lending it `inout`, or calling a method that changes the object holding it (`s.release()`
+while a binding reads `s.held`). Another field of the holder is written as usual. `match
+move o` binds the value itself, and an `inout` binding has it for the arm.
+
+What a `match` only looks at is destroyed after it: a subject read from a temporary (an
+object a call made, the value a `view` result is in) keeps the temporary until the match
+ends, and a part matched out of a temporary of its own (`match make().o { ... }`) is the
+match's until then. Two looks are refused, since the temporary would end first: a `view`
+local of a part of a temporary (`'v' cannot be a 'view' of 'make(...).o': it is a part of
+a temporary, which is destroyed with the statement, and a 'Lock?' runs a '__deinit__'
+there; bind the value itself ('let v = ...')`), and a branch of a conditional subject that
+reads a temporary it does not leave.
+
+A `__deinit__` runs on the whole value, so a field does not leave a struct that has one by
+`move` (`cannot move 'g.name' out of 'g': a 'Guard' has a '__deinit__', which runs on the
+whole value; write 'mem::replace(g.name, v)'`).
+
+A generic struct's `__deinit__` goes in a block of every instance, `impl Holder<T>`: one in
+a conditional block is an error (`'__deinit__' cannot be in a conditional 'impl' block:
+every 'Holder<T>' is destroyed the same way; declare it in 'impl Holder<T>'`), also when
+the block's bounds only repeat the struct's own. An enum has none of its own; it runs those
+of the structs in its payloads.
+
+A struct with a `__deinit__` implements the built-in trait `Deinitializable`
+([Traits](06-traits.md#deinitializable)).
+
+**Not yet:**
+
+- A `mem::Buffer<T>` runs no `__deinit__` for its elements, so a buffer, and a container
+  built on one (`cl::List<Lock>`), cannot hold such a value (`a buffer cannot hold a 'Lock'
+  yet: its elements run no '__deinit__' when the buffer lets them go; hold each in a
+  'mem::Box<Lock>'`). A `mem::Box<Lock>` is an object holding the value, which a buffer
+  holds as any object. `cl::LinkedList<Lock>` and `cl::HashMap<K, Lock>` hold their
+  elements in objects and work, unless the struct is `Cloneable`: their `toList()`,
+  `keys()` and `values()` then make a `cl::List` of it, and the same error is reported
+  inside `::collections`.
+- A value has no count. The compiler refuses to replace a value that a `match` binding or
+  a `view` argument reads where it can see it (above; a call that reads and writes one
+  variable's parts is refused as for any value). It cannot see code that reaches the object
+  holding the value through another `shared mut` reference: such code can replace the value
+  while it is read, and the reader then reads it after its `__deinit__` ran. What the value
+  holds is still alive (the reader's own references keep it), but what the `__deinit__`
+  gave up is gone.
+
+---
+
 ## Equality, `toString` and Traits
 
 `==` and `!=` compare two structs of the same type field by field: value fields by value,
@@ -684,6 +853,15 @@ Point(x: 4, y: 2) 6 True
 | `__super__` | in a struct's `__init__` |
 | Assigning `self` | `self = A(1)` in a method |
 | Duplicate method | two `fn m()` across `impl` blocks; `fn toString()` |
+| `__deinit__` declared otherwise | One with a parameter, a result type or no body, or declared `static`, `view`, `shared` or `async`: `'__deinit__' takes no parameters ('fn __deinit__() { ... }' runs when the value is destroyed)`; two of them; one in a conditional `impl` block of a generic struct (see [`__deinit__`](#running-code-when-a-value-is-destroyed-__deinit__)) |
+| `__deinit__` called or waiting | `g.__deinit__()`; an `await` in its body |
+| Copying a struct with a `__deinit__` | `q = p` or `f(p)`: `cannot copy 'p' (a 'Lock'); write 'move p' to transfer it`; a capture of `p`: `cannot capture 'p' (a unique 'Lock'): a function captures by copy`; `p.clone()` without an `impl Cloneable for Lock` block: `a struct with a '__deinit__' is Cloneable only with an 'impl Cloneable for Lock' block` |
+| Moving a field out of a struct with a `__deinit__` | `n = move g.name`: write `mem::replace(g.name, v)` |
+| `self` lent `inout` whole in a struct with a `__deinit__` | `mem::replace(self, v)`, `x: inout = self`, `fn me() -> inout Lock { return self; }` in one of its methods: `'self' cannot be passed to 'inout' parameter 'slot': a 'Lock' has a '__deinit__', and what a method is called on stays the value it is (lend its fields)` |
+| Replacing what a `match` binding reads | `match o { l: Lock { o = None; } None { } }`: `'o' cannot be assigned here: 'match' binding 'l' reads a value of it that runs a '__deinit__' where it is replaced, until its arm ends` |
+| A look into a temporary that ends first | `v: view = make().o;` for a `Lock?` part; a branch of a conditional `match` subject reading a part of a shared temporary object: `a branch of a 'match' subject cannot read 'make(...).o': it is in a temporary, which is destroyed before the arms run` |
+| A part leaving a temporary object that runs a `__deinit__` | `let g = makeObject().g;` where the object's class has one: `cannot move 'makeObject(...).g' out of 'makeObject(...)': a 'Loud' has a '__deinit__', which runs on the whole object` |
+| A buffer of structs with a `__deinit__` | `mem::Buffer<Lock>`, `cl::List<Lock>`: `a buffer cannot hold a 'Lock' yet` |
 | A method named `destroy` | `fn destroy()` or `static fn destroy()` in an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in struct 'P' (a struct has none)` |
 | `let` field assignment | `let a = A(1); a.x = 2;` |
 | Field of a struct in an object that is not `mut` | `let s = Shape(Point(0, 0)); s.at.x = 7;`: `'s' is immutable (a 'Shape'; write 'mut Shape' to change it); cannot assign to its field 'x'` |
@@ -718,6 +896,11 @@ with `<`.
   ([Memory](16-memory.md#ownership-transfers)).  A
   method takes the receiver's address as its first argument, and a `view fn` the same;
   a constructor writes its result into the caller's storage.
+- A struct with a `__deinit__` has one byte more than its fields, after the last of them
+  (it counts toward the 64 bytes an optional's value may have): whether the storage holds a
+  value still to destroy. The constructor sets it, a move
+  clears it where the value was, and each place that lets the storage go runs the
+  `__deinit__` only where it is set. `==` and `toString` do not see it.
 - `toString` and `==` go through the struct's layout, constant data the compiler emits
   for each struct type that is printed or compared ([PIR](../pir.md)): the field count,
   the struct's name, then each field's name and the words a tuple element has.

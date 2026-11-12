@@ -288,6 +288,13 @@ bool Sema::sharesStorage(const ast::Type *ty) {
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
     return sharesStorage(ft->getElementType());
   if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    // A struct that runs a `__deinit__` is one value however plain its
+    // fields: a copy of it would be a second one to destroy (#378).  (In
+    // this walk, not by ast::holdsDeinit at each step of it: a tuple of
+    // tuples is looked into once.)
+    if (const auto *st = ast::dyn_cast<ast::StructType>(tt);
+        st && st->getDeinitMethod())
+      return true;
     for (const ast::Type *e : tt->getElementTypes())
       if (sharesStorage(e))
         return true;

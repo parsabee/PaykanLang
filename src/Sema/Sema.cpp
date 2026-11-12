@@ -1659,7 +1659,8 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
               : form;
       return true;
     }
-    error(subject->getLocation(), msg);
+    if (!msg.empty())
+      error(subject->getLocation(), msg);
   } else {
     // `n: view T` is a `view` local of the subject, whatever the subject is,
     // reading it in its form (#368).
@@ -2496,9 +2497,12 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     if (S.CurrentClassCtx &&
         S.CurrentClassCtx->MethodName == names::kMethodDeinit) {
       S.error(node->getLocation(),
-              "'await' cannot be used in '__deinit__': an object is "
-              "destroyed where its last reference goes, which waits for no "
-              "task");
+              std::string("'await' cannot be used in '__deinit__': ") +
+                  (S.CurrentClassCtx->Struct
+                       ? "a value is destroyed where its storage ends"
+                       : "an object is destroyed where its last reference "
+                         "goes") +
+                  ", which waits for no task");
       return nullptr;
     }
     // A task variable awaited in an operand that runs on some paths only
@@ -3584,8 +3588,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // would run again then, on an object that is in use until it does.
   if (node->getMethodName() == names::kMethodDeinit) {
     S.error(node->getLocation(),
-            "'__deinit__' cannot be called directly; it runs when the object "
-            "is destroyed");
+            std::string("'__deinit__' cannot be called directly; it runs "
+                        "when the ") +
+                (st ? "value" : "object") + " is destroyed");
     return nullptr;
   }
   // A struct's methods are those of its `impl` blocks, called directly.
@@ -5138,6 +5143,8 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // in turn): checked last, like C++ instantiates at the end of the TU.
   if (!checkPendingInstantiations())
     ok = false;
+  if (!checkBufferElements())
+    ok = false;
 
   // Each of the module's templates once more, with a move-only class for
   // each parameter without bounds: its copies need `T: Copyable` (#368).
@@ -5335,6 +5342,13 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
     return false;
   if (std::string why = viewedBy(name); !why.empty()) {
     error(loc, why + "; it cannot be assigned");
+    return false;
+  }
+  if (const std::string binding = lookedAtBy(name); !binding.empty()) {
+    error(loc, "'" + name + "' cannot be assigned here: 'match' binding '" +
+                   binding +
+                   "' reads a value of it that runs a '__deinit__' where it "
+                   "is replaced, until its arm ends");
     return false;
   }
   if (ast::dyn_cast<ast::SliceType>(CurrentScope->lookup(name))) {
@@ -6933,6 +6947,27 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       !checkParallelWrite(node->getInitExpr(), nullptr, "bound 'inout'",
                           node->getLocation()))
     viewOk = false;
+  // A `view` of a part of a temporary would read it after the temporary,
+  // which ends with the statement, ran the part's `__deinit__` (#378).
+  if (node->getMode() == ast::ParamMode::View && node->getInitExpr() &&
+      ast::holdsDeinit(declTy) && partLeavesTemporary(node->getInitExpr())) {
+    error(node->getLocation(),
+          "'" + node->getName() + "' cannot be a 'view' of '" +
+              placeText(node->getInitExpr()) +
+              "': it is a part of a temporary, which is destroyed with the "
+              "statement, and a '" +
+              typeName(declTy) +
+              "' runs a '__deinit__' there; bind the value itself ('let " +
+              node->getName() + " = ...')");
+    viewOk = false;
+  }
+  if (std::string why = node->getMode() == ast::ParamMode::Inout
+                            ? wholeSelfLent(node->getInitExpr())
+                            : std::string();
+      !why.empty()) {
+    error(node->getLocation(), "'self' cannot be bound 'inout': " + why);
+    viewOk = false;
+  }
   // An `inout` local is the borrow's writes (a unique one's: a shared
   // form is its own, #368).
   if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy) &&
@@ -7125,9 +7160,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   // (an immutable or a frozen object's cells are usable).
   if (auto *at = ast::dyn_cast<ast::AtomicType>(fieldTy))
     return checkAtomicMemberAssign(node, at);
-  if (ast::isa<ast::StructType>(recvTy) &&
-      !checkParallelWrite(node->getReceiver(), nullptr, "written",
-                          node->getLocation()))
+  if (ast::isa<ast::StructType>(recvTy)
+          ? !checkParallelWrite(node->getReceiver(), nullptr, "written",
+                                node->getLocation(), &node->getFieldName(),
+                                fieldTy)
+          : !checkNotLookedAt(node->getReceiver(), "written",
+                              node->getLocation(), &node->getFieldName()))
     return false;
 
   const bool path = ast::isa<ast::MemberAccessExpr>(node->getReceiver()) ||
@@ -7446,6 +7484,10 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   // Record the subject type so the lowering can pick the right form (in
   // particular, distinguish an enum subject from a class subject).
   node->getSubject()->setResolvedType(subjectTy);
+  // A part of a temporary matched on leaves it for the match (#378), as
+  // one read into a variable does (checkCopyRule).
+  if (!noteLeavesTemporary(node->getSubject()))
+    return false;
 
   // The arms' moves join after the match (the prototype's move analysis).
   MatchMovesGuard matchMoves(*this, node);

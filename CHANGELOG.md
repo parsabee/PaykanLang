@@ -31,6 +31,19 @@ samples/concurrency/README.md.
   and so does taking a `locked mut` cell's contents `inout`. No field leaves by `move` an
   object that runs one (`cannot move 'c.name' out of 'c': a 'C' has a '__deinit__', which runs
   on the whole object`): its class's, a superclass's, or one of a class the module derives.
+- `__deinit__` for structs (#378; docs/language/11-structs.md, "Running code when a value is
+  destroyed"): `fn __deinit__() { ... }` in a struct's `impl` block runs once where a value
+  of the struct is destroyed: at the end of the scope of the variable holding it, with the
+  object or the value it is a part of, or where it is assigned over. A struct that declares
+  one is move-only whatever its fields are, `Cloneable` only by a `clone` of its own, and
+  `Deinitializable`; a field does not leave it by `move`. Its values have one byte more than
+  their fields, which says whether the storage still holds a value. A `mem::Buffer` (and so a
+  `cl::List`) cannot hold such a struct yet: box it. A scope's variables are now let go in
+  the reverse of the order they were declared in, objects and values in one order (values
+  held in memory used to go after the references). A `__deinit__` cannot be in a conditional
+  `impl` block of a generic class or struct. A `parallel for` body that writes an element of
+  an array of the enclosing function, or hands it to an `inout` parameter, now counts as
+  destroying what may be there, an object or a value, in the par-safe check.
 - The built-in trait `Sendable` (#378; docs/language/06-traits.md, "Sendable"): the types whose
   ownership can move to another thread, which is what the send check finds. It has no methods and
   no `impl` block gives it. `T: Sendable` bounds a template that sends its value, makes it `atomic

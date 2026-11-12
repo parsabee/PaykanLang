@@ -218,6 +218,10 @@ Val ModuleLowering::lowerStructDecl(ast::StructDecl *sd) {
           Val(pir::Operand::value(ctorFn->Params[i]), ctorFn->Params[i].Ty));
     B.call(initFn->Name, initFn->Sig, initArgs);
   }
+  // A value of a struct with a `__deinit__` from here (deinitFlagOffset).
+  if (st->getDeinitMethod())
+    B.ptrStore(B.ptrAdd(out, Val::i64(deinitFlagOffset(st)), "live.addr"),
+               Val::boolean(true));
   B.emitRetVoid();
   return Val();
 }

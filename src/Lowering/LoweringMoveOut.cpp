@@ -210,6 +210,10 @@ bool ModuleLowering::holdsUnique(const ast::Type *ty) {
     return false;
   }
   if (const auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    // A struct with a `__deinit__` is one value, wherever its bytes go
+    // (#378): it moves as what holds a unique reference does.
+    if (st->getDeinitMethod())
+      return true;
     for (size_t i = 0; i < st->getArity(); ++i)
       if (st->findFieldQualifier(st->getFieldName(i)).Form ==
               ast::QualForm::Unique &&

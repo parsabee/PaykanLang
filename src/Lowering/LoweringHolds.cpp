@@ -1104,6 +1104,7 @@ struct ModuleLowering::EffectScan {
     Out.Releases = Out.Releases || holdsReference(ty);
     Out.add(L.dropEffect(ty));
   }
+
   void store(const std::string &name);
   void storeField(ast::Expr *recv, const std::string &field);
   /// A store its caller may see into what @p place names: an object's
@@ -1704,7 +1705,7 @@ const ModuleLowering::Effect &ModuleLowering::dropEffect(ast::Type *ty) {
   // a value of the type again.
   DropEffects[ty] = Effect::unknown();
   Effect e;
-  // What a dying object's `__deinit__` does is the drop's to do (#378): the
+  // What a dying value's `__deinit__` does is the drop's to do (#378): the
   // program's code, which may store and let go as any call may.
   auto runs = [&](const std::string &owner) {
     e.add(effectOf(bodyOf(owner + names::kNameSep + names::kMethodDeinit)));
@@ -1727,6 +1728,8 @@ const ModuleLowering::Effect &ModuleLowering::dropEffect(ast::Type *ty) {
         if (ast::StructType *p = et->getPayload(i))
           work.push_back(p);
     } else if (auto *st = ast::dyn_cast<ast::StructType>(t)) {
+      if (st->getDeinitMethod())
+        runs(st->getName());
       for (size_t i = 0; i < st->getNumFields(); ++i) {
         ast::Type *elem = bufferElementOf(st, st->getFieldName(i));
         if (elem)
@@ -1780,7 +1783,8 @@ ModuleLowering::Effect ModuleLowering::handedOver(const ast::Expr *by) {
   bool given = false;
   if (const auto *ce = by ? ast::dyn_cast<ast::CallExpr>(by) : nullptr) {
     args = &ce->getArguments();
-    makes = ASTCtx.lookupClassType(ce->getCalleeName()) != nullptr;
+    makes = ASTCtx.lookupClassType(ce->getCalleeName()) != nullptr ||
+            ASTCtx.lookupStructType(ce->getCalleeName()) != nullptr;
   } else if (const auto *mc =
                  by ? ast::dyn_cast<ast::MethodCallExpr>(by) : nullptr) {
     args = &mc->getArguments();
@@ -1830,6 +1834,8 @@ const ModuleLowering::Effect &ModuleLowering::deinitEffect(ast::Type *ty,
         if (ast::StructType *p = et->getPayload(i))
           work.push_back({p, false});
     } else if (auto *st = ast::dyn_cast<ast::StructType>(t)) {
+      if (st->getDeinitMethod())
+        runs(st->getName());
       for (size_t i = 0; i < st->getNumFields(); ++i) {
         ast::Type *elem = bufferElementOf(st, st->getFieldName(i));
         work.push_back({elem ? elem : st->getElementType(i), false});

@@ -586,6 +586,23 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// an owned variable leaves its slot, and the variable ends.  The field's
   /// type, or nullptr after an error.
   ast::Type *checkPartialMove(ast::UnaryExpr *node, ast::MemberAccessExpr *ma);
+  /// Whether @p e is a part read out of a temporary of its own: a field, an
+  /// element or a tuple member of a value no place holds, or of a unique
+  /// object that is one.  Such a part leaves the temporary (#378).  A part
+  /// of what a call lent (a `view` or `inout` result) stays where it is.
+  bool partLeavesTemporary(const ast::Expr *e);
+  /// Marks the parts of @p subject, a `match` subject or a branch of a
+  /// conditional that is one, that leave a temporary and run a `__deinit__`
+  /// (Expr::setLeavesTemporary).  False, with an error, for a branch that
+  /// looks at such a value in a temporary it does not leave: the temporary
+  /// ends with the branch, before the arms run.
+  bool noteLeavesTemporary(ast::Expr *subject, bool branch = false);
+  /// Why @p e cannot be lent `inout` whole (#378): it is the `self` of a
+  /// method of a struct with a `__deinit__`, which stays the value it is
+  /// (a callee or a borrow could put another there: in `__deinit__`, or in
+  /// a method it calls, the value being destroyed would be handed on and
+  /// the new one never destroyed).  Empty otherwise.
+  std::string wholeSelfLent(const ast::Expr *e) const;
   /// Why no field leaves an object of @p ct by `move` (#378): a
   /// `__deinit__` that may run on the object, which is its class's, a
   /// superclass's, or one of a class this module derives from it, and reads
@@ -646,6 +663,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool OpenWorld = false;
   /// The unit being checked (visitTranslationUnit).
   const ast::TranslationUnit *Unit = nullptr;
+  /// The places of the enclosing function that each `parallel for` body
+  /// writes (checkParallelWrite): what is there was made anywhere, and the
+  /// body may destroy it (#378), which the par-safe check counts.
+  /// (With the type of the field written, where the write is of one.)
+  std::unordered_map<const ast::ForStmt *,
+                     std::vector<std::pair<const ast::Expr *, ast::Type *>>>
+      ParallelOuterWrites;
   /// Whether @p owner, the scope a name is bound in, is outside the
   /// innermost `parallel for`.
   bool isOuterScope(Scope *owner) const;
@@ -668,7 +692,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// the enclosing function changes only in an array, through a subscript
   /// that is the variable of each loop it is outside of (#368).
   bool checkParallelWrite(const ast::Expr *place, const ast::Expr *last,
-                          const std::string &how, ast::SourceLocation loc);
+                          const std::string &how, ast::SourceLocation loc,
+                          const std::string *field = nullptr,
+                          ast::Type *fieldTy = nullptr);
   /// The body reads the element @p e: of the read of its root just made.
   void noteParallelElementRead(const ast::Expr *e);
   /// The body's read of the name @p root reads no element of it.
@@ -716,6 +742,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool isAtomicPlace(const ast::Expr *e);
   /// `move` of a variable a live plain `match` binding reads is refused.
   bool checkNotReadByArm(const std::string &name, ast::SourceLocation loc);
+  /// The `match` binding that looks at a value running a `__deinit__` in
+  /// the place @p path (`o`, `d.slot`), in a part of it or in what holds it
+  /// (#378): nothing counts a value, so what the binding reads is not
+  /// replaced until its arm ends.  Empty for none.
+  std::string lookedAtBy(const std::string &path) const;
+  /// Reports @p place, or its field @p field, being @p how ("written",
+  /// "passed 'inout'") while a `match` binding looks at such a value there
+  /// (lookedAtBy).
+  bool checkNotLookedAt(const ast::Expr *place, const std::string &how,
+                        ast::SourceLocation loc,
+                        const std::string *field = nullptr);
   /// The classes the send check let cross: every class derived from one,
   /// the instances too, is checked once the module's are all known.
   std::unordered_set<const ast::ClassType *> CrossedClasses;
@@ -3061,6 +3098,17 @@ private:
     const ModuleTemplates *Origin;
   };
   std::vector<PendingTraitImpl> PendingTraitImpls;
+  /// A `mem::Buffer<T>` made for the element type Elem.  A buffer's
+  /// elements are the runtime's to destroy, which runs no `__deinit__`
+  /// (#378): whether Elem holds a struct with one is known once the
+  /// module's `impl` blocks are, so the check waits (checkBufferElements).
+  struct BufferElementCheck {
+    ast::Type *Elem;
+    /// The instantiations that asked for it, the buffer's own last.
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<BufferElementCheck> BufferElementChecks;
+  bool checkBufferElements();
   /// A bounded `impl` block (`impl Box<T: Cloneable>`) of an instance made
   /// before what its bounds ask could be told: before the module's `impl`
   /// blocks were recorded, or while another instance was being made, its

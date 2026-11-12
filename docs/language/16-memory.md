@@ -149,6 +149,16 @@ that release returns.
 Cleanup that must happen at end of life goes in the class's `__deinit__`, which `destroy`
 runs before it releases the fields; what the fields hold is released automatically after it.
 
+A struct can declare a `__deinit__` too
+([Structs](11-structs.md#running-code-when-a-value-is-destroyed-__deinit__)). A value has
+no count: one with a `__deinit__` is move-only, so it is in one place at a time, and its
+`__deinit__` runs where that place ends: the scope of the variable holding it, the object
+or the value it is a part of, the assignment that replaces it. A value that was moved runs
+nothing where it was.
+
+When a scope ends, its variables are let go in the reverse of the order they were declared
+in, references and values alike: the last one declared goes first.
+
 ## Assignment, Passing, and Returning
 
 For reference types, the counting is balanced so an object stays alive exactly as long as some

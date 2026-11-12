@@ -115,7 +115,7 @@ void ModuleLowering::Scope::declare(const std::string &name, pir::LocalId local,
     DeclOrder.push_back({local, astTy});
   }
   if (memHoldsRefs(astTy))
-    MemVars.push_back({local, astTy});
+    DeclOrder.push_back({local, astTy, false, true});
 }
 
 void ModuleLowering::Scope::declareWeak(const std::string &name,
@@ -969,23 +969,27 @@ void ModuleLowering::emitScopeCleanup(Scope &scope, bool wayOut) {
     emitWriteBack(*it);
   // Reverse declaration order (LIFO).
   for (auto it = scope.DeclOrder.rbegin(); it != scope.DeclOrder.rend(); ++it) {
+    if (it->Mem) {
+      const Val local = B.localAddr(it->Local, "mem.addr");
+      if (wayOut)
+        emitMemDrop(local, it->ASTType);
+      else
+        emitMemRelease(local, it->ASTType);
+      continue;
+    }
     assert(it->ASTType && ast::isCountedRef(it->ASTType) &&
-           "DeclOrder must only contain ref-typed variables");
+           "an owned variable is a counted reference or a value in memory");
     if (it->Weak)
       B.weakRelease(B.load(it->Local));
     else
       emitRelease(B.load(it->Local));
   }
-  for (auto it = scope.MemVars.rbegin(); it != scope.MemVars.rend(); ++it) {
-    const Val local = B.localAddr(it->Local, "mem.addr");
-    if (wayOut)
-      emitMemDrop(local, it->ASTType);
-    else
-      emitMemRelease(local, it->ASTType);
-  }
   for (auto it = scope.PendingReleases.rbegin();
        it != scope.PendingReleases.rend(); ++it)
     emitRelease(*it);
+  // (Pushed last one first: in the order releaseMemTemps would go.)
+  for (const auto &[v, ty, len] : scope.PendingMemTemps)
+    releaseMemTemp(v, ty, len);
 }
 
 void ModuleLowering::emitAllScopesCleanup() {
@@ -1214,6 +1218,17 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
   val = coerceBoolToI64(val, localTy);
   B.store(local, val);
   return val;
+}
+
+bool ModuleLowering::isTailReturnLeaf(const ast::Expr *e) const {
+  // The value returned, or a branch of the conditional that is.
+  std::function<bool(const ast::Expr *)> in = [&](const ast::Expr *r) {
+    if (r == e)
+      return true;
+    const auto *te = r ? ast::dyn_cast<ast::TernaryExpr>(r) : nullptr;
+    return te && (in(te->getTrueExpr()) || in(te->getFalseExpr()));
+  };
+  return TailReturn && in(TailReturn);
 }
 
 Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
@@ -2266,6 +2281,7 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
     if (viewResult) {
       B.memCopy(memResult, result, Val::i64(memLayout(retTy).Size));
       emitMemRetain(memResult, retTy);
+      emitMemMovedOut(memResult, retTy); // the value stays where it is
     }
     return memResult;
   }
