@@ -2382,7 +2382,9 @@ private:
                                  uint8_t flags, bool &ok);
 
   /// Phase 4 for the `impl` blocks of @p cd's class: their methods join it.
-  bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct);
+  /// Those of the block @p only alone, when given.
+  bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
+                           const ast::ImplDecl *only = nullptr);
 
   /// Give @p cd, which declares no `__init__`, the default one: it takes the
   /// superclass constructor's arguments and then one per field of the class,
@@ -2453,7 +2455,9 @@ private:
   bool populateStructs();
   bool populateStructType(ast::StructDecl *sd, ast::StructType *st);
   /// Phase 4 for the `impl` blocks of @p sd's struct: their methods join it.
-  bool populateImplMethods(ast::StructDecl *sd, ast::StructType *st);
+  /// Those of the block @p only alone, when given.
+  bool populateImplMethods(ast::StructDecl *sd, ast::StructType *st,
+                           const ast::ImplDecl *only = nullptr);
   /// Give @p sd, which declares no `__init__`, the default one: one
   /// parameter per field, in order, stored into the field.
   bool declareDefaultInit(ast::StructDecl *sd, ast::StructType *st);
@@ -2801,10 +2805,8 @@ private:
     ~MakingInstance() {
       S.MakingInstances.pop_back();
       S.ImplScopeMethod = SavedMethod;
-      // The outermost: every instance it asked for is whole.
-      if (S.MakingInstances.empty() && S.TraitImplsKnown &&
-          !S.PendingAsyncResults.empty())
-        S.checkPendingAsyncResults();
+      if (S.MakingInstances.empty())
+        S.instancesMade();
     }
     MakingInstance(const MakingInstance &) = delete;
     MakingInstance &operator=(const MakingInstance &) = delete;
@@ -2902,8 +2904,10 @@ private:
   /// Declare the `static fn`s of the `impl` blocks of the instantiation
   /// @p instName of @p type (ImplsByClass) as the functions `Inst::name`,
   /// their bodies pending like @p base, the instantiation's own entry.
+  /// Those of the block @p only alone, when given.
   void declareInstantiationStatics(const std::string &instName, ast::Type *type,
-                                   const PendingInstantiation &base);
+                                   const PendingInstantiation &base,
+                                   const ast::ImplDecl *only = nullptr);
 
   /// Instantiations in creation order; injected into the TranslationUnit at
   /// the end of run() so they are lowered.
@@ -2967,6 +2971,8 @@ private:
     std::vector<InstantiationFrame> Frames;
   };
   std::vector<PendingBoundCheck> PendingBoundChecks;
+  /// Set while checkPendingBounds runs the checks that waited.
+  bool CheckingPendingBounds = false;
   /// The send check of an `async fn`'s result (checkAsyncDecl).
   struct PendingAsyncResult {
     const ast::FuncDecl *Fn;
@@ -3045,6 +3051,72 @@ private:
     const ModuleTemplates *Origin;
   };
   std::vector<PendingTraitImpl> PendingTraitImpls;
+  /// A bounded `impl` block (`impl Box<T: Cloneable>`) of an instance made
+  /// before what its bounds ask could be told: before the module's `impl`
+  /// blocks were recorded, or while another instance was being made, its
+  /// fields not all known.  The block joins the instance, when its bounds
+  /// hold, once that is known (joinLateImpls).
+  struct LateImpl {
+    const ast::Decl *Template;
+    ast::ImplDecl *Impl; // the template's block
+    std::string Inst;
+    std::vector<ast::Type *> Args;
+    const ModuleTemplates *Origin;
+    /// The instantiations in progress where the instance was asked for,
+    /// then its own request.
+    std::vector<InstantiationFrame> Frames;
+    /// The instance's own entry (its declaration, its templates): none
+    /// when the instance was not made.
+    std::optional<PendingInstantiation> Base;
+  };
+  std::vector<LateImpl> LateImpls;
+  /// Set once the module's `impl` blocks, and the `impl ... for` copies of
+  /// the instances made before them, are recorded (checkImplDecls): what a
+  /// type implements can be told from then on.
+  bool ConformancesKnown = false;
+  /// An empty `impl Cloneable for C {}` whose class has a field that was
+  /// not whole when the block was read: whether `clone` can be derived is
+  /// checked once it is (checkPendingCloneDerives).
+  struct PendingCloneDerive {
+    std::string Name;
+    const ast::ClassType *Class;
+    ast::SourceLocation Loc;
+    const ModuleTemplates *Origin;
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<PendingCloneDerive> PendingCloneDerives;
+  /// Whether the `clone` of `impl Cloneable for @p name {}` can be derived
+  /// from the fields of @p ct: reported at @p loc when one has no clone.
+  bool checkCloneDerive(const std::string &name, const ast::ClassType *ct,
+                        ast::SourceLocation loc);
+  bool checkPendingCloneDerives();
+  /// How many of LateImpls joinLateImpls has done.
+  size_t LateImplsDone = 0;
+  bool JoiningLateImpls = false;
+  /// The instances whose fields are being resolved.
+  std::unordered_set<const ast::Type *> HalfMade;
+  /// Whether what @p ty holds and implements can be told: not when it is,
+  /// or names, a type of this module or an instance before the module's
+  /// `impl` blocks are recorded (ConformancesKnown), an instance being
+  /// made, or one a block of LateImpls may still join.
+  bool isWhole(const ast::Type *ty) const;
+  /// Whether the bounded block @p im of an instance asked for with @p args
+  /// (of a class when @p ofClass) waits in LateImpls: when an argument is
+  /// not whole.  One that lays the type out does not: a class's `clone`,
+  /// which is virtual, and `__init__`.
+  bool joinsLater(const ast::ImplDecl *im, bool ofClass,
+                  const std::vector<ast::Type *> &args) const;
+  /// The copy of the template's block @p im for the instance @p instName
+  /// with @p args, added to the instance's blocks (ImplsByClass).
+  ast::ImplDecl *cloneImplFor(ast::ImplDecl *im, const std::string &instName,
+                              const std::vector<ast::Type *> &args,
+                              bool foreign);
+  /// Join the blocks of LateImpls whose bounds hold to their instances.
+  bool joinLateImpls();
+  /// The outermost instance being made is whole, and so is every instance
+  /// it asked for: what waited for that is done (joinLateImpls,
+  /// checkPendingAsyncResults).
+  void instancesMade();
   static constexpr size_t kMaxInstantiationDepth = 16;
   /// The longest name an instantiation made inside an instantiation of its
   /// own template that would make it again with ever deeper type arguments

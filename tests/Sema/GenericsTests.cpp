@@ -1114,6 +1114,180 @@ fn main() -> int { b = Box<int>(1); return 0; }
   std::filesystem::remove_all(dir);
 }
 
+// A conditional block joins the instances whose arguments meet its
+// bounds, whatever the order of the declarations: an argument declared
+// after the instance is first named, or one that holds the instance, is
+// judged once its fields and `impl` blocks are known.
+TEST(Generics, AConditionalBlockIsDecidedOnceItsArgumentIsKnown) {
+  auto r = semaCheck(R"(struct Box<T> { v: T; }
+impl Box<T: Hashable> {
+  view fn h() -> int { return self.v.hash(); }
+  static fn make(v: T) -> Box<T> { return Box<T>(move v); }
+}
+impl Hashable for Box<T: Hashable> {
+  view fn hash() -> int { return self.v.hash() + 1; }
+}
+impl Box<T: Cloneable> {
+  view fn dup() -> Box<T> { return Box<T>(self.v.clone()); }
+}
+class Holder { b: Box<Key>?; bb: Box<Box<Key>>?; t: Box<Tree>?; }
+class Key { n: int; }
+impl Hashable for Key { view fn hash() -> int { return self.n; } }
+class Tree { kid: Box<Tree>?; n: int; }
+impl Cloneable for Tree {
+  view fn clone() -> Self { return Tree(None, self.n); }
+}
+class Node<T> { next: Box<Node<T>>?; v: T; }
+impl Cloneable for Node<T: Cloneable> {
+  view fn clone() -> Self { return Node<T>(None, self.v.clone()); }
+}
+class Many<T> { one: T?; }
+impl Many<T: Cloneable> { view fn has() -> bool { return self.one != None; } }
+enum Rose { Leaf(v: int), Fork(kids: Many<Rose>) }
+fn need<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  let b = Box<Key>::make(Key(5));
+  let bb = Box<Box<Key>>(Box<Key>(Key(7)));
+  let t = Box<Tree>(Tree(None, 1)).dup();
+  let n = Box<Node<int>>(Node<int>(None, 5)).dup();
+  return b.h() + need(b) + bb.h() + need(bb) + t.v.n + n.v.v;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // An argument that is a struct, or an instance, is judged the same way:
+  // by what it implements once the module's blocks are recorded, and once
+  // it is whole.
+  for (const char *src :
+       {// A struct argument declared after the instance is first named.
+        R"(struct Box<T> { v: T; }
+impl Box<T: Hashable> { view fn h() -> int { return self.v.hash(); } }
+class Holder { b: Box<Key>?; }
+struct Key { n: int; }
+impl Hashable for Key { view fn hash() -> int { return self.n; } }
+fn main() -> int { let b = Box<Key>(Key(5)); return b.h() - 5; }
+)",
+        // A struct that holds a class instance of itself.
+        R"(struct Box<T> { v: T; }
+impl Box<T: Hashable> { view fn h() -> int { return 1; } }
+class Node<T> { v: T?; }
+struct S { n: Node<S>?; }
+fn main() -> int { let b = Box<S>(S(None)); return 0; }
+)",
+        // An instance whose own conformance waits with the module's.
+        R"(struct Box<T> { v: T; }
+impl Box<T: Hashable> { view fn h() -> int { return self.v.hash(); } }
+impl Hashable for Box<T: Hashable> {
+  view fn hash() -> int { return self.v.hash() + 1; }
+}
+class Holder { bb: Box<Box<int>>?; }
+fn need<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  let bb = Box<Box<int>>(Box<int>(7));
+  return bb.h() + need(bb);
+}
+)",
+        // A conformance recorded after another block of the same type,
+        // whose own check makes an instance.
+        R"(trait Conv<T> { view fn n() -> int; }
+struct Wrap<T> { v: T; }
+struct Box<T> { v: T; }
+impl Box<T: Hashable> { view fn h() -> int { return self.v.hash(); } }
+class Key { n: int; }
+impl Hashable for Key { view fn hash() -> int { return self.n; } }
+struct Pair<T> { a: T; }
+impl Conv<Wrap<bool>> for Pair<T> { view fn n() -> int { return 1; } }
+impl Hashable for Pair<T> { view fn hash() -> int { return 5; } }
+class Holder { b: Box<Pair<Key>>?; }
+fn main() -> int {
+  let b = Box<Pair<Key>>(Pair<Key>(Key(1)));
+  return b.h() - 5;
+}
+)",
+        // A bound checked in a field of an instance being made, met by
+        // a conformance that waits for that instance.
+        R"(struct Box<T> { v: T?; }
+impl Hashable for Box<T: Showable> { view fn hash() -> int { return 1; } }
+struct Set<K: Hashable> { n: int; }
+class Node<T> { v: T; kids: Set<Box<Node<T>>>; }
+fn main() -> int {
+  let n = Node<int>(1, Set<Box<Node<int>>>(0));
+  return n.kids.n;
+}
+)",
+        // A half-made struct instance as the argument.
+        R"(class Wrap<X> { x: X?; }
+impl Wrap<X: Hashable> { view fn h() -> int { return 1; } }
+struct P<T> { v: T; kid: Wrap<P<T>>; }
+impl Hashable for P<T> { view fn hash() -> int { return 2; } }
+fn main() -> int { let w = Wrap<P<int>>(None); return w.h() - 1; }
+)",
+        // An instance whose template holds a class declared later.
+        R"(async fn eat<T: Sendable>(x: T) -> int { return 1; }
+struct Wrap<T> { v: T; }
+impl Wrap<T: Sendable> {
+  static fn send(x: T) -> int { return await eat(move x); }
+}
+class Pair<T> { a: T; k: Key; }
+class Holder { w: Wrap<Pair<int>>?; }
+class Node { v: int; }
+class Key { n: shared Node; }
+fn main() -> int { return 0; }
+)"}) {
+    auto ok = semaCheck(src);
+    EXPECT_TRUE(ok.Ok) << src << "\n" << ok.Diagnostics;
+  }
+  // Two blocks that give one method under different bounds: the instance
+  // has the one whose bound its argument meets, wherever it is first named.
+  auto two = semaCheck(R"(struct Box<T> { v: T; }
+impl Box<T: Hashable> { view fn f() -> int { return 1; } }
+impl Box<T: Cloneable> { view fn f() -> Str { return "2"; } }
+class Holder { b: Box<Key>?; }
+class Node { v: int; }
+struct Key { n: Node; }
+impl Hashable for Key { view fn hash() -> int { return 1; } }
+fn main() -> int { let b = Box<Key>(Key(Node(1))); return b.f() - 1; }
+)");
+  EXPECT_TRUE(two.Ok) << two.Diagnostics;
+  // A derived `clone` is told of its fields once they are whole.
+  auto derive = semaCheck(R"(struct Box<T> { v: T; }
+class Other { kids: Box<Box<Tree>>; }
+impl Cloneable for Other {}
+class Tree { kids: Box<Box<Leaf>>; }
+impl Cloneable for Tree {}
+class Leaf { n: int; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(derive.ErrorCount, 1u) << derive.Diagnostics;
+  EXPECT_NE(derive.Diagnostics.find(
+                ":5:1: error: 'impl Cloneable for Tree {}' cannot derive "
+                "'clone': its field 'kids' ('Box<Box<Leaf>>') has no clone"),
+            std::string::npos)
+      << derive.Diagnostics;
+  // And only those: a block's method is no method of the others.
+  auto no = semaCheck(R"(struct Box<T> { v: T; }
+impl Box<T: Hashable> { view fn h() -> int { return self.v.hash(); } }
+async fn eat<T>(x: T) -> int { return 1; }
+impl Box<T: Sendable> {
+  static fn send(x: T) -> int { return await eat(move x); }
+}
+class Holder { b: Box<Plain>?; }
+class Plain { n: int; }
+class Node { v: int; }
+class Tree { kid: Box<Tree>?; tag: shared Node; }
+struct Key { n: shared Node; }
+class Late { k: Box<Key>?; }
+fn main() -> int {
+  let b = Box<Plain>(Plain(1));
+  return b.h();
+}
+)");
+  EXPECT_EQ(no.ErrorCount, 1u) << no.Diagnostics;
+  EXPECT_NE(
+      no.Diagnostics.find(":15:10: error: no method 'h' on type 'Box<Plain>'"),
+      std::string::npos)
+      << no.Diagnostics;
+}
+
 // Instantiation names are global (OD-9 b): a program's own `_Heap<int>`
 // clashes with the one `::collections` makes of its private `_Heap<T>`, and
 // its own `Result<Str, Error>` with the one `::io` brings in.  The clash is

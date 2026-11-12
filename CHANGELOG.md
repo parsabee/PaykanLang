@@ -406,6 +406,12 @@ samples/concurrency/README.md.
 - A write through a local that borrowed an `inout` arm's binding (`o: inout Open { x: inout =
   o.balance; x = x + 5; }`) was lost: the binding went back to the subject after its own last
   mention, before the write. A borrow of the binding keeps it in use.
+- A conditional `impl` block (`impl Box<T: Hashable>`) was decided where its instance was first
+  named. When that was a field of a class declared before the type argument (or the argument
+  held the instance itself), the argument's own `impl` blocks and fields were not known yet:
+  the instance lost a block it should have (`no method 'h' on type 'Box<Key>'`) or got one it
+  should not, and an enum that held a `cl::List` of itself did not compile. The block now
+  joins the instance once the argument is known.
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is

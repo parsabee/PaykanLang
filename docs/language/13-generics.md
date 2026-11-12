@@ -190,6 +190,22 @@ Fix it where the value goes:
 
 The message names the parameter as the code does, an `impl R<U>` block's `U` included.
 
+Whether an instance has a conditional block is decided from its type arguments, wherever the
+instance is first named: an argument declared later in the file, one that is itself an
+instance, or one that holds the instance (`class Tree { kids: Box<Tree>?; }`), is judged
+once its fields and its `impl` blocks are known. A bound on a field's type (`kids:
+Set<Box<Node<T>>>`) and the `clone` an empty `impl Cloneable for` block derives wait for the
+same. Two blocks lay a type out and are decided where the instance is first named, so name
+it after the argument's declaration: an `impl Cloneable for` block of a generic class, and a
+block that declares `__init__`.
+
+A class is Sendable when no class derived from it holds what does not cross, and an instance
+of a generic class is derived where it is first named. So a block bounded `Sendable` may
+have joined `Box<Base>` before a `Sub<T> : Base` that holds a `shared` reference is first
+named; the block's sends are then refused in that instance (`'Base' does not implement trait
+'Sendable' ... (of class 'Sub<Node>', derived from 'Base')`). Name the subclass's instance
+first.
+
 A parameter sent to another thread is reported the same way, by its missing `T: Sendable`
 ([Sendable](06-traits.md#sendable)): a `T` given to a task, made `atomic shared` or `locked`,
 returned from an `async fn` or handed to a template that needs `T: Sendable` (`'T' is not

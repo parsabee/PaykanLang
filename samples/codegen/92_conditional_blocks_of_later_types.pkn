@@ -1,0 +1,91 @@
+// 92 — a conditional `impl` block of an instance named before its argument
+// Exercises: a block bounded on its type parameter (`impl Box<T: Hashable>`)
+//            joins the instances whose arguments meet the bound, and whether
+//            one does is known once the argument's fields and `impl` blocks
+//            are: `Box<Key>` is first named in a class declared before
+//            `Key`, `Box<Tree>` in `Tree` itself, and `cl::List<Rose>` in
+//            the enum it holds.  `Box<Key>` had no `h`, and `Rose` did not
+//            compile (`'Rose' is not Cloneable`, from the list's own
+//            conditional block).
+// expect-stdout: 5 6 8 9
+// expect-stdout: 2 7
+import ::io;
+import ::collections as cl;
+
+struct Box<T> {
+  v: T;
+}
+
+impl Box<T: Hashable> {
+  view fn h() -> int             { return self.v.hash(); }
+
+  static fn make(v: T) -> Box<T> { return Box<T>(move v); }
+}
+
+impl Hashable for Box<T: Hashable> {
+  view fn hash() -> int { return self.v.hash() + 1; }
+}
+
+impl Box<T: Cloneable> {
+  view fn dup() -> Box<T> { return Box<T>(self.v.clone()); }
+}
+
+class Holder {
+  b: Box<Key>?;
+  bb: Box<Box<Key>>?;
+}
+
+class Key {
+  n: int;
+}
+
+impl Hashable for Key {
+  view fn hash() -> int { return self.n; }
+}
+
+class Tree {
+  kid: Box<Tree>?;
+  n: int;
+}
+
+impl Cloneable for Tree {
+  view fn clone() -> Self { return Tree(None, self.n + 1); }
+}
+
+enum Rose {
+  Leaf(v: int),
+  Fork(kids: cl::List<Rose>)
+}
+
+fn need<T: Hashable>(x: view T) -> int {
+  return x.hash();
+}
+
+fn total(r: view Rose) -> int {
+  match r {
+    l: view Leaf {
+      return l.v;
+    }
+    f: view Fork {
+      s = 0;
+      for i in 0..f.kids.len() {
+        s += total(f.kids.at(i));
+      }
+      return s;
+    }
+  }
+}
+
+fn main() -> int {
+  let b = Box<Key>::make(Key(5));
+  let bb = Box<Box<Key>>(Box<Key>(Key(7)));
+  io::println(Str(b.h()) + " " + Str(need(b)) + " " + Str(bb.h()) + " "
+      + Str(need(bb)));
+  let t = Box<Tree>(Tree(None, 1)).dup();
+  kids = cl::List<Rose>();
+  kids.push(Rose::Leaf(3));
+  kids.push(Rose::Leaf(4));
+  let r = Rose::Fork(move kids);
+  io::println(Str(t.v.n) + " " + Str(total(r)));
+  return 0;
+}
