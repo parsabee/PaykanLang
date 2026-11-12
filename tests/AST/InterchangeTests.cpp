@@ -1787,6 +1787,42 @@ TEST(Interchange, TraitsRoundTrip) {
   EXPECT_EQ(write(*back), text);
 }
 
+// A `final class` ends with `(final)`, which takes no fields.
+TEST(Interchange, FinalClassesRoundTrip) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_final_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "final class Leaf { n: int; }\n"
+                           "class Open { n: int; }\n"
+                           "final class Box<T> { v: T; }\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  EXPECT_NE(text.find("(methods)\n      (final))"), std::string::npos) << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  ASSERT_EQ(back->getClassDecls().size(), 2u);
+  EXPECT_TRUE(back->getClassDecls()[0]->isFinal());
+  EXPECT_FALSE(back->getClassDecls()[1]->isFinal());
+  ASSERT_EQ(back->getGenericClassDecls().size(), 1u);
+  EXPECT_TRUE(back->getGenericClassDecls()[0]->isFinal());
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+
+  const size_t at = text.find("(final)");
+  ASSERT_NE(at, std::string::npos);
+  std::string bad = text;
+  bad.replace(at, 7, "(final 1)");
+  ast::ASTContext ctx2;
+  EXPECT_EQ(read(bad, ctx2, error), nullptr);
+  EXPECT_NE(error.find("(final) takes no fields"), std::string::npos) << error;
+}
+
 TEST(Interchange, ImplBlockRoundTrips) {
   parser::ParserDriver driver("recursive-descent");
   auto path =

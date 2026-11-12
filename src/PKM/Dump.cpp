@@ -190,8 +190,9 @@ void dumpIface(const File &f, std::ostream &os) {
       os << "    fields in { " << list(e.PayloadVariants) << " }\n";
   }
   for (const ClassRec &c : i.Classes) {
-    os << "  class " << c.Name << " super " << quoted(c.SuperClassName) << " ["
-       << origin(c.IsLocal, c.OriginModule) << "]\n";
+    os << (c.Final ? "  final class " : "  class ") << c.Name << " super "
+       << quoted(c.SuperClassName) << " [" << origin(c.IsLocal, c.OriginModule)
+       << "]\n";
     for (const ClassRec::Field &fl : c.Fields)
       os << "    " << (fl.Weak ? "weak " : "") << "field " << fl.FieldName
          << ": " << fl.TypeName << "\n";

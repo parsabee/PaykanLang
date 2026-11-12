@@ -1,0 +1,61 @@
+// 95 — `final class`: a class no class extends
+// Exercises: a `final class` declared and used as any class; its object is
+//            of exactly its class, so a field leaves it by `move` (what a
+//            class that could be extended elsewhere allows only in a
+//            program's main module) and a `parallel for` body calls its
+//            methods; a generic class marked `final`; a final class that
+//            extends another.
+// expect-stdout: if else
+// expect-stdout: 14
+// expect-stdout: Word(while) 5
+import ::io;
+
+final class Token {
+  text: Str;
+
+  view fn width() -> int { return self.text.len(); }
+}
+
+class Node {
+  label: Str;
+
+  view fn toString() -> Str { return "Node(" + self.label + ")"; }
+}
+
+final class Word : Node {
+  n: int;
+
+  view fn toString() -> Str { return "Word(" + self.label + ")"; }
+}
+
+impl Word {
+  fn __init__(label: Str) { __super__(move label); self.n = self.label.len(); }
+}
+
+final class Slot<T> {
+  v: T;
+}
+
+fn text(t: Token) -> Str {
+  return move t.text;   // a Token is nothing but a Token
+}
+
+fn widths(n: int) -> int {
+  total = 0;
+  parallel for i in 0..n {
+    let t = Token("token");
+    total += t.width() + i;
+  }
+  return total;
+}
+
+fn main() -> int {
+  io::println(text(Token("if")) + " " + text(Token("else")));
+  io::println(Str(widths(2) + Slot(3).v));
+  let w: Node = Word("while");
+  match w {
+    x: Word { io::println(x.toString() + " " + Str(x.n)); }
+    _ { io::println("a node"); }
+  }
+  return 0;
+}

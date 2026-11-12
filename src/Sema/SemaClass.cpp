@@ -511,9 +511,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     ast::ClassType *superClass = nullptr;
     if (cd->hasSuperClass() && !SuperclassLost.count(cd->getName())) {
       superClass = Ctx.lookupClassType(cd->getSuperClassName());
-      // Non-inheritable (final) classes cannot be subclassed.
-      // Currently this covers built-in types like Str; it will also apply
-      // to user-defined `final` classes once that keyword is added.
+      // A final class cannot be subclassed: `Str`, and a class declared
+      // `final class`.
       if (superClass && superClass->isFinal()) {
         error(cd->getLocation(), "cannot inherit from '" +
                                      cd->getSuperClassName() +
@@ -525,7 +524,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     }
     if (!superClass)
       superClass = Ctx.getObjTy();
-    Ctx.preRegisterClassType(cd->getName(), superClass);
+    Ctx.preRegisterClassType(cd->getName(), superClass)
+        ->setFinal(cd->isFinal());
   }
 
   // Phase 4: Populate field types and method signatures for each class.  A
@@ -2665,6 +2665,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     superClass = Ctx.getObjTy();
 
   ast::ClassType *ct = Ctx.preRegisterClassType(instName, superClass);
+  ct->setFinal(tmpl->isFinal());
   // Cache before populating: a self-referential field (`next: Node<T>`)
   // resolves to this very type instead of recursing.
   ClassInstantiations[instName] = ct;

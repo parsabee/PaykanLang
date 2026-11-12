@@ -711,6 +711,8 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
   header("ClassDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams(), node->getTypeParamBounds());
+  if (node->isFinal())
+    OS << " final";
   if (node->hasSuperClass())
     OS << " : " << node->getSuperClassName();
   OS << "\n";

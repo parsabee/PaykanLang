@@ -174,6 +174,11 @@ private:
     for (const FuncDecl *m : d.getMethods())
       funcDecl(*m, /*bodiless=*/true); // a pure virtual method's is `_`
     close();
+    // `final class`: a trailing (final).
+    if (d.isFinal()) {
+      open("final");
+      close();
+    }
     close();
   }
 

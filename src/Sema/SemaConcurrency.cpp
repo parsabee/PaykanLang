@@ -1911,12 +1911,13 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
     }
     // A `__deinit__` runs on the whole object: one that may run on this
     // one would read the field after it left (#378).
-    if (const std::string why = ct ? deinitOfObject(ct) : std::string();
+    bool finalHelps = false;
+    if (const std::string why =
+            ct ? deinitOfObject(ct, &finalHelps) : std::string();
         !why.empty()) {
       error(loc, "cannot move '" + placeText(link) + "' out of '" +
                      placeText(link->getReceiver()) + "': " + why +
-                     ", which runs on the whole object; write 'mem::replace(" +
-                     placeText(link) + ", v)'");
+                     keepWholeAdvice(ct, finalHelps, placeText(link)));
       return nullptr;
     }
     // In a template's code, the part moved holding a type argument's
@@ -2028,12 +2029,33 @@ std::string Sema::wholeSelfLent(const ast::Expr *e) const {
          "value it is (lend its fields)";
 }
 
-std::string Sema::deinitOfObject(const ast::ClassType *ct) const {
+std::string Sema::keepWholeAdvice(const ast::ClassType *ct, bool finalHelps,
+                                  const std::string &place) const {
+  std::string advice = ", which runs on the whole object; ";
+  if (finalHelps) {
+    advice += "declare '";
+    advice += ct->getName();
+    advice += "' a 'final class', or ";
+  }
+  advice += "write 'mem::replace(";
+  advice += place;
+  advice += ", v)'";
+  return advice;
+}
+
+std::string Sema::deinitOfObject(const ast::ClassType *ct,
+                                 bool *finalHelps) const {
+  if (finalHelps)
+    *finalHelps = false;
   for (const ast::ClassType *c = ct; c; c = c->getSuperClass())
     if (c->getDeinitMethod())
       return c == ct ? "a '" + ct->getName() + "' has a '__deinit__'"
                      : "a '" + ct->getName() + "' runs the '__deinit__' of '" +
                            c->getName() + "'";
+  // No class derives from a `final class`, from an instance of a generic
+  // class or from `Str`.
+  if (ct->isFinal() || ct->getName().find('<') != std::string::npos)
+    return "";
   // The classes this module derives from it.  (One another module derives
   // is not known here: docs/language/16-memory.md, "Fields and elements".)
   if (!Unit)
@@ -2068,8 +2090,10 @@ std::string Sema::deinitOfObject(const ast::ClassType *ct) const {
              "', which runs the '__deinit__' of '" +
              (own ? cd->getName() : with->getName()) + "'";
   }
+  bool own = false;
   for (const ast::ClassDecl *cd : Unit->getClassDecls()) {
     const ast::ClassType *d = Ctx.lookupClassType(cd->getName());
+    own = own || d == ct;
     const ast::ClassType *with = nullptr;
     for (const ast::ClassType *c = d; c && c != ct; c = c->getSuperClass()) {
       if (c->getDeinitMethod() && !with)
@@ -2079,7 +2103,22 @@ std::string Sema::deinitOfObject(const ast::ClassType *ct) const {
                "', which runs the '__deinit__' of '" + with->getName() + "'";
     }
   }
-  return "";
+  // Only a program's main module knows every class derived from one of its
+  // own (as for a virtual call in a `parallel for` body): another module
+  // may derive one from any other class that is not `final`, with a
+  // `__deinit__`.
+  const auto &free = Unit->getFuncDecls();
+  const bool program =
+      !OpenWorld &&
+      std::any_of(free.begin(), free.end(), [](const ast::FuncDecl *fn) {
+        return fn->getName() == names::kMain;
+      });
+  if (own && program)
+    return "";
+  if (finalHelps)
+    *finalHelps = own;
+  return "a class another module derives from '" + ct->getName() +
+         "' may declare a '__deinit__'";
 }
 
 bool Sema::checkMovable(const std::string &name, ast::SourceLocation loc,
@@ -2811,13 +2850,15 @@ bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
         const auto *ct =
             holder ? ast::dyn_cast<ast::ClassType>(ast::stripOptional(holder))
                    : nullptr;
-        if (const std::string why = ct ? deinitOfObject(ct) : std::string();
+        bool finalHelps = false;
+        if (const std::string why =
+                ct ? deinitOfObject(ct, &finalHelps) : std::string();
             !why.empty()) {
           error(src->getLocation(),
                 "cannot move '" + placeText(inner) + "' out of '" +
                     placeText(next) + "': " + why +
-                    ", which runs on the whole object; write 'mem::replace(" +
-                    placeText(inner) + ", v)' on a variable that holds it");
+                    keepWholeAdvice(ct, finalHelps, placeText(inner)) +
+                    " on a variable that holds it");
           return false;
         }
         p = next;
