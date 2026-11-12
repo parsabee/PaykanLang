@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <cstdint>
@@ -2889,33 +2890,53 @@ inline bool isMemType(const Type *ty) {
                 isFunctionValue(ty) || isMemOptional(ty) || isPayloadEnum(ty));
 }
 
+namespace detail {
+/// holdsDeinit's walk, with the tuples, structs and tagged unions it has
+/// looked into already in @p seen.
+inline bool holdsDeinitIn(const Type *ty, std::vector<const Type *> &seen) {
+  if (!ty)
+    return false;
+  if (const auto *qt = dyn_cast<QualifiedType>(ty))
+    return holdsDeinitIn(qt->getInnerType(), seen);
+  if (const auto *ot = dyn_cast<OptionalType>(ty))
+    return holdsDeinitIn(ot->getInnerType(), seen);
+  if (const auto *ft = dyn_cast<FixedArrayType>(ty))
+    return holdsDeinitIn(ft->getElementType(), seen);
+  if (const auto *st = dyn_cast<StructType>(ty); st && st->getDeinitMethod())
+    return true;
+  const auto *tt = dyn_cast<TupleType>(ty);
+  const auto *et = tt ? nullptr : dyn_cast<EnumType>(ty);
+  if (!tt && !et)
+    return false;
+  // A part met again holds what it held: `(T, T, T)`, nested eleven deep,
+  // names 3^11 parts and eleven types.
+  if (std::find(seen.begin(), seen.end(), ty) != seen.end())
+    return false;
+  seen.push_back(ty);
+  if (tt) {
+    for (const Type *e : tt->getElementTypes())
+      if (holdsDeinitIn(e, seen))
+        return true;
+    return false;
+  }
+  for (size_t i = 0; i < et->getNumVariants(); ++i)
+    if (const StructType *payload = et->getPayload(i);
+        payload && holdsDeinitIn(payload, seen))
+      return true;
+  return false;
+}
+} // namespace detail
+
 /// Whether a value of @p ty runs a struct's `__deinit__` when it is
 /// destroyed (#378): a struct that declares one, or a struct, tuple,
 /// fixed-size array, optional or tagged union that holds such a struct in
 /// place.  (An object runs its own, in its `destroy`.)
 inline bool holdsDeinit(const Type *ty) {
-  if (!ty)
+  // (Most types asked about are no aggregate: no list is made for them.)
+  if (!ty || isa<BuiltinType>(ty))
     return false;
-  if (const auto *qt = dyn_cast<QualifiedType>(ty))
-    return holdsDeinit(qt->getInnerType());
-  if (const auto *ot = dyn_cast<OptionalType>(ty))
-    return holdsDeinit(ot->getInnerType());
-  if (const auto *ft = dyn_cast<FixedArrayType>(ty))
-    return holdsDeinit(ft->getElementType());
-  if (const auto *st = dyn_cast<StructType>(ty); st && st->getDeinitMethod())
-    return true;
-  if (const auto *tt = dyn_cast<TupleType>(ty)) {
-    for (const Type *e : tt->getElementTypes())
-      if (holdsDeinit(e))
-        return true;
-    return false;
-  }
-  if (const auto *et = dyn_cast<EnumType>(ty))
-    for (size_t i = 0; i < et->getNumVariants(); ++i)
-      if (const StructType *payload = et->getPayload(i);
-          payload && holdsDeinit(payload))
-        return true;
-  return false;
+  std::vector<const Type *> seen;
+  return detail::holdsDeinitIn(ty, seen);
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.
