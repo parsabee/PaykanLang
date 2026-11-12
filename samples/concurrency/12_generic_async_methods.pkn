@@ -1,0 +1,43 @@
+// The concurrency prototype: a generic method can be `async` (#353).  Each
+// instantiation is a start function and its task, like any `async fn`; what
+// crosses into the task is the method's own type parameter to bound
+// `Sendable`.
+// expect-stdout: abc 5
+// expect-stdout: 5 8
+
+import ::io;
+
+class Box<T> {
+  v: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = move v; }
+
+  async view fn later<U: Sendable + Showable>(u: U) -> Str {
+    return u.toString();
+  }
+}
+
+class Meter {
+  base: int;
+}
+
+impl Meter {
+  async view fn sized<U: Sendable + Showable>(u: U) -> int {
+    return u.toString().len() + self.base;
+  }
+}
+
+fn main() -> int {
+  let frozen: atomic shared Box<int> = Box<int>(5);
+  let text = frozen.later("abc");     // U = Str, inferred
+  let size = frozen.later<int>(5);    // U written out
+  io::println(await text + " " + await size);
+
+  let meter: atomic shared Meter = Meter(1);
+  let a = meter.sized<int>(1234);
+  let b = meter.sized("seven..");
+  io::println(Str(await a) + " " + Str(await b));
+  return 0;
+}

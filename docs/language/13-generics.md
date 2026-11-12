@@ -226,6 +226,11 @@ A parameter bounded `Copyable` copies, so it is given a type that meets its boun
 not checked. A conditional block bounded `Copyable` on a parameter (`impl Pair<A: Copyable,
 B>`) is checked with such a type there, and the archetypes elsewhere.
 
+A generic method or generic `static fn` ([Generic Methods](#generic-methods)) is checked
+once too, with an archetype for each of its own parameters and, in a generic type, for each
+of the type's: `view fn twice<U>(u: U) -> (U, U) { return (u, u); }` needs `U: Copyable`
+whether or not anything calls it.
+
 What a copy needs is the code's own: a method's, its signature's, and a lambda's in it, a
 static fn's, a field's type, an enum's payload. A `T: Copyable` instance copies a `view` of
 its type argument's form as the argument copies: with `T` = `shared Node`, the copy is the
@@ -447,6 +452,8 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
 - A generic class's `impl` block can have `static fn`s; one is called on an
   instantiation, `Box<int>::of(3)` (or `m::Box<int>::of(3)` through an import), and is that
   instantiation's function.
+- A method of an `impl` block, and a `static fn`, can have type parameters of its own next
+  to the class's: see [Generic Methods](#generic-methods).
 
 A struct can be generic in the same way (`struct Pair<A, B> { a: A; b: B; }`, with
 `impl Pair<A, B>` blocks): see [Generic structs](11-structs.md#generic-structs). So can an
@@ -463,17 +470,168 @@ fn unbox<T>(b: Box<T>) -> T { return b.get(); }
 fn pick<A, B>(a: A, b: B) -> B { return b; }
 ```
 
-Only free functions can be generic: a method, in a class body or an `impl`
-block, and a `static fn` cannot declare their own type parameters (a generic
-class's or struct's methods use its parameters). `fn map<U>(x: U) -> U` in a
-class body is a syntax error, `a method cannot have type parameters of its own:
-only a free function is generic (the methods of a generic class or struct use
-its type parameters)`; a `static fn`'s says `a 'static fn' cannot ...`.
+A method of an `impl` block and a `static fn` can be generic too: see
+[Generic Methods](#generic-methods).
 
 A free function's parameter written without its type has a type parameter of
 its own, after the written ones: `fn pick(a, b) => b;` is generic in both
 parameters, as `fn pick<A, B>(a: A, b: B) => b;` is (see [Untyped
 Parameters](03-functions.md#untyped-parameters)).
+
+## Generic Methods
+
+A method of an `impl` block, and a `static fn`, can declare type parameters of
+its own, next to the type parameters of the type it belongs to:
+
+```pkn
+import ::io;
+
+class Box<T> {
+  v: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = move v; }
+
+  // `U` is the method's own type parameter; `T` is the class's.
+  view fn map<U>(f: (view T) -> U) -> Box<U> {
+    return Box<U>(f(self.v));
+  }
+
+  // A `static fn` with a type parameter of its own.
+  static fn withTag<U>(v: T, tag: U) -> (Box<T>, U) {
+    return (Box<T>(move v), move tag);
+  }
+}
+
+fn main() -> int {
+  let b = Box<int>(20);
+  let s = b.map(fn(n: view int) => "n=" + Str(n + 1));     // U = Str, inferred
+  let f = b.map<float>(fn(n: view int) => float(n) / 8.0);  // U written out
+  let t = Box<int>::withTag<Str>(7, "seven");               // both lists written
+  io::println(s.v + " " + Str(f.v) + " " + Str(t.0.v) + " " + t.1);
+  return 0;
+}
+```
+
+Output:
+
+```
+n=21 2.5 7 seven
+```
+
+- **Where.** In an `impl` block of a class or a struct, generic or not: a `fn`, a
+  `view fn`, a `shared fn`, an `async fn` and a `static fn`. A struct has only `impl`
+  methods, so every method of a struct can be generic.
+- **Type arguments** go where a free function's go, after the name: `b.map<float>(f)`,
+  `Point::make<int>(1)`. They are inferred where a free function's are: from the
+  arguments, from a lambda's result, and from the type the call flows into
+  ([Inference](#inference)). The owner's are never inferred from a method's arguments: a
+  method's come from its receiver, and a `static fn`'s are written after the owner,
+  `Box<int>::withTag(7, "seven")`. The type a call flows into is that call's own: in
+  `let s: Str = k.none().toString();` the `Str` is `toString`'s, and `none` needs its type
+  argument written. A method call on the left of `==`, or in the first arm of a
+  conditional expression that flows into no typed slot, is typed before the other side, so
+  it takes nothing from it: `x == k.none()` and `if c then x else k.none()` infer,
+  `k.none() == x` and `if c then k.none() else x` do not.
+- **Two lists.** In `Box<int>::withTag<Str>(7, "seven")` the first list is `Box`'s and the
+  second is `withTag`'s. A list after the function's name is always the function's:
+  `Box::withTag<Str>(7, "seven")` is an error that asks for `Box`'s (`'Box::withTag' is a
+  function of the generic class 'Box': write 'Box<...>::withTag(...)' with its type
+  arguments`).
+- **Bounds** work as on a free function: `view fn slot<K: Hashable>(k: view K) -> int`.
+  One may name the type's parameters: `view fn of<U: Keyed<T>>(u: view U) -> T` in an
+  `impl Slot<T>` block.
+- **Names.** A method's own type parameter may not be named like a type or like a type
+  parameter of its `impl` block (`type parameter 'T' of generic method 'map' shadows type
+  parameter 'T' of the 'impl' block for 'Box'`).
+- **Each instantiation** is an ordinary method of its type, named after its type arguments
+  (`Box<int>.map<Str>`), or the function `Box<int>::withTag<Str>`. Its body is checked
+  when it is first asked for, with the note `in instantiation of 'Box<int>.map<Str>'
+  requested here`; a generic method nothing calls is only parsed, and
+  [the archetype check](#the-archetype-check) reads it for copies and sends of its
+  parameters.
+
+### A generic method is called directly
+
+A class body's methods are virtual: each has a slot in the class's vtable, the same in
+every module. A generic method is as many functions as it has instantiations, so it has
+no slot, and that is why it is declared in an `impl` block, whose methods are called
+directly. A subclass inherits it and cannot override it; inside it, `self.area()` still
+goes through the vtable.
+
+```pkn
+import ::io;
+
+class Shape {
+  view fn area() -> float;     // virtual: a vtable slot
+}
+
+impl Shape {
+  // Called directly; a subclass inherits it and cannot override it.
+  view fn measured<U>(unit: view U, show: (float, view U) -> Str) -> Str {
+    return show(self.area(), unit);
+  }
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+fn main() -> int {
+  let s = Square(1.5);
+  io::println(s.measured("m2", fn(a: float, u: view Str) => Str(a) + " " + u));
+  return 0;
+}
+```
+
+Output:
+
+```
+2.25 m2
+```
+
+`s.measured<Str>(...)` on a `Square` is `Shape.measured<Str>`, whose `self` is a `Shape`.
+A subclass that declares `measured` gets the errors of any `impl` method: in its body,
+`method 'measured' of 'Shape' is declared in an 'impl' block and cannot be overridden`;
+in an `impl` block, `class 'Square' already has a method 'measured' (from 'Shape')`.
+
+A class body's method with type parameters is a syntax error at the `<`:
+
+```pkn
+class Shape {
+  view fn area() -> float;
+  view fn scaled<U>(k: U) -> float;
+}
+
+fn main() -> int { return 0; }
+```
+
+Error:
+
+```
+a class body's method cannot have type parameters of its own: its methods are virtual, and a generic method has no vtable slot; declare it in an 'impl' block, whose methods are called directly
+```
+
+So are `fn __init__<U>(...)` (`'__init__' cannot have type parameters of its own: a
+type's constructor takes the type's`), a method of an `impl Trait for` block (`a method
+of an 'impl ... for' block cannot have type parameters of its own: a trait's
+requirements have none`) and a trait's method (`a trait method cannot be generic`). No
+requirement is generic, so a generic method meets none: `method 'map' of 'Box<int>' is
+generic and cannot meet the requirement 'map' of trait 'Mapper'`.
+
+### What a generic method is not
+
+- **A value.** A generic `static fn` named without a call is `'Point::make' is a generic
+  function; a generic function cannot be a function value yet (wrap a call to it in a
+  lambda)`. A method is never a value.
+- **A way to bound the type's own parameters.** A method adds type parameters; a bound on
+  `T` goes on the type or on a conditional `impl` block (`impl Box<T: Showable>`), whose
+  generic methods are on the instances that meet it. Two blocks may give one name under
+  different bounds, as for any method; an instance that meets both reports the clash
+  (`class 'Two<int>' already has a method 'which'`).
+- **An enum's.** An enum has no `impl` block yet.
 
 ## Using Type Arguments
 
@@ -761,6 +919,12 @@ d = gen::Box<int>(1);     // the same class as c's
   name another module's traits yet
   ([#147](https://github.com/parsabee/PaykanLang/issues/147),
   [Traits](06-traits.md#not-supported-yet)).
+- A type's [generic methods](#generic-methods) and generic `static fn`s go
+  with it too, those of a class or struct that is not generic included: an
+  importer calls `lib::Point`'s `p.scaled<int>(...)` and
+  `lib::Point::make<Str>(...)`, and makes the instantiation it calls. One is
+  `Point.scaled<int>` whichever module makes it, and a program keeps one
+  copy.
 - A module's `.pkm` holds its templates: an importer instantiates them from
   a prebuilt or cached module as from its source (the standard library's
   `::collections` is one). Each module compiles its own copy of the
@@ -777,6 +941,11 @@ d = gen::Box<int>(1);     // the same class as c's
   because it is followed by `::` and a name. The one ambiguous shape is `g(a < b, c > (d))`,
   which reads as a generic call — parenthesise a comparison to get the other
   meaning.
+- A method's name follows the same rule: `b.map<float>(f)` is a generic method's call
+  because the `>` is followed by `(`, and `x.m < y` stays a comparison. `g(a.b < c, d >
+  (e))` reads as a call of `a.b<c, d>(e)`.
+- After `Box<int>::`, a second list is the function's own: `Box<int>::withTag<Str>(7,
+  "seven")`.
 - `>=` is a single token: write `x: Box<int> = …`, not `x: Box<int>=…`.
 
 ## Semantic Checks
@@ -792,7 +961,12 @@ d = gen::Box<int>(1);     // the same class as c's
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
 | `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
 | Generic superclass | `class Full : Half<int> { … }`, `class Full<T> : Half<T> { … }` (a syntax error, at the `<`; the class body is still parsed): `a superclass cannot be generic: a class, generic or not, extends a class that has no type parameters`; the generic class named without type arguments, `class H : GC { … }`: `superclass 'GC' of class 'H' is a generic class: a superclass cannot be generic` |
-| Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` in a class body or an `impl` block (a syntax error): `a method cannot have type parameters of its own: only a free function is generic ...`, `a 'static fn' cannot have type parameters of its own: ...` |
+| Generic method outside an `impl` block | A class body's method with type parameters of its own, `view fn map<U>(x: U) -> U` (a syntax error): `a class body's method cannot have type parameters of its own: its methods are virtual, and a generic method has no vtable slot; declare it in an 'impl' block, whose methods are called directly`; `fn __init__<U>(...)`: `'__init__' cannot have type parameters of its own: a type's constructor takes the type's`; in an `impl Trait for` block: `a method of an 'impl ... for' block cannot have type parameters of its own: a trait's requirements have none` ([Generic Methods](#generic-methods)) |
+| A generic method's type parameters | `fn map<U, U>(...)`: `duplicate type parameter 'U' in generic method 'map'`; `fn map<Str>(...)`: `type parameter 'Str' of generic method 'map' shadows a type of the same name`; `fn map<T>(...)` in `impl Box<T>`: `type parameter 'T' of generic method 'map' shadows type parameter 'T' of the 'impl' block for 'Box'` (a `static fn`'s say `generic function 'Box::of'`) |
+| Type arguments of a generic method | `b.map<int, int>(f)`: `generic method 'Box<int>.map' expects 1 type argument(s), got 2`; on a method that is not generic, `p.get<int>()`: `method 'get' of 'Point' is not generic and takes no type arguments`; on a builtin method, `n.toString<int>()`: `method 'toString' of 'int' is not generic and takes no type arguments`; on a field of function type, `p.cb<int>(2)`: `'cb' is a field of function type; a call through it takes no type arguments`; on a `static fn` that is not generic: `'Point::zero' is not generic and takes no type arguments` |
+| A public generic member's signature | a type private to the module written in the signature of a public generic method or `static fn` of a public type, `view fn leak<U>(u: view U) -> _Loc`: `method 'leak' of 'Pub' is public but its result names the private type '_Loc'; make the method private or the type public` (a private type as a type argument is fine: `p.apply<_Loc>(...)`) |
+| A generic method and a trait | a requirement whose only method of the name is generic: `method 'map' of 'Box<int>' is generic and cannot meet the requirement 'map' of trait 'Mapper'` |
+| A generic method's name | declared again, generic or not, in the type or a class derived from it: `class 'Square' already has a method 'measured' (from 'Shape')`; in a subclass's body: `method 'measured' of 'Shape' is declared in an 'impl' block and cannot be overridden` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Copy of a parameter without bounds | a template's copy of an unbounded `T`, used or not: `'T' is not 'Copyable': declare 'T: Copyable' to copy it` ([The archetype check](#the-archetype-check)) |
@@ -804,7 +978,8 @@ d = gen::Box<int>(1);     // the same class as c's
 
 ## Not Supported Yet
 
-Variance, default type arguments, explicit specialisation, generic methods (a method's or a
-`static fn`'s own type parameters) and generic superclasses. Each instantiation is compiled on its
+Variance, default type arguments, explicit specialisation, generic superclasses, generic
+trait requirements, generic methods in a class body (a virtual method has one vtable slot),
+and a generic method or function as a function value. Each instantiation is compiled on its
 own, also over class-type arguments; sharing one compiled copy among those would be an
 optimisation a program cannot observe.

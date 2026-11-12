@@ -609,15 +609,22 @@ generic classes, structs, enums and functions and their `impl` blocks,
 `impl Trait for` blocks too (§4.8), as
 `Sema::exportTemplates` produced them (an enum has no `impl` block, and its
 instantiations no code: an importer's `Maybe<int>` is an `ENUM` record of
-its own `IFACE` like any enum):
+its own `IFACE` like any enum).  A generic type's generic methods and
+generic `static fn`s (docs/language/13-generics.md, "Generic Methods") are
+in its `impl` blocks, with their own type parameters.  Those of a class or
+struct that is not generic are in a block of kind 3, named by the type's own
+name, which holds nothing else; a module with only such blocks has a `TMPL`
+section too:
 
 ```
 TmplSection
   "PKMT"  u32 version(= the release's)  u32 flags(0)
   Str file                                the module's source, as diagnostics name it
   uleb n ; Str uses[n]                    the other modules the bodies name (§4.8 Uses)
-  uleb n ; { u8 kind (1 class, 2 struct); uleb index }[n]
-                                          the template each impl block of the unit belongs to
+  uleb n ; { u8 kind (1 class, 2 struct, 3 type); uleb index }[n]
+                                          the template each impl block of the unit belongs to;
+                                          kind 3: none (index 0), the block is of the class or
+                                          struct it names and holds its generic methods
   Str ast                                 the interchange text of the unit
 ```
 
@@ -751,6 +758,20 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   instantiation is `$<module>::f<int>`. Type names are unique across a
   program (Sema rejects two types of one name anywhere in its imports), so
   one name is one instantiation program-wide.
+- **Generic methods.** A method or `static fn` with type parameters of its
+  own is a template of its type, whichever kind the type is.  An importer
+  finds it by the type: for an instantiation, through the template it was
+  made from (`Sema::instantiationInfo`, which also resolves an instantiation
+  an import's interface gave); for a class or struct that is not generic, by
+  the type's name, which is one type program-wide.  An instantiation is the
+  `impl` method `Box<int>.map<Str>` or the function `Point::make<int>`: its
+  owner's name and its own type arguments, with no module qualifier, so it
+  is one function whichever module asks for it.  `IFACE` lists none of them:
+  a module's importers make the ones they call.  Each is emitted as a shared
+  copy by every module that makes it, like the methods of an instantiation
+  (below), also on a type another module defines: Sema hands the lowering
+  those in `SemaContext::ForeignMethodClasses` and `ForeignMethodStructs`,
+  and the type itself and its other methods stay the defining module's.
 - **`impl Trait for` blocks.** A generic class's or struct's trait blocks
   go with its template, their trait names not renamed: a built-in trait is
   the same in every module, and a module names no other module's traits.

@@ -187,7 +187,10 @@ private:
     Requirement, ///< a trait's method: `;` instead of a body
     ClassMethod, ///< a class body's: a body, or `;` for a pure virtual one
     ImplMethod,  ///< an `impl` block's method: a body
-    StaticFn,    ///< an `impl` block's `static fn`: a body
+    /// A method of an `impl Trait for` block: as ImplMethod, with no type
+    /// parameters of its own.
+    TraitImplMethod,
+    StaticFn, ///< an `impl` block's `static fn`: a body
   };
   ast::FuncDecl *parseFuncDecl(FuncKind kind = FuncKind::Free);
   /// Type parameters and, given @p bounds, their bounds (`T: Showable + Eq`).
@@ -270,7 +273,8 @@ private:
   ast::Expr *parseUnary();
   ast::Expr *parsePostfix();
   ast::Expr *parseCallSuffix(ast::Expr *e, ast::SourceLocation start,
-                             const std::string *method);
+                             const std::string *method,
+                             std::vector<ast::Type *> typeArgs = {});
   ast::Expr *parseDotSuffix(ast::Expr *e, ast::SourceLocation start);
   ast::Expr *parsePrimary();
   ast::Expr *expressionExpected();
@@ -284,7 +288,12 @@ private:
   /// the instantiation, `Box<int>::of(1)`, its name in @p member): on
   /// success the type arguments are in @p out and the current token is the
   /// `(`; otherwise the position is rewound.
-  bool tryGenericCallArgs(std::vector<ast::Type *> &out, std::string &member);
+  bool tryGenericCallArgs(std::vector<ast::Type *> &out, std::string &member,
+                          std::vector<ast::Type *> &memberArgs);
+  /// `.name <` opens a generic method's type arguments only when a type
+  /// argument list followed by `> (` fits (#353), as `name <` does for a
+  /// call; `a.b < c` is otherwise a comparison.
+  bool tryMethodTypeArgs(std::vector<ast::Type *> &out);
 };
 
 } // namespace paykan::frontend::recursive_descent

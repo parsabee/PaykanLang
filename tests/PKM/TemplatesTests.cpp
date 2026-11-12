@@ -21,7 +21,8 @@ Templates sample() {
   t.Uses = {"::result", "lib::util"};
   t.Impls = {{Templates::OwnerKind::Class, 0},
              {Templates::OwnerKind::Struct, 1},
-             {Templates::OwnerKind::Class, 0}};
+             {Templates::OwnerKind::Class, 0},
+             {Templates::OwnerKind::Type, 0}};
   t.Ast = "(paykan-ast 0.2.0\n  (unit))\n";
   return t;
 }
@@ -74,6 +75,17 @@ TEST(Templates, RejectsABadImplOwner) {
     at += 1 + u.size();
   at += 1;
   ASSERT_EQ(bytes[at], 1);
-  bytes[at] = 3;
-  EXPECT_NE(error(bytes).find("bad impl owner kind 3"), std::string::npos);
+  auto kind = bytes;
+  kind[at] = 4;
+  EXPECT_NE(error(kind).find("bad impl owner kind 4"), std::string::npos);
+  kind[at] = 0;
+  EXPECT_NE(error(kind).find("bad impl owner kind 0"), std::string::npos);
+  // A block of a type that is not generic (#353) names no template: the
+  // second record's, `struct 1`, read as one.
+  auto type = bytes;
+  ASSERT_EQ(type[at + 2], 2);
+  ASSERT_EQ(type[at + 3], 1);
+  type[at + 2] = 3;
+  EXPECT_NE(error(type).find("an impl block of a type names template 1"),
+            std::string::npos);
 }

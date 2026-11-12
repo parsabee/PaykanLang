@@ -23,6 +23,9 @@ struct WrittenTypeArgs {
   const std::string *Copy = nullptr;
   /// Per argument, bit i for the i-th type parameter.
   std::vector<uint64_t> Params;
+  /// The same for the arguments written after a call's owner type
+  /// (CallExpr::getOwnerTypeArgs, #353).
+  std::vector<uint64_t> OwnerParams;
 };
 /// By type application of a copy: a GenericType, or the CallExpr or
 /// EnumValueExpr whose written type arguments they are.
@@ -96,7 +99,8 @@ private:
   uint64_t paramsNamed(const Type *ty) const;
   /// Record the written type arguments @p args of @p node, a type
   /// application of the copy.
-  void noteTypeArgs(const ASTNode *node, const std::vector<Type *> &args);
+  void noteTypeArgs(const ASTNode *node, const std::vector<Type *> &args,
+                    bool owner = false);
 
 public:
   ASTCloner(ASTContext &ctx, std::unordered_map<std::string, Type *> subst,
@@ -137,7 +141,13 @@ public:
 
   /// Copy an `impl` block for the type named @p newTypeName.  The copy has
   /// no type parameters.
-  ImplDecl *cloneImplDecl(ImplDecl *im, const std::string &newTypeName);
+  /// Copy an `impl` block for the type @p newTypeName.  A generic method
+  /// (one with type parameters of its own, #353) is left out of an
+  /// instantiation's copy, whose methods are concrete: its instantiations
+  /// are made from the template.  With @p keepGeneric (a template's copy)
+  /// it is copied as a template, its type parameters kept.
+  ImplDecl *cloneImplDecl(ImplDecl *im, const std::string &newTypeName,
+                          bool keepGeneric = false);
 
   /// Copy an enum under a new name (its variants and their fields).  The
   /// copy has no type parameters.

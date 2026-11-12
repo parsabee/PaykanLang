@@ -208,8 +208,8 @@ traitMember ::= "async"? "shared"? "view"? "fn" IDENT "(" paramList? ")"
 
 implDecl    ::= "impl" ( "!"? typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
-implMember  ::= funcDecl                          -- funcDecl without typeParams
-              | "static" "async"? "fn" IDENT "(" paramList? ")"
+implMember  ::= funcDecl                          -- typeParams: a generic method
+              | "static" "async"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 
@@ -261,12 +261,23 @@ Sema instantiates); the superclass of any class is a plain class name, and type
 arguments after it are a syntax error at the `<` (`a superclass cannot be
 generic: ...`, `frontend::kGenericSuperclass`), after which the class body is
 still parsed.
-Only a free function is generic: a method in a class body or an `impl` block,
-pure virtual or not, and a `static fn` have no `typeParams` of their own (the
-methods of a generic class or struct use its), and `<` after their name is a
-syntax error there (`a method cannot have type parameters of its own: only a
-free function is generic ...`, `a 'static fn' cannot have type parameters of
-its own: ...`, `frontend::kGenericMethod` and `kGenericStaticFn`).
+A method of an `impl` block and a `static fn` may have `typeParams` of their
+own, next to their type's: a generic method
+([language/13-generics.md](language/13-generics.md#generic-methods)).  Three
+places take none, and `<` after the name is a syntax error there, each a
+text of `include/paykan/Frontend.h` that every frontend reports:
+
+- a class body's method, pure virtual or not (`a class body's method cannot
+  have type parameters of its own: its methods are virtual, and a generic
+  method has no vtable slot; declare it in an 'impl' block, whose methods are
+  called directly`, `frontend::kGenericMethod`);
+- `__init__` (`'__init__' cannot have type parameters of its own: a type's
+  constructor takes the type's`, `frontend::kGenericInit`);
+- a method of an `impl ... for` block (`a method of an 'impl ... for' block
+  cannot have type parameters of its own: a trait's requirements have none`,
+  `frontend::kGenericTraitImplMethod`).
+
+A trait's method takes none either (`a trait method cannot be generic`).
 A type parameter's bounds (`T: Showable + Into<int>`) name the traits its type
 argument must implement.  `impl Showable for A` implements trait `Showable` for `A`.
 `impl !Sendable for A {}` opts `A` out of a trait its structure gives it
@@ -655,7 +666,9 @@ unary          ::= ( "!" | "-" | "~" | "move" | "await" ) unary | postfix
 
 postfix ::= primary postfixOp*
 postfixOp ::= "(" argumentList? ")"                -- call of a function value
-            | "." IDENT "(" argumentList? ")"      -- method call
+            | "." IDENT ( "<" typeArgList ">" )? "(" argumentList? ")"
+                                                   -- method call; a generic
+                                                   -- method's type arguments
             | "." IDENT                            -- field access
             | "." INT                              -- tuple index (see §1)
             | "[" expression "]"                   -- subscript
@@ -670,6 +683,9 @@ primary ::= literal
                                                              -- instantiation, or
                                                              -- a generic enum's
                                                              -- variant with fields
+          | IDENT "<" typeArgList ">" "::" IDENT "<" typeArgList ">"
+            "(" argumentList? ")"                            -- its generic
+                                                             -- static fn
           | IDENT "<" typeArgList ">" "::" IDENT             -- a generic enum's
                                                              -- variant
           | modulePath "::" IDENT                            -- enum variant, or a
@@ -678,6 +694,8 @@ primary ::= literal
           | modulePath "::" IDENT "(" argumentList? ")"      -- qualified call
           | modulePath "::" IDENT "<" typeArgList ">" "(" argumentList? ")"
           | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
+          | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT "<" typeArgList ">"
+            "(" argumentList? ")"
           | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT
           | "(" expression ")"
           | "(" expression ( "," expression )+ ")"           -- tuple literal
@@ -776,6 +794,18 @@ matching `>`, and opens type arguments if `(` follows. Both readings agree on
 every input: in `f(a < b, c) > (d)` the `)` closes the call's own parenthesis
 before any `>`, so it is a comparison of `f(a < b, c)` with `(d)` either
 way, with the same AST.
+
+A method call's name follows the same rule: `.name <` opens type arguments
+exactly when a `typeArgList` followed by `>` `(` fits (`b.map<float>(f)`),
+and is a field compared otherwise (`x.m < y`, `x.f < a && b > (c)`).  One
+shape is a call by both rules: `g(a.b < c, d > (e))` is `g` given the one
+argument `a.b<c, d>(e)`, as `g(a < b, c > (d))` is `g` given `a<b, c>(d)`.
+
+After `Owner<...> ::` a second list is the function's own: in
+`Box<int>::withTag<Str>(7, "seven")` the first is the owner's type arguments
+and the second the `static fn`'s.  The two are separate lists of the call
+(`CallExpr::getOwnerTypeArgs` and `getTypeArgs`), so `Box::of<int>(1)` gives
+`of` the type argument, not `Box`.
 
 A type argument list closes with single `>` tokens, so the first `>` of a
 `>>` can close one: `id<Box<u8>>(x) >> 2` is a generic call, then a shift.

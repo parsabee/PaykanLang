@@ -277,22 +277,59 @@ LAST_RESORT = {"return", "if", "elif", "while", "for", "in", "match", "fn",
                "let", "view", "inout", ":", "native", "static", "pub"}
 
 
+TYPE_LIST_OPS = {",", "?", "(", ")", "[", "]", "->", "::", "<", ">", ";", "&"}
+
+
+def type_list_spaces(toks):
+    """The indices of the spaces of @p toks (kind, text pairs) inside a type
+    argument list (`pick<Str, int>(...)`, `Box<Pair<A, B>>`): a `<` right
+    after a name, up to the `>` that closes it, with only types between.  A
+    line never breaks there."""
+    inside = set()
+    k = 0
+    while k < len(toks):
+        if not (toks[k] == ("op", "<") and k and toks[k - 1][0] == "word"):
+            k += 1
+            continue
+        angles, spaces, j = 1, [], k + 1
+        while j < len(toks) and angles:
+            kind, text = toks[j]
+            if kind == "ws":
+                spaces.append(j)
+            elif kind == "op" and text == "<":
+                angles += 1
+            elif kind == "op" and text == ">":
+                angles -= 1
+            elif kind not in ("word", "num") and text not in TYPE_LIST_OPS:
+                break
+            j += 1
+        if angles == 0:
+            inside.update(spaces)
+            k = j
+        else:
+            k += 1
+    return inside
+
+
 def break_points(code):
     """(index, depth, priority) of each space of @p code where it may
     break: 0 after a comma or `=`/`->`/`=>`, 1 before a binary operator, 2 any
-    other space, 9 after a keyword or a type annotation's `:`."""
+    other space, 9 after a keyword or a type annotation's `:`.  None inside
+    a type argument list."""
     toks = []   # (start, text, kind, depth)
     pos = depth = 0
-    for kind, text in line_tokens(code):
+    lexed = line_tokens(code)
+    for kind, text in lexed:
         toks.append((pos, text, kind, depth))
         if kind == "op" and text in ("(", "[", "{"):
             depth += 1
         elif kind == "op" and text in (")", "]", "}"):
             depth -= 1
         pos += len(text)
+    typed = type_list_spaces(lexed)
     out = []
     for k, (start, text, kind, d) in enumerate(toks):
-        if kind != "ws":
+        if kind != "ws" or k in typed:
             continue
         prev = next((t for t in reversed(toks[:k]) if t[2] != "ws"), None)
         nxt = next((t for t in toks[k + 1:] if t[2] != "ws"), None)

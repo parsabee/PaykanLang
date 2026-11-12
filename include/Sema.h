@@ -124,6 +124,18 @@ struct SemaContext {
   /// The module's own file, which its other declarations' locations point
   /// into (the lowering's warnings name it).
   SourceFile Source;
+  /// The instantiations of generic methods (#353) whose owner another
+  /// module defines (an imported class or struct, or an instantiation an
+  /// import exports): each a declaration by the owner's name holding those
+  /// methods alone.  The lowering emits them as shared copies, one per
+  /// program, and takes the owner and its other methods from its module.
+  std::vector<ast::ClassDecl *> ForeignMethodClasses;
+  std::vector<ast::StructDecl *> ForeignMethodStructs;
+  /// The structs with generic methods (#353), by name: code of the struct
+  /// that a module may never make an instantiation of, though another
+  /// does.  What the lowering derives from "every method of the struct is
+  /// here" does not hold for them.
+  StringSet GenericMemberTypes;
 
   explicit operator bool() const { return Ok; }
 };
@@ -745,6 +757,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                    ast::AtomicType *at);
   /// A variable, or a field reached through variables and fields only.
   static bool isPlaceChain(const ast::Expr *e);
+  /// Whether the place chain @p e starts at a `move` (`move x`, `(move
+  /// x).f`): typing it again would see the variable moved.
+  static bool movesPlace(const ast::Expr *e);
   /// An element of a place: `a[i]` of `a` or `o.a`.
   static bool isElementOfPlace(const ast::Expr *e);
   /// Whether two index expressions are written the same.
@@ -1515,6 +1530,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       else if (ast::isa<ast::EnumValueExpr>(e) || ast::isa<ast::CallExpr>(e) ||
                ast::isa<ast::TernaryExpr>(e))
         S.VariantExpectation = expected;
+      else if (expected && ast::isa<ast::MethodCallExpr>(e))
+        S.MethodExpectations[e] = expected; // by node: see there
       else if (ast::Type *sized = sizedLiteralTarget(e, expected))
         S.LiteralExpectation = sized;
       return visit(e);
@@ -1544,6 +1561,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// unsigned; both unsigned, of any widths; the value's type.  A literal
     /// count at or above the width is a warning (docs/design/bitwise.md).
     ast::Type *visitShift(ast::BinaryExpr *node);
+    /// A method call, checked: visitMethodCallExpr's work but for the
+    /// type arguments no method took.
+    ast::Type *checkMethodCall(ast::MethodCallExpr *node);
     /// visit(@p operand) of a binary operator whose other operand has type
     /// @p otherTy: a numeric literal takes the other operand's sized type,
     /// and a generic enum's variant its type arguments (`m ==
@@ -1552,6 +1572,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       if (otherTy &&
           (isNumericLiteral(operand) || ast::isa<ast::EnumValueExpr>(operand) ||
            ast::isa<ast::CallExpr>(operand) ||
+           ast::isa<ast::MethodCallExpr>(operand) ||
            ast::isa<ast::TernaryExpr>(operand)))
         return visitExpecting(operand, otherTy);
       return visit(operand);
@@ -1876,6 +1897,10 @@ public:
     /// trait, a block of the module's own trait only its methods (#147,
     /// checkTraitImpl).
     std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>> Impls;
+    /// The generic methods and generic `static fn`s (#353) of the module's
+    /// classes and structs that are not generic: `impl` blocks by the
+    /// type's name, holding those alone.
+    std::vector<ast::ImplDecl *> MemberImpls;
     /// The modules the bodies name, the module itself first: canonical
     /// name and the file ModuleCache knows it by.
     std::vector<std::pair<std::string, std::string>> Uses;
@@ -2620,6 +2645,12 @@ private:
   /// arguments (`Maybe::Nothing`, `Maybe::Just(1)`) flows into (set by
   /// visitExpecting): an instantiation of its template gives them.
   ast::Type *VariantExpectation = nullptr;
+  /// The type a method call flows into (set by visitExpecting), for a
+  /// generic method whose own type parameters its arguments leave open
+  /// (#353).  By the call's node, taken when that call is checked: the
+  /// links of its receiver are typed before it, and each may be a call that
+  /// would take a slot shared with them for its own.
+  std::unordered_map<const ast::Expr *, ast::Type *> MethodExpectations;
   /// Whether @p name is a class, struct or function template.
   bool isTemplate(const std::string &name) const {
     return ClassTemplates.count(name) || StructTemplates.count(name) ||
@@ -2926,6 +2957,152 @@ private:
   /// other class.
   const InstantiationInfo *instantiationInfo(ast::ClassType *ct);
 
+  // -- Generic methods (#353): a method or a `static fn` of an `impl` block
+  // with type parameters of its own.  It is a template of its owner: of the
+  // type, for a class or struct that is not generic, and of the type's
+  // template for a generic one (one template for every instance).  A call
+  // instantiates it once per type argument list: a method as the `impl`
+  // method `name<args>` of its owner, called directly, and a `static fn` as
+  // the function `Owner::name<args>`.
+
+  struct MethodTemplate {
+    ast::FuncDecl *Fn = nullptr;
+    const ast::ImplDecl *Impl = nullptr;
+  };
+  /// A type's generic methods and generic `static fn`s, by the type's name
+  /// then theirs: a class's or struct's that is not generic, and each
+  /// instance's, which has those of the blocks that joined it (a bounded
+  /// block joins the instances that meet its bounds, joinGenericMembers).
+  StringMap<StringMap<MethodTemplate>> MethodTemplates;
+  /// A generic class's or struct's, by its template: every generic member
+  /// of its `impl` blocks, in order.
+  std::unordered_map<const ast::Decl *, std::vector<MethodTemplate>>
+      TemplateMethodTemplates;
+  /// The block of a template each instance's copy of one was made from
+  /// (cloneImplFor).
+  std::unordered_map<const ast::ImplDecl *, const ast::ImplDecl *> ImplCopyOf;
+  /// The instances this module made, whose blocks joined them here; and
+  /// the names of those another module made that were given their generic
+  /// members on first use (methodTemplatesOf).
+  std::unordered_set<const ast::Type *> InstancesMadeHere;
+  StringSet ImportedInstancesJoined;
+  /// The type parameters a generic method's code sees, its block's first
+  /// and then its own, each with its bounds (the owner's and the block's
+  /// for the block's): what an instantiation's type arguments answer to.
+  struct MethodTemplateNames {
+    std::vector<const std::string *> Params;
+    ast::TypeParamBounds Bounds;
+    /// The member's own bounds by the same positions, none for the
+    /// block's parameters: what an instantiation checks (the owner's held
+    /// when the owner was made, the block's when it joined).
+    ast::TypeParamBounds Own;
+  };
+  std::unordered_map<const ast::Decl *, MethodTemplateNames>
+      MethodTemplateParams;
+  /// Record the names of @p fn, a generic member of the block @p im.
+  void noteMethodTemplate(ast::FuncDecl *fn, const ast::ImplDecl *im,
+                          const ast::TypeParamBounds *ownerBounds);
+  /// Check the type parameters of @p fn, a generic method or `static fn` of
+  /// the block @p im of @p ownerName: false, with an error, for a list
+  /// that is not one.
+  bool checkMethodTemplate(const std::string &ownerName,
+                           const ast::FuncDecl *fn, const ast::ImplDecl *im);
+  /// The generic members of @p block, a block of @p type's template that
+  /// joins @p type, become the type's: false, with an error, for a name the
+  /// type has already.
+  bool joinGenericMembers(ast::Type *type, const ast::ImplDecl *block);
+  /// A generic method found for a type: its template, the class or the
+  /// struct that declares it (the type, or a superclass), and for a
+  /// generic owner its type arguments.
+  struct FoundMethodTemplate {
+    MethodTemplate T;
+    ast::ClassType *Class = nullptr;
+    ast::StructType *Struct = nullptr;
+    std::vector<ast::Type *> OwnerArgs;
+    std::string ownerName() const;
+  };
+  /// The generic methods and `static fn`s @p ct (or @p st) itself declares,
+  /// with its type arguments when it is an instance; null when none.
+  const StringMap<MethodTemplate> *
+  methodTemplatesOf(ast::ClassType *ct, ast::StructType *st,
+                    std::vector<ast::Type *> &ownerArgs,
+                    ast::SourceLocation loc);
+  /// The generic method @p name of @p ct (or one of its superclasses) or of
+  /// @p st; with @p statics, the generic `static fn` of that name, which is
+  /// its type's own.  False when there is none.
+  bool findMethodTemplate(ast::ClassType *ct, ast::StructType *st,
+                          const std::string &name, FoundMethodTemplate &out,
+                          bool statics = false,
+                          ast::SourceLocation loc = ast::SourceLocation());
+  /// Whether the name @p name is taken on @p ty by a generic method (its
+  /// own or an inherited one) or by its own generic `static fn`: @p owner
+  /// is the type that declares it.
+  bool methodTemplateOwner(ast::Type *ty, const std::string &name,
+                           std::string &owner);
+  /// Whether @p name, spelled bare, is a module-private type of another
+  /// module: that module's own to name.
+  bool isOthersPrivateType(const std::string &name) const;
+  /// The generic `static fn` a call by @p callee (`Point::make`,
+  /// `Box::withTag`) names, of a class or struct or of a template of one;
+  /// null when it names none.
+  const ast::FuncDecl *genericStaticNamed(const std::string &callee);
+  bool isGenericStatic(const std::string &callee) {
+    return genericStaticNamed(callee) != nullptr;
+  }
+  /// The instantiations made, by `Owner.name<args>` and `Owner::name<args>`
+  /// (no Fn: it failed, and was reported).
+  struct MemberInstance {
+    ast::FuncDecl *Fn = nullptr;
+    ast::MethodDecl *Method = nullptr; // a method's
+  };
+  StringMap<MemberInstance> MemberInstantiations;
+  /// The methods among them, to add to their owners' declarations for the
+  /// lowering (injectInstantiations): never while a class's methods are
+  /// walked.
+  struct MadeMethod {
+    std::string Owner;
+    ast::FuncDecl *Fn;
+    ast::MethodDecl *Method;
+    ast::Type *Type;
+  };
+  std::vector<MadeMethod> InstantiatedMethods;
+  /// See SemaContext::ForeignMethodClasses.
+  std::vector<ast::ClassDecl *> ForeignMethodClassDecls;
+  std::vector<ast::StructDecl *> ForeignMethodStructDecls;
+  /// Instantiate @p found with the type arguments @p args: the `impl`
+  /// method `name<args>` of its owner or the function `Owner::name<args>`,
+  /// declared now and its body queued.  Null, with an error, when it cannot
+  /// be.
+  const MemberInstance *instantiateMember(const FoundMethodTemplate &found,
+                                          const std::vector<ast::Type *> &args,
+                                          ast::SourceLocation loc,
+                                          const ast::ASTNode *written);
+  /// The type arguments of @p found's own parameters a call leaves out:
+  /// from the arguments, the result and the type the call flows into.
+  bool inferMemberTypeArgs(const FoundMethodTemplate &found,
+                           const std::vector<ast::Expr *> &argExprs,
+                           const std::vector<ast::Type *> &argTypes,
+                           ast::Type *expected, ast::SourceLocation loc,
+                           std::vector<ast::Type *> &out);
+  /// A call of a generic `static fn` (#353), @p typeArgs its own written
+  /// ones: infers the ones left out, makes the instantiation and rebinds
+  /// the call to it.
+  bool resolveGenericStatic(ast::CallExpr *node,
+                            const FoundMethodTemplate &found,
+                            std::vector<ast::Type *> typeArgs,
+                            const std::vector<ast::Type *> &argTypes,
+                            ast::Type *expected);
+  /// A call of a generic method (#353): resolves the written type arguments
+  /// of @p node, or infers them from @p argTypes and @p expected, makes the
+  /// instantiation and rebinds the call to it.  Null when the receiver has
+  /// no generic method of that name (@p failed false) or the call is in
+  /// error (@p failed true, reported).
+  ast::MethodDecl *
+  resolveGenericMethodCall(ast::MethodCallExpr *node, ast::ClassType *ct,
+                           ast::StructType *st,
+                           const std::vector<ast::Type *> &argTypes,
+                           ast::Type *expected, bool &failed);
+
   /// A template one of whose instantiations is in progress, and that
   /// instantiation's name (interned, as its copy of the template has it).
   struct InstantiatingTemplate {
@@ -3202,6 +3379,10 @@ private:
   /// Which type parameters the type arguments written in the copies of
   /// the instantiations name (ASTCloner::recordTypeArgs).
   ast::WrittenTypeArgMap WrittenTypeArgs;
+  /// The call whose owner type's arguments (CallExpr::getOwnerTypeArgs,
+  /// #353) an instantiation is being requested with: writtenArgParams
+  /// reads that list's record for it, and the function's own otherwise.
+  const ast::ASTNode *OwnerListOf = nullptr;
   /// Which type parameters of the innermost instantiation in progress the
   /// type arguments of @p written, the type application a request was
   /// written as, name: null when not known (no type application, or one

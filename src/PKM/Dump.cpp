@@ -249,10 +249,14 @@ void dumpTmpl(const File &f, std::ostream &os, bool text) {
   for (const std::string &u : t->Uses)
     os << "    " << u << "\n";
   os << "  impls " << t->Impls.size() << "\n";
-  for (const Templates::Impl &im : t->Impls)
-    os << "    "
-       << (im.Kind == Templates::OwnerKind::Class ? "class " : "struct ")
-       << im.Owner << "\n";
+  for (const Templates::Impl &im : t->Impls) {
+    if (im.Kind == Templates::OwnerKind::Type)
+      os << "    type\n";
+    else
+      os << "    "
+         << (im.Kind == Templates::OwnerKind::Class ? "class " : "struct ")
+         << im.Owner << "\n";
+  }
   if (text)
     os << "  ast " << t->Ast.size() << " B\n" << t->Ast;
 }

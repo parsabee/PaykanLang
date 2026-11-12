@@ -634,3 +634,204 @@ fn main() -> int {
             "1 s tt Pair<int, Str>(a: 2, b: p) Pair<Str, int>(a: p, b: 2) 2\n");
   g.expectNoLeaks("StaticFnOfAnInstantiation");
 }
+
+// Generic methods and generic `static fn`s (#353): each instantiation is an
+// `impl` method of its owner or a function of it, called directly; a
+// subclass inherits one, a struct's changes `self`, and an `async` one
+// starts a task.
+TEST(Generics, MethodsAndStaticFnsWithTypeParametersOfTheirOwn) {
+  LeakGuard g;
+  auto r = compileAndRun(
+      R"pkn(// OK: generic methods and generic `static fn`s (#353).  A method of an
+// `impl` block, and a `static fn`, may have type parameters of its own next
+// to its type's: written after its name at a call, or inferred.  Each
+// instantiation is an `impl` method of its owner (`Box<int>.map<Str>`) or a
+// function of it (`Box<int>::withTag<Str>`), called directly; a subclass
+// inherits a generic method and nothing overrides it.
+// expect-stdout: n=21 2.5 7 seven
+// expect-stdout: 8 2.5
+// expect-stdout: 2.25 m2
+// expect-stdout: 4 12 12
+// expect-stdout: 3 5
+// expect-stdout: abc 5
+import ::io;
+
+class Box<T> {
+  v: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = move v; }
+
+  // `U` is the method's own type parameter; `T` is the class's.
+  view fn map<U>(f: (view T) -> U) -> Box<U> {
+    return Box<U>(f(self.v));
+  }
+
+  // A `static fn` with a type parameter of its own.
+  static fn withTag<U>(v: T, tag: U) -> (Box<T>, U) {
+    return (Box<T>(move v), move tag);
+  }
+
+  // What crosses into the task is the method's own to bound.
+  async view fn later<U: Sendable + Showable>(u: U) -> Str {
+    return u.toString();
+  }
+}
+
+class Shape {
+  view fn area() -> float;     // virtual: a vtable slot
+}
+
+impl Shape {
+  // Called directly; a subclass inherits it and cannot override it.
+  view fn measured<U>(unit: view U, show: (float, view U) -> Str) -> Str {
+    return show(self.area(), unit);
+  }
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+// A struct's generic method changes `self` like any method of it.
+struct Tally { n: int; }
+
+impl Tally {
+  fn add<U>(by: U, weigh: (U) -> int) -> int {
+    self.n = self.n + weigh(move by);
+    return self.n;
+  }
+  view fn total<U>(unit: view U) -> view int { return self.n; }
+
+  // A type that is not generic has generic `static fn`s too.
+  static fn of<U>(first: U, weigh: (U) -> int) -> Tally {
+    return Tally(weigh(move first));
+  }
+}
+
+fn main() -> int {
+  let b = Box<int>(20);
+  let s = b.map(fn(n: view int) => "n=" + Str(n + 1));     // U = Str, inferred
+  let f = b.map<float>(fn(n: view int) => float(n) / 8.0);  // U written out
+  let t = Box<int>::withTag<Str>(7, "seven");               // both lists written
+  io::println(s.v + " " + Str(f.v) + " " + Str(t.0.v) + " " + t.1);
+  let u = Box<int>::withTag(8, 2.5);                        // U = float, inferred
+  io::println(Str(u.0.v) + " " + Str(u.1));
+
+  let q = Square(1.5);
+  io::println(q.measured("m2", fn(a: float, unit: view Str) => Str(a) + " " + unit));
+
+  tally = Tally(1);
+  let first = tally.add("abc", fn(s: Str) => s.len());
+  let second = tally.add<int>(4, fn(n: int) => n * 2);
+  io::println(Str(first) + " " + Str(second) + " " + Str(tally.total(1.5)));
+  let made = Tally::of<Str>("xyz", fn(s: Str) => s.len());
+  let also = Tally::of(2.5, fn(x: float) => int(x * 2.0));
+  io::println(Str(made.n) + " " + Str(also.n));
+
+  let frozen: atomic shared Box<int> = Box<int>(5);
+  let text = frozen.later("abc");
+  let size = frozen.later<int>(5);
+  io::println(await text + " " + await size);
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut,
+            "n=21 2.5 7 seven\n8 2.5\n2.25 m2\n4 12 12\n3 5\nabc 5\n");
+  g.expectNoLeaks("MethodsAndStaticFnsWithTypeParametersOfTheirOwn");
+}
+
+// A generic method given a lambda that captures a reference, making values
+// of its own type parameter: nothing is left behind.
+TEST(Generics, AGenericMethodTakesACapturingLambda) {
+  LeakGuard g;
+  auto r = compileAndRun(
+      R"pkn(// A generic method takes a lambda that captures references, and makes and
+// returns values of its own type parameter: every instantiation releases
+// what it was given and what it made.
+// expect-stdout: (a!, b!) 2 ab 2
+import ::io;
+
+class Shelf<T> {
+  a: T;
+  b: T;
+}
+
+impl Shelf<T> {
+  // `f` of each item.
+  view fn both<U>(f: (view T) -> U) -> (U, U) {
+    return (f(self.a), f(self.b));
+  }
+
+  // `f` applied to `seed` and each item in turn.
+  view fn fold<U>(seed: U, f: (U, view T) -> U) -> U {
+    return f(f(move seed, self.a), self.b);
+  }
+
+  // A shelf of what `f` makes of each item.
+  static fn of<U>(a: U, b: U, f: (U) -> T) -> Shelf<T> {
+    return Shelf<T>(f(move a), f(move b));
+  }
+}
+
+fn main() -> int {
+  let shelf = Shelf<Str>("a", "b");
+  let mark: shared = "!";
+  let marked = shelf.both(fn(s: view Str) => s + mark);
+  let count = shelf.fold(0, fn(n: int, s: view Str) => n + s.len());
+  let joined = shelf.fold<Str>("", fn(acc: Str, s: view Str) => acc + s);
+  let made = Shelf<Str>::of<int>(1, 22, fn(n: int) => Str(n) + mark);
+  io::println(marked.toString() + " " + Str(count) + " " + joined + " "
+      + Str(made.fold(0, fn(n: int, s: view Str) => n + s.len()) - 3));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "(a!, b!) 2 ab 2\n");
+  g.expectNoLeaks("AGenericMethodTakesACapturingLambda");
+}
+
+// An `atomic` parameter of a generic method, `static fn` or function takes
+// a place's handle whether the call's type arguments are written or
+// inferred: the callee's change is the caller's.
+TEST(Generics, AnInferredGenericCallTakesAnAtomicPlacesHandle) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+class K { n: int; }
+impl K {
+  view fn bump<U: Showable>(c: atomic int, by: view U) -> Str { c += 10; return by.toString(); }
+  static fn sbump<U: Showable>(c: atomic int, by: view U) -> Str { c += 100; return by.toString(); }
+}
+struct S { n: int; }
+impl S {
+  view fn bump<U: Showable>(c: atomic int, by: view U) -> Str { c += 10000; return by.toString(); }
+}
+fn fbump<U: Showable>(c: atomic int, by: view U) -> Str { c += 1000; return by.toString(); }
+// A struct's own generic `clone` is the one its call names.
+impl S { view fn clone<U>() -> int { return 7; } }
+fn main() -> int {
+  let k = K(1);
+  let s = S(1);
+  n: atomic int = 5;
+  k.bump<Str>(n, "x");
+  k.bump(n, "x");
+  K::sbump<Str>(n, "x");
+  K::sbump(n, "x");
+  fbump<Str>(n, "x");
+  fbump(n, "x");
+  s.bump<int>(n, 1);
+  s.bump(n, 1);
+  io::println(Str(n) + " " + Str(s.clone<int>()));
+  // One that is moved in is typed once.
+  m: atomic int = 1;
+  io::println(fbump(move m, "moved") + k.bump(move n, "!"));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "22225 7\nmoved!\n");
+  g.expectNoLeaks("AnInferredGenericCallTakesAnAtomicPlacesHandle");
+}

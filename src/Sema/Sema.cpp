@@ -2254,7 +2254,7 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
       node->setResolvedType(fnt);
       return fnt;
     }
-    if (S.FuncTemplates.count(qualified)) {
+    if (S.FuncTemplates.count(qualified) || S.isGenericStatic(qualified)) {
       S.errorGenericFunctionValue(qualified, node->getLocation());
       return nullptr;
     }
@@ -2722,6 +2722,17 @@ Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
   if (!call || call->hasTypeArgs())
     return OtherSide::NotNeeded;
   const std::string &callee = call->getCalleeName();
+  // `Point::none()`, `Box<int>::none()`: a generic `static fn` (#353),
+  // whose own type parameters its parameters may leave open.
+  if (const ast::FuncDecl *fn = S.genericStaticNamed(callee)) {
+    std::vector<ast::Type *> paramTypes;
+    for (const ast::Param &p : fn->getParams())
+      paramTypes.push_back(p.ParamType);
+    return inferableFrom(fn->getTypeParams(), paramTypes) ? OtherSide::NotNeeded
+                                                          : OtherSide::Needed;
+  }
+  if (call->hasOwnerTypeArgs())
+    return OtherSide::NotNeeded;
   // `none()`, `res::ok(1)`: a generic function's type parameters that its
   // parameters leave open come from the type its result flows into.
   if (auto fn = S.FuncTemplates.find(callee); fn != S.FuncTemplates.end()) {
@@ -3039,7 +3050,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     const std::string variant =
         callee.substr(sep + std::string_view(names::kQualSep).size());
     if (auto *et = S.Ctx.lookupEnumType(owner)) {
-      if (!node->hasTypeArgs())
+      if (!node->hasTypeArgs() && !node->hasOwnerTypeArgs())
         return checkVariantCall(node, et, variant);
       S.error(node->getLocation(), "'" + owner +
                                        "' is not a generic enum and takes no "
@@ -3047,9 +3058,21 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return nullptr;
     }
     if (S.EnumTemplates.count(owner)) {
+      // The enum's arguments go after the enum (`Maybe<int>::Just(1)`), as
+      // an owner's do (#353): a variant has none of its own.
+      if (node->hasTypeArgs()) {
+        S.error(node->getLocation(),
+                "'" + S.displayName(callee) +
+                    "' is a variant of the generic enum '" +
+                    S.displayName(owner) + "': write '" + S.displayName(owner) +
+                    "<...>::" + variant + "(...)' with its type arguments");
+        return nullptr;
+      }
       std::optional<std::vector<ast::Type *>> argTypes;
+      const ast::ASTNode *outer = std::exchange(S.OwnerListOf, node);
       ast::EnumType *et = genericVariantEnum(
-          node, owner, variant, node->getTypeArgs(), expected, &argTypes);
+          node, owner, variant, node->getOwnerTypeArgs(), expected, &argTypes);
+      S.OwnerListOf = outer;
       if (!et)
         return nullptr;
       return checkVariantCall(node, et, variant,
@@ -3100,10 +3123,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   const FunctionSig *known = nullptr;
   // Explicit type arguments (`Box<int>(...)`) need no argument types: the
   // instance is known first, and so are its parameters.
-  const bool explicitInstance = node->hasTypeArgs() &&
-                                !S.isConversionTarget(node->getCalleeName()) &&
-                                (S.isTemplate(node->getCalleeName()) ||
-                                 S.isTemplateStatic(node->getCalleeName()));
+  // A generic `static fn` (#353) is one once its own are written; the
+  // owner's alone leave them to the arguments.
+  const bool genericStatic = S.isGenericStatic(node->getCalleeName());
+  const bool explicitInstance =
+      !S.isConversionTarget(node->getCalleeName()) &&
+      ((node->hasTypeArgs() && S.isTemplate(node->getCalleeName())) ||
+       (genericStatic ? node->hasTypeArgs()
+                      : (node->hasTypeArgs() || node->hasOwnerTypeArgs()) &&
+                            S.isTemplateStatic(node->getCalleeName())));
   if (explicitInstance && !S.resolveGenericCall(node, {}))
     return nullptr;
   if (explicitInstance ||
@@ -3255,13 +3283,26 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   // -- Generic call: instantiate the template and rebind the callee
   if (!explicitInstance &&
-      (node->hasTypeArgs() || S.isTemplate(node->getCalleeName()) ||
+      (node->hasTypeArgs() || node->hasOwnerTypeArgs() || genericStatic ||
+       S.isTemplate(node->getCalleeName()) ||
        S.isTemplateStatic(node->getCalleeName()))) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer
     if (!S.resolveGenericCall(node, argTypes, expected))
       return nullptr;
+    // An `atomic` parameter of the instance takes a place's handle, which
+    // the arguments typed for the inference did not know to give.
+    if (const FunctionSig *made = S.lookupFunction(node->getCalleeName()))
+      for (size_t i = 0; i < argTypes.size() && i < made->ParamTypes.size();
+           ++i)
+        if (ast::isa<ast::AtomicType>(made->ParamTypes[i]) &&
+            Sema::isPlaceChain(node->getArguments()[i]) &&
+            !Sema::movesPlace(node->getArguments()[i])) {
+          S.WantAtomicHandle = true;
+          argTypes[i] = visit(node->getArguments()[i]);
+          S.WantAtomicHandle = false;
+        }
   } else if (S.CurrentTypeParams &&
              S.CurrentTypeParams->count(node->getCalleeName())) {
     S.error(node->getLocation(),
@@ -3405,6 +3446,31 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
+  // Type arguments are a generic method's (#353), whose call is rebound to
+  // its instantiation: any other method takes none, a builtin's too
+  // (`n.toString<int>()`).
+  const bool written = node->hasTypeArgs();
+  const std::string name = node->getMethodName();
+  ast::Type *ty = checkMethodCall(node);
+  if (ty && written && node->getMethodName() == name) {
+    ast::Type *recv = node->getReceiver()->getResolvedType();
+    S.error(node->getLocation(),
+            "method '" + name + "' of '" + (recv ? typeName(recv) : "?") +
+                "' is not generic and takes no type arguments");
+    return nullptr;
+  }
+  return ty;
+}
+
+ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
+  // The type the call flows into, if known: a generic method's own type
+  // parameters may come from it (visitExpecting).
+  ast::Type *expected = nullptr;
+  if (auto it = S.MethodExpectations.find(node);
+      it != S.MethodExpectations.end()) {
+    expected = it->second;
+    S.MethodExpectations.erase(it);
+  }
   // Resolve receiver type.  A method call on an `atomic` place (the
   // prototype) takes its handle, not its value.
   S.WantAtomicHandle = Sema::isPlaceChain(node->getReceiver()) ||
@@ -3551,8 +3617,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                 recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
               ct == S.Ctx.getStrTy())) {
     builtinResult = S.Ctx.getIntTy();
-  } else if (mname == names::kMethodClone && (!ct || ct == S.Ctx.getStrTy()) &&
-             !(st && st->findMethod(mname))) {
+  } else if (Sema::FoundMethodTemplate own;
+             mname == names::kMethodClone && (!ct || ct == S.Ctx.getStrTy()) &&
+             !(st && (st->findMethod(mname) ||
+                      S.findMethodTemplate(nullptr, st, mname, own)))) {
     // `x.clone()` (the builtin `Cloneable`, #369): a copy of a Copyable
     // value, a new `Str`, and part by part for a struct or a tuple.
     std::string why;
@@ -3593,10 +3661,45 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                 (st ? "value" : "object") + " is destroyed");
     return nullptr;
   }
+  // The name as the call wrote it: a generic method's call is rebound to
+  // its instantiation's below.
+  const std::string writtenName = node->getMethodName();
   // A struct's methods are those of its `impl` blocks, called directly.
   ast::MethodDecl *method = ct ? ct->findMethod(node->getMethodName())
                                : st->findMethod(node->getMethodName());
   std::string ownerName = ct ? ct->getName() : st->getName();
+  // A generic method of an `impl` block (#353): the call names one of its
+  // instantiations, by the type arguments written or inferred from the
+  // arguments, which are typed first for that.
+  // Written type arguments name the instance before the arguments are
+  // checked, which then flow into its parameters as into any method's.
+  std::vector<ast::Type *> inferredFrom;
+  bool genericCall = false;
+  if (!method) {
+    Sema::FoundMethodTemplate probe;
+    if (S.findMethodTemplate(ct, st, node->getMethodName(), probe)) {
+      if (!node->hasTypeArgs()) {
+        bool argsOk = true;
+        for (ast::Expr *arg : node->getArguments()) {
+          inferredFrom.push_back(visit(arg));
+          argsOk = argsOk && inferredFrom.back();
+        }
+        if (!argsOk)
+          return nullptr; // reported
+        genericCall = true;
+      }
+      bool failed = false;
+      method = S.resolveGenericMethodCall(node, ct, st, inferredFrom, expected,
+                                          failed);
+      if (!method)
+        return nullptr; // reported (the template was found)
+    }
+  } else if (node->hasTypeArgs()) {
+    S.error(node->getLocation(),
+            "method '" + node->getMethodName() + "' of '" + ownerName +
+                "' is not generic and takes no type arguments");
+    return nullptr;
+  }
 
   if (!method && ct && node->getMethodName() == names::kMethodClone &&
       node->getNumArguments() == 0 && !S.isErroneousClass(ct)) {
@@ -3617,6 +3720,13 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     ast::Type *fieldTy = ct ? ct->findField(node->getMethodName())
                             : st->findField(node->getMethodName());
     auto *fnt = fieldTy ? ast::dyn_cast<ast::FunctionType>(fieldTy) : nullptr;
+    if (fnt && node->hasTypeArgs()) {
+      S.error(node->getLocation(),
+              "'" + node->getMethodName() +
+                  "' is a field of function type; a call through it takes no "
+                  "type arguments");
+      return nullptr;
+    }
     if (fnt) {
       if (!S.checkMemberAccess(ct ? static_cast<ast::Type *>(
                                         S.fieldOwner(ct, node->getMethodName()))
@@ -3647,11 +3757,12 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
   }
 
-  // A private method is its type's own.
+  // A private method is its type's own (a generic one by its template's
+  // name, which starts its instantiation's).
   if (!S.checkMemberAccess(ct ? static_cast<ast::Type *>(
                                     S.declaringClass(ct, node->getMethodName()))
                               : static_cast<ast::Type *>(st),
-                           node->getMethodName(), node->getLocation()))
+                           writtenName, node->getLocation()))
     return nullptr;
 
   // `destroy` is the compiler-generated ARC destructor; it runs automatically
@@ -3696,7 +3807,14 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     // prototype); any other value makes a new cell (checkAssignable).
     S.WantAtomicHandle =
         ast::isa<ast::AtomicType>(paramTys[i]) && Sema::isPlaceChain(argExpr);
-    auto *argTy = visitExpecting(argExpr, paramTys[i]);
+    // (A generic method's arguments were typed to infer its own; one that
+    // is to give its handle is typed again, now that its parameter is
+    // known.)
+    if (genericCall && Sema::movesPlace(argExpr))
+      S.WantAtomicHandle = false; // typed once: what it moved, it moved
+    auto *argTy = genericCall && !S.WantAtomicHandle
+                      ? inferredFrom[i]
+                      : visitExpecting(argExpr, paramTys[i]);
     S.WantAtomicHandle = false;
     if (!argTy)
       continue;
@@ -4137,11 +4255,16 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
              (ast::isa<ast::EnumValueExpr>(arm) ||
               ast::isa<ast::CallExpr>(arm) || ast::isa<ast::TernaryExpr>(arm)))
       S.VariantExpectation = want;
+    else if (want && ast::isa<ast::MethodCallExpr>(arm))
+      S.MethodExpectations[arm] = want;
     return visit(arm);
   };
   auto *condTy = visit(node->getCondition());
   ast::Type *trueTy = nullptr;
   ast::Type *falseTy = nullptr;
+  // (A method call in the first arm is typed in its place, whether or not
+  // it turns out to be a generic method's: what an arm moves is seen in the
+  // order the arms are written.)
   if (!expected && needsOtherSide(node->getTrueExpr()) >
                        needsOtherSide(node->getFalseExpr())) {
     falseTy = visitArm(node->getFalseExpr(), nullptr);
@@ -4677,7 +4800,25 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(ImportedNatives),
                      std::move(ImportedInstanceClassDecls),
                      std::move(ImportedInstanceStructDecls),
-                     {OwnSourceName, OwnSourceLines, nullptr, ""}};
+                     {OwnSourceName, OwnSourceLines, nullptr, ""},
+                     std::move(ForeignMethodClassDecls),
+                     std::move(ForeignMethodStructDecls),
+                     {}};
+  // The structs with generic methods: one that is not generic by its own
+  // table, an instance by its template's (whichever block they are in).
+  for (const auto &[name, st] : Ctx.getStructTypes()) {
+    if (name != st->getName())
+      continue; // an alias
+    auto own = MethodTemplates.find(name);
+    bool has = own != MethodTemplates.end() && !own->second.empty();
+    if (!has)
+      if (const StructInstantiationInfo *info = structInstantiationInfo(st))
+        if (auto of = TemplateMethodTemplates.find(info->Template);
+            of != TemplateMethodTemplates.end())
+          has = !of->second.empty();
+    if (has)
+      result.GenericMemberTypes.insert(name);
+  }
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;
