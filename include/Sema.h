@@ -605,9 +605,20 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   std::string wholeSelfLent(const ast::Expr *e) const;
   /// Why no field leaves an object of @p ct by `move` (#378): a
   /// `__deinit__` that may run on the object, which is its class's, a
-  /// superclass's, or one of a class this module derives from it, and reads
-  /// the whole object.  Empty when none is known.
-  std::string deinitOfObject(const ast::ClassType *ct) const;
+  /// superclass's, or one of a class derived from it, and reads the whole
+  /// object.  Empty when none can run: the classes derived from it are
+  /// known (none of a `final class`, of an instance of a generic class or
+  /// of `Str`; this module's, of a class of a program's main module) and
+  /// declare none.  @p finalHelps is set when declaring the class `final`
+  /// would let the field leave: it is this module's, and only a class
+  /// another module derives could declare one.
+  std::string deinitOfObject(const ast::ClassType *ct,
+                             bool *finalHelps = nullptr) const;
+  /// The rest of the error of a field moved out of an object that may run
+  /// a `__deinit__` (deinitOfObject's @p why): what to write instead of
+  /// `move @p place`.
+  std::string keepWholeAdvice(const ast::ClassType *ct, bool finalHelps,
+                              const std::string &place) const;
   /// The loop depth each variable was declared at, by varKey.
   std::unordered_map<std::string, unsigned> DeclLoopDepth;
   /// Set while an expression that is an `atomic` variable's handle (not
@@ -1778,6 +1789,8 @@ public:
       /// resolve, with type identity preserved) but is NOT given the
       /// importer's qualifier — names are never re-exported transitively.
       bool IsLocal = true;
+      /// A `final class`: an importer derives no class from it.
+      bool Final = false;
       /// Canonical name (ModuleName.h) of the module that declares the
       /// class ("" for compiler builtins): the module's identity, used to
       /// detect two modules exporting different classes under one name, and

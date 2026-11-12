@@ -21,6 +21,11 @@ samples/concurrency/README.md.
   or an optional. The C of `--emit-c` runs a task where it is called, so it keeps the code of a
   module that has to do with tasks instead of linking its compiled code, and `--list-modules`
   does not name it (docs/c-backend.md).
+- `final class Name { ... }` (docs/language/05-classes.md, "Final classes"): a class that no
+  class extends, in its module or in one that imports it (the module's interface records it).
+  The compiler then knows an object of the type is of exactly that class: a field can leave
+  it by `move`, a virtual call on it is resolved in a `parallel for` body, and what
+  destroying it runs is known. `final` is a new keyword.
 - `__deinit__` for classes (#378; docs/language/05-classes.md, "Deinitializers"): `fn
   __deinit__() { ... }` runs once when an object is destroyed, before what it holds is
   released: the class's own, then each superclass's. It cannot keep `self`, `await`, or be
@@ -201,6 +206,13 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- **Breaking:** in a module that others import, a field leaves by `move` only an object whose
+  class nothing can extend: `move c.name` on a class that is not `final` (nor an instance of
+  a generic class) is `cannot move 'c.name' out of 'c': a class another module derives from
+  'Open' may declare a '__deinit__', which runs on the whole object; declare 'Open' a 'final
+  class', or write 'mem::replace(c.name, v)'`. A class another module derived, with a
+  `__deinit__` that read the field, crashed. A program's main module is not affected.
+- **Breaking:** `final` is a keyword and no longer an identifier.
 - **Breaking:** `io::File` is a struct that closes its file in its `__deinit__` (#378;
   docs/stdlib/io.md, "`File`"), where it was a class around a counted runtime object. The file is
   closed where the `File` is destroyed: at the end of its variable's scope, with the object or

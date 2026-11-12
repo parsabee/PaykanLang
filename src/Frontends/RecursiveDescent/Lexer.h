@@ -62,6 +62,7 @@ enum class Tok : uint8_t {
   KwAwait,
   KwParallel,
   KwAtomic,
+  KwFinal,
   KwShared,
   KwLocked,
   KwMut,

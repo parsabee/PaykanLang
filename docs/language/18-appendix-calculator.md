@@ -72,7 +72,7 @@ entry on until it reaches the entry that has no `next`:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
-class Entry {
+final class Entry {
   key: Str;
   value: float;
   next: Entry?;   // the next entry in the same bucket, or None
@@ -177,7 +177,10 @@ Removing a key unlinks its entry. `unlink` walks the chain through `inout` bindi
 entry before the one with the key; there the binding's last use has passed, and `mem::take`
 moves the entry with the key out of `self.next`, leaving `None`. The arm owns that entry, as
 the binding of a temporary, and `move n.next` hands the rest of the chain back to
-`self.next` ([Fields and elements](16-memory.md#fields-and-elements-memreplace-memtake-and-memswap)):
+`self.next` ([Fields and elements](16-memory.md#fields-and-elements-memreplace-memtake-and-memswap)).
+`Entry` is a `final class` for that move: a field leaves an object only when no
+`__deinit__` can run on it, and a class that another module could derive from might get one
+([Final classes](05-classes.md#final-classes)):
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn

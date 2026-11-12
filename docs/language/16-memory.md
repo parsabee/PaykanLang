@@ -616,9 +616,14 @@ variable. An object that runs a `__deinit__` ([Classes](05-classes.md#deinitiali
 up no field this way, since its `__deinit__` runs on the whole object: `cannot move 'c.name'
 out of 'c': a 'C' has a '__deinit__', which runs on the whole object; write
 'mem::replace(c.name, v)'`. That is so when the object's class declares one, when a
-superclass does, and when a class the module derives from it does (the object may be one of
-those). A class that another module derives is not known where the field is moved, so its
-`__deinit__` is not to read a field that the module of its superclass moves out.
+superclass does, and when a class derived from it does or may (the object may be one of
+those). The classes a module derives from one of its own are known to it. Another module
+may derive more, so a module that others import moves a field only out of an object whose
+class nothing can extend, a [`final class`](05-classes.md#final-classes): `cannot move
+'c.name' out of 'c': a class another module derives from 'Open' may declare a '__deinit__',
+which runs on the whole object; declare 'Open' a 'final class', or write
+'mem::replace(c.name, v)'`. A program's main module is imported by none, and knows every
+class derived from its own.
 
 ### `return` moves
 

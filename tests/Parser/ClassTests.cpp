@@ -420,6 +420,40 @@ TEST(Class, MethodsAreNotGeneric) {
   EXPECT_TRUE(ok);
 }
 
+// `final class Name { ... }` is a class no class extends; `final` goes
+// before `class` only, and is a keyword.
+TEST(Class, FinalGoesBeforeClassOnly) {
+  auto [ok, driver] = parse("final class Leaf { n: int; }\n"
+                            "class Open { n: int; }\n"
+                            "final class Box<T> { v: T; }\n"
+                            "fn main() -> int { return 0; }\n");
+  ASSERT_TRUE(ok);
+  const auto &classes = driver->getRoot()->getClassDecls();
+  ASSERT_EQ(classes.size(), 2u);
+  EXPECT_TRUE(classes[0]->isFinal());
+  EXPECT_EQ(classes[0]->getLocation().getColumnStart(), 1u);
+  EXPECT_FALSE(classes[1]->isFinal());
+  ASSERT_EQ(driver->getRoot()->getGenericClassDecls().size(), 1u);
+  EXPECT_TRUE(driver->getRoot()->getGenericClassDecls()[0]->isFinal());
+
+  auto r =
+      parseWithDiags("final struct S { n: int; }\n"
+                     "final fn f() -> int { return 1; }\n"
+                     "fn main() -> int { let final = 1; return final; }\n");
+  EXPECT_FALSE(r.Ok);
+  ASSERT_GE(r.Diags.size(), 3u) << r.Text;
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_NE(r.Diags[i].Message.find(
+                  "expected 'class' after 'final': only a class can be "
+                  "'final' (one no class extends)"),
+              std::string::npos)
+        << r.Text;
+    EXPECT_EQ(r.Diags[i].Loc.getLineStart(), i + 1);
+  }
+  EXPECT_NE(r.Diags[2].Message.find("unexpected 'final'"), std::string::npos)
+      << r.Text;
+}
+
 // A superclass with type arguments is an error at the `<`, said as such: it
 // was `unexpected '<'; expected '{' to open the class body`.  No class
 // extends an instantiation of a generic class; a generic class extends a

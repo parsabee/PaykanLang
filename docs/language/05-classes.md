@@ -707,7 +707,8 @@ The rest of this chapter gives the precise rules.
 
 - Class instances are **heap-allocated** with a leading vtable pointer; layout is
   `{ vptr, strong count, weak count, fields… }` (see [Memory](16-memory.md) for the counts).
-- Every class transitively extends `Obj`. There is no multiple inheritance.
+- Every class transitively extends `Obj`. There is no multiple inheritance. A `final class`
+  is extended by none ([Final classes](#final-classes)).
 - **All methods declared inside a class are virtual**: dispatched through the vtable.
   Methods of an `impl` block are called directly (see [`impl` Blocks](#impl-blocks)).
 - A method **borrows** its object: it cannot return, pass, store or capture `self`. A
@@ -1351,6 +1352,47 @@ made as a shape, now a square of area 9
 
 ---
 
+### Final classes
+
+`final class Name { ... }` declares a class that no class extends:
+
+```pkn
+final class Token {
+  text: Str;
+}
+
+fn text(t: Token) -> Str {
+  return move t.text;     // nothing but a Token is a Token
+}
+
+fn main() -> int {
+  return text(Token("if")).len() - 2;
+}
+```
+
+- A class that names a final one as its superclass is an error (`cannot inherit from
+  'Token': class is final`), in the module that declares it and in every module that
+  imports it: the module's interface says the class is final. `Str` is final.
+- `final` goes before `class` only (`expected 'class' after 'final': only a class can be
+  'final' (one no class extends)`): a struct and an enum have no subclasses, and a method of
+  an `impl` block is never overridden as it is. `final` is a keyword, so it names nothing
+  else.
+- An instance of a generic class is extended by no class either
+  ([Generics](13-generics.md)); `final class Box<T>` says so, and changes nothing.
+
+What it buys is what the compiler knows of an object whose type is the class: it is of
+exactly that class.
+
+- **A field can leave it by `move`.** A `__deinit__` runs on the whole object, so a field
+  leaves only an object that can run none ([Memory](16-memory.md#ownership-transfers)). In a
+  module that others import, a class that is not final may be derived from elsewhere, with a
+  `__deinit__`, and `move c.name` is refused; a final class's own chain is all there is.
+- **A virtual call on it is resolved**, and what destroying it runs is known, so a
+  `parallel for` body may call its methods and let go of it
+  ([Concurrency](19-concurrency.md)).
+- A program's main module is imported by none: it knows every class derived from its own,
+  final or not.
+
 ## The `Obj` Root
 
 Every class transitively extends `Obj`. `Obj` defines:
@@ -1406,6 +1448,9 @@ created for that argument list. See [Generics](13-generics.md).
 | `__deinit__` declared otherwise | One with a parameter, a result type, no body, or declared `static`, `view`, `shared` or `async`; one in a conditional `impl` block of a generic class; a trait's requirement (`a trait cannot require '__deinit__'`): `'__deinit__' takes no parameters ('fn __deinit__() { ... }' runs when the object is destroyed)` (see [Deinitializers](#deinitializers)) |
 | `__deinit__` called or waiting | `x.__deinit__()`: `'__deinit__' cannot be called directly; it runs when the object is destroyed`; an `await` in its body |
 | A field moved out of an object that runs a `__deinit__` | `move c.name` where `c`'s class, a superclass, or a class the module derives from it declares one: `cannot move 'c.name' out of 'c': a 'C' has a '__deinit__', which runs on the whole object; write 'mem::replace(c.name, v)'` |
+| A field moved out of an object another module may extend | In a module that others import, `move c.name` where `c`'s class is not final: `cannot move 'c.name' out of 'c': a class another module derives from 'Open' may declare a '__deinit__', which runs on the whole object; declare 'Open' a 'final class', or write 'mem::replace(c.name, v)'` |
+| Extending a final class | `class Sub : Token` for a `final class Token`, or `: Str`: `cannot inherit from 'Token': class is final` |
+| `final` before anything but `class` | `final struct S`, `final fn f()`: `expected 'class' after 'final': only a class can be 'final' (one no class extends)` |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |
 | `__super__(…)` missing | A derived `__init__` whose base has one (other than the default one of a class with no fields) does not begin with `__super__(…)`: `'__init__' in class 'Dog' must call '__super__' as its first statement because its superclass 'Animal' has an '__init__'` |
 | `__super__(…)` twice or not first | A `__super__(…)` call that is not the first statement of `__init__`: a second one, after the first or under an `if` or a loop, or one after another statement: `'__super__' may be called only once, as the first statement of '__init__'`, at the call |

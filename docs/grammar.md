@@ -59,6 +59,7 @@ Keywords (reserved; never identifiers):
 import  as  class  struct  enum  match  fn  native  return  if  then  else
 elif  while  for  break  continue  True  False  None  _  view  inout  let  weak  impl
 static  trait  move  async  await  parallel  atomic  shared  const  locked  lock  mut
+final
 ```
 
 `const` is reserved and spells nothing: every type that writes it is a syntax error (§5).
@@ -187,8 +188,8 @@ name; for the list form the whole path is the base path.
 ## 4. Declarations
 
 ```
-classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
-                "{" classMember* "}"
+classDecl   ::= "final"? "class" IDENT typeParams? ( ":" modulePath )?
+                "{" classMember* "}"                -- `final`: no class extends it
 classMember ::= fieldDecl ";" | funcDecl      -- funcDecl without typeParams
               | "async"? "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual

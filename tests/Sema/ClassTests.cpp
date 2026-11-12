@@ -2526,6 +2526,72 @@ fn main() -> int {
   EXPECT_EQ(r.Diagnostics.find(".pkn:6:"), std::string::npos) << r.Diagnostics;
 }
 
+// No class extends a `final class`; a module that others import (one with
+// no `main`) moves a field only out of an object of a class nothing can
+// extend, since a class another module derives may declare a `__deinit__`;
+// and a `parallel for` body's virtual call on a final class is resolved.
+TEST(Final, AClassNothingExtends) {
+  auto r = semaCheck(R"(final class Leaf { name: Str; }
+class Sub : Leaf { n: int; }
+class Text : Str { n: int; }
+fn main() -> int { return 0; }
+)");
+  for (const char *want :
+       {":2:1: error: cannot inherit from 'Leaf': class is final",
+        ":3:1: error: cannot inherit from 'Str': class is final"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+
+  auto lib = semaCheck(R"(final class Leaf { name: Str; }
+class Open { name: Str; }
+class Box<T> { name: Str; v: T; }
+fn leaf(c: Leaf) -> Str { return move c.name; }
+fn open(c: Open) -> Str { return move c.name; }
+fn box(c: Box<int>) -> Str { return move c.name; }
+)");
+  EXPECT_NE(lib.Diagnostics.find(
+                ":5:34: error: cannot move 'c.name' out of 'c': a class "
+                "another module derives from 'Open' may declare a "
+                "'__deinit__', which runs on the whole object; declare 'Open' "
+                "a 'final class', or write 'mem::replace(c.name, v)'"),
+            std::string::npos)
+      << lib.Diagnostics;
+  for (const char *line : {".pkn:4:", ".pkn:6:"})
+    EXPECT_EQ(lib.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                             << lib.Diagnostics;
+
+  auto calls = semaCheck(R"(final class Leaf {
+  n: int;
+  view fn size() -> int { return 1; }
+}
+class Open {
+  n: int;
+  view fn size() -> int { return 1; }
+}
+fn sizes() -> int {
+  total = 0;
+  parallel for i in 0..4 { let a = Leaf(i); total += a.size(); }
+  parallel for i in 0..4 { let b = Open(i); total += b.size(); }
+  return total;
+}
+)");
+  EXPECT_NE(calls.Diagnostics.find(
+                ":12:54: error: a 'parallel for' body cannot call "
+                "'Open.size', which a class derived from 'Open' may override"),
+            std::string::npos)
+      << calls.Diagnostics;
+  EXPECT_EQ(calls.Diagnostics.find(".pkn:11:"), std::string::npos)
+      << calls.Diagnostics;
+
+  // A program's main module knows every class derived from its own.
+  auto program = semaCheck(R"(class Open { name: Str; }
+fn open(c: Open) -> Str { return move c.name; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(program.Diagnostics.find("error"), std::string::npos)
+      << program.Diagnostics;
+}
+
 // Destroying an object runs its `__deinit__`.  An object dies in the code
 // that made it or in what that code hands it to, so making one is a call
 // of its `__deinit__`s in the par-safe check; and so is taking `inout` the

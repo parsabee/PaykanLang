@@ -1162,8 +1162,8 @@ a 'parallel for' body cannot call 'log', which calls '::io::println<Str>', which
 ```
 
 A virtual call is resolved when the compiler knows every method it can reach. That is so for
-a `Str` and an instance of a generic class, from which no class derives, and for a class of a
-program's main module, where the compiler has seen all the classes derived from it and checks
+a `Str`, an instance of a generic class and a [`final class`](05-classes.md#final-classes),
+from which no class derives, and for a class of a program's main module, where the compiler has seen all the classes derived from it and checks
 each override. In a module that others import, a class can still be derived from elsewhere, so
 a virtual call on one of its classes is an error; an `impl` block's method is never overridden
 and can be called. `a == b` and `Str(a)` count as calls of `equals` and `toString` on the objects

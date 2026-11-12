@@ -1870,6 +1870,8 @@ private:
   // Type parameter names (interned); empty for an ordinary class.
   std::vector<const std::string *> TypeParams;
   TypeParamBounds Bounds;
+  // `final class Name { ... }`: no class extends it.
+  bool Final = false;
 
 public:
   ClassDecl(SourceLocation loc, const std::string &internedName,
@@ -1897,6 +1899,8 @@ public:
   bool isGeneric() const { return !TypeParams.empty(); }
   const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
   void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
+  bool isFinal() const { return Final; }
+  void setFinal(bool v = true) { Final = v; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
