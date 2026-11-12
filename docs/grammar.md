@@ -189,8 +189,8 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= fieldDecl ";" | funcDecl      -- funcDecl without typeParams or "async"
-              | "shared"? "view"? "fn" IDENT "(" paramList? ")"
+classMember ::= fieldDecl ";" | funcDecl      -- funcDecl without typeParams
+              | "async"? "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
@@ -202,17 +202,17 @@ variant     ::= IDENT ( "(" varDecl ( "," varDecl )* ")" )?   -- its fields
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
                 "{" traitMember* "}"
-traitMember ::= "shared"? "view"? "fn" IDENT "(" paramList? ")"
+traitMember ::= "async"? "shared"? "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
-implMember  ::= funcDecl                          -- funcDecl without typeParams or "async"
-              | "static" "fn" IDENT "(" paramList? ")"
+implMember  ::= funcDecl                          -- funcDecl without typeParams
+              | "static" "async"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 
-funcDecl    ::= ( "async" | "shared"? "view"? ) "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= "async"? "shared"? "view"? "fn" IDENT typeParams? "(" paramList? ")"   -- "shared" and "view": a method's
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
@@ -305,23 +305,22 @@ written, `___init__` too); `destroy`, which is never declared, gets
 `'destroy' is reserved for the compiler-generated destructor and cannot be
 declared` at the function, an `impl` block's method or `static fn`, as
 Sema reports one with a body.
-`async fn` declares a free function that is a task
+`async fn` declares a function that is a task
 ([design/concurrency.md](design/concurrency.md), the concurrency prototype):
 a call of it starts the task, and `await` (§7) takes the result
-(`FuncDecl::isAsync`; the `FuncDecl` starts at `async`).  `async` stands
-directly before `fn`, at top level only.  Anywhere else it is a syntax
-error: before anything but `fn` at top level (`async main()`, `async view
-fn`) it is `unexpected 'async'; expected 'fn' after 'async'`, at the
-`async`, and `view async fn` is the top-level error at the `view`; in a
-class body, an `impl` block or a trait it is the member error there
-(`unexpected 'async'; expected a field ('name: Type;') or a method ('fn')
-in the class body`, `unexpected 'async'; expected a method ('fn', 'view fn'
-or 'static fn') in the impl block; fields go in the type's declaration`,
-`unexpected 'async'; expected a method signature ('fn' or 'view fn') in the
-trait`), and `native async fn` is `unexpected 'async'; expected 'fn' after
-'native'`: the prototype has no async methods
-([samples/concurrency/README.md](../samples/concurrency/README.md), "What
-is not").
+(`FuncDecl::isAsync`; the `FuncDecl` starts at `async`).  A free function, a
+method of a class body or an `impl` block, a pure virtual method, a trait's
+requirement and a `static fn` can be one.  `async` comes first (`async fn`,
+`async view fn`), and after `static` in `static async fn`; an `async shared
+fn` parses, and is Sema's error (`'f' cannot be both 'async' and a 'shared
+fn': ...`).  At top level it stands directly before `fn`: before anything
+else (`async main()`, `async view fn`) it is `unexpected 'async'; expected
+'fn' after 'async'`, at the `async`, and `view async fn` is the top-level
+error at the `view`.  In a class body `shared async fn` is the member error
+there (`unexpected 'shared'; expected a field ('name: Type;') or a method
+('fn') in the class body`), in an `impl` block `async static fn` is
+`unexpected 'async'; expected 'static async fn': 'static' comes first`, and
+`native async fn` is `unexpected 'async'; expected 'fn' after 'native'`.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/03-functions.md](language/03-functions.md)):

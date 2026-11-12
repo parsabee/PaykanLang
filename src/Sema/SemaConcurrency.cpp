@@ -398,8 +398,12 @@ bool Sema::sameIndex(const ast::Expr *a, const ast::Expr *b) {
   return samePlace(a, b);
 }
 
-bool Sema::checkCrossedClasses() {
+bool Sema::checkCrossedClasses(const ast::TranslationUnit *tu) {
   bool ok = true;
+  // Where each of the module's classes is declared.
+  std::unordered_map<std::string, ast::SourceLocation> declared;
+  for (const ast::ClassDecl *cd : tu->getClassDecls())
+    declared.emplace(cd->getName(), cd->getLocation());
   std::unordered_set<const ast::ClassType *> reported;
   const std::vector<const ast::ClassType *> crossed(CrossedClasses.begin(),
                                                     CrossedClasses.end());
@@ -417,7 +421,8 @@ bool Sema::checkCrossedClasses() {
       if (why.empty())
         continue;
       reported.insert(other);
-      error(other->getLocation(),
+      auto at = declared.find(other->getName());
+      error(at == declared.end() ? other->getLocation() : at->second,
             "class '" + other->getName() + "' extends '" + ct->getName() +
                 "', which is sent to another thread: " + why);
       ok = false;
@@ -1077,13 +1082,122 @@ std::string Sema::uncrossable(ast::Type *ty, ast::Qualifier q,
   return why;
 }
 
-bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
-  if (!ParallelStack.empty()) {
-    error(call->getLocation(),
-          "a task cannot be started in a 'parallel for' body");
+bool Sema::checkAsyncDecl(const ast::FuncDecl *fn, ast::Type *result) {
+  const std::string name = displayName(fn->getName());
+  if (fn->hasInferredResult()) {
+    error(fn->getLocation(), "the result type of 'async fn' '" + name +
+                                 "' is not inferred: write it, 'async fn " +
+                                 name + "(...) -> T => ...'");
     return false;
   }
-  const std::vector<ast::Expr *> &args = call->getArguments();
+  // Its result crosses back to the awaiting thread: the send check.
+  if (std::string why = uncrossable(result, fn->getResultQual(), "");
+      !why.empty()) {
+    error(fn->getLocation(),
+          "the result of 'async fn' '" + name + "' (a '" +
+              qualifiedName(fn->getResultQual(), result) +
+              "') cannot cross to the task's awaiter: " + why);
+    return false;
+  }
+  return checkAsyncModes(fn);
+}
+
+bool Sema::checkAsyncModes(const ast::FuncDecl *fn) {
+  const std::string name = displayName(fn->getName());
+  if (fn->isShared()) {
+    error(fn->getLocation(),
+          "'" + name +
+              "' cannot be both 'async' and a 'shared fn': a 'shared' "
+              "receiver is aliased on its own thread, and cannot cross to "
+              "the task");
+    return false;
+  }
+  if (fn->getResultMode() != ast::ParamMode::Value) {
+    error(fn->getLocation(),
+          "an 'async fn' returns a value: its result cannot be 'view' or "
+          "'inout'");
+    return false;
+  }
+  for (const ast::Param &p : fn->getParams())
+    if (p.Mode != ast::ParamMode::Value) {
+      error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" + name +
+                       "' cannot be '" + ast::paramModeName(p.Mode) +
+                       "': a task outlives the call that starts it");
+      return false;
+    }
+  return true;
+}
+
+ast::Type *Sema::taskOf(ast::Qualifier q, ast::Type *result) {
+  // The task's result keeps its form, which `await` hands on.  A unique
+  // result's `mut` is no part of the task's type (a fresh object is its
+  // awaiter's to write, as a temporary is): a task of a `mut Node` is a
+  // task of a `Node`, in a variable, an override and a requirement alike.
+  return Ctx.getTaskType(q.Form == ast::QualForm::Unique
+                             ? result
+                             : Ctx.getQualifiedType(q, result));
+}
+
+bool Sema::checkSendArgs(const ast::MethodCallExpr *call,
+                         const ast::MethodDecl *method) {
+  FunctionSig sig;
+  sig.ParamTypes = method->getParamTypes();
+  return checkSendArgs(call->getLocation(), call->getArguments(), sig);
+}
+
+bool Sema::checkAsyncMethodCall(const ast::MethodCallExpr *call,
+                                const ast::MethodDecl *method) {
+  // The task uses the receiver on another thread: it has to cross, and
+  // unless it is frozen (a handle, which the task holds a reference of its
+  // own to) nothing else may touch it meanwhile, which the caller's waiting
+  // in place guarantees.  A conditional is each of its branches.  (The
+  // contents of a `locked` object are reached in a `lock` block only, a
+  // borrow there.)
+  bool handles = true;
+  const std::function<bool(const ast::Expr *)> crosses =
+      [&](const ast::Expr *receiver) {
+        if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(receiver))
+          return crosses(te->getTrueExpr()) && crosses(te->getFalseExpr());
+        ast::Type *ty = const_cast<ast::Expr *>(receiver)->getResolvedType();
+        const ast::Qualifier q = qualifierOf(receiver);
+        if (std::string why = uncrossable(ast::stripOptional(ty), q, "");
+            !why.empty()) {
+          error(receiver->getLocation(),
+                "the receiver of 'async fn' '" + method->getName() + "' ('" +
+                    placeText(receiver) + "', a '" + qualifiedName(q, ty) +
+                    "') cannot cross to its task: " + why);
+          return false;
+        }
+        handles = handles && q.Form == ast::QualForm::AtomicShared;
+        return true;
+      };
+  if (!crosses(call->getReceiver()))
+    return false;
+  if (!handles && call != AwaitOperand) {
+    // Inside an `await`'s operand, the `await` is of something else
+    // (`await c.dup().n` awaits the field).
+    error(call->getLocation(),
+          "'" + placeText(call) + "' lends '" + placeText(call->getReceiver()) +
+              "' to the task it starts: " +
+              (AwaitOperand ? "'await' the call itself, '(await " +
+                                  placeText(call) + ")'"
+                            : "'await' it where it is called"));
+    return false;
+  }
+  return true;
+}
+
+bool Sema::checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig) {
+  return checkSendArgs(call->getLocation(), call->getArguments(), sig);
+}
+
+bool Sema::checkSendArgs(ast::SourceLocation loc,
+                         const std::vector<ast::Expr *> &args,
+                         const FunctionSig &sig) {
+  if (!ParallelStack.empty()) {
+    error(loc, "a task cannot be started in a 'parallel for' body");
+    return false;
+  }
   bool ok = true;
   for (size_t i = 0; i < args.size() && i < sig.ParamTypes.size(); ++i) {
     ast::Type *p = sig.ParamTypes[i];
@@ -1449,7 +1563,8 @@ void Sema::finishLoopMoves() {
   if (!FlowEnded)
     checkLoopIteration(loop, loop.Loc);
   // After the loop: no iteration at all, the last one's end, or a `break`.
-  std::vector<MovedMap> paths{std::move(loop.Entry)};
+  std::vector<MovedMap> paths{loop.NoIteration ? std::move(*loop.NoIteration)
+                                               : std::move(loop.Entry)};
   if (!FlowEnded)
     paths.push_back(MovedVars);
   for (MovedMap &b : loop.Breaks)
@@ -1475,7 +1590,9 @@ void Sema::checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc) {
     if (!LoopMovesReported.insert(key + "@" + at(loop.Loc)).second)
       continue;
     const std::string name(keyName(key));
-    error(st.At, "'" + name + "' is moved in the loop at " + at(loop.Loc) +
+    error(st.At, "'" + name + "' is " +
+                     (st.By == "await" ? "awaited" : "moved") +
+                     " in the loop at " + at(loop.Loc) +
                      " and not assigned again before the next iteration" +
                      (at(loc) == at(loop.Loc)
                           ? ""
@@ -1661,6 +1778,15 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
     error(node->getLocation(), why + "; it cannot be moved");
     return nullptr;
   }
+  // A task handle is spent on every path: moved in an operand that runs on
+  // some paths only, its task is left running, unawaited, on the others.
+  if (ast::isa<ast::TaskType>(ty) && ConditionalOperand > 0) {
+    error(node->getLocation(), "task '" + name +
+                                   "' would be moved on some paths only: "
+                                   "move it before the condition");
+    MovedVars[varKey(name)] = MovedState{node->getLocation(), false, ""};
+    return nullptr;
+  }
   // (A move in a loop of a variable declared outside it is checked at the
   // iteration's end: checkLoopIteration.)
   MovedVars[varKey(name)] = MovedState{node->getLocation(), false, ""};
@@ -1755,10 +1881,20 @@ ast::Qualifier Sema::qualifierOf(const ast::Expr *e) {
     // `await` hands on the form the task's result was declared with.
     if (u->getOpcode() == ast::UnaryOpcode::Await)
       if (const auto *tt = ast::dyn_cast<ast::TaskType>(
-              const_cast<ast::Expr *>(u->getOperand())->getResolvedType()))
+              const_cast<ast::Expr *>(u->getOperand())->getResolvedType())) {
         if (const auto *qt =
                 ast::dyn_cast<ast::QualifiedType>(tt->getInnerType()))
           return qt->getQualifier();
+        // A unique result's `mut` (taskOf): the call's, awaited where it is
+        // written.
+        if (const auto *ce = ast::dyn_cast<ast::CallExpr>(u->getOperand())) {
+          if (!ce->calleeIsValue())
+            if (const FunctionSig *sig = lookupFunction(ce->getCalleeName()))
+              return sig->ResultQual;
+        } else if (ast::isa<ast::MethodCallExpr>(u->getOperand())) {
+          return qualifierOf(u->getOperand());
+        }
+      }
     return ast::Qualifier{};
   }
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))

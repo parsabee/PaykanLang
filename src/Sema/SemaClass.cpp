@@ -945,6 +945,42 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       return nullptr;
   }
 
+  // An async method's type is its task's; its colour is its slot's.
+  if (method->isAsync()) {
+    if (method->getName() == names::kMethodInit) {
+      error(method->getLocation(), "'__init__' cannot be 'async': constructing "
+                                   "gives the object at once");
+      return nullptr;
+    }
+    // The compiler calls these itself, and has no task to wait for: the
+    // ones it calls, by their parameters (a `hash(salt: int)` is the
+    // program's own).
+    for (const char *implicit : {names::kMethodClone, names::kMethodEquals,
+                                 names::kMethodHash, names::kMethodToString})
+      if (method->getName() == implicit &&
+          method->getParams().size() ==
+              (method->getName() == names::kMethodEquals ? 1u : 0u)) {
+        error(method->getLocation(),
+              "'" + method->getName() +
+                  "' cannot be 'async': the compiler calls it, and waits for "
+                  "no task");
+        return nullptr;
+      }
+    if (!checkAsyncDecl(method, retTy))
+      return nullptr;
+    retTy = taskOf(method->getResultQual(), retTy);
+    flags |= ast::MethodDecl::Async;
+  }
+  if (overridden && overridden->isAsync() != method->isAsync()) {
+    error(method->getLocation(),
+          "override of '" + method->getName() + "' " +
+              (overridden->isAsync()
+                   ? "must be an 'async fn', like the method it overrides"
+                   : "cannot be an 'async fn': the method it overrides is "
+                     "not"));
+    return nullptr;
+  }
+
   // -- override signature check
   // An override must have an identical signature: same parameter types and
   // return type.  Strict equality is enforced (no covariance).

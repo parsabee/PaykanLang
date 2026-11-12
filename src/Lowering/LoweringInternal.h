@@ -490,6 +490,27 @@ private:
   /// The program's `main` for an `async fn main` (@p task): starts the task
   /// and awaits its result.
   void emitAsyncMainEntry(const pir::Function &task);
+  /// Whether a call of @p fn starts a task (not the program's `async fn
+  /// main`, whose caller is the entry point).
+  bool startsAsyncTask(const ast::FuncDecl *fn) const;
+  /// The call `await` is about to wait for, and what it held for its task
+  /// to release once it has: a receiver lent to the task, or a temporary.
+  const ast::FuncDecl *EntryPoint = nullptr;
+  const ast::Expr *AwaitedCall = nullptr;
+  std::function<void()> AfterAwait;
+  /// What an async method's receiver is at the start of its task.
+  enum class AsyncReceiver { None, Object, Struct };
+  /// The function an `async fn` runs as a task, whose result is @p result.
+  pir::Function *declareAsyncTask(const pir::Function *start, ast::Type *result,
+                                  AsyncReceiver receiver);
+  /// A task's result that is not 64 bits of a value: a pointer to it.
+  static bool asyncResultOnHeap(const ast::Type *result);
+  /// The body of @p start, which an `async fn` is called by: a plain
+  /// function, so a virtual call and another module can reach it, that
+  /// starts @p task and returns the handle.
+  void emitAsyncStart(pir::Function &start, const pir::Function &task,
+                      const std::vector<ast::Type *> &params,
+                      AsyncReceiver receiver);
 
   // -- Ownership predicates
 

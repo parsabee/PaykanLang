@@ -24,11 +24,16 @@ namespace {
 
 /// `view fn name(int, view Str) -> T`, as a requirement or a method reads;
 /// `shared fn ...` for a `shared fn`.
-std::string fnSignature(bool shared, bool view, const std::string &name,
+std::string fnSignature(bool async, bool shared, bool view,
+                        const std::string &name,
                         const std::vector<ast::Type *> &params,
                         const ast::ParamModes &modes, ast::Type *ret) {
-  std::string s = shared ? "shared " : "";
+  std::string s = async ? "async " : "";
+  s += shared ? "shared " : "";
   s += view ? "view fn " : "fn ";
+  // An `async fn` is written with its task's result.
+  if (const auto *task = ast::dyn_cast<ast::TaskType>(ret); async && task)
+    ret = task->getInnerType();
   s += name + "(";
   for (size_t i = 0; i < params.size(); ++i) {
     if (i)
@@ -179,7 +184,8 @@ bool Sema::checkTraitDecls(ast::TranslationUnit *tu) {
                                         /*binds=*/false, "a parameter name");
       RequiredSig sig;
       if (!paramsOk ||
-          !resolveRequirement(fn, placeholders, td->getName(), sig)) {
+          !resolveRequirement(fn, placeholders, td->getName(), sig) ||
+          (fn->isAsync() && !checkAsyncModes(fn))) {
         it->second.Erroneous = true;
         ok = false;
       }
@@ -199,7 +205,12 @@ bool Sema::resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
                           fn->getLocation(), what);
     if (!out.Ret)
       return false;
+    out.RetQual = takeQualifier();
   }
+  // What a method of its colour returns: a task of the result in its form,
+  // as declareMethod makes an implementing method's.
+  if (fn->isAsync())
+    out.Ret = taskOf(out.RetQual, out.Ret);
   for (const auto &p : fn->getParams()) {
     if (p.getName() == names::kSelf) {
       error(p.Loc, "'self' cannot be used as a parameter name of " + what +
@@ -527,8 +538,8 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
       continue;
     }
     const std::string want =
-        fnSignature(req->isShared(), req->isView(), req->getName(), sig.Params,
-                    sig.Modes, sig.Ret);
+        fnSignature(req->isAsync(), req->isShared(), req->isView(),
+                    req->getName(), sig.Params, sig.Modes, sig.Ret);
     ast::MethodDecl *m = methodOf(ty, req->getName());
     if (!m) {
       std::string msg = kind;
@@ -545,7 +556,7 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
     }
     if (!sameSignature(m, req, sig)) {
       std::string msg = "'";
-      msg += fnSignature(m->isShared(), m->isView(), m->getName(),
+      msg += fnSignature(m->isAsync(), m->isShared(), m->isView(), m->getName(),
                          m->getParamTypes(), m->getParamModes(),
                          m->getReturnType());
       msg += "' of " + kind + " '";
@@ -593,14 +604,14 @@ std::string Sema::unmetRequirement(ast::Type *ty, const TraitRef &tr) {
     if (!resolveRequirement(req, subst, trait, sig))
       return "a requirement of '" + trait + "' does not resolve";
     const std::string want =
-        fnSignature(req->isShared(), req->isView(), req->getName(), sig.Params,
-                    sig.Modes, sig.Ret);
+        fnSignature(req->isAsync(), req->isShared(), req->isView(),
+                    req->getName(), sig.Params, sig.Modes, sig.Ret);
     const ast::MethodDecl *m = methodOf(ty, req->getName());
     if (!m)
       return "it has no method '" + want + "'";
     if (!sameSignature(m, req, sig))
       return "its '" +
-             fnSignature(m->isShared(), m->isView(), m->getName(),
+             fnSignature(m->isAsync(), m->isShared(), m->isView(), m->getName(),
                          m->getParamTypes(), m->getParamModes(),
                          m->getReturnType()) +
              "' does not match '" + want + "'";

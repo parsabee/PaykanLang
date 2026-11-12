@@ -195,7 +195,8 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
       // The modes, the result's and the flags, each written when it or
       // what follows says anything.
       const uint8_t flags = static_cast<uint8_t>(
-          (f->Native ? kFuncNative : 0) | (f->ParSafe ? kFuncParSafe : 0));
+          (f->Native ? kFuncNative : 0) | (f->ParSafe ? kFuncParSafe : 0) |
+          (f->Async ? kFuncAsync : 0));
       const bool result = flags != 0 || f->Modes.Result != kModeValue;
       if (!f->Modes.Modes.empty() || result)
         writeModes(v, strs, f->Modes);
@@ -339,6 +340,7 @@ private:
                     detail::hex(flags & ~kFuncKnownFlags));
     out.Native = flags & kFuncNative;
     out.ParSafe = flags & kFuncParSafe;
+    out.Async = flags & kFuncAsync;
     return true;
   }
   /// `uleb count` then records; @p body gets (tag, payload reader) for a

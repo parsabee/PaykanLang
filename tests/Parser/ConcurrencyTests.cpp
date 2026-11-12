@@ -96,23 +96,24 @@ async fn same<T>(x: T) -> T { return x; }
     EXPECT_NE(dump.find(fn), std::string::npos) << fn << "\n" << dump;
 }
 
-// Only a free function is `async` in the prototype: a method of a class
-// body, an `impl` block or a trait is not, nor a `static fn`, a `view fn`
-// or a native function.  `async` is followed by `fn` and nothing else.
-TEST(AsyncFn, OnlyAFreeFunction) {
+// A method of a class or an `impl` block, a `static` one and a requirement of
+// a trait can be `async`.
+TEST(AsyncFn, Methods) {
+  const std::string c = "class C { n: int; }\n";
+  for (const std::string &src :
+       {std::string("class C { n: int; async fn f() -> int { return 1; } }\n"),
+        std::string(
+            "class C { n: int; async view fn f() -> int { return 1; } }\n"),
+        c + "impl C { async fn f() -> int { return 1; } }\n",
+        c + "impl C { static async fn f() -> int { return 1; } }\n",
+        std::string("trait T { async fn f() -> int; }\n")})
+    EXPECT_TRUE(parse(src).Ok) << src;
+}
+
+// `async` comes before the receiver and `fn`, on a free function only before
+// `fn`, and not on a native function.
+TEST(AsyncFn, WhereAsyncCanBeWritten) {
   const char *const cases[][2] = {
-      {"class C { n: int; async fn f() -> int { return 1; } }",
-       "unexpected 'async'; expected a field ('name: Type;') or a method "
-       "('fn') in the class body"},
-      {"class C { n: int; }\nimpl C { async fn f() -> int { return 1; } }",
-       "unexpected 'async'; expected a method ('fn', 'view fn' or 'static "
-       "fn') in the impl block"},
-      {"class C { n: int; }\n"
-       "impl C { static async fn f() -> int { return 1; } }",
-       "unexpected 'async'; expected 'fn' after 'static'"},
-      {"trait T { async fn f() -> int; }",
-       "unexpected 'async'; expected a method signature ('fn' or 'view fn') "
-       "in the trait"},
       {"async view fn f() -> int { return 1; }",
        "unexpected 'async'; expected 'fn' after 'async'"},
       {"view async fn f() -> int { return 1; }",
@@ -125,6 +126,12 @@ TEST(AsyncFn, OnlyAFreeFunction) {
        "unexpected 'async'; expected 'fn' after 'native'"},
       {"async fn<T> f(x: T) -> T { return x; }",
        "unexpected '<'; expected a function name after 'fn'"},
+      {"class C { n: int; }\n"
+       "impl C { async static fn f() -> int { return 1; } }",
+       "unexpected 'async'; expected 'static async fn': 'static' comes first"},
+      {"class C { n: int; shared async fn f() -> int { return 1; } }",
+       "unexpected 'shared'; expected a field ('name: Type;') or a method "
+       "('fn') in the class body"},
   };
   for (const auto &c : cases)
     expectRejected(atTopLevel(c[0]), c[1]);

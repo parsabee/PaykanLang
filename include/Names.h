@@ -129,8 +129,14 @@ inline constexpr const char *kMethodHash = "hash";
 /// docs/design/pkm.md §3.5).  `Show` and `ValueType` are not: every class
 /// has `Show` through `Obj`, and the rest follow from a type's structure
 /// (src/Sema/SemaTraits.cpp, traitImplOwner).
+/// What a module interface records, where a conformance names its trait,
+/// for a class whose objects the module's code sends to another thread (a
+/// task's argument or receiver, a frozen value, a cell's): an importer's
+/// class derived from it crosses too, so the importer's send check is of
+/// it (Sema::checkCrossedClasses).
+inline constexpr const char *kImplCrosses = "crosses";
 inline bool isImplBuiltinTrait(std::string_view n) {
-  return n == kTraitHashable || n == kTraitCloneable;
+  return n == kTraitHashable || n == kTraitCloneable || n == kImplCrosses;
 }
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";
@@ -458,6 +464,9 @@ inline constexpr const char *kSelf = "self"; ///< Receiver parameter in methods
 /// destructors (`K.w`, `K.destroy`, `K.__init__`).  '.' cannot occur in a
 /// Paykan identifier, so these never clash with a user function (`fn K_w`).
 inline constexpr const char *kNameSep = ".";
+/// What an `async fn` named `f` runs as a task: `f` itself is the plain
+/// function that starts it (ModuleLowering::emitAsyncStart).
+inline constexpr const char *kAsyncTaskSuffix = "$task";
 
 /// The type a PIR function of a type is named after: @p name up to its
 /// first '.' or "::" outside `<...>` and `(...)` (`Box<int>.get`,

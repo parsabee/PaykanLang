@@ -522,6 +522,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The scope the loop stands in: a `break` or `continue` spends the
     /// task handles of the scopes inside it (checkTasksAwaitedUpTo).
     Scope *Outer = nullptr;
+    /// What is moved when the loop ends without an iteration, when that is
+    /// more than Entry: a `while`'s condition has run.
+    std::optional<MovedMap> NoIteration = std::nullopt;
   };
   std::vector<LoopMoves> LoopMoveStack;
   /// The (variable, loop) pairs reported as moved and not assigned again.
@@ -693,7 +696,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The classes the send check let cross: every class derived from one,
   /// the instances too, is checked once the module's are all known.
   std::unordered_set<const ast::ClassType *> CrossedClasses;
-  bool checkCrossedClasses();
+  /// Each class of the module @p tu that extends a class whose objects are
+  /// sent to another thread, by this module or by one it imports (its
+  /// interface says so, names::kImplCrosses), crosses with it: the send
+  /// check is of that class too.
+  bool checkCrossedClasses(const ast::TranslationUnit *tu);
   /// What a `return`, `break` or `continue` may not leave: a lambda's body
   /// and a loop inside a `lock` block are the block's own.
   unsigned ReturnLockBase = 0;
@@ -722,6 +729,32 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The send check of an async call: every reference argument is moved
   /// or a temporary, and never `shared`.
   bool checkSendArgs(const ast::CallExpr *call, const FunctionSig &sig);
+  bool checkSendArgs(ast::SourceLocation loc,
+                     const std::vector<ast::Expr *> &args,
+                     const FunctionSig &sig);
+  /// The send check of the arguments of a call of an async method.
+  bool checkSendArgs(const ast::MethodCallExpr *call,
+                     const ast::MethodDecl *method);
+  /// What an `async fn` or method may be: its result crosses to its
+  /// awaiter, and its parameters are by value (the task outlives the call).
+  bool checkAsyncDecl(const ast::FuncDecl *fn, ast::Type *result);
+  /// The part of checkAsyncDecl a trait's requirement has too, whose
+  /// result is known only where it is implemented: by-value parameters and
+  /// result, and no `shared fn`.
+  bool checkAsyncModes(const ast::FuncDecl *fn);
+  /// The type of a call of an `async fn` whose result is a @p q @p result.
+  ast::Type *taskOf(ast::Qualifier q, ast::Type *result);
+  /// The receiver of a call of an async method: it crosses to the task,
+  /// and one that is not frozen is lent, so the call is awaited in place.
+  bool checkAsyncMethodCall(const ast::MethodCallExpr *call,
+                            const ast::MethodDecl *method);
+  /// The operand of the `await` being checked: a call of an async method
+  /// there lends its receiver only while the caller waits.
+  const ast::Expr *AwaitOperand = nullptr;
+  /// How many operands being checked run on some paths only (a branch of a
+  /// conditional, the right of `&&` and `||`): an `await` of a task variable
+  /// there would leave it unspent on the others.
+  unsigned ConditionalOperand = 0;
   /// `move x`: the variable's type, and x ends; nullptr after an error.
   ast::Type *checkMove(ast::UnaryExpr *node);
   /// Error at @p loc (and false) when @p name was moved.
@@ -1667,6 +1700,8 @@ public:
       bool Native = false;
       /// FunctionSig::ParSafe.
       bool ParSafe = false;
+      /// FunctionSig::Async.
+      bool Async = false;
       bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -2524,6 +2559,8 @@ private:
   /// A requirement's signature for one implementation of its trait.
   struct RequiredSig {
     ast::Type *Ret = nullptr;
+    /// The result's qualifier, written or its type argument's.
+    ast::Qualifier RetQual;
     std::vector<ast::Type *> Params;
     ast::ParamModes Modes;
   };

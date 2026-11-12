@@ -1,0 +1,29 @@
+// OK: tasks across modules.  A module that declares an `async fn` is
+// imported, its async method overridden here and awaited there; a module
+// without one awaits its tasks.  (The C of `--emit-c` runs a task where it
+// is called, so the code of both modules is in the C, not linked as
+// compiled code: docs/c-backend.md.)
+// expect-stdout: 42 12 5
+// expect-stdout: 49 14
+import ::io;
+import jobs;
+import relay;
+
+class Doubled : jobs::Shape {
+  async view fn area() -> int {
+    return 2 * self.size;
+  }
+}
+
+impl Doubled {
+  fn __init__(size: int) { __super__(size); }
+}
+
+fn main() -> int {
+  let t = jobs::twice(21);
+  io::println(Str(await t) + " " + Str(relay::quad(3)) + " "
+      + Str(relay::width(5)));
+  io::println(Str(jobs::total(jobs::Shape(7))) + " "
+      + Str(jobs::total(Doubled(7))));
+  return 0;
+}

@@ -1034,6 +1034,17 @@ async, and the result is a value: `an 'async fn' returns a value: its result
 cannot be 'view' or 'inout'` (proposed; owner may change).  `main` may be
 `async fn main() -> int` (decision 11; src/Sema/Sema.cpp:4088).
 
+The prototype runs a task on the pool of MLIR's async runtime, so an async
+method's receiver crosses to another thread: it passes the send check, and
+one that is not frozen (`atomic shared`) is lent for the task, which the
+caller's `await` where the call is written keeps safe (`'c.get()' lends 'c'
+to the task it starts: 'await' it where it is called`).  Every `async fn` is
+lowered to a plain function that starts the task and returns its handle, and
+the task's own function (`f$task`), so a virtual call and another module need nothing
+of the runtime's: a value held in memory moves to the heap there, and a
+result held in memory or an optional comes back on the heap, its 64 bits a
+pointer.
+
 ### Starting tasks
 
 ```pkn

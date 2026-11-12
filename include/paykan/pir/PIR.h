@@ -660,6 +660,13 @@ struct Module {
   bool defines(const Class &c) const { return !c.IsExtern || isCompiled(c); }
 };
 
+/// Whether the code of @p m has to do with tasks (the concurrency
+/// prototype): it has an `async fn`, the function a compiled one runs as
+/// (`f$task`), an `async_call` or an `await`.  A compiled function's body is
+/// not in the module, so one that only awaits another module's tasks does
+/// not show.
+bool usesTasks(const Module &m);
+
 struct Program {
   /// Main module first; every module exactly once.
   std::vector<Module> Modules;

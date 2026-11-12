@@ -303,7 +303,7 @@ void Sema::ParSafety::recordVerdicts() {
     if (!f.Report || !st)
       continue;
     if (ast::MethodDecl *md = st->findMethod(f.Fn->getName()))
-      md->setParSafe(!Bad.count(f.Fn));
+      md->setParSafe(!md->isAsync() && !Bad.count(f.Fn));
   }
   // What an object of an exported class runs for each of its methods: an
   // importer has no bodies to look through, and the slots of its vtable a
@@ -321,6 +321,8 @@ void Sema::ParSafety::recordVerdicts() {
 
 bool Sema::ParSafety::runsSafely(ast::ClassType *ct,
                                  const std::string &name) const {
+  if (const ast::MethodDecl *md = ct->findMethod(name); md && md->isAsync())
+    return false; // it starts a task
   for (ast::ClassType *c = ct; c; c = c->getSuperClass()) {
     if (c->isBuiltin())
       return true; // the runtime's
@@ -560,6 +562,8 @@ void Sema::ParSafety::classMethod(ast::ClassType *ct, const std::string &name,
                                   ast::SourceLocation loc) {
   const std::string shown = ct->getName() + names::kNameSep + name;
   const ast::MethodDecl *md = ct->findMethod(name);
+  if (md && md->isAsync())
+    return add({loc, shown, nullptr, "starts a task"});
   if (md && !md->isVirtual())
     return runsMethodOf(ct, name, shown, loc);
   // An exact class has no subclass; a closed one has only those Subclasses
@@ -591,7 +595,9 @@ void Sema::ParSafety::methodCall(ast::MethodCallExpr *mc) {
     if (!md)
       return valueMethod(st, name, loc);
     const std::string shown = st->getName() + names::kNameSep + name;
-    if (const ast::FuncDecl *fn = bodyOf(st->getName(), name))
+    if (md->isAsync())
+      add({loc, shown, nullptr, "starts a task"});
+    else if (const ast::FuncDecl *fn = bodyOf(st->getName(), name))
       add({loc, shown, fn, ""});
     else if (!md->isParSafe())
       add({loc, shown, nullptr, "is not par-safe"});

@@ -1176,7 +1176,8 @@ ImplDecl *Parser::parseImplDecl() {
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     bool isStatic = accept(Tok::KwStatic);
-    if (isStatic && !at(Tok::KwFn)) {
+    if (isStatic && !at(Tok::KwFn) &&
+        !(at(Tok::KwAsync) && kind(1) == Tok::KwFn)) {
       errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
                      "'self', so it is never a 'view fn')");
     } else if (atMethodStart()) {
@@ -1186,6 +1187,8 @@ ImplDecl *Parser::parseImplDecl() {
         methods.push_back(m);
         continue;
       }
+    } else if (!isStatic && at(Tok::KwAsync) && kind(1) == Tok::KwStatic) {
+      errorAtCurrent("expected 'static async fn': 'static' comes first");
     } else {
       errorAtCurrent("expected a method ('fn', 'view fn' or 'static fn') in "
                      "the impl block; fields go in the type's declaration");
@@ -1330,7 +1333,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   const bool native = kind == FuncKind::Native;
   const bool requirement = kind == FuncKind::Requirement;
   SourceLocation start = cur().Loc;
-  // `async fn` (the concurrency prototype): a free function that is a task.
+  // `async fn` (the concurrency prototype): a call of it starts a task.
   const bool async = !native && accept(Tok::KwAsync);
   // `shared fn`, `shared view fn` (a method whose `self` is shared; Sema).
   const bool shared = !native && accept(Tok::KwShared);

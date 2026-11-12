@@ -2493,7 +2493,30 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
                                    "block: a wait holding a lock");
       return nullptr;
     }
+    // A task variable awaited in an operand that runs on some paths only
+    // (`await t`, `await move t`) is left running on the others.
+    const ast::Expr *named = operand;
+    if (const auto *mv = ast::dyn_cast<ast::UnaryExpr>(operand);
+        mv && mv->getOpcode() == ast::UnaryOpcode::Move)
+      named = mv->getOperand();
+    if (const auto *task = ast::dyn_cast<ast::Identifier>(named);
+        task && S.ConditionalOperand > 0 && !task->isFunctionRef()) {
+      ast::Type *held = S.CurrentScope->lookup(task->getName());
+      if (held && ast::isa<ast::TaskType>(held)) {
+        S.error(node->getLocation(),
+                "task '" + task->getName() +
+                    "' would be awaited on some paths only: 'await' it "
+                    "before the condition");
+        // Reported: not again as a task its scope leaves unawaited.
+        if (S.CurrentScope->findOwner(task->getName()))
+          S.MovedVars[S.varKey(task->getName())] =
+              Sema::MovedState{node->getLocation(), false, "await"};
+        return nullptr;
+      }
+    }
+    const ast::Expr *savedOperand = std::exchange(S.AwaitOperand, operand);
     ast::Type *t = visit(operand);
+    S.AwaitOperand = savedOperand;
     if (!t)
       return nullptr;
     auto *tt = ast::dyn_cast<ast::TaskType>(t);
@@ -2742,7 +2765,11 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     lhsTy = visitOperand(node->getLHS(), rhsTy);
   } else {
     lhsTy = visit(node->getLHS());
+    const bool someOnly = node->getOpcode() == ast::BinaryOpcode::And ||
+                          node->getOpcode() == ast::BinaryOpcode::Or;
+    S.ConditionalOperand += someOnly;
     rhsTy = visitOperand(node->getRHS(), lhsTy);
+    S.ConditionalOperand -= someOnly;
   }
   // A `locked Str`'s text is its contents, reached in a `lock` block.
   if (lhsTy == S.Ctx.getStrTy() &&
@@ -3659,6 +3686,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   sliceArgNote(paramTys[i], argTy));
     }
   }
+  // An async method starts a task: what it takes across is moved or copied,
+  // the send check a free function's call makes first too.
+  if (method->isAsync() && !S.checkSendArgs(node, method))
+    return nullptr;
   // `equals` is lent its argument, as `==` lends it: comparing keeps nothing.
   const bool lends = node->getMethodName() == names::kMethodEquals;
   for (size_t i = 0; i < node->getNumArguments(); ++i)
@@ -3693,6 +3724,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                 "' must be a variable or a field: its 'inout' result is part "
                 "of it");
 
+  if (method->isAsync() && !S.checkAsyncMethodCall(node, method))
+    return nullptr;
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
 }
@@ -4066,6 +4099,11 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   // Maybe::Just(1)`, `if c then none() else Maybe::Just(1)`).
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
   auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
+    struct OnSomePaths {
+      unsigned &Depth;
+      explicit OnSomePaths(unsigned &d) : Depth(d) { ++Depth; }
+      ~OnSomePaths() { --Depth; }
+    } onSomePaths(S.ConditionalOperand);
     // A literal arm's elements take the slot's (or the other arm's) types
     // and forms (#368), as a literal does where it flows.
     if (want && (ast::isa<ast::ArrayLiteralExpr>(arm) ||
@@ -5078,7 +5116,7 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
 
   // Each of the module's templates once more, with a move-only class for
   // each parameter without bounds: its copies need `T: Copyable` (#368).
-  if (ok && !hasErrors() && !checkCrossedClasses())
+  if (ok && !hasErrors() && !checkCrossedClasses(node))
     ok = false;
   if (ok && !hasErrors() && !checkArchetypes())
     ok = false;
@@ -5246,7 +5284,15 @@ bool Sema::visitDeclStmt(ast::DeclStmt *node) {
 
 bool Sema::visitExprStmt(ast::ExprStmt *node) {
   // Type-check the expression; we discard the type.
-  return resolveExprType(node->getExpr()) != nullptr;
+  ast::Type *ty = resolveExprType(node->getExpr());
+  if (!ty)
+    return false;
+  if (ast::isa<ast::TaskType>(ty)) {
+    error(node->getLocation(), "this task is never awaited: 'await' the call, "
+                               "or hold its task in a variable that is");
+    return false;
+  }
+  return true;
 }
 
 Sema::VarKind Sema::varKind(std::string_view name) const {
@@ -5647,18 +5693,27 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
 }
 
 bool Sema::visitWhileStmt(ast::WhileStmt *node) {
+  // The condition runs before every iteration, so what it moves or awaits
+  // is moved in the loop: it is checked inside the loop's moves.
+  beginLoopMoves(node->getLocation());
   // Type-check the condition — must be bool.
   auto *condTy = resolveExprType(node->getCondition());
-  if (!condTy)
-    return false;
-  if (condTy != Ctx.getBoolTy()) {
+  if (condTy && condTy != Ctx.getBoolTy()) {
     error(node->getCondition()->getLocation(),
           "while condition must be 'bool', got '" + typeName(condTy) + "'");
+    condTy = nullptr;
+  }
+  if (!condTy) {
+    FlowEnded = true; // nothing of the loop is checked
+    finishLoopMoves();
+    FlowEnded = false;
     return false;
   }
 
+  // The loop ends after its condition has run, an iteration or none.
+  LoopMoveStack.back().NoIteration = MovedVars;
+
   // Type-check the body inside a loop context.
-  beginLoopMoves(node->getLocation());
   ++LoopDepth;
   bool ok = visit(node->getBody());
   --LoopDepth;
@@ -6122,58 +6177,22 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
 
   // An `async fn` (the concurrency prototype): a call of it is a task of
-  // its result, which is a number, bool, char, a reference, or nothing;
-  // its parameters are by value, since the task outlives the call.
+  // its result.
   ast::Type *callTy = retTy;
   if (node->isAsync()) {
-    if (retTy && !ast::isa<ast::BuiltinType>(retTy) && !ast::isRefType(retTy)) {
-      error(node->getLocation(),
-            "an 'async fn' returns a number, bool, char, a reference or "
-            "nothing in the prototype, not '" +
-                typeName(retTy) + "'");
+    // `@main` is the entry point's name, whatever module declares it.
+    if (node->getName() == names::kMain && OpenWorld) {
+      error(node->getLocation(), "'async fn main' is a program's entry point: "
+                                 "a module that others import cannot declare "
+                                 "one");
       ErroneousNames.insert(node->getName());
       return false;
     }
-    // Its result crosses back to the awaiting thread: the send check.
-    if (std::string why = uncrossable(retTy, node->getResultQual(), "");
-        !why.empty()) {
-      error(node->getLocation(),
-            "the result of 'async fn' '" + node->getName() + "' (a '" +
-                qualifiedName(node->getResultQual(), retTy) +
-                "') cannot cross to the task's "
-                "awaiter: " +
-                why);
+    if (!checkAsyncDecl(node, retTy)) {
       ErroneousNames.insert(node->getName());
       return false;
     }
-    // A value held in memory is passed by its address, which the task
-    // would read after the caller's frame moved on: not in the prototype.
-    for (size_t i = 0; i < paramTypes.size(); ++i)
-      if (ast::isMemType(paramTypes[i])) {
-        const ast::Param &p = node->getParams()[i];
-        error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +
-                         node->getName() + "' has type '" +
-                         typeName(paramTypes[i]) +
-                         "', a value held in memory: the prototype passes "
-                         "numbers, references and handles to a task (hold "
-                         "the value in a class)");
-        ErroneousNames.insert(node->getName());
-        return false;
-      }
-    for (const ast::Param &p : node->getParams())
-      if (p.Mode != ast::ParamMode::Value) {
-        error(p.Loc, "parameter '" + p.getName() + "' of 'async fn' '" +
-                         node->getName() + "' cannot be '" +
-                         ast::paramModeName(p.Mode) +
-                         "': a task outlives the call that starts it");
-        ErroneousNames.insert(node->getName());
-        return false;
-      }
-    // The task's result keeps its form, which `await` hands on.
-    callTy = Ctx.getTaskType(
-        node->getResultQual().Form == ast::QualForm::Unique
-            ? retTy
-            : Ctx.getQualifiedType(node->getResultQual(), retTy));
+    callTy = taskOf(node->getResultQual(), retTy);
   }
   // Register the function in the function table.
   declareFunction(node->getName(), callTy, paramTypes);

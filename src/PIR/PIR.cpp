@@ -178,6 +178,40 @@ const Class *Module::findClass(const std::string &name) const {
   return nullptr;
 }
 
+namespace {
+
+bool usesTasks(const Block &b) {
+  for (const Stmt &s : b.Stmts) {
+    if (const auto *i = std::get_if<Instr>(&s)) {
+      if (i->Op == Opcode::AsyncCall || i->Op == Opcode::Await)
+        return true;
+    } else if (const auto *f = std::get_if<If>(&s)) {
+      if (usesTasks(*f->Then) || (f->Else && usesTasks(*f->Else)))
+        return true;
+    } else if (const auto *w = std::get_if<While>(&s)) {
+      if ((w->CondBlock && usesTasks(*w->CondBlock)) || usesTasks(*w->Body))
+        return true;
+    } else if (const auto *sw = std::get_if<Switch>(&s)) {
+      for (const Switch::Case &c : sw->Cases)
+        if (usesTasks(*c.Body))
+          return true;
+      if (sw->Default && usesTasks(*sw->Default))
+        return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+bool usesTasks(const Module &m) {
+  for (const Function &f : m.Functions)
+    if (f.IsAsync || f.Name.ends_with(names::kAsyncTaskSuffix) ||
+        usesTasks(f.Body))
+      return true;
+  return false;
+}
+
 bool lendsType(const Signature &sig) {
   for (Type t : sig.Params)
     if (t == Type::Box)

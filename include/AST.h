@@ -1507,6 +1507,8 @@ public:
     // A `parallel for` body may call it (Sema::checkParSafety): read by its
     // module's importers, who have not its body.
     ParSafe = 1 << 5,
+    // `async fn`: a call starts a task; its return type is the task's.
+    Async = 1 << 6,
   };
 
 private:
@@ -1567,6 +1569,7 @@ public:
   /// implements by overriding it (docs/language/05-classes.md).
   bool isPure() const { return MethodFlags & Pure; }
   bool isParSafe() const { return MethodFlags & ParSafe; }
+  bool isAsync() const { return MethodFlags & Async; }
   void setParSafe(bool v) {
     MethodFlags = v ? MethodFlags | ParSafe : MethodFlags & ~ParSafe;
   }

@@ -122,7 +122,9 @@ struct PtrStoreLowering : PIRPattern<P::PtrStoreOp> {
   using PIRPattern::PIRPattern;
   LogicalResult matchAndRewrite(P::PtrStoreOp op, OpAdaptor a,
                                 ConversionPatternRewriter &r) const override {
-    r.replaceOpWithNewOp<LLVM::StoreOp>(op, a.getValue(), a.getPtr());
+    r.replaceOpWithNewOp<LLVM::StoreOp>(op, a.getValue(), a.getPtr(),
+                                        /*alignment=*/0,
+                                        /*isVolatile=*/op.getTouch());
     return success();
   }
 };
@@ -922,6 +924,13 @@ translateToLLVMIR(ModuleOp module, llvm::LLVMContext &ctx,
   auto llvmModule = translateModuleToLLVMIR(module, ctx, name);
   if (!llvmModule)
     return Status::error("MLIR -> LLVM IR translation failed:\n" + diagnostics);
+  // The functions MLIR's async passes outline are named alike in every
+  // module, and are that module's own.
+  for (llvm::Function &f : *llvmModule)
+    if ((f.getName().starts_with("async_execute_fn") ||
+         f.getName() == "__resume") &&
+        !f.isDeclaration())
+      f.setLinkage(llvm::GlobalValue::InternalLinkage);
   // Paykan_malloc returns a block of its own every time (Runtime.h), which
   // LLVM knows only from the declaration's attributes: without `noalias` it
   // cannot tell two objects apart, so a store to one object's field forces

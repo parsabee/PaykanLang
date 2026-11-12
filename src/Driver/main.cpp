@@ -963,6 +963,12 @@ int main(int argc, char *argv[]) {
   resolverOpts.ReadCache = !opts.RebuildModules && !opts.NoModuleCache;
   resolverOpts.WriteCache = !opts.NoModuleCache;
   resolverOpts.Verbose = opts.Verbose ? &std::cerr : nullptr;
+  // The C of --emit-c is linked with the compiled code of each module file
+  // --list-modules names, and runs a task where it is called: a module
+  // whose compiled code has to do with tasks stays in the program.
+  const bool linksModuleFiles =
+      (opts.EmitSource && opts.EmitStage == "c") || opts.ListModules;
+  resolverOpts.SequentialTasks = linksModuleFiles;
   if (backend)
     resolverOpts.CompiledBy =
         caps.CompileModules ? toPkm(backend->objectKind()) : pkm::Object{};
@@ -1037,10 +1043,10 @@ int main(int argc, char *argv[]) {
   // What the PIR passes do, to the modules' code and to the program's.
   paykan::pir::Statistics stats;
   // The C of --emit-c is linked with the compiled code of each module file
-  // --list-modules names: a module whose cache entry could not be written
-  // has none, so its code stays in the program, as under --no-module-cache.
-  const bool linksModuleFiles =
-      (opts.EmitSource && opts.EmitStage == "c") || opts.ListModules;
+  // --list-modules names (linksModuleFiles): a module whose cache entry
+  // could not be written has none, so its code stays in the program, as
+  // under --no-module-cache, and so does the code of one that has to do
+  // with tasks, which the C runs where they are called.
   for (const std::string &name : resolver.cacheable()) {
     // An import: the main module, first, is never cached (a program's
     // knows what no module that may be imported may know).
@@ -1050,6 +1056,7 @@ int main(int argc, char *argv[]) {
     const pkm::Interface *iface = resolver.builtInterface(name);
     if (mod == program.Modules.end() || !iface)
       continue;
+    const bool tasksInC = linksModuleFiles && paykan::pir::usesTasks(*mod);
     auto written = moduleCode(copyOf(*mod), *iface, backend.get(), caps,
                               opts.SkipPasses, stats);
     if (!written)
@@ -1061,6 +1068,7 @@ int main(int argc, char *argv[]) {
       object = toPkm(*code.Object);
     resolver.writeCacheEntry(name, code.Code, object ? &*object : nullptr);
     if (code.Object && paykan::modules::providesFor(code.Code, program) &&
+        !tasksInC &&
         (!linksModuleFiles || !resolver.moduleFile(name).empty())) {
       *mod = std::move(code.Code);
       compiled[name] = std::move(*code.Object);

@@ -82,9 +82,11 @@ inline constexpr uint8_t kMethodShared = 1 << 3;
 inline constexpr uint8_t kMethodPure = 1 << 4;
 /// A `parallel for` body may call it (ast::MethodDecl::ParSafe).
 inline constexpr uint8_t kMethodParSafe = 1 << 5;
-inline constexpr uint8_t kMethodKnownFlags = kMethodPrivate | kMethodView |
-                                             kMethodImpl | kMethodShared |
-                                             kMethodPure | kMethodParSafe;
+/// An `async fn` (ast::MethodDecl::Async): its return type is the task's.
+inline constexpr uint8_t kMethodAsync = 1 << 6;
+inline constexpr uint8_t kMethodKnownFlags =
+    kMethodPrivate | kMethodView | kMethodImpl | kMethodShared | kMethodPure |
+    kMethodParSafe | kMethodAsync;
 
 /// The modes of a signature's parameters (ast::ParamModes): one per
 /// parameter with its name, or none when every parameter is by value, and
@@ -104,7 +106,10 @@ struct ModeRecs {
 inline constexpr uint8_t kFuncNative = 1 << 0;
 /// Bit 1: a `parallel for` body may call it (FunctionSig::ParSafe).
 inline constexpr uint8_t kFuncParSafe = 1 << 1;
-inline constexpr uint8_t kFuncKnownFlags = kFuncNative | kFuncParSafe;
+/// Bit 2: an `async fn`: its result type is the task's.
+inline constexpr uint8_t kFuncAsync = 1 << 2;
+inline constexpr uint8_t kFuncKnownFlags =
+    kFuncNative | kFuncParSafe | kFuncAsync;
 
 /// ModuleInfo::FunctionInfo.
 struct FuncRec {
@@ -114,6 +119,7 @@ struct FuncRec {
   ModeRecs Modes;
   bool Native = false;  ///< kFuncNative
   bool ParSafe = false; ///< kFuncParSafe
+  bool Async = false;   ///< kFuncAsync
   bool operator==(const FuncRec &) const = default;
 };
 

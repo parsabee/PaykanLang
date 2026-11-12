@@ -37,7 +37,14 @@ modules it found (next to the source, in a `--module-path` directory or in
 built from source whose cache entry cannot be written (the directory is
 read-only, or `.paykan_cache` is a file) has no module file: its code is in
 the C, as that of every import built from source is under
-`--no-module-cache`, and `--list-modules` does not name it.  To build the C:
+`--no-module-cache`, and `--list-modules` does not name it.  Nor does it name
+an import built from source whose code has to do with tasks (an `async fn`,
+an `await`): the C runs a task where it is called, which compiled code, made
+for the async runtime, does not, so that module's code is in the C as well,
+and so is the code of a module that imports one handing out tasks.  A
+prebuilt module file with such code and no source is an error (`... has
+compiled code that starts tasks, and the C of --emit-c runs a task where it
+is called`).  To build the C:
 
 ```sh
 paykan --emit-c prog.pkn > prog.c

@@ -362,6 +362,27 @@ TEST(Interface, ParSafeFunctionsAndMethods) {
   EXPECT_TRUE((*back).Classes[0].Methods[1].Flags & kMethodParSafe);
 }
 
+// An `async fn` and an async method keep their marks (kFuncAsync,
+// kMethodAsync), which change the bytes: an importer starts a task where
+// it calls one, and checks what crosses to it.
+TEST(Interface, AsyncFunctionsAndMethods) {
+  Interface i = sortedSample();
+  Interface tasks = i;
+  tasks.Functions[2].Async = true;
+  tasks.Classes[0].Methods[1].Flags |= kMethodAsync;
+  const std::vector<uint8_t> bytes = writeInterface(tasks);
+  EXPECT_NE(bytes, writeInterface(i));
+  StatusOr<Interface> back = readInterface(bytes, "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, tasks);
+  EXPECT_TRUE((*back).Functions[2].Async);
+  EXPECT_FALSE((*back).Functions[2].Native);
+  EXPECT_FALSE((*back).Functions[2].ParSafe);
+  EXPECT_FALSE((*back).Functions[0].Async);
+  EXPECT_TRUE((*back).Classes[0].Methods[1].Flags & kMethodAsync);
+  EXPECT_FALSE((*back).Classes[0].Methods[0].Flags & kMethodAsync);
+}
+
 // A method's flags byte carries its pure virtual bit (§3.5's PURE, 0x10):
 // a CLASS record of a pure method round-trips; the bit on a struct's method,
 // an `impl` block's, an initializer or `destroy`, or a bit the format does
@@ -402,9 +423,9 @@ TEST(Interface, PureVirtualMethods) {
         << slotless;
   }
   bad = i;
-  bad.Classes[0].Methods[1].Flags = 0xC0;
+  bad.Classes[0].Methods[1].Flags = 0x80;
   EXPECT_NE(readError(writeInterface(bad), "shapes")
-                .find("method 'kind' has unknown flags 0xc0"),
+                .find("method 'kind' has unknown flags 0x80"),
             std::string::npos);
   // A `shared fn` is a class's method other than its initializer and its
   // destroy (Sema rejects the others).

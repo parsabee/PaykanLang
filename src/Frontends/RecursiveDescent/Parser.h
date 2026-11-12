@@ -55,7 +55,9 @@ private:
   Tok kind(size_t k = 0) { return peek(k).Kind; }
   /// At a method: `fn`, `view fn`, `shared fn` or `shared view fn`.
   bool atMethodStart() {
-    size_t k = kind() == Tok::KwShared ? 1 : 0;
+    size_t k = kind() == Tok::KwAsync ? 1 : 0;
+    if (kind(k) == Tok::KwShared)
+      ++k;
     if (kind(k) == Tok::KwView)
       ++k;
     return kind(k) == Tok::KwFn;
