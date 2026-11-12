@@ -1069,9 +1069,18 @@ CodeGen enforced, now in one place.
   `self`), with what letting go of their values may let go of in turn: a
   value's parts, and the fields of a dying object of an *exact* class,
   one no class derives from (`Str`, an instance of a generic class, as a
-  superclass is never generic).  An object of any other class may be a
-  subclass's holding anything, and a function value's closure anything,
-  so letting go of one is "not known".  A weak field's store lets go of
+  superclass is never generic, a `final` class).  An object of any other
+  class may be a subclass's holding anything, and a function value's
+  closure anything, so letting go of one is "not known".  A dying object
+  also runs its `__deinit__`s (docs/language/05-classes.md,
+  "Deinitializers"), the program's code, given what the object reaches: a
+  store's count for the value it overwrites, and so do those of the values
+  that may die in a call or where its result is let go of, the ones it is
+  handed for good (a `move` among its arguments) and the one it hands back
+  when it was given something that reaches an object.  For an object made
+  there (a constructor's result) they are its class's and its
+  superclasses'; for any other, "not known" unless its class is exact or
+  one of the main module's.  A weak field's store lets go of
   no object; a store through an `inout` name may replace a slot of any of
   its type's superclasses, which a `match` arm narrows, so it counts those
   too (and an arm the class of the subject's slot).  A call the code makes

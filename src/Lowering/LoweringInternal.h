@@ -731,8 +731,22 @@ private:
   /// class, whose subclass may hold anything, and for a function value.
   const Effect &dropEffect(ast::Type *ty);
   std::unordered_map<const ast::Type *, Effect> DropEffects;
-  /// A class no class derives from: Str, or an instance of a generic class
-  /// (a superclass is never generic).
+  /// What the `__deinit__`s do that run when a value of type @p ty dies
+  /// (#378): the value's own, and those of what dies with it.  That is the
+  /// program's code, given the value: a function that lets go of a value of
+  /// its own (one it was handed, made or got from a call) runs it, where
+  /// letting go of the references alone changes nothing its caller holds.
+  /// An object's class is the one @p ty names when @p exact (it was made
+  /// here); otherwise it may be of a class derived from it, as dropEffect
+  /// has it.  Nothing for a type none of whose values runs one.
+  const Effect &deinitEffect(ast::Type *ty, bool exact);
+  std::map<std::pair<const ast::Type *, bool>, Effect> DeinitEffects;
+  /// The deinitEffect of the values that may die in the call @p by or where
+  /// its result is let go of: what it is handed for good and what it hands
+  /// back.  Nothing for any other expression.
+  Effect handedOver(const ast::Expr *by);
+  /// A class no class derives from: Str, an instance of a generic class (a
+  /// superclass is never generic), or a `final` one.
   static bool isExactClass(const ast::ClassType *ct);
   /// A class of the main module of a closed world (World::Closed): every
   /// class derived from it is one this module defines (Subclasses).
