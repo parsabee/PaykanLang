@@ -11,7 +11,7 @@
 //     end there.
 // Each file is then read back whole.
 //
-// Runtime sites: file_start_read and file_write (File.c), PaykanFile_new
+// Runtime sites: file_start_read and file_write (File.c), file_new
 // (File.c), the read buffers and the Strs they make.
 //
 // Expected under --track-heap: live blocks : 0.
@@ -85,7 +85,7 @@ fn main(args: view Str[]) -> int {
   fill(w, "old\n");
   match io::open(w, "w+") {
     o: Ok {
-      let f = move o.value;
+      f = move o.value;
       io::println("w+ write: " + err::name(f.write("hello\n").code));
       io::println("w+ read: " + text(f.read()));
       io::println("w+ write: " + err::name(f.write("world\n").code));
@@ -99,7 +99,7 @@ fn main(args: view Str[]) -> int {
   fill(r, "abcdefgh\nijkl\n");
   match io::open(r, "r+") {
     o: Ok {
-      let f = move o.value;
+      f = move o.value;
       io::println("r+ write: " + err::name(f.write("XY").code));
       io::println("r+ readbytes: " + text(f.readbytes(2)));
       io::println("r+ write: " + err::name(f.write("Z").code));
@@ -116,7 +116,7 @@ fn main(args: view Str[]) -> int {
   fill(a, "abc\n");
   match io::open(a, "a+") {
     o: Ok {
-      let f = move o.value;
+      f = move o.value;
       io::println("a+ write: " + err::name(f.write("hello\n").code));
       io::println("a+ read: " + text(f.read()));
       io::println("a+ write: " + err::name(f.write("world\n").code));

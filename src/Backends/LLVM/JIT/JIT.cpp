@@ -178,6 +178,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     // Reached through `native fn`s (the standard library's ::io), with the
     // print functions above.
     {kPaykanIoOpen,          reinterpret_cast<void *>(&Paykan_io_open)},
+    {kPaykanIoClose,         reinterpret_cast<void *>(&Paykan_io_close)},
     {kPaykanIoWrite,         reinterpret_cast<void *>(&Paykan_io_write)},
     {kPaykanIoReadln,        reinterpret_cast<void *>(&Paykan_io_readln)},
     {kPaykanIoReadBytes,     reinterpret_cast<void *>(&Paykan_io_readbytes)},

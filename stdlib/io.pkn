@@ -9,10 +9,13 @@
 // A File is an open file: `open(path, mode)` opens one with C's `fopen` (the
 // mode "r", "w", "a", ...) and returns a Result (::result) holding it, or the
 // Error (::error) saying why it could not; `stdin()` is the process's
-// standard input.  A File is closed when the last reference to it goes.
-// Each of its methods reports what went wrong the same way: a write returns
-// its Error (`Ok` when it wrote), a read a Result holding the text read, or
-// its Error, `EndOfFile` when nothing was left to read.
+// standard input.  A File is a value with one owner: it moves, and the file
+// is closed where the File is destroyed (its `__deinit__`).  Each of its
+// methods reports what went wrong the same way: a write returns its Error
+// (`Ok` when it wrote), a read a Result holding the text read, or its
+// Error, `EndOfFile` when nothing was left to read.  Reading and writing
+// change the file (its position, what C has buffered), so they are plain
+// `fn`s: a function that reads a file takes it `inout`.
 //
 // Names starting with `_` are the module's own (docs/language/15-modules.md,
 // "Private to the module"): the native functions, bound to the runtime's
@@ -47,15 +50,17 @@ fn printerrln<T: Showable>(value: view T) {
 
 // -- Files --------------------------------------------------------------------
 
+// A file is named by its handle, an `int`: the address of the runtime's
+// file (Runtime.h, "File"), which nothing counts.  0 is no file.
 native fn _open(path: view Str, mode: view Str, errno: inout int)
-                -> Obj? = "Paykan_io_open";
-native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
-native fn _readln(file: view Obj, errno: inout int)
-                  -> Str? = "Paykan_io_readln";
-native fn _readbytes(file: view Obj, n: int, errno: inout int)
+                -> int = "Paykan_io_open";
+native fn _close(file: int) = "Paykan_io_close";
+native fn _write(file: int, s: view Str) -> int = "Paykan_io_write";
+native fn _readln(file: int, errno: inout int) -> Str? = "Paykan_io_readln";
+native fn _readbytes(file: int, n: int, errno: inout int)
                      -> Str? = "Paykan_io_readbytes";
-native fn _read(file: view Obj, errno: inout int) -> Str? = "Paykan_io_read";
-native fn _stdin() -> Obj = "Paykan_io_stdin";
+native fn _read(file: int, errno: inout int) -> Str? = "Paykan_io_read";
+native fn _stdin() -> int = "Paykan_io_stdin";
 
 /// The Result of a read: the @p text read, or the error its @p errno says
 /// (`EndOfFile` for 0, nothing left to read).
@@ -71,32 +76,33 @@ fn _readResult(text: Str?, errno: int) -> res::Result<Str, err::Error> {
   }
 }
 
-/// An open file.  Made by `open` and `stdin`; the handle is the runtime's
-/// file, closed when the last File holding it goes.
-class File {
-  __handle: Obj;
-  /// "File@" and the address of the runtime's file.
-  view fn toString() -> Str { return self.__handle.toString(); }
+/// An open file.  Made by `open` and `stdin`; the handle names the
+/// runtime's file, which this File alone holds and closes when it is
+/// destroyed.
+struct File {
+  __handle: int;
 }
 
 impl File {
   /// Made by `open` and `stdin` only: the initializer is the module's.
-  fn ___init__(handle: Obj) { self.__handle = move handle; }
+  fn ___init__(handle: int) { self.__handle = handle; }
+  /// Closes the file (the process's standard input stays open).
+  fn __deinit__()           { _close(self.__handle); }
   /// Writes @p s to the file: no error, or why it could not.
-  view fn write(s: view Str) -> err::Error
+  fn write(s: view Str) -> err::Error
                             { return err::fromErrno(_write(self.__handle, s)); }
   /// The next line, with its newline when it has one.
-  view fn readln() -> res::Result<Str, err::Error> {
+  fn readln() -> res::Result<Str, err::Error> {
     errno = 0;
     return _readResult(_readln(self.__handle, errno), errno);
   }
   /// Up to @p n bytes (`InvalidArgument` when @p n is not positive).
-  view fn readbytes(n: int) -> res::Result<Str, err::Error> {
+  fn readbytes(n: int) -> res::Result<Str, err::Error> {
     errno = 0;
     return _readResult(_readbytes(self.__handle, n, errno), errno);
   }
   /// The rest of the file.
-  view fn read() -> res::Result<Str, err::Error> {
+  fn read() -> res::Result<Str, err::Error> {
     errno = 0;
     return _readResult(_read(self.__handle, errno), errno);
   }
@@ -107,17 +113,15 @@ impl File {
 /// text as its message).
 fn open(path: view Str, mode: view Str) -> res::Result<File, err::Error> {
   errno = 0;
-  match _open(path, mode, errno) {
-    handle: Obj {
-      return res::ok(File(move handle));
-    }
-    None {
-      return res::fail(err::fromErrno(errno));
-    }
+  let handle = _open(path, mode, errno);
+  if handle == 0 {
+    return res::fail(err::fromErrno(errno));
   }
+  return res::ok(File(handle));
 }
 
-/// The process's standard input.
+/// The process's standard input.  Every call gives a File of its own over
+/// the one input, which none of them closes.
 fn stdin() -> File {
   return File(_stdin());
 }

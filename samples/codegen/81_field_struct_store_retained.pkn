@@ -9,7 +9,7 @@
 //            test for null (docs/pir.md §6, `retain nonnull`): with one,
 //            GCC's -Warray-bounds at -O1 and above followed the null path
 //            into the field's write, and the strict C build failed.  A
-//            native function's `Obj?` result matched to its `None` arm: the
+//            native function's `Str?` result matched to its `None` arm: the
 //            type arm's retain of the subject's box keeps its test, since
 //            the same box, null, is released on the way to `None`.  The
 //            same through an object a value held in memory holds (a struct
@@ -179,17 +179,19 @@ fn viaLocalStruct() -> int {
 
 fn fresh() -> C => C(P(1, 2, 3), [1, 2, 3]);
 
-native fn _open(path: view Str, mode: view Str, errno: inout int)
-                -> Obj? = "Paykan_io_open";
+native fn _stdin() -> int = "Paykan_io_stdin";
+native fn _readbytes(file: int, n: int, errno: inout int)
+                     -> Str? = "Paykan_io_readbytes";
 
 class F {
-  handle: Obj;
+  text: Str;
 }
 
-fn opened(path: Str) -> F? {
+// (A read of no bytes is refused before anything is read: None.)
+fn taken(n: int) -> F? {
   errno = 0;
-  match _open(path, "r", errno) {
-    handle: Obj { return F(move handle); }
+  match _readbytes(_stdin(), n, errno) {
+    text: Str { return F(move text); }
     None { return None; }
   }
 }
@@ -221,7 +223,7 @@ fn main() -> int {
   at.p = P(7, 6, 9);
   io::println("inout: " + Str(b) + " " + Str(x) + " " + Str(r) + " " + Str(l)
       + " " + Str(c.p.b));
-  io::println("native: " + Str(opened("") == None));
+  io::println("native: " + Str(taken(0) == None));
   let s = S(fresh(), 1);
   u = U::A(fresh(), 1);
   io::println("held: " + Str(viaStructCopy(s)) + " " + Str(viaParam(s)) + " "

@@ -154,8 +154,8 @@ typedef struct PaykanObject PaykanWeak;
 //
 // Every constructor (the runtime's and the generated class constructors)
 // initialises `strong` and `weak` to 0: a new object is unowned until it is
-// boxed (PaykanShared_new).  An immortal static (PaykanObject_None,
-// PaykanFile_Stdin) starts with `strong` 1, which nothing ever releases.
+// boxed (PaykanShared_new).  An immortal static (PaykanObject_None) starts
+// with `strong` 1, which nothing ever releases.
 
 // A vtable is an array of PaykanMethod, the generic function-pointer type:
 // every slot holds a method converted to `void (*)(void)` and is converted
@@ -179,13 +179,7 @@ enum {
   // String
   PAYKAN_SLOT_STRING_LENGTH = 4, // int64_t (*)(PaykanObject *self)
   PAYKAN_SLOT_STRING_CONCAT = 5, // void (*)(PaykanObject *self, *other)
-  PAYKAN_STRING_SLOTS = 6,
-  // File
-  PAYKAN_SLOT_FILE_WRITE = 4,     // void (*)(PaykanObject *self, *str)
-  PAYKAN_SLOT_FILE_READLN = 5,    // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_SLOT_FILE_READBYTES = 6, // PaykanShared *(*)(PaykanObject *, int64_t)
-  PAYKAN_SLOT_FILE_READ = 7,      // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_FILE_SLOTS = 8
+  PAYKAN_STRING_SLOTS = 6
 };
 
 struct PaykanObject {
@@ -344,8 +338,10 @@ extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 
 // -- File
 //
-// Inherits Object.  The first three vtable slots match Object's layout;
-// File-specific slots follow (PAYKAN_SLOT_FILE_*).
+// The file behind an io::File (stdlib/io.pkn).  It is no object: it has no
+// header, nothing counts it, and no vtable names it.  An io::File is a
+// struct holding its address as an `int`, the one owner of it, and closes
+// it in its `__deinit__`.
 
 /// What a file's stream did last.  C lets a read follow a write on a stream
 /// opened for update ("r+", "w+", "a+") only after an fflush, and a write
@@ -359,56 +355,37 @@ typedef enum PaykanFileOp {
 } PaykanFileOp;
 
 typedef struct PaykanFile {
-  PaykanMethod *vtable; // points to PaykanFile_vtable
-  int32_t strong;       // object header (see PaykanObject)
-  int32_t weak;
-  FILE *handle;        // underlying C file handle (NULL if closed)
+  FILE *handle;        // the open C stream
   PaykanFileOp lastOp; // what the stream did last
 } PaykanFile;
 
-// Constructor / destructor.
-PaykanFile *PaykanFile_new(void);
-
-/// Open a file at `path` with the given `mode` string (e.g. "r", "w").
-/// Returns a PaykanShared* wrapping a PaykanFile on success, or NULL with
-/// C's errno in `*err` on failure: EINVAL for a path or a mode holding a NUL
-/// byte, which fopen would read only up to it.
-PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode,
-                              int64_t *err);
-void PaykanFile_destroy(PaykanObject *self);
-PaykanShared *PaykanFile_toString(PaykanObject *self);
-int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other,
-                          uint64_t owned);
-void PaykanFile_write(PaykanObject *self, PaykanObject *str);
-PaykanShared *PaykanFile_readln(PaykanObject *self);
-PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n);
-PaykanShared *PaykanFile_read(PaykanObject *self);
-
-// Global vtable instance.
-extern PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS];
-
-// Stdin singleton — immortal PaykanFile wrapping C's stdin.
-extern PaykanFile PaykanFile_Stdin;
-
 // The standard library's ::io (stdlib/io.pkn), whose natives bind to these.
-// An io::File holds a PaykanFile as its handle; each function takes it
-// borrowed and panics if it is not a file.  A failure is reported as C's
-// errno (Runtime.h, "Errors"): a write returns it, 0 when it succeeded; a
-// read returns a fresh Str, or NULL with the errno in `*err`, 0 there meaning
-// the end of the file.  `err` is an int64_t, the native's `inout int`, passed
-// as the address the native ABI gives it.  Reads and writes mix in any order
-// (PaykanFileOp): a read after a write first writes out what the write left
-// in C's buffer, and fails with the errno when that fails.
+// Each takes a file as the `int` an io::File holds, the address of its
+// PaykanFile, and changes it: a read or a write moves the stream and sets
+// `lastOp`, so ::io declares none of them a `view fn`.  A failure is
+// reported as C's errno (Runtime.h, "Errors"): a write returns it, 0 when it
+// succeeded; a read returns a fresh Str, or NULL with the errno in `*err`, 0
+// there meaning the end of the file.  `err` is an int64_t, the native's
+// `inout int`, passed as the address the native ABI gives it.  Reads and
+// writes mix in any order (PaykanFileOp): a read after a write first writes
+// out what the write left in C's buffer, and fails with the errno when that
+// fails.
 
-/// `fopen(path, mode)`: the file (owned +1), or NULL with C's errno in
-/// `*err`.
-PaykanShared *Paykan_io_open(PaykanObject *path, PaykanObject *mode, void *err);
-int64_t Paykan_io_write(PaykanObject *file, PaykanObject *str);
-PaykanShared *Paykan_io_readln(PaykanObject *file, void *err);
-PaykanShared *Paykan_io_readbytes(PaykanObject *file, int64_t n, void *err);
-PaykanShared *Paykan_io_read(PaykanObject *file, void *err);
-/// The process's stdin, PaykanFile_Stdin (owned +1).
-PaykanShared *Paykan_io_stdin(void);
+/// `fopen(path, mode)`: the new file, or 0 with C's errno in `*err`: EINVAL
+/// for a path or a mode holding a NUL byte, which fopen would read only up
+/// to it.
+int64_t Paykan_io_open(PaykanObject *path, PaykanObject *mode, void *err);
+/// Closes @p file and frees it: an io::File's `__deinit__`.  The process's
+/// stdin (Paykan_io_stdin) stays open.
+void Paykan_io_close(int64_t file);
+int64_t Paykan_io_write(int64_t file, PaykanObject *str);
+PaykanShared *Paykan_io_readln(int64_t file, void *err);
+PaykanShared *Paykan_io_readbytes(int64_t file, int64_t n, void *err);
+PaykanShared *Paykan_io_read(int64_t file, void *err);
+/// The process's stdin: one file, the same for every call, which
+/// Paykan_io_close leaves open.  Its reads and writes take a lock of its
+/// own: a File is Sendable, so two threads may each hold a File naming it.
+int64_t Paykan_io_stdin(void);
 
 // -- Errors
 //
@@ -1100,7 +1077,6 @@ void Paykan_heap_dump(void);
                            offsetof(T, weak) == offsetof(PaykanObject, weak),  \
                        #T " must start with the object header")
 PAYKAN_CHECK_HEADER(PaykanString);
-PAYKAN_CHECK_HEADER(PaykanFile);
 PAYKAN_CHECK_HEADER(PaykanBuffer);
 #undef PAYKAN_CHECK_HEADER
 

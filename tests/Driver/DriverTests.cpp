@@ -2863,6 +2863,97 @@ TEST(Driver, FileUpdateModesKeepEveryWrite) {
   std::filesystem::remove_all(dir);
 }
 
+// A File made by `io::stdin()` closes nothing when it is destroyed (#378:
+// a File is a struct whose `__deinit__` closes its file, and the input is
+// not its to close): the next one reads on where it stopped.  Run and
+// built, at -O0 and -O2.
+TEST(Driver, AStdinFileLeavesTheInputOpen) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_stdin_file_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "stdin.pkn").string();
+  std::ofstream(src) << "import ::io;\n"
+                        "fn line() -> Str {\n"
+                        "  input = io::stdin();\n"
+                        "  match input.readln() {\n"
+                        "    l: Ok { return move l.value; }\n"
+                        "    _ { return \"(end)\\n\"; }\n"
+                        "  }\n"
+                        "}\n"
+                        "fn main() -> int {\n"
+                        "  io::print(line());\n"
+                        "  io::print(line());\n"
+                        "  match io::stdin().read() {\n"
+                        "    r: Ok { io::print(r.value); }\n"
+                        "    _ { }\n"
+                        "  }\n"
+                        "  io::print(line());\n"
+                        "  return 0;\n"
+                        "}\n";
+  const std::string input = "printf 'one\\ntwo\\nthree\\nfour\\n' | ";
+  auto runAndBuild = [&](const std::string &opt) {
+    auto r = run(input + paykanRun() + " " + opt + " " + src + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << opt << ": " << r.out;
+    EXPECT_EQ(r.out, "one\ntwo\nthree\nfour\n(end)\n") << opt;
+    auto exe = (dir / ("stdin" + opt)).string();
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(rc, 0) << opt << ": " << out;
+    auto built = run(input + exe + " 2>&1");
+    EXPECT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    EXPECT_EQ(built.out, "one\ntwo\nthree\nfour\n(end)\n") << opt;
+  };
+  runAndBuild("-O0");
+  runAndBuild("-O2");
+  std::filesystem::remove_all(dir);
+}
+
+// A File is Sendable, and every `io::stdin()` File names the runtime's one
+// stdin file: two tasks that each read it get whole lines, every line once
+// (the runtime locks that file's reads and writes).
+TEST(Driver, TwoTasksReadTheInputLineByLine) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_stdin_tasks_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "tasks.pkn").string();
+  std::ofstream(src)
+      << "import ::io;\n"
+         "async fn count() -> int {\n"
+         "  input = io::stdin();\n"
+         "  n = 0;\n"
+         "  while True {\n"
+         "    match input.readln() {\n"
+         "      l: Ok {\n"
+         "        if l.value != \"abcde\\n\" { return -100000; }\n"
+         "        n = n + 1;\n"
+         "      }\n"
+         "      _ { break; }\n"
+         "    }\n"
+         "  }\n"
+         "  return n;\n"
+         "}\n"
+         "async fn both() -> int {\n"
+         "  let a = count();\n"
+         "  let b = count();\n"
+         "  return await a + await b;\n"
+         "}\n"
+         "fn main() -> int {\n"
+         "  io::println(await both());\n"
+         "  return 0;\n"
+         "}\n";
+  auto runAt = [&](const std::string &opt) {
+    auto r = run("yes abcde | head -20000 | " + paykanRun() + " " + opt + " " +
+                 src + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << opt << ": " << r.out;
+    EXPECT_EQ(r.out, "20000\n") << opt;
+  };
+  runAt("-O0");
+  runAt("-O2");
+  std::filesystem::remove_all(dir);
+}
+
 // A memory::Buffer slot never set, of a type whose zero bytes are no value,
 // panics when at() reads it, after what the program printed: a tagged union
 // whose first variant holds a Str, a function value, and a struct holding

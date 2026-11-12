@@ -868,3 +868,157 @@ fn main() -> int {
             "holding d\nunlock d\nholding e\nunlock e\nend\nunlock a\n");
   g.expectNoLeaks("DeinitWaitsForAMatchThatLooksAtIt");
 }
+
+// -- io::File: a struct whose `__deinit__` closes the file (#378)
+
+namespace {
+
+/// @p source with `PATH_A` and `PATH_B` replaced by two scratch paths of
+/// this process, which are removed when the result is returned.
+RunResult runWithScratchFiles(std::string source) {
+  const auto dir = std::filesystem::temp_directory_path();
+  const std::string stem = "paykan_struct_file_" + std::to_string(getpid());
+  const std::string a = (dir / (stem + "_a.txt")).string();
+  const std::string b = (dir / (stem + "_b.txt")).string();
+  for (const auto &[key, path] :
+       {std::pair<std::string, std::string>{"PATH_A", a}, {"PATH_B", b}})
+    for (size_t at; (at = source.find(key)) != std::string::npos;)
+      source.replace(at, key.size(), path);
+  RunResult r = compileAndRun(source);
+  std::filesystem::remove(a);
+  std::filesystem::remove(b);
+  return r;
+}
+
+/// What the programs below read a file back with.
+const char *const kFileText = R"pkn(
+import ::io;
+import ::collections as cl;
+import ::memory as mem;
+
+fn text(path: view Str) -> Str {
+  match io::open(path, "r") {
+    r: Ok {
+      f = move r.value;
+      match f.read() {
+        s: Ok { return move s.value; }
+        _ { return "(empty)"; }
+      }
+    }
+    e: Err { return "(none)"; }
+  }
+}
+)pkn";
+
+} // namespace
+
+// A File is closed where it is destroyed, and what was written is in the
+// file from then on (C keeps a short write in its buffer until the stream
+// is closed): at the end of its variable's scope, where it is assigned
+// over, and with the object that holds it.  A function that writes a file
+// it does not keep takes it `inout`.
+TEST(Struct, AFileIsClosedWhereItIsDestroyed) {
+  LeakGuard g;
+  auto r = runWithScratchFiles(std::string(kFileText) + R"(
+class Log { out: io::File; lines: int; }
+impl Log {
+  fn add(s: view Str) { self.out.write(s); self.lines = self.lines + 1; }
+}
+
+fn append(f: inout io::File, s: view Str) { f.write(s); }
+
+fn main() -> int {
+  let a = "PATH_A";
+  let b = "PATH_B";
+  match io::open(a, "w") {
+    w: Ok {
+      f = move w.value;
+      f.write("scope");
+      append(f, "+inout");
+      io::println("in scope: " + text(a));
+    }
+    e: Err { return 1; }
+  }
+  io::println("after scope: " + text(a));
+
+  match io::open(a, "w") {
+    w: Ok {
+      f = move w.value;
+      f.write("first");
+      match io::open(b, "w") {
+        o: Ok { f = move o.value; }
+        e: Err { return 1; }
+      }
+      io::println("assigned over: " + text(a));
+      f.write("second");
+    }
+    e: Err { return 1; }
+  }
+  io::println("then: " + text(b));
+
+  match io::open(a, "w") {
+    w: Ok {
+      let log: mut = Log(move w.value, 0);
+      log.add("one,");
+      log.add("two");
+      io::println("lines " + Str(log.lines) + ": " + text(a));
+    }
+    e: Err { return 1; }
+  }
+  io::println("object gone: " + text(a));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "in scope: (empty)\nafter scope: scope+inout\n"
+                      "assigned over: first\nthen: second\n"
+                      "lines 2: (empty)\nobject gone: one,two\n");
+  g.expectNoLeaks("AFileIsClosedWhereItIsDestroyed");
+}
+
+// A file under several names is in a `mem::Box`, written through `get()` of
+// a `shared mut` box and closed when the box goes; one moved into a task
+// is written and closed there.
+TEST(Struct, AFileIsSharedInABoxAndMovesIntoATask) {
+  LeakGuard g;
+  auto r = runWithScratchFiles(std::string(kFileText) + R"(
+async fn fill(f: io::File, s: Str) -> int {
+  f.write(s);
+  return 1;
+}
+
+fn main() -> int {
+  let a = "PATH_A";
+  match io::open(a, "w") {
+    w: Ok {
+      {
+        let box: shared mut = mem::Box(move w.value);
+        let other = box;
+        other.get().write("boxed");
+        box.get().write(" twice");
+        io::println("boxed: " + text(a));
+      }
+      io::println("box gone: " + text(a));
+    }
+    e: Err { return 1; }
+  }
+  match io::open(a, "w") {
+    w: Ok {
+      let n = await fill(move w.value, "task");
+      io::println("task " + Str(n) + ": " + text(a));
+    }
+    e: Err { return 1; }
+  }
+  let x = io::stdin();
+  let y = io::stdin();
+  io::println(Str(x == y) + " " + Str(cl::startsWith(x.toString(), "File(__handle: ")));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "boxed: (empty)\nbox gone: boxed twice\ntask 1: task\n"
+                      "True True\n");
+  g.expectNoLeaks("AFileIsSharedInABoxAndMovesIntoATask");
+}

@@ -1089,7 +1089,7 @@ cannot express itself, such as the standard library's file I/O (#198,
 
 ```pkn
 // from: stdlib/io.pkn
-native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
+native fn _write(file: int, s: view Str) -> int = "Paykan_io_write";
 ```
 
 The string is the C symbol, a C identifier other than a C keyword (`= "a b"`

@@ -1065,8 +1065,8 @@ parameter or a field alike (`'c' is immutable (a 'Counter'; write 'mut Counter' 
 it); 'increment' is not a 'view fn'`), or on a `view`, a parameter or a local
 ([`view`: read-only](03-functions.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
-`toString`, `equals`, `len`; `concat` is not, so it needs a `mut Str`. (The standard
-library's `io::File` methods are `view fn`s.) `let` is about the variable, not the object:
+`toString`, `equals`, `len`; `concat` is not, so it needs a `mut Str`. `let` is about the
+variable, not the object:
 a `let` local cannot be reassigned, and whether a method may change what it holds is its
 type's, `mut` or not ([Variables](02-basics.md#variables--declarations)).
 

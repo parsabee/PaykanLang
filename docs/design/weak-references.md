@@ -97,8 +97,8 @@ free a live object.
 object's address, and the two names say what a pointer holds (a strong
 reference, counted in `strong`; a weak one, counted in `weak`; a raw
 `PaykanObject*` alias, counted nowhere).  A new object has both counts at
-zero until it is boxed; an immortal static (`PaykanObject_None`,
-`PaykanFile_Stdin`) starts with `strong` 1, which nothing releases.
+zero until it is boxed; an immortal static (`PaykanObject_None`) starts
+with `strong` 1, which nothing releases.
 
 The separate control block is gone.  `PaykanShared_new(obj)` is `++strong`
 and returns `obj`; `PaykanShared_get` is the identity; `Paykan_retain` and
