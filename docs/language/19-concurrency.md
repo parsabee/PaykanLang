@@ -830,6 +830,8 @@ replace it ([Memory](16-memory.md)).
 
 A task runs on another thread, so what it takes must be safe to use there. The **send
 check** runs at an async call's arguments and at the declaration of an `async fn`'s result.
+What passes it is `Sendable`, a built-in trait a template bounds its type parameter by
+([Sendable](06-traits.md#sendable)).
 A number, a `bool`, a `char`, a `Str`, a handle ([below](#locked-mut-cells-and-lock-blocks))
 and a unique object (a `T` or a `mut T`) whose fields all cross (own and inherited, through
 structs, tuples, arrays, optionals and enum payloads) cross; a unique object crosses by

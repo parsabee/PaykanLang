@@ -616,6 +616,17 @@ at the function: `the result of 'async fn' 'give' (a 'shared Job') cannot
 cross to the task's awaiter: is 'shared Job': a 'shared' reference is
 aliased on its own thread` (prototype, 2026-11-03).
 
+The check has a name, the built-in trait `Sendable` (#378): `T: Sendable`
+exactly when the check finds nothing against `T`
+(`Sema::isSendable` is `Sema::uncrossable`).  It is structural and no
+`impl` block gives it; the standard library opts a native type out with
+`impl !Sendable for T {}`, which its module's interface records.  A
+template's own check (#373) gives a type parameter that is not bounded
+`Sendable` an archetype that does not cross, so what the template sends is
+reported once, at the template.  There is no `Sync`: threads share an object
+only frozen, behind a lock or as an atomic value, each of which a send
+makes.
+
 | Type | Crossable |
 |---|---|
 | numbers, `bool`, `char`, payload-free enums, unique and `const` `Str` (the mut model: `Str` and `mut Str`) | yes |

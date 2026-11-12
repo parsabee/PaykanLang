@@ -21,6 +21,18 @@ samples/concurrency/README.md.
   or an optional. The C of `--emit-c` runs a task where it is called, so it keeps the code of a
   module that has to do with tasks instead of linking its compiled code, and `--list-modules`
   does not name it (docs/c-backend.md).
+- The built-in trait `Sendable` (#378; docs/language/06-traits.md, "Sendable"): the types whose
+  ownership can move to another thread, which is what the send check finds. It has no methods and
+  no `impl` block gives it. `T: Sendable` bounds a template that sends its value, makes it `atomic
+  shared` or `locked` or returns it from an `async fn`: the template is checked once, where it is
+  written (`'T' is not 'Sendable': declare 'T: Sendable' to send it to a task`), and a type
+  argument that does not meet the bound is refused with the reason (`'shared Node' does not
+  implement trait 'Sendable', which 'total' requires of 'T': a 'shared' reference is aliased on
+  its own thread`). The standard library opts a type out with `impl !Sendable for T {}`, which
+  is in its module's interface. `Sendable` is a built-in trait's name now: a trait, a class, a
+  struct, an enum or a function of that name is an error. An async method's result is
+  send-checked once the module's types are known, so a class declared after the method no
+  longer passes unchecked.
 - Borrows across an `await` (#368; docs/language/19-concurrency.md, "Borrows across an `await`").
   An `inout` local or `match` binding that is live across an `await` names storage the function
   owns, an owned path or its own `inout` parameter: reached through `self`, a `shared` reference

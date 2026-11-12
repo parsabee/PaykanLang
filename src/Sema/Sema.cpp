@@ -5075,6 +5075,9 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     ok = false;
   if (!checkPendingBounds())
     ok = false;
+  // And what the async methods declared so far return (checkAsyncDecl).
+  if (!checkPendingAsyncResults())
+    ok = false;
 
   // Forward-declare every free function's signature next, so that any body —
   // a free function OR a class method — may call any module-level function

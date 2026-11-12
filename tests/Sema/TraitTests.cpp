@@ -52,6 +52,237 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
 }
 
+// `Sendable` (#378) is what the send check finds nothing against: a value,
+// a unique object or an aggregate of Sendable parts, a frozen object and a
+// cell; not a `shared` reference, a function value or an `Obj`, nor what
+// holds one.  It is structural: no block implements it, and only the
+// standard library opts a type out.
+TEST(Traits, SendableIsWhatCrosses) {
+  auto r = semaCheck(R"(import ::collections as cl;
+class Node { v: int; }
+class Cache { hits: int; }
+class Job { name: Str; cache: shared Cache; }
+struct Pair { a: int; n: Node; }
+struct Mine { id: int; }
+fn need<T: Sendable>(x: T) -> int { return 1; }
+impl Sendable for Node {}
+impl !Sendable for Mine {}
+impl !Hashable for Mine {}
+fn main() -> int {
+  let f: atomic shared = Node(3);
+  let s: shared = Node(5);
+  let o: Obj = Node(6);
+  let opt: Node? = Node(7);
+  let ok = need(Node(1)) + need(1) + need("s") + need(f) +
+           need(Pair(1, Node(1))) + need((1, "a")) +
+           need(cl::List<Node>()) + need(move opt);
+  let a = need(s);
+  let b = need(Job("j", Cache(0)));
+  let c = need(fn() => 3);
+  let d = need(move o);
+  let e = need(cl::List<shared Node>());
+  let g = need((1, s));
+  return ok;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 9) << r.Diagnostics;
+  expectAll(
+      r,
+      {":8:1: error: 'Sendable' is built in: a type is Sendable by what it "
+       "holds, and cannot be implemented (a class whose 'shared' links stay "
+       "inside it waits for #377)",
+       ":9:1: error: only the standard library opts a type out of "
+       "'Sendable': struct 'Mine' is Sendable by what it holds",
+       ":10:1: error: 'impl !Hashable for': only 'Sendable' is opted out of "
+       "('impl !Sendable for T {}')",
+       ":19:11: error: 'shared Node' does not implement trait 'Sendable', "
+       "which 'need' requires of 'T': a 'shared' reference is aliased on its "
+       "own thread",
+       ":20:11: error: 'Job' does not implement trait 'Sendable', which "
+       "'need' requires of 'T': field 'cache' is 'shared Cache': a 'shared' "
+       "reference is aliased on its own thread",
+       ":21:11: error: '() -> int' does not implement trait 'Sendable', "
+       "which 'need' requires of 'T': is a function value, whose captures "
+       "are not known",
+       ":22:11: error: 'Obj' does not implement trait 'Sendable', which "
+       "'need' requires of 'T': is an 'Obj', which may be any class",
+       ":23:11: error: 'List<shared Node>' does not implement trait "
+       "'Sendable', which 'need' requires of 'T': field '__items' is 'shared "
+       "Node'",
+       ":24:11: error: '(int, shared Node)' does not implement trait "
+       "'Sendable', which 'need' requires of 'T': field '.1' is 'shared "
+       "Node'"});
+}
+
+// A template is checked once against its bounds (#373): what it sends, makes
+// `atomic shared` or `locked`, returns from an `async fn` or gives to a
+// template that needs it is a `T: Sendable`, the template's or its `impl`
+// block's.
+TEST(Traits, ATemplateSendsWhatItsBoundsSay) {
+  auto r = semaCheck(R"(import ::collections as cl;
+fn need<T: Sendable>(x: view T) -> int { return 1; }
+async fn total<T: Sendable>(xs: cl::List<T>) -> int { return xs.len(); }
+fn publish<T: Sendable>(x: T) -> atomic shared T { return move x; }
+async fn eat<T>(x: T) -> int { return 1; }
+async fn back<T>(x: T) -> T { return move x; }
+fn relay<T>(x: T) -> int { return await eat(move x); }
+fn freeze<T>(x: T) -> int { let f: atomic shared T = move x; return 1; }
+fn cell<T>(x: T) -> int { let c: locked mut T = move x; return 1; }
+fn ask<T>(x: view T) -> int { return need(x); }
+fn list<T>(xs: cl::List<T>) -> int { return await total(move xs); }
+fn fine<T: Sendable>(x: T) -> int { return await eat(move x) + need(1); }
+struct Box<T> { v: T; }
+impl Box<T: Sendable> {
+  fn send(x: T) -> int { return await eat(move x); }
+}
+impl Box<U> {
+  fn leak(x: U) -> int { return await eat(move x); }
+}
+fn main() -> int { return fine(1); }
+)");
+  EXPECT_EQ(r.ErrorCount, 7) << r.Diagnostics;
+  expectAll(
+      r, {":6:1: error: 'T' is not 'Sendable': declare 'T: Sendable' to "
+          "return it from an 'async fn'",
+          ":7:45: error: 'T' is not 'Sendable': declare 'T: Sendable' to send "
+          "it to a task",
+          ":8:29: error: 'T' is not 'Sendable': declare 'T: Sendable' to make "
+          "it 'atomic shared'",
+          ":9:27: error: 'T' is not 'Sendable': declare 'T: Sendable' to make "
+          "it 'locked mut'",
+          ":10:38: error: 'T' is not 'Sendable': declare 'T: Sendable' for "
+          "'need', which needs it",
+          ":11:51: error: 'T' is not 'Sendable': declare 'T: Sendable' for "
+          "'total', which needs it",
+          ":18:43: error: 'U' is not 'Sendable': declare 'U: Sendable' to send "
+          "it to a task"});
+}
+
+// A generic type's async method returns its `T` in every instance, so an
+// instance whose argument does not cross is refused with the block that
+// lets the others have the method: a conditional `impl` bounded `Sendable`.
+TEST(Traits, AnAsyncMethodOfTheSendableInstances) {
+  auto bad = semaCheck(R"(class Node { id: int; }
+class Cell<T: Copyable> {
+  v: T;
+  async view fn later() -> T { return self.v; }
+}
+impl Cell<T> { fn __init__(v: T) { self.v = v; } }
+fn main() -> int {
+  let n: shared Node = Node(4);
+  let b = Cell<shared Node>(n);
+  return b.v.id;
+}
+)");
+  EXPECT_EQ(bad.ErrorCount, 1) << bad.Diagnostics;
+  expectAll(bad,
+            {":4:3: error: the result of 'async fn' 'later' (a 'shared Node') "
+             "cannot cross to the task's awaiter: is 'shared Node': a 'shared' "
+             "reference is aliased on its own thread; put the method in an "
+             "'impl Cell<...>' block that bounds the parameter 'Sendable', "
+             "which only the instances that meet the bound have"});
+  auto good = semaCheck(R"(class Node { id: int; }
+class Cell<T: Copyable> {
+  v: T;
+  view fn now() -> T { return self.v; }
+}
+impl Cell<T> { fn __init__(v: T) { self.v = v; } }
+impl Cell<T: Sendable> {
+  async view fn later() -> T { return self.v; }
+}
+fn main() -> int {
+  let n: shared Node = Node(4);
+  let b = Cell<shared Node>(n);
+  let i = Cell<int>(3);
+  return b.now().id + await i.later() - 7;
+}
+)");
+  EXPECT_TRUE(good.Ok) << good.Diagnostics;
+}
+
+// An async method's result is send-checked against what its type holds,
+// which is known once the module's classes are: the order of the
+// declarations does not matter.  The hint is for an instance a bound would
+// keep the method from.
+TEST(Traits, AnAsyncMethodsResultIsCheckedOnceTypesAreWhole) {
+  auto r = semaCheck(R"(class Node { v: int; }
+class A { n: int; async view fn mk() -> Job { return Job(Node(self.n)); } }
+class Job { s: shared Node; }
+struct Cell<T> { n: int; }
+impl Cell<T: Sendable> { async view fn bad() -> Obj? { return None; } }
+struct Wrap<T> { v: T; }
+impl Wrap<T> { async view fn get() -> T { return self.v; } }
+class Late { c: Cell<int>?; w: Wrap<shared Node>?; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 3) << r.Diagnostics;
+  expectAll(r,
+            {":2:19: error: the result of 'async fn' 'mk' (a 'Job') cannot "
+             "cross to the task's awaiter: field 's' is 'shared Node'",
+             ":5:26: error: the result of 'async fn' 'bad' (a 'Obj?') cannot "
+             "cross to the task's awaiter: is an 'Obj', which may be any "
+             "class\n",
+             ":7:16: error: the result of 'async fn' 'get' (a 'shared Node') "
+             "cannot cross to the task's awaiter: is 'shared Node': a "
+             "'shared' reference is aliased on its own thread; put the "
+             "method in an 'impl Wrap<...>' block"});
+}
+
+// Asking whether a type is Sendable sends nothing: a class a bound was
+// asked about is not one the program sends, and its subclasses are not
+// checked as if it were.  A type that holds itself is judged once.
+TEST(Traits, AskingWhetherATypeIsSendableSendsNothing) {
+  auto r = semaCheck(R"(class Node { v: int; }
+class Base { s: shared Node; }
+class Der : Base { k: int; }
+struct Box<T> { v: T; }
+impl Box<T: Sendable> { view fn f() -> int { return 1; } }
+class Many<T> { one: T?; }
+struct Rec { kids: Many<Rec>; n: int; }
+enum Tree { Leaf, Fork(kids: Many<Tree>) }
+fn need<T: Sendable>(x: view T) -> int { return 1; }
+fn main() -> int {
+  let b: Box<Base>? = None;
+  let r = Rec(Many<Rec>(None), 1);
+  return need(r) + need(Tree::Leaf) - 2;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// What an `impl TRAIT for` block of a template may not say is an error at
+// the block, whether or not the template is ever instantiated.
+TEST(Traits, ATemplatesImplBlockIsCheckedWhereItIsWritten) {
+  auto r = semaCheck(R"(struct Box<T> { v: T; }
+impl !Sendable for Box<T> {}
+class Cell<T> { n: int; }
+impl !Hashable for Cell<T> {}
+struct B<T> { v: T; }
+impl Sendable for B<T> {}
+impl Copyable for B<T> {}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+  expectAll(r, {":2:1: error: only the standard library opts a type out of "
+                "'Sendable': struct 'Box<T>' is Sendable by what it holds",
+                ":4:1: error: 'impl !Hashable for': only 'Sendable' is opted "
+                "out of ('impl !Sendable for T {}')",
+                ":6:1: error: 'Sendable' is built in",
+                ":7:1: error: 'Copyable' is built in"});
+}
+
+// A template that copies its `T` into a task needs `T: Copyable`, as one
+// that copies it anywhere else does.
+TEST(Traits, ATemplateThatCopiesIntoATask) {
+  auto r = semaCheck(R"(async fn eat<U>(y: U) -> int { return 1; }
+fn pass<T>(x: T) -> int { return await eat(x); }
+fn main() -> int { return pass(1) - 1; }
+)");
+  EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+  expectAll(r, {":2:44: error: 'T' is not 'Copyable': declare 'T: Copyable' "
+                "to copy it into a task"});
+}
+
 // `Showable` was `Show` through 0.3: the old name is an error that names
 // the new one, in a bound and in an `impl ... for` block, unless the program
 // declares a trait of that name itself.

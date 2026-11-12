@@ -1026,6 +1026,7 @@ ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,
   auto *out = Ctx.make<ImplDecl>(im->getLocation(), in(newTypeName),
                                  std::move(methods), cloneType(im->getTrait()));
   out->setTypeParamBounds(cloneBounds(im->getTypeParamBounds()));
+  out->setNegative(im->isNegative());
   return out;
 }
 
@@ -1038,6 +1039,7 @@ ImplDecl *ASTCloner::cloneTemplate(ImplDecl *im) {
                                  copy->getMethods(), copy->getTrait(),
                                  std::move(params));
   out->setTypeParamBounds(copy->getTypeParamBounds());
+  out->setNegative(copy->isNegative());
   return out;
 }
 

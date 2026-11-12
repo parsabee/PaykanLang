@@ -1798,7 +1798,8 @@ TEST(Interchange, ImplBlockRoundTrips) {
                            "  view fn read() -> int { return self.n; }\n"
                            "  static fn make() -> A { return A(); }\n"
                            "}\n"
-                           "impl Showable for Pair<K, V> {}\n";
+                           "impl Showable for Pair<K, V> {}\n"
+                           "impl !Sendable for A {}\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
@@ -1806,6 +1807,8 @@ TEST(Interchange, ImplBlockRoundTrips) {
   EXPECT_NE(text.find("(impl @2:1-5:2 \"A\"\n      (methods"),
             std::string::npos)
       << text;
+  // `impl !Sendable for A {}` (#378): (not TRAIT) where (for TRAIT) goes.
+  EXPECT_NE(text.find("\"A\"\n      (not"), std::string::npos) << text;
   EXPECT_NE(text.find("(qual static)"), std::string::npos) << text;
   EXPECT_NE(text.find("\"Pair\"\n      (type-params \"K\" \"V\")\n      (for"),
             std::string::npos)
@@ -1814,9 +1817,11 @@ TEST(Interchange, ImplBlockRoundTrips) {
   std::string error;
   ast::TranslationUnit *back = read(text, ctx, error);
   ASSERT_NE(back, nullptr) << error;
-  ASSERT_EQ(back->getImplDecls().size(), 2u);
+  ASSERT_EQ(back->getImplDecls().size(), 3u);
   EXPECT_TRUE(back->getImplDecls()[0]->getMethods()[1]->isStatic());
   EXPECT_EQ(back->getImplDecls()[1]->getTypeParams().size(), 2u);
+  EXPECT_FALSE(back->getImplDecls()[1]->isNegative());
+  EXPECT_TRUE(back->getImplDecls()[2]->isNegative());
   EXPECT_EQ(dump(back), dump(driver.getRoot()));
   EXPECT_EQ(write(*back), text);
 }

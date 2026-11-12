@@ -426,6 +426,10 @@ argument or receiver, a frozen value, a cell's), its own class or one it
 imports.  An importer's class derived from it crosses with it, so the
 importer's send check is of that class too (`Sema::checkCrossedClasses`:
 `class 'Doubled' extends 'Shape', which is sent to another thread: ...`).
+`!Sendable` (`names::kImplNotSendable`) is a class's or a struct's opt-out
+of `Sendable`, the standard library's `impl !Sendable for T {}` (#378): an
+importer's send check refuses the type, and what holds it.  Nothing is
+recorded for `Sendable` itself, which follows from a type's structure.
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing

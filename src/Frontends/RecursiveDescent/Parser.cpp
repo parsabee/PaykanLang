@@ -1061,14 +1061,19 @@ EnumDecl *Parser::parseEnumDecl() {
   return ed;
 }
 
-// implDecl ::= "impl" ( typeAnnotation "for" )? modulePath
+// implDecl ::= "impl" ( "!"? typeAnnotation "for" )? modulePath
 //              "{" implMember* "}"
 // implMember ::= ( "shared"? "view"? | "static" ) "fn" ... ( block | "=>" expr
 // ";" )
 ImplDecl *Parser::parseImplDecl() {
   SourceLocation start = consume().Loc; // "impl"
+  // `impl !Sendable for A {}` (#378): the type does not implement the
+  // trait.
+  const bool negative = accept(Tok::Not);
   if (!at(Tok::Ident)) {
-    errorAtCurrent("expected a type name after 'impl'");
+    errorAtCurrent(negative ? "expected a trait's name after 'impl !' ('impl "
+                              "!Sendable for T {}')"
+                            : "expected a type name after 'impl'");
     return nullptr;
   }
   // `impl List<T: Cloneable>`: a generic type whose parameters carry bounds
@@ -1104,6 +1109,11 @@ ImplDecl *Parser::parseImplDecl() {
   Type *trait = nullptr;
   Type *target = nullptr;
   const char *after = "after 'impl'";
+  if (negative && boundedTarget()) {
+    errorAtCurrent("expected a trait's name after 'impl !' ('impl !Sendable "
+                   "for T {}')");
+    return nullptr;
+  }
   if (boundedTarget()) {
     if (!parseBounded())
       return nullptr;
@@ -1117,6 +1127,11 @@ ImplDecl *Parser::parseImplDecl() {
     target = parseTypeAnnotation();
     if (!target)
       return nullptr;
+    if (negative && !at(Tok::KwFor)) {
+      errorAtCurrent("expected 'for' after the trait of 'impl !' ('impl "
+                     "!Sendable for T {}')");
+      return nullptr;
+    }
     if (accept(Tok::KwFor)) {
       trait = target;
       target = nullptr;
@@ -1206,6 +1221,7 @@ ImplDecl *Parser::parseImplDecl() {
       Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
                          trait, std::move(typeParams));
   im->setTypeParamBounds(std::move(bounds));
+  im->setNegative(negative);
   return im;
 }
 

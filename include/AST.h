@@ -2345,6 +2345,9 @@ class ImplDecl : public Decl {
   // `impl List<T: Cloneable>`: the block is part of an instance only when
   // its type arguments meet these bounds (#369); empty when none.
   TypeParamBounds Bounds;
+  // `impl !Sendable for T {}` (#378): the type does not implement the
+  // trait, which its structure would give it.
+  bool Negative = false;
 
 public:
   ImplDecl(SourceLocation loc, const std::string &internedTypeName,
@@ -2363,6 +2366,8 @@ public:
   }
   const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
   void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
+  bool isNegative() const { return Negative; }
+  void setNegative(bool v) { Negative = v; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
 };

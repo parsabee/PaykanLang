@@ -2024,6 +2024,134 @@ TEST(Pkm, AsyncAcrossModules) {
   fs::remove_all(dir);
 }
 
+// A module of the standard library opts a type out of `Sendable` (`impl
+// !Sendable for T {}`, #378): the opt-out is in its module file, and an
+// importer's send check and its `T: Sendable` bounds refuse the type, and
+// what holds it.
+TEST(Pkm, AnOptOutOfSendableIsInTheModuleFile) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_pinned_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "pinned.pkn",
+            "struct Handle { id: int; }\n"
+            "impl Handle { fn __init__(id: int) { self.id = id; } }\n"
+            "impl !Sendable for Handle {}\n"
+            "class Loop { n: int; }\n"
+            "impl !Sendable for Loop {}\n"
+            "struct Free { id: int; }\n"
+            "fn open(id: int) -> Handle { return Handle(id); }\n");
+  // The module's own async method cannot hand one out, wherever in the
+  // file the opt-out is written.
+  writeFile(dir / "hands.pkn",
+            "class Maker {\n"
+            "  n: int;\n"
+            "  async view fn mk() -> Handle { return Handle(self.n); }\n"
+            "}\n"
+            "struct Handle { id: int; }\n"
+            "impl !Sendable for Handle {}\n");
+  // Nor do a parallel loop's threads read one.
+  writeFile(dir / "par.pkn", "import ::pinned;\n"
+                             "struct Wrap { h: pinned::Handle; n: int; }\n"
+                             "fn main() -> int {\n"
+                             "  let h = pinned::open(3);\n"
+                             "  let hs = [pinned::open(1), pinned::open(2)];\n"
+                             "  let w = Wrap(pinned::open(3), 1);\n"
+                             "  let f = pinned::Free(4);\n"
+                             "  s = 0;\n"
+                             "  parallel for i in 0..10 {\n"
+                             "    s += h.id + hs[0].id + w.n + f.id;\n"
+                             "  }\n"
+                             "  return s;\n}\n");
+  writeFile(dir / "main.pkn",
+            "import ::pinned;\n"
+            "struct Wrap { h: pinned::Handle; }\n"
+            "async fn use(h: pinned::Handle) -> int { return h.id; }\n"
+            "async fn hold(w: Wrap) -> int { return w.h.id; }\n"
+            "async fn run(l: pinned::Loop) -> int { return l.n; }\n"
+            "async fn free(f: pinned::Free) -> int { return f.id; }\n"
+            "fn need<T: Sendable>(x: view T) -> int { return 1; }\n"
+            "fn main() -> int {\n"
+            "  let a = await use(pinned::open(1));\n"
+            "  let b = await hold(Wrap(pinned::open(2)));\n"
+            "  let c = await run(pinned::Loop(3));\n"
+            "  let d = await free(pinned::Free(4));\n"
+            "  let e = need(pinned::open(5));\n"
+            "  return a + b + c + d + e;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  auto made = paykan("--emit-pkm --module-name=::pinned -o lib/pinned.pkm "
+                     "pinned.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  auto dump = paykan("pkm dump --section=iface lib/pinned.pkm");
+  EXPECT_TRUE(contains(dump.out, "impl !Sendable for Handle")) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "impl !Sendable for Loop")) << dump.out;
+  auto r = paykan("--check-only --error-limit=0 --module-path=lib main.pkn");
+  EXPECT_NE(r.exitCode, 0);
+  const std::string pinned = "which its module keeps on the thread that made "
+                             "it ('impl !Sendable')";
+  for (const std::string &want :
+       {":9:21: error: cannot send 'pinned::open(...)' (a 'Handle'): is "
+        "'Handle', " +
+            pinned,
+        ":10:22: error: cannot send 'Wrap(...)' (a 'Wrap'): field 'h' is "
+        "'Handle', " +
+            pinned,
+        ":11:21: error: cannot send 'pinned::Loop(...)' (a 'Loop'): is "
+        "'Loop', " +
+            pinned,
+        ":13:11: error: 'Handle' does not implement trait 'Sendable', which "
+        "'need' requires of 'T': is 'Handle', " +
+            pinned})
+    EXPECT_TRUE(contains(r.out, want)) << want << "\n" << r.out;
+  EXPECT_FALSE(contains(r.out, ":12:")) << r.out;
+  auto hands = paykan("--emit-pkm --module-name=::hands -o lib/hands.pkm "
+                      "hands.pkn");
+  EXPECT_NE(hands.exitCode, 0);
+  EXPECT_TRUE(
+      contains(hands.out, ":3:3: error: the result of 'async fn' 'mk' (a "
+                          "'Handle') cannot cross to the task's awaiter: is "
+                          "'Handle', " +
+                              pinned))
+      << hands.out;
+  auto par = paykan("--check-only --error-limit=0 --module-path=lib par.pkn");
+  EXPECT_NE(par.exitCode, 0);
+  for (const std::string &want :
+       {":10:10: error: 'h' (a 'Handle') cannot be used in a 'parallel for' "
+        "body: is 'Handle', " +
+            pinned,
+        ":10:17: error: 'hs' (a 'Handle[2]') cannot be used in a 'parallel "
+        "for' body: is 'Handle', " +
+            pinned,
+        ":10:28: error: 'w' (a 'Wrap') cannot be used in a 'parallel for' "
+        "body: field 'h' is 'Handle', " +
+            pinned})
+    EXPECT_TRUE(contains(par.out, want)) << want << "\n" << par.out;
+  EXPECT_FALSE(contains(par.out, "'f'")) << par.out;
+  // A module of the standard library imported from its source opts out
+  // as one compiled ahead does.
+  fs::create_directories(dir / "std");
+  fs::copy_file(dir / "pinned.pkn", dir / "std" / "pinned.pkn");
+  writeFile(dir / "src.pkn", "import ::pinned;\n"
+                             "fn main() -> int {\n"
+                             "  let h = pinned::open(1);\n"
+                             "  return h.id - 1;\n}\n");
+  auto src =
+      run("cd " + dir.string() + " && PAYKAN_STDLIB=" + (dir / "std").string() +
+          " " + paykanCmd() + " --check-only src.pkn 2>&1");
+  EXPECT_EQ(src.exitCode, 0) << src.out;
+  // Outside the standard library, a type is Sendable by what it holds.
+  auto own = paykan("--check-only pinned.pkn");
+  EXPECT_NE(own.exitCode, 0);
+  EXPECT_TRUE(contains(own.out, "only the standard library opts a type out "
+                                "of 'Sendable'"))
+      << own.out;
+  fs::remove_all(dir);
+}
+
 // What an importer checks of an `async fn` it only has the module file of:
 // its arguments' send check, the receiver an async method borrows, that it
 // is no value, and the colour of an override.

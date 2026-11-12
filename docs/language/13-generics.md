@@ -190,8 +190,15 @@ Fix it where the value goes:
 
 The message names the parameter as the code does, an `impl R<U>` block's `U` included.
 
-Only copies are reported. Everything else an archetype lacks (`+`, `Str(x)`, a method) is
-checked per instance, as before. The check runs only when the module has no other error.
+A parameter sent to another thread is reported the same way, by its missing `T: Sendable`
+([Sendable](06-traits.md#sendable)): a `T` given to a task, made `atomic shared` or `locked`,
+returned from an `async fn` or handed to a template that needs `T: Sendable` (`'T' is not
+'Sendable': declare 'T: Sendable' to send it to a task`). A parameter bounded `Copyable` has
+no archetype, so what it sends is checked per instance.
+
+Only copies and sends are reported. Everything else an archetype lacks (`+`, `Str(x)`, a
+method) is checked per instance, as before. The check runs only when the module has no other
+error.
 
 A parameter bounded by a trait other than `Copyable` (`K: Hashable`, `T: Showable`,
 `T: ValueType`) is an archetype too, which meets the bound. Its copies are checked the same
@@ -773,6 +780,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Copy of a parameter without bounds | a template's copy of an unbounded `T`, used or not: `'T' is not 'Copyable': declare 'T: Copyable' to copy it` ([The archetype check](#the-archetype-check)) |
+| Send of a parameter without bounds | a template's send of a `T` not bounded `Sendable`, used or not: `'T' is not 'Sendable': declare 'T: Sendable' to send it to a task` ([The archetype check](#the-archetype-check)) |
 | Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument, 17 deep: `instantiating 'Bad<…>' exceeds the maximum instantiation depth (16); a generic class may not instantiate itself with an ever-growing type argument` |
 | Instantiation name too long | an instantiation inside one of its own template's that grows its type arguments from that one's, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
