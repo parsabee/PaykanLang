@@ -1451,6 +1451,8 @@ PaykanLocked_unlock(obj) -> void        ; releases the mutex
 Paykan_freeze(obj) -> void              ; makes the object immortal and calls its walk slot (§5); null and an immortal: nothing
 Paykan_freeze_mem(ptr, ptr) -> void     ; freezes the references a value holds: its type descriptor (§4), its address
 Paykan_walk_child(obj, i64) -> void     ; a walk's visit of a field: freezes it, or, in the check of a moved value and when the second argument is 1, looks at it
+Paykan_deinit_begin(obj) -> i64         ; before the `__deinit__`s a destroy runs: the object can be referred to, and what they drop is destroyed where it is dropped
+Paykan_deinit_end(obj, i64) -> void     ; after them, with what `Paykan_deinit_begin` returned: a panic if a reference to the object remains
 Paykan_moved_unique(box) -> i64         ; 1 when every object the value holds uniquely has a strong count of 1, or is immortal
 Paykan_moved_unique_mem(ptr, ptr) -> i64 ; the same for a value held in memory: its type descriptor (§4), its address
 Paykan_panic_moved(ptr) -> void         ; stops the program: "a value moved out of '<place>' is still borrowed"; never returns

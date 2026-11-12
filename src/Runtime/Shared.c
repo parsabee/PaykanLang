@@ -19,6 +19,9 @@
 // object is dead and the word records how far its destruction has got:
 //
 //   kDying    its destroy is running (destroy_dead_object);
+//   kDeinit   its `__deinit__`s are running (Paykan_deinit_begin), the first
+//             part of its destroy: kDeinit + n while the code they run holds
+//             n references to it of its own, which it gives back;
 //   kPending  destruction is pending (deferred, below): the object is on the
 //             pending stack;
 //   0         destroyed: the memory is freed as soon as `weak` is zero, and
@@ -32,7 +35,7 @@
 // is PAYKAN_REF_ATOMIC - 1 for a plain strong count (below), and
 // PAYKAN_REF_MAX for a weak count.
 
-enum { kDying = -1, kPending = -2 };
+enum { kDying = -1, kPending = -2, kDeinit = INT32_MIN / 2 };
 
 PAYKAN_NORETURN static void count_overflow(const char *kind, int limit) {
   Paykan_runtime_panic("too many %s references to one object (the limit is "
@@ -125,6 +128,10 @@ static _Thread_local PaykanObject *g_inline_pending[kInlinePending];
 static _Thread_local PaykanObject **g_pending; // the pending stack ...
 static _Thread_local size_t g_pending_len;     // ... its height ...
 static _Thread_local size_t g_pending_cap = kInlinePending; // ... its room
+// The height below which the pending objects are an enclosing drain's: one
+// that is running a `__deinit__` (Paykan_deinit_begin), whose code's own
+// releases drain what they push and no more.
+static _Thread_local size_t g_pending_base;
 
 static void push_pending(PaykanObject *obj) {
   if (!g_pending)
@@ -184,6 +191,10 @@ void Paykan_release(PaykanShared *shared) {
     shared->strong -= 1;
     if (shared->strong > 0)
       return;
+    // Its `__deinit__` is running (kDeinit + n): a reference that code took
+    // of the object, given back.
+    if (shared->strong < kPending)
+      return;
     if (g_destroying) {
       // A destroy is running: defer to the outermost release.
       push_pending(shared);
@@ -191,10 +202,48 @@ void Paykan_release(PaykanShared *shared) {
     }
     g_destroying = 1;
     destroy_dead_object(shared);
-    while (g_pending_len && g_pending)
+    while (g_pending_len > g_pending_base && g_pending)
       destroy_dead_object(g_pending[--g_pending_len]);
     g_destroying = 0;
   }
+}
+
+// -- `__deinit__` (#378)
+//
+// A class's generated destroy runs the `__deinit__`s of the object's class
+// and its superclasses between these two, before it releases the fields.
+// That is the program's code, so for its duration:
+//
+//   * the object can be referred to: a `view` argument, `==`, its text.
+//     Its count is kDeinit + n, which a retain and a release move as they
+//     move a live count, and which no weak reference upgrades (it is below
+//     zero).  The code gives every reference back, as the borrow of `self`
+//     has it; one that did not would be a reference to freed memory, so
+//     that is a panic;
+//   * no destroy is running, as far as that code's own releases go: an
+//     object it drops is destroyed where it is dropped, not when the
+//     object being destroyed is done.  What an enclosing drain has pending
+//     stays below g_pending_base, for that drain.
+//
+// The token is the state to put back.
+
+int64_t Paykan_deinit_begin(PaykanObject *obj) {
+  const int64_t token =
+      (int64_t)(((uint64_t)g_pending_base << 1) | (g_destroying ? 1u : 0u));
+  obj->strong = kDeinit;
+  g_pending_base = g_pending_len;
+  g_destroying = 0;
+  return token;
+}
+
+void Paykan_deinit_end(PaykanObject *obj, int64_t token) {
+  if (PAYKAN_UNLIKELY(obj->strong != kDeinit))
+    Paykan_runtime_panic("an object was kept by its '__deinit__': %d "
+                         "reference(s) to it remain",
+                         (int)(obj->strong - kDeinit));
+  obj->strong = kDying;
+  g_destroying = (int)(token & 1);
+  g_pending_base = (size_t)((uint64_t)token >> 1);
 }
 
 void Paykan_dispose(PaykanObject *obj) {

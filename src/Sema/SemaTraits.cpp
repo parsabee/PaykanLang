@@ -115,6 +115,9 @@ void Sema::registerBuiltinTraits() {
   // Sendable (#378) by what a type holds: nothing the send check refuses
   // (traitImplOwner).
   builtin(names::kTraitSendable, nullptr, nullptr, {});
+  // Deinitializable (#378): every class, by the `__deinit__` it declares
+  // or by none (traitImplOwner).  The method is nothing a bound calls.
+  builtin(names::kTraitDeinitializable, nullptr, nullptr, {});
   std::vector<ast::Type *> cloneable = values;
   cloneable.push_back(Ctx.getStrTy());
   builtin(names::kTraitCloneable, names::kMethodClone,
@@ -171,6 +174,7 @@ bool Sema::checkTraitDecls(ast::TranslationUnit *tu) {
                                      "' in trait '" + td->getName() + "'");
         ok = false;
       } else if (fn->getName() == names::kMethodInit ||
+                 fn->getName() == names::kMethodDeinit ||
                  fn->getName() == names::kMethodDestroy) {
         error(fn->getLocation(),
               "a trait cannot require '" + fn->getName() + "'");
@@ -330,6 +334,13 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   // nothing against, a class or a qualified type argument too.
   if (isBuiltinTrait(names::kTraitSendable))
     return isSendable(ty) ? ty : nullptr;
+  // Deinitializable (#378): what runs a `__deinit__` when it is destroyed,
+  // which every class does (one that declares none runs nothing).
+  if (isBuiltinTrait(names::kTraitDeinitializable)) {
+    if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
+      return traitImplOwner(qt->getInnerType(), tr);
+    return ast::isa<ast::ClassType>(ty) ? ty : nullptr;
+  }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     for (const ast::ClassType *c = ct; c; c = c->getSuperClass())
       if (has(c))
@@ -694,6 +705,15 @@ bool Sema::checkImplForm(const ast::ImplDecl *im, const std::string &trait,
     error(im->getLocation(),
           "'Copyable' is built in: a type is Copyable by what it holds, and "
           "cannot be implemented");
+    return false;
+  }
+  // Deinitializable follows from what a type is (#378): `__deinit__` is
+  // declared in the class, and no block gives the trait.
+  if (builtin && trait == names::kTraitDeinitializable) {
+    error(im->getLocation(),
+          "'Deinitializable' is built in: every class is Deinitializable, "
+          "by the '__deinit__' it declares or by none, and it cannot be "
+          "implemented");
     return false;
   }
   // So does Sendable (#378).  A class whose `shared` and `weak` links stay

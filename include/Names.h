@@ -24,6 +24,12 @@ inline constexpr const char *kString = "Str";
 // Built-in method names
 inline constexpr const char *kMethodInit = "__init__";
 inline constexpr const char *kMethodSuper = "__super__";
+/// `__deinit__`: the counterpart of `__init__` (#378; docs/language/
+/// 05-classes.md, "Deinitializers").  It runs once when the object is
+/// destroyed, before what it holds is released: the class's own, then each
+/// superclass's.  Like `__init__` it is a class's own, with no vtable slot
+/// (the generated `destroy`, which has one, calls it).
+inline constexpr const char *kMethodDeinit = "__deinit__";
 /// `___init__`: the initializer, private to its module (docs/language/
 /// 05-classes.md, "Private fields and methods").  The parser records it as
 /// `__init__` with FuncDecl::isModulePrivateInit; the AST interchange form
@@ -35,7 +41,7 @@ inline constexpr const char *kMethodInitModulePrivate = "___init__";
 /// type's own methods.  The reserved `__init__` and `__super__` are not.
 inline bool isTypePrivateName(std::string_view name) {
   return name.size() > 2 && name[0] == '_' && name[1] == '_' &&
-         name != kMethodInit && name != kMethodSuper;
+         name != kMethodInit && name != kMethodSuper && name != kMethodDeinit;
 }
 /// A name the `_` prefix makes private to its module: a free function, a
 /// type, or a field or method reachable anywhere in the module that declares
@@ -131,6 +137,11 @@ inline constexpr const char *kTraitCloneable = "Cloneable";
 /// an `Obj`.  Structural, never implemented: what Sema::uncrossable finds
 /// nothing against.
 inline constexpr const char *kTraitSendable = "Sendable";
+/// No methods of its own to call: the types that run code when a value of
+/// them is destroyed, `__deinit__` (#378).  Every class is one, its
+/// `__deinit__` doing nothing unless it declares one.  Never implemented
+/// with a block.
+inline constexpr const char *kTraitDeinitializable = "Deinitializable";
 inline constexpr const char *kMethodClone = "clone";
 inline constexpr const char *kMethodHash = "hash";
 /// What a module interface records for `impl !Sendable for T {}` (#378),
@@ -225,6 +236,9 @@ inline constexpr const char *kPaykanFreezeMem = "Paykan_freeze_mem";
 // The walk a class's `__walk` makes of a reference field, and the check of
 // a value moved out of borrowed storage (#368).
 inline constexpr const char *kPaykanWalkChild = "Paykan_walk_child";
+// Around the `__deinit__`s a class's destroy runs (#378).
+inline constexpr const char *kPaykanDeinitBegin = "Paykan_deinit_begin";
+inline constexpr const char *kPaykanDeinitEnd = "Paykan_deinit_end";
 inline constexpr const char *kPaykanMovedUnique = "Paykan_moved_unique";
 inline constexpr const char *kPaykanMovedUniqueMem = "Paykan_moved_unique_mem";
 inline constexpr const char *kPaykanPanicMoved = "Paykan_panic_moved";
@@ -563,6 +577,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanFreeze,
     kPaykanFreezeMem,
     kPaykanWalkChild,
+    kPaykanDeinitBegin,
+    kPaykanDeinitEnd,
     kPaykanMovedUnique,
     kPaykanMovedUniqueMem,
     kPaykanPanicMoved,

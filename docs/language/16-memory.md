@@ -119,7 +119,9 @@ any alias is always right.
 
 When a release drops the count to zero:
 
-1. The object's `destroy` method runs. The compiler generates `destroy` to **release every
+1. The object's `destroy` method runs. The compiler generates `destroy` to run the class's
+   `__deinit__` and then each superclass's, where they declare one
+   ([Classes](05-classes.md#deinitializers)), and then to **release every
    reference the object holds** — its reference-typed fields (the `weak` ones dropped), and
    the references inside its array, tuple, struct and function-value fields — so destruction cascades
    transitively.
@@ -143,9 +145,9 @@ finishes before the objects it released are destroyed. All of them are destroyed
 that release returns.
 
 `destroy` is **final**. A class cannot declare its own `destroy`, override it, or call
-`obj.destroy()` explicitly — the compiler owns it entirely (see [Classes](05-classes.md)). There is no
-user-defined finalizer; cleanup that must happen at end of life belongs in the fields the object
-holds, which are released automatically.
+`obj.destroy()` explicitly — the compiler owns it entirely (see [Classes](05-classes.md)).
+Cleanup that must happen at end of life goes in the class's `__deinit__`, which `destroy`
+runs before it releases the fields; what the fields hold is released automatically after it.
 
 ## Assignment, Passing, and Returning
 

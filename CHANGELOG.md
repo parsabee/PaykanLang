@@ -21,6 +21,14 @@ samples/concurrency/README.md.
   or an optional. The C of `--emit-c` runs a task where it is called, so it keeps the code of a
   module that has to do with tasks instead of linking its compiled code, and `--list-modules`
   does not name it (docs/c-backend.md).
+- `__deinit__` for classes (#378; docs/language/05-classes.md, "Deinitializers"): `fn
+  __deinit__() { ... }` runs once when an object is destroyed, before what it holds is
+  released: the class's own, then each superclass's. It cannot keep `self`, `await`, or be
+  called by name, and a class that declares none pays nothing. Every class implements the new
+  built-in trait `Deinitializable`, whose name is reserved like the other built-in traits'.
+  It needs no vtable slot (the generated `destroy` runs it), so no layout changes. Making an
+  object counts as a call of its `__deinit__` in the par-safe check of a `parallel for` body,
+  and so does taking a `locked mut` cell's contents `inout`.
 - The built-in trait `Sendable` (#378; docs/language/06-traits.md, "Sendable"): the types whose
   ownership can move to another thread, which is what the send check finds. It has no methods and
   no `impl` block gives it. `T: Sendable` bounds a template that sends its value, makes it `atomic

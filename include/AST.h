@@ -1624,6 +1624,9 @@ class ClassType : public Type {
   // The class initialiser (__init__), stored separately because it is a
   // static function, not a virtual method, and has no vtable slot.
   MethodDecl *InitMethod = nullptr;
+  // Its `__deinit__`, when it declares one: the class's own like
+  // `__init__`, called by the generated `destroy` and by nothing else.
+  MethodDecl *DeinitMethod = nullptr;
 
   // The methods of its `impl` blocks, in declaration order.  They are called
   // directly, so they have no vtable slot, and a subclass inherits them
@@ -1746,6 +1749,8 @@ public:
     // Do NOT inherit InitMethod — every class has its own or none.
   }
 
+  /// The `__deinit__` this class declares, or null.
+  MethodDecl *getDeinitMethod() const { return DeinitMethod; }
   const std::vector<MethodDecl *> &getVTable() const { return VTable; }
   size_t getVTableSize() const { return VTable.size(); }
   /// The `impl` methods this class declares (not its superclasses').

@@ -515,6 +515,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     std::vector<ast::MethodDecl *> methods = ct->getVTable();
     if (auto *init = ct->findMethod(names::kMethodInit))
       methods.push_back(init);
+    // So is `__deinit__`: a subclass's `destroy` in the importing module
+    // calls it.
+    if (auto *deinit = ct->getDeinitMethod())
+      methods.push_back(deinit);
     methods.insert(methods.end(), ct->getImplMethods().begin(),
                    ct->getImplMethods().end());
     for (auto *m : methods)

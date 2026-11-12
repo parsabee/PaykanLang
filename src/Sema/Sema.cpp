@@ -2493,6 +2493,14 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
                                    "block: a wait holding a lock");
       return nullptr;
     }
+    if (S.CurrentClassCtx &&
+        S.CurrentClassCtx->MethodName == names::kMethodDeinit) {
+      S.error(node->getLocation(),
+              "'await' cannot be used in '__deinit__': an object is "
+              "destroyed where its last reference goes, which waits for no "
+              "task");
+      return nullptr;
+    }
     // A task variable awaited in an operand that runs on some paths only
     // (`await t`, `await move t`) is left running on the others.
     const ast::Expr *named = operand;
@@ -3572,6 +3580,14 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
   }
 
+  // `__deinit__` runs once, when the object is destroyed: run by name it
+  // would run again then, on an object that is in use until it does.
+  if (node->getMethodName() == names::kMethodDeinit) {
+    S.error(node->getLocation(),
+            "'__deinit__' cannot be called directly; it runs when the object "
+            "is destroyed");
+    return nullptr;
+  }
   // A struct's methods are those of its `impl` blocks, called directly.
   ast::MethodDecl *method = ct ? ct->findMethod(node->getMethodName())
                                : st->findMethod(node->getMethodName());

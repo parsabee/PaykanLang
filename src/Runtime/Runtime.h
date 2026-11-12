@@ -234,6 +234,12 @@ void Paykan_freeze_mem(const void *type, void *value);
 /// What a class's walk slot calls for each reference field: freezes
 /// @p obj, or in Paykan_moved_unique's walk visits it if @p unique.
 void Paykan_walk_child(PaykanObject *obj, int64_t unique);
+// The `__deinit__`s of an object being destroyed run between these two
+// (Shared.c, "`__deinit__`"): the object can be referred to while they run,
+// and what they drop is destroyed where it is dropped.  The second takes
+// what the first returned.
+int64_t Paykan_deinit_begin(PaykanObject *obj);
+void Paykan_deinit_end(PaykanObject *obj, int64_t token);
 /// Whether the value @p box, moved out of borrowed storage (#368), is held
 /// by nothing else: its count and those of the objects it uniquely holds
 /// are 1, stopping at `shared`, `weak` and function values and skipping

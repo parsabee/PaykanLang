@@ -1872,3 +1872,179 @@ TEST(ClassRecovery, InheritanceCycleIsReportedOnce) {
       << r.Diagnostics;
   EXPECT_EQ(errorCount(r.Diagnostics), 2u) << r.Diagnostics;
 }
+
+// -- Deinitializers (#378)
+
+// `__deinit__` is a class's plain `fn` with no parameters, no result and a
+// body.  It is never called by name, cannot `await`, and cannot keep the
+// object: `self` is borrowed there as in any method that is not a
+// `shared fn`.
+TEST(Deinit, IsDeclaredAndUsedAsOne) {
+  auto r = semaCheck(R"(class Reg { last: Node?; }
+class Child { v: int; }
+class Node {
+  id: int;
+  kid: Child;
+  reg: shared mut Reg;
+  fn __deinit__() {
+    self.reg.last = self;
+    let me = self;
+    keep(self);
+    let f = fn() -> int { return self.id; };
+    let k = move self.kid;
+    let s = self.share();
+    self.touch();
+    self.id = 3;
+  }
+  fn touch() { self.id = self.id + 1; }
+  shared fn share() -> shared mut Node { return self; }
+}
+fn keep(n: Node) -> int { return n.id; }
+async fn tick() -> int { return 1; }
+class A { n: int; async fn __deinit__() { } }
+class B { n: int; fn __deinit__(k: int) { } }
+class C { n: int; fn __deinit__() -> int { return 1; } }
+class D { n: int; view fn __deinit__() { } }
+class E { n: int; fn __deinit__() { let x = await tick(); } }
+class F { n: int; fn __deinit__() { } fn __deinit__() { } }
+class G { n: int; }
+impl G { fn __deinit__() { self.n = 0; } }
+class H : G { fn __deinit__() { self.n = 1; } }
+struct S { n: int; }
+impl S { fn __deinit__() { } }
+class I { n: int; }
+impl I { static fn __deinit__() { } }
+trait Ends { fn __deinit__(); }
+fn main() -> int {
+  let g = G(1);
+  g.__deinit__();
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 16u) << r.Diagnostics;
+  for (const char *want :
+       {":8:5: error: cannot copy 'self' (a unique 'mut Node'); a method "
+        "borrows its receiver",
+        ":9:5: error: cannot copy 'self'", ":10:10: error: cannot copy 'self'",
+        ":11:34: error: cannot capture 'self'",
+        ":12:13: error: cannot move 'self.kid'",
+        ":13:13: error: 'share' is a 'shared fn', which takes its receiver as "
+        "a 'shared mut Node'; 'self' is borrowed in '__deinit__', where the "
+        "object is being destroyed",
+        ":22:19: error: '__deinit__' cannot be 'async': an object is "
+        "destroyed where its last reference goes, which waits for no task",
+        ":23:19: error: '__deinit__' takes no parameters ('fn __deinit__() { "
+        "... }' runs when the object is destroyed)",
+        ":24:19: error: '__deinit__' returns nothing",
+        ":25:19: error: '__deinit__' is a plain 'fn', not a 'static', 'view' "
+        "or 'shared' one",
+        ":26:45: error: 'await' cannot be used in '__deinit__': an object is "
+        "destroyed where its last reference goes, which waits for no task",
+        ":27:39: error: duplicate method '__deinit__' in class 'F'",
+        ":32:10: error: '__deinit__' is a class's in this version: a struct "
+        "has none yet",
+        ":34:17: error: '__deinit__' is a plain 'fn', not a 'static', 'view' "
+        "or 'shared' one",
+        ":35:14: error: a trait cannot require '__deinit__'",
+        ":38:3: error: '__deinit__' cannot be called directly; it runs when "
+        "the object is destroyed"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // It never changes `self` there, and is not told to be a `view fn`.
+  EXPECT_EQ(r.Diagnostics.find("make it a 'view fn'"), std::string::npos)
+      << r.Diagnostics;
+}
+
+// Every class is Deinitializable, by the `__deinit__` it declares or by
+// none; no block gives the trait, and its name is a built-in trait's.
+TEST(Deinit, EveryClassIsDeinitializable) {
+  auto r = semaCheck(R"(class A { n: int; }
+class B { n: int; fn __deinit__() { self.n = 0; } }
+struct S { n: int; }
+fn need<T: Deinitializable>(x: view T) -> int { return 1; }
+fn main() -> int {
+  let a = A(1);
+  let b: shared B = B(2);
+  let s = S(3);
+  return need(a) + need(b) + need("text") + need(s) + need(3);
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  for (const char *want :
+       {":9:45: error: 'S' does not implement trait 'Deinitializable', which "
+        "'need' requires of 'T'",
+        ":9:55: error: 'int' does not implement trait 'Deinitializable'"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  auto block = semaCheck("class A { n: int; }\n"
+                         "impl Deinitializable for A { }\n"
+                         "fn main() -> int { return 0; }\n");
+  EXPECT_NE(block.Diagnostics.find(
+                ":2:1: error: 'Deinitializable' is built in: every class is "
+                "Deinitializable, by the '__deinit__' it declares or by none, "
+                "and it cannot be implemented"),
+            std::string::npos)
+      << block.Diagnostics;
+  auto name = semaCheck("class Deinitializable { n: int; }\n"
+                        "fn main() -> int { return 0; }\n");
+  EXPECT_NE(name.Diagnostics.find("'Deinitializable' is a builtin trait and "
+                                  "cannot be redeclared"),
+            std::string::npos)
+      << name.Diagnostics;
+}
+
+// Destroying an object runs its `__deinit__`.  An object dies in the code
+// that made it or in what that code hands it to, so making one is a call
+// of its `__deinit__`s in the par-safe check; and so is taking `inout` the
+// contents of a `locked mut` cell, which were made anywhere.
+TEST(Deinit, IsACallOfTheParSafeCheck) {
+  auto r = semaCheck(R"(native fn shout(n: int) = "pk_test_shout";
+class Loud { n: int; fn __deinit__() { shout(self.n); } }
+class Quiet { n: int; fn __deinit__() { self.n = 0; } }
+class Holder { l: Loud; }
+class Base { n: int; }
+class Noisy : Base { fn __deinit__() { shout(1); } }
+class Slot { l: Loud?; b: Base; }
+fn mk(i: int) -> Base { return Base(i); }
+fn quiet(i: int) -> int { let q = Quiet(i); return q.n; }
+fn loud(i: int) -> int { let l = Loud(i); return l.n; }
+fn held(i: int) -> int { let h = Holder(Loud(i)); return h.l.n; }
+fn clear(s: inout Slot) { s.l = None; }
+fn main() -> int {
+  total: atomic int = 0;
+  let cell: locked mut Slot = Slot(Loud(1), Noisy(2));
+  parallel for i in 0..4 { let q = Quiet(i); total += q.n + quiet(i); }
+  parallel for i in 0..4 { let l = Loud(i); total += l.n; }
+  parallel for i in 0..4 { total += loud(i); }
+  parallel for i in 0..4 { total += held(i); }
+  parallel for i in 0..4 { let b = mk(i); total += b.n; }
+  parallel for i in 0..4 { s: mut = Slot(None, Base(i)); clear(s); }
+  parallel for i in 0..4 { lock cell as c: inout { c.b = Base(i); } }
+  parallel for i in 0..4 { lock cell as c: view { total += c.b.n; } }
+  return 0;
+}
+)");
+  for (const char *want :
+       {":17:36: error: a 'parallel for' body cannot destroy a 'Loud': it "
+        "runs 'Loud.__deinit__', which calls 'shout', which is a native "
+        "function outside the par-safe list",
+        ":18:37: error: a 'parallel for' body cannot call 'loud', which calls "
+        "'Loud.__deinit__'",
+        ":19:37: error: a 'parallel for' body cannot call 'held', which calls "
+        "'Loud.__deinit__'",
+        ":22:28: error: a 'parallel for' body cannot destroy a 'Noisy': it "
+        "runs 'Noisy.__deinit__'"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // Nothing with a `__deinit__` that is not par-safe is made in the
+  // others, and a `view` of a cell's contents destroys nothing.
+  for (int line : {16, 20, 21, 23}) {
+    const std::string at = ".pkn:" + std::to_string(line) + ":";
+    for (size_t pos = r.Diagnostics.find(at); pos != std::string::npos;
+         pos = r.Diagnostics.find(at, pos + 1)) {
+      const std::string rest =
+          r.Diagnostics.substr(pos, r.Diagnostics.find('\n', pos) - pos);
+      EXPECT_EQ(rest.find(" error: "), std::string::npos) << rest;
+    }
+  }
+}

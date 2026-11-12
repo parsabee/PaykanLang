@@ -638,9 +638,17 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
+    // `__deinit__` is the class's own, like `__init__`: the generated
+    // `destroy` runs it, then each superclass's.
+    const bool deinit = method->getName() == names::kMethodDeinit;
+    if (deinit && !checkDeinitDecl(method, ct)) {
+      ok = false;
+      continue;
+    }
     // __init__ is a per-class constructor, not a virtual override.
     const ast::MethodDecl *overridden = nullptr;
-    if (method->getName() != names::kMethodInit && ct->getSuperClass())
+    if (method->getName() != names::kMethodInit && !deinit &&
+        ct->getSuperClass())
       overridden = ct->getSuperClass()->findMethod(method->getName());
     if (overridden && overridden->isImpl()) {
       error(method->getLocation(),
@@ -655,7 +663,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     // frontend's grammar keeps `native fn` at the top level).  `__init__`
     // and `destroy` have no slot of their own; they are reported where they
     // are checked (rejectBodyInits, visitClassDecl).
-    const bool pure = !method->getBody() &&
+    const bool pure = !method->getBody() && !deinit &&
                       method->getName() != names::kMethodInit &&
                       method->getName() != names::kMethodDestroy;
     if (pure && overridden && !overridden->isPure()) {
@@ -1157,9 +1165,14 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
         continue;
       }
       const std::string &name = fn->getName();
+      if (name == names::kMethodDeinit && !checkDeinitDecl(fn, ct)) {
+        ok = false;
+        continue;
+      }
       // __init__ is the same here as in the class body: the class's own,
-      // never inherited or called through the vtable.
-      const bool init = name == names::kMethodInit;
+      // never inherited or called through the vtable.  So is __deinit__.
+      const bool init =
+          name == names::kMethodInit || name == names::kMethodDeinit;
       const bool clone = cloneable && name == names::kMethodClone;
       hasClone = hasClone || clone;
       if (ct->findMethod(name) &&
@@ -1230,6 +1243,9 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
 }
 
 bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
+  // `__deinit__` is the object's own: no `static fn` has the name.
+  if (fn->getName() == names::kMethodDeinit && fn->isStatic())
+    return !checkDeinitDecl(fn, owner);
   // A class's `__walk` (the prototype) is emitted for it too: the walk of
   // its references that freezes an `atomic shared` object.
   if (fn->getName() == names::kMethodWalk) {
@@ -1504,6 +1520,30 @@ bool Sema::isWhole(const ast::Type *ty) const {
       return false;
   return std::all_of(args->begin(), args->end(),
                      [&](const ast::Type *a) { return isWhole(a); });
+}
+
+bool Sema::checkDeinitDecl(const ast::FuncDecl *fn, const ast::Type *owner) {
+  std::string why;
+  if (!ast::isa<ast::ClassType>(owner))
+    why = "is a class's in this version: a " +
+          std::string(typeKindWord(owner)) + " has none yet";
+  else if (fn->isStatic() || fn->isView() || fn->isShared())
+    why = "is a plain 'fn', not a 'static', 'view' or 'shared' one";
+  else if (fn->isAsync())
+    why = "cannot be 'async': an object is destroyed where its last "
+          "reference goes, which waits for no task";
+  else if (!fn->getParams().empty())
+    why = "takes no parameters";
+  else if (fn->getReturnType() || fn->hasInferredResult())
+    why = "returns nothing";
+  else if (!fn->getBody())
+    why = "needs a body";
+  if (why.empty())
+    return true;
+  error(fn->getLocation(),
+        std::string("'") + names::kMethodDeinit + "' " + why +
+            " ('fn __deinit__() { ... }' runs when the object is destroyed)");
+  return false;
 }
 
 bool Sema::joinsLater(const ast::ImplDecl *im, bool ofClass,
