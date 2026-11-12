@@ -788,7 +788,7 @@ fn main() -> int { return 0; }
 // A generic class's `impl Trait for` blocks go with its template: an
 // importer's instantiation checks them as the module would check its own
 // (`Box<float>` in gb is the same error), in gb's file, with the importer's
-// request as the note, also a block of gb's own trait and an `impl Show
+// request as the note, also a block of gb's own trait and an `impl Showable
 // for` block, whose methods main never calls.
 TEST(Module, ImporterInstantiationChecksTraitBlock) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_trait_block").string();
@@ -802,7 +802,7 @@ impl NBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Named for NBox<T> { view fn name() -> Str { return self.v.name(); } }
 class SBox<T> { v: T; }
 impl SBox<T> { fn __init__(v: T) { self.v = move v; } }
-impl Show for SBox<T> {}
+impl Showable for SBox<T> {}
 )");
   auto main = writeFile(tmp, "main.pkn", R"(import gb;
 fn main() -> int { b = gb::Box<float>(1.5); return 0; }
@@ -831,11 +831,12 @@ fn main() -> int { b = gb::Box<float>(1.5); return 0; }
                 "0; }\n"),
       tmp);
   EXPECT_FALSE(show.Ok);
-  EXPECT_EQ(diagSummary(show.Diagnostics),
-            "gb.pkn:10:1: error: class 'SBox<int>' already implements 'Show' "
-            "(through 'Obj')\n"
-            "show.pkn:2:24: note: in instantiation of 'SBox<int>' requested "
-            "here\n")
+  EXPECT_EQ(
+      diagSummary(show.Diagnostics),
+      "gb.pkn:10:1: error: class 'SBox<int>' already implements 'Showable' "
+      "(through 'Obj')\n"
+      "show.pkn:2:24: note: in instantiation of 'SBox<int>' requested "
+      "here\n")
       << show.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
@@ -915,7 +916,7 @@ fn wrap<T>(x: T) -> Str { return greet(Dog()); }
 fn wrapn() -> Str { return greet(Dog()); }
 class Holder<T> { v: T; fn say() -> Str { return greet(Dog()); } }
 fn wrap2<T>(x: T) -> Str { return greet(Dog()) + greet(Dog()); }
-fn sh<T: Show>(x: view T) -> Str { return x.toString(); }
+fn sh<T: Showable>(x: view T) -> Str { return x.toString(); }
 fn shw<T>(x: T) -> Str { return sh(x); }
 )";
   writeFile(t27, "lib.pkn", kTraitLib);
@@ -1233,7 +1234,7 @@ TEST(Module, ExportedConformanceIsChecked) {
   info.ExportedImpls = {{"Bad", "Hashable"},
                         {"Ghost", "Hashable"},
                         {"Key", "Named"},
-                        {"Key", "Show"},
+                        {"Key", "Showable"},
                         {"Plain", "Hashable"}};
   paykan::sema::Sema::ModuleCache[key] = std::move(info);
 
@@ -1253,7 +1254,8 @@ fn main() -> int { return 0; }
         "'Hashable', but it describes no class or struct 'Ghost'",
         "import of module 'lib': the interface says 'Key' implements 'Named', "
         "which is not a built-in trait an 'impl' block implements",
-        "import of module 'lib': the interface says 'Key' implements 'Show', "
+        "import of module 'lib': the interface says 'Key' implements "
+        "'Showable', "
         "which is not a built-in trait an 'impl' block implements",
         "import of module 'lib': the interface says 'Plain' implements "
         "'Hashable', but it has no method 'view fn hash() -> int'"})

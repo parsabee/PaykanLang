@@ -3307,7 +3307,7 @@ TEST(Pkm, StrOfAValueAcrossModules) {
       "P3 (4, a) None\nP3Size(w: 1, h: 2) P3 Size(w: 5, h: 6)\n";
   const std::string e5 = "lib/shows.pkn:6:39: error: 'Str' cannot convert a "
                          "value of type '(int) -> int', which does not "
-                         "implement trait 'Show'";
+                         "implement trait 'Showable'";
   const std::string note = "bad.pkn:3:7: note: in instantiation of ";
   auto checkBad = [&](const std::string &flags) {
     auto bad = paykan(flags + " --check-only bad.pkn");
@@ -4762,7 +4762,7 @@ class Holder<T> {
 // module comes from its source, the cache or a prebuilt file, and an
 // importer's instantiation checks them as the module would check its own:
 // an `impl Hashable for` block's body, a block of the module's own trait,
-// whose methods it gets but not the trait, and an `impl Show for` block of
+// whose methods it gets but not the trait, and an `impl Showable for` block of
 // a class.  An importer's subclass of the module's Hashable class is
 // Hashable through it, and cannot repeat the conformance.
 TEST(Pkm, TraitBlocksAndSubclassesOnEveryPath) {
@@ -4781,7 +4781,7 @@ impl NBox<T> { fn __init__(v: T) { self.v = move v; } }
 impl Named for NBox<T> { view fn name() -> Str { return self.v.name(); } }
 class SBox<T> { v: T; }
 impl SBox<T> { fn __init__(v: T) { self.v = move v; } }
-impl Show for SBox<T> {}
+impl Showable for SBox<T> {}
 class CK { v: int; }
 impl CK { fn __init__(v: int) { self.v = v; } }
 impl Hashable for CK { view fn hash() -> int { return self.v; } }
@@ -4831,7 +4831,7 @@ fn main() -> int {
                     "'int'\nnamed" +
                         kRequest + "NBox<int>' requested here\n"},
       {"show.pkn", "lib/gb.pkn:11:1: error: class 'SBox<int>' already "
-                   "implements 'Show' (through 'Obj')\nshow" +
+                   "implements 'Showable' (through 'Obj')\nshow" +
                        kRequest + "SBox<int>' requested here\n"},
       {"own.pkn", "own.pkn:4:24: error: 'Box<Str>' does not implement trait "
                   "'Named', which 'g' requires of 'T'\n"},

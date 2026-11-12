@@ -1,9 +1,9 @@
 # Traits
 
 A trait names the methods a type must have. `impl Trait for Type` declares that a class (or
-a struct) implements it, and a type parameter's bounds (`<T: Show>`) say which traits its
+a struct) implements it, and a type parameter's bounds (`<T: Showable>`) say which traits its
 type argument must implement. This chapter shows how to declare and use a trait, then gives
-the rules, including the built-in traits `Show`, `Hashable`, `ValueType` and `Copyable`.
+the rules, including the built-in traits `Showable`, `Hashable`, `ValueType` and `Copyable`.
 
 ## Declaring and using a trait
 
@@ -72,7 +72,7 @@ variable 'n' names trait 'Named', which is not a type (use a type parameter boun
 ```
 
 You use a built-in trait every time you print: `io::println` is declared
-`io::println<T: Show>`, and every class, every number and every string implements `Show`.
+`io::println<T: Showable>`, and every class, every number and every string implements `Showable`.
 [Generics](13-generics.md) has more on how bounded generic code is checked.
 
 ---
@@ -87,17 +87,18 @@ You use a built-in trait every time you print: `io::println` is declared
   [`impl` Blocks](05-classes.md#impl-blocks)), and a method that `A` already has meets a
   requirement too.
 - A class implements every trait its superclasses implement. Every class implements the
-  built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
+  built-in trait `Showable` (`view fn toString() -> Str`; named `Show` through 0.3, which is
+  now an error: `'Show' is now 'Showable'`) through `Obj`, and so do `int`,
   `float`, `bool`, `char` and every sized numeric type (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
   is `(1, a)`), structs (`Point(x: 1, y: 2)`), enums (the variant's name, `North`, and a
-  variant's fields after it, `Rect(w: 2, h: 3)`) and the optional of a `Show` type
+  variant's fields after it, `Rect(w: 2, h: 3)`) and the optional of a `Showable` type
   (`"None"` or the value's text). A tuple, struct or enum implements it only when every
   element, field and variant field does: a function value does not, so `struct S { f: (int)
-  -> int; }` is not `Show` (`'S' does not implement trait 'Show', which 'io::println'
+  -> int; }` is not `Showable` (`'S' does not implement trait 'Showable', which 'io::println'
   requires of 'T': its field 'f' has type '(int) -> int', which does not implement it`, and
   `s.toString()` is an error), nor is `(1, f)` or an enum with such a variant. The
-  standard library's print functions (`io::println<T: Show>`) take any `Show` value, and
-  `Str(x)` gives the text `x.toString()` gives for every `Show` value `x` (see
+  standard library's print functions (`io::println<T: Showable>`) take any `Showable` value, and
+  `Str(x)` gives the text `x.toString()` gives for every `Showable` value `x` (see
   [To a string](04-strings-and-conversions.md#to-a-string): `Str(s)` of a `Str` is a new
   string with `s`'s text, and takes no `view` of one).
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
@@ -121,7 +122,7 @@ You use a built-in trait every time you print: `io::println` is declared
   for` block, which may leave the method to the compiler (see [Cloneable](#cloneable)).
 - `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
   rules (see [Structs](11-structs.md)).
-- `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
+- `fn f<T: Showable + Into<int>>(...)` and `class Box<T: Named>` bound their type
   parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
 
@@ -166,7 +167,7 @@ instantiation (`Box<int>`) implements it, checked when it is instantiated (see
 
 ```pkn
 fn greet<T: Named>(x: view T) -> Str { return "hi " + x.name(); }
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }   // show(42), show(a), show("s")
+fn show<T: Showable>(x: view T) -> Str { return x.toString(); }   // show(42), show(a), show("s")
 
 class Holder<T: Named> {
   v: T;
@@ -187,7 +188,7 @@ bound may name another type parameter: `<T, C: Into<T>>`.
 
 ## Hashable
 
-`Hashable` is a built-in trait, like `Show`:
+`Hashable` is a built-in trait, like `Showable`:
 
 ```pkn
 trait Hashable { view fn hash() -> int; }
@@ -237,7 +238,7 @@ True True False
 
 The standard library's `HashMap<K, V>` and `HashSet<K>` require `K: Hashable` (see
 [Collections](../stdlib/collections.md)). Declaring a trait named `Hashable` is an
-error, as for `Show`.
+error, as for `Showable`.
 
 A conformance crosses modules with its type. A struct or a class of module `keys` with an
 `impl Hashable for` block is `Hashable` in every module that imports `keys`, and wherever
@@ -535,11 +536,11 @@ class 'Node' is not Cloneable: write 'impl Cloneable for Node {}' to derive its 
 
 | Error | Trigger |
 |-------|---------|
-| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`, `Copyable`, `Cloneable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
+| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Showable`, `Hashable`, `ValueType`, `Copyable`, `Cloneable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
 | Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
-| Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
+| Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Showable`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | `impl Copyable` | `impl Copyable for X`, for a class or a struct: `'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented` (see [Copyable](#copyable)) |
 | Not Cloneable | `x.clone()` of a class with no `impl Cloneable for` block, of a struct, tuple or array with a part that is not Cloneable, or of an enum whose payloads are not Copyable; a type argument that fails `T: Cloneable` (see [Cloneable](#cloneable)) |
@@ -547,7 +548,7 @@ class 'Node' is not Cloneable: write 'impl Cloneable for Node {}' to derive its 
 | Inherited `clone` | A subclass of a Cloneable class with no `impl Cloneable for` block of its own: `class 'D' inherits 'Cloneable' from 'C', whose 'clone' makes a 'C': ...`; a `clone` returning another class: `'view fn clone() -> C' of class 'D' does not match 'view fn clone() -> D' of trait 'Cloneable'` |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by; the instantiation's body, the bounds of the templates it uses and the bodies of the instantiations only it uses are not checked, so it is the one error |
 | Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
-| Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
+| Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Showable for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
 | Trait as a type | A trait is used where a type is expected |
 | Trait as a superclass | `class C : T` for a trait `T`: `superclass 'T' of class 'C' is a trait, not a class: a class implements a trait with 'impl T for C { ... }'` |
 

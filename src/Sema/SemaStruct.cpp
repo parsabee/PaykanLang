@@ -340,7 +340,7 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st) {
         continue;
       }
       const std::string &name = fn->getName();
-      // `toString` is every struct's (the builtin `Show`): `Point(x: 1,
+      // `toString` is every struct's (the builtin `Showable`): `Point(x: 1,
       // y: 2)`, which nested structs and tuples print too.
       if (name == names::kMethodToString || st->findMethod(name)) {
         error(fn->getLocation(), "struct '" + sd->getName() +

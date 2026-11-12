@@ -508,7 +508,7 @@ TEST(Interface, ImplRecordsAreChecked) {
     bad.Impls = std::move(impls);
     return readError(writeInterface(bad));
   };
-  for (const char *trait : {"Named", "Show", "ValueType", ""})
+  for (const char *trait : {"Named", "Showable", "ValueType", ""})
     EXPECT_EQ(rejects({{"Key", trait}}),
               "DECLS: 'impl " + std::string(trait) + " for Key': '" + trait +
                   "' is not a built-in trait an 'impl' block implements (at "

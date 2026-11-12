@@ -218,7 +218,7 @@ requires of 'T'`).
 ### `listToString`
 
 ```pkn
-fn listToString<T: Show>(xs: view List<T>) -> Str
+fn listToString<T: Showable>(xs: view List<T>) -> Str
 ```
 
 The elements' `toString()`, in order, as `[a, b, c]`; `[]` for an empty list. The result is

@@ -81,7 +81,7 @@ copied around like a number. A struct can be generic, like a class
   `self` **is the receiver's storage**: `p.shift(1)` changes `p`.  A `view fn` reads
   `self` only; a `static fn` is called as `Point::origin()`.
 - `==` / `!=` compare **field by field**; `toString()` (and `io::println`) renders
-  `Point(x: 1, y: 2)`.  Every struct implements `ValueType`, and `Show` when each field
+  `Point(x: 1, y: 2)`.  Every struct implements `ValueType`, and `Showable` when each field
   does (not one holding a function value);
   `impl Hashable for` and user traits work as for classes; a struct's `Hashable` crosses
   modules with it (a user trait's does not yet, #147).
@@ -443,15 +443,15 @@ absent optionals equal, nested structs and tuples element-wise; a `float` field 
 IEEE 754, so a struct holding a NaN is unequal to itself.  `toString()` renders the
 struct's name and each field's name and value as its own `toString()` shows it:
 `Point(x: 1, y: 2)`, `Item(name: a, node: Node2, pos: (7, 8))`.  `::io`'s `print`,
-`println`, `printerr` and `printerrln` take a struct as they take a tuple (it is `Show`).
+`println`, `printerr` and `printerrln` take a struct as they take a tuple (it is `Showable`).
 
-Every struct implements the built-in traits `Show` (its `toString`) and `ValueType` (it
-is held in place), so it meets `T: Show` and `T: ValueType` bounds ([Traits](06-traits.md)), and
-`impl Show for A {}` or `impl ValueType for A {}` is an error (`struct 'A' already
-implements 'Show'`).  A struct with a field that does not implement `Show`, a function
+Every struct implements the built-in traits `Showable` (its `toString`) and `ValueType` (it
+is held in place), so it meets `T: Showable` and `T: ValueType` bounds ([Traits](06-traits.md)), and
+`impl Showable for A {}` or `impl ValueType for A {}` is an error (`struct 'A' already
+implements 'Showable'`).  A struct with a field that does not implement `Showable`, a function
 value or an aggregate holding one, does not either, and cannot, since its `toString` is
 built in: `io::println(s)` and `s.toString()` are errors naming the field (`its field 'f'
-has type '(int) -> int', which does not implement it`), and so is `impl Show for S {}`.
+has type '(int) -> int', which does not implement it`), and so is `impl Showable for S {}`.
 A `ValueType` is not always Copyable (a struct holding a unique object moves), so a template
 that copies one declares `T: Copyable` too, as `twice` below does
 ([The archetype check](13-generics.md#the-archetype-check)). `Hashable` and user traits are
@@ -469,7 +469,7 @@ impl Hashable for Point {
 trait Named { view fn name() -> Str; }
 impl Named for Point { view fn name() -> Str { return "Point"; } }
 
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
 fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
 fn greet<T: Named>(x: view T) -> Str { return x.name(); }
 fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
@@ -690,7 +690,7 @@ Point(x: 4, y: 2) 6 True
 | `view` field assignment | `fn f(a: view A) { a.x = 1; }`; in a `view fn` |
 | Field of a struct in a tuple | `t.1.x = 3` |
 | Field of a temporary as `inout` | `bump(mk().x)` |
-| Built-in trait | `impl Show for A {}`; `impl ValueType for A {}` |
+| Built-in trait | `impl Showable for A {}`; `impl ValueType for A {}` |
 | Another module's struct | `impl other::A { ... }` |
 | Crossing into C | `native fn f(a: view A)` |
 

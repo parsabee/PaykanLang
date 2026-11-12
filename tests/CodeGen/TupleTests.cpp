@@ -771,7 +771,7 @@ TEST(Tuple, GenericViewResultOfATupleType) {
 TEST(Tuple, ShowBoundSatisfiedByATuple) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
-    fn show<T: Show>(x: view T) -> Str { return "<" + x.toString() + ">"; }
+    fn show<T: Showable>(x: view T) -> Str { return "<" + x.toString() + ">"; }
     fn main() -> int {
       io::println(show((1, "x")));
       t: ((int, float), Str?) = ((1, 2.5), None);

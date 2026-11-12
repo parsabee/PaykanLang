@@ -1329,12 +1329,12 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     return L.emitMoveOutCheck(node,
                               emitStructMethodCall(node, st, wantAddress));
   }
-  // `o.toString()` on an optional (the builtin `Show`).
+  // `o.toString()` on an optional (the builtin `Showable`).
   if (ast::dyn_cast<ast::OptionalType>(recvResolved) &&
       node->getMethodName() == kMethodToString)
     return emitOptionalToStringCall(node);
   // `t.toString()` on a tuple, a struct or an enum, `n.toString()` on an
-  // int, float, bool or char (the builtin `Show`).
+  // int, float, bool or char (the builtin `Showable`).
   if (ast::dyn_cast<ast::TupleType>(recvResolved) ||
       ast::dyn_cast<ast::EnumType>(recvResolved) ||
       ast::dyn_cast<ast::BuiltinType>(recvResolved))
@@ -1579,8 +1579,9 @@ Val ModuleLowering::ExprEmitter::emitUnsignedToInt(ast::MethodCallExpr *node) {
   return L.B.select(fits, some, none, "toint.opt");
 }
 
-// `o.toString()` on an optional (the builtin `Show`): "None", or the value's
-// text, as a fresh box like any method's `Str` result (visitMethodCallExpr).
+// `o.toString()` on an optional (the builtin `Showable`): "None", or the
+// value's text, as a fresh box like any method's `Str` result
+// (visitMethodCallExpr).
 Val ModuleLowering::ExprEmitter::emitOptionalToStringCall(
     ast::MethodCallExpr *node) {
   ast::Type *recvResolved = node->getReceiver()->getResolvedType();
@@ -1641,8 +1642,8 @@ Val ModuleLowering::ExprEmitter::emitOptionalToStringCall(
 }
 
 // `t.toString()` on a tuple, a struct or an enum, `n.toString()` on an int,
-// float, bool or char (the builtin `Show`): its text, as a fresh box like any
-// method's `Str` result (visitMethodCallExpr).
+// float, bool or char (the builtin `Showable`): its text, as a fresh box like
+// any method's `Str` result (visitMethodCallExpr).
 Val ModuleLowering::ExprEmitter::emitShowCall(ast::MethodCallExpr *node) {
   ast::Type *recvResolved = node->getReceiver()->getResolvedType();
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(recvResolved)) {

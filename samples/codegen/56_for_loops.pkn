@@ -29,7 +29,7 @@ fn trace(what: Str, v: int) -> int {
   return v;
 }
 
-fn times<T: Show>(x: view T, n: int) -> Str {
+fn times<T: Showable>(x: view T, n: int) -> Str {
   out = "";
   for _i in 0..n {
     out = out + x.toString();

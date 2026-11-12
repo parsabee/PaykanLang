@@ -73,7 +73,7 @@ TEST(Traits, BoundedGenericsRun) {
       while (i < xs.len()) { t = t + xs[i].into(); i = i + 1; }
       return t;
     }
-    fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+    fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
     class Holder<T: Named> {
       v: T;
       view fn label() -> Str { return "[" + self.v.name() + "]"; }
@@ -98,16 +98,16 @@ TEST(Traits, BoundedGenericsRun) {
   guard.expectNoLeaks("traits");
 }
 
-// A template of another module bounded by `Show` takes the importer's class,
-// whose `toString` override it calls.
+// A template of another module bounded by `Showable` takes the importer's
+// class, whose `toString` override it calls.
 TEST(Traits, ShowBoundAcrossModules) {
   LeakGuard guard;
   auto dir = tempDir() / "pkn_trait_modules";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   std::ofstream(dir / "fmt.pkn") << R"pkn(
-fn show<T: Show>(x: view T) -> Str { return "<" + x.toString() + ">"; }
-class Box<T: Show> {
+fn show<T: Showable>(x: view T) -> Str { return "<" + x.toString() + ">"; }
+class Box<T: Showable> {
   v: T;
   view fn text() -> Str { return show(self.v); }
 }
@@ -129,7 +129,7 @@ fn main() -> int {
   auto r = compileAndRunFile((dir / "main.pkn").string());
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "<P> <P> <s>\n");
-  guard.expectNoLeaks("Show across modules");
+  guard.expectNoLeaks("Showable across modules");
   std::filesystem::remove_all(dir);
 }
 
@@ -222,7 +222,7 @@ fn main() -> int {
 TEST(Traits, ScalarsShow) {
   LeakGuard guard;
   auto r = compileAndRun(R"pkn(import ::io;
-    fn show<T: Show>(x: view T) -> Str { return "<" + x.toString() + ">"; }
+    fn show<T: Showable>(x: view T) -> Str { return "<" + x.toString() + ">"; }
     fn main() -> int {
       n = 42;
       f = 2.5;
@@ -236,11 +236,11 @@ TEST(Traits, ScalarsShow) {
   )pkn");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42 2.5 True z\n<42><2.5><True><z><s>\n");
-  guard.expectNoLeaks("scalar Show");
+  guard.expectNoLeaks("scalar Showable");
 }
 
 // A tuple, struct, enum and optional whose every part shows itself print
-// as before, with `io::println`, `toString()` and through a `T: Show`
+// as before, with `io::println`, `toString()` and through a `T: Showable`
 // bound: a function value inside an object (which shows itself through
 // its class) does not stop the struct holding the object from showing
 // itself.  The struct holds it `shared`, so the struct copies.
@@ -256,7 +256,7 @@ TEST(Traits, AggregatesOfShowPartsShow) {
     struct Q { p: P; at: (float, char?); }
     enum E { A(q: Q), B(n: int?), N }
     enum Maybe<X> { Just(v: X), Nothing }
-    fn show<X: Show>(x: view X) -> Str { return "<" + x.toString() + ">"; }
+    fn show<X: Showable>(x: view X) -> Str { return "<" + x.toString() + ">"; }
     fn main() -> int {
       q = Q(P(1, Handler()), (2.5, None));
       io::println(q);
@@ -280,7 +280,7 @@ TEST(Traits, AggregatesOfShowPartsShow) {
                       "None\n"
                       "Q(p: P(x: 1, h: h2), at: (2.5, None))\n"
                       "<Just(v: P(x: 1, h: h2))><((2.5, None), B(n: 3))>\n");
-  guard.expectNoLeaks("aggregates of Show parts");
+  guard.expectNoLeaks("aggregates of Showable parts");
 }
 
 // `hash()` of int, bool, char and Str (the builtin `Hashable`): equal values

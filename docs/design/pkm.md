@@ -411,7 +411,7 @@ prototype form, `Str for; Str trait`: `for` is a type the blob describes
 with a `CLASS` or `STRUCT` record, spelled as that record names it (`Key`,
 `GBox<int>`), and `trait` a built-in trait an `impl ... for` block
 implements, which is only `Hashable` (`names::isImplBuiltinTrait`: every
-class has `Show` through `Obj`, and `ValueType` follows from a type's
+class has `Showable` through `Obj`, and `ValueType` follows from a type's
 structure).  A record is written for a conformance the type has itself,
 never for one a subclass has through its superclass, and lists no
 methods: they are in the type's record, with the `impl` bit.  The records

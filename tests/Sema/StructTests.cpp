@@ -371,7 +371,7 @@ impl Hashable for Point {
 }
 trait Named { view fn name() -> Str; }
 impl Named for Point { view fn name() -> Str { return "Point"; } }
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
 fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
 fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
 fn greet<T: Named>(x: view T) -> Str { return x.name(); }
@@ -443,7 +443,7 @@ impl A {
   static fn x() -> int { return 1; }
   static fn m() -> int { return 2; }
 }
-impl Show for A {}
+impl Showable for A {}
 impl ValueType for A {}
 impl Hashable for A {}
 impl int { fn f() {} }
@@ -454,7 +454,7 @@ fn main() -> int { return A::x(); }
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"struct 'A' already has a method 'm'",
                 "struct 'A' already has a method 'toString'",
-                "struct 'A' already implements 'Show'",
+                "struct 'A' already implements 'Showable'",
                 "struct 'A' already implements 'ValueType'",
                 "struct 'A' does not implement 'view fn hash() -> int' of "
                 "trait 'Hashable'",

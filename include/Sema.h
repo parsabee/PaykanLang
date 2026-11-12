@@ -2626,7 +2626,7 @@ private:
   /// body, the class or struct being checked).
   ast::Type *SelfType = nullptr;
 
-  /// Register the builtin trait `Show`, which `Obj` implements.
+  /// Register the builtin trait `Showable`, which `Obj` implements.
   void registerBuiltinTraits();
   /// Register the module's traits by name (their signatures are checked by
   /// checkTraitDecls, once classes can be named).
@@ -2636,12 +2636,12 @@ private:
   /// parameters); false after reporting a type that does not resolve.
   bool resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
                           const std::string &traitName, RequiredSig &out);
-  /// The trait the annotation @p ref names (`Show`, `Into<T>` with @p subst
+  /// The trait the annotation @p ref names (`Showable`, `Into<T>` with @p subst
   /// applied); nullopt after an error.
   std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
                                           ast::SourceLocation loc);
   static std::string traitRefName(const TraitRef &tr);
-  /// Whether the trait annotation @p ref names a built-in trait (`Show`,
+  /// Whether the trait annotation @p ref names a built-in trait (`Showable`,
   /// `Hashable`, `ValueType`): the same trait in every module.
   bool namesBuiltinTrait(const ast::Type *ref) const;
   /// The trait name the annotation @p ref spells (`Named` of `Named<T>`);
@@ -2655,7 +2655,7 @@ private:
   /// is part of the instance only then.
   bool implBoundsHold(const ast::ImplDecl *im,
                       const std::vector<ast::Type *> &args);
-  /// Whether @p ty has a text: implements the builtin `Show`, whose
+  /// Whether @p ty has a text: implements the builtin `Showable`, whose
   /// `toString()` the print functions call.  A number, bool, char and
   /// object have one; a tuple, struct, enum or optional has one when every
   /// element, field, variant field or value does, so one holding a function
@@ -2679,7 +2679,7 @@ private:
   /// hasText, as part of @p query.
   bool hasText(ast::Type *ty, std::string *why, TextQuery &query);
   /// The end of a message that @p ty, which has no text, does not implement
-  /// `Show`: "its field 'f' has type '(int) -> int', which does not
+  /// `Showable`: "its field 'f' has type '(int) -> int', which does not
   /// implement it", naming the part that has none (hasText); "" for a type
   /// without parts.
   std::string noTextReason(ast::Type *ty);

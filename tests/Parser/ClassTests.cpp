@@ -402,7 +402,7 @@ TEST(Class, MethodWithoutBodyOrSemicolon) {
 TEST(Class, MethodsAreNotGeneric) {
   auto r = parseWithDiags("class A {\n"
                           "  fn f<T>(x: int) -> int { return x; }\n"
-                          "  view fn g<T: Show>() -> Str;\n"
+                          "  view fn g<T: Showable>() -> Str;\n"
                           "  fn h() -> int => 1;\n"
                           "}\n"
                           "fn main() -> int { return 0; }\n");

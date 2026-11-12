@@ -74,7 +74,7 @@ fn boxed<T>(v: T) -> Box<T> {
 fn greet<T: Named>(x: view T) -> Str {
   return x.name();
 }
-fn show<T: Show>(x: view T) -> Str {
+fn show<T: Showable>(x: view T) -> Str {
   return x.toString();
 }
 fn sameHash<T: Hashable>(a: view T, b: view T) -> bool {

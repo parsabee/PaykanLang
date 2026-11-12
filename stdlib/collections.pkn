@@ -257,7 +257,7 @@ fn listOf<T: Cloneable>(xs: view T[]) -> List<T> {
 // with `concat`, which grows it in place; `out = out + ...` would copy the
 // string so far for each element.  `out` is a string of its own (each use
 // of a literal is a new one), so the appends change no other.
-fn listToString<T: Show>(xs: view List<T>) -> Str {
+fn listToString<T: Showable>(xs: view List<T>) -> Str {
   let out: mut = "[";
   i: unsigned = 0;
   while i < xs.len() {

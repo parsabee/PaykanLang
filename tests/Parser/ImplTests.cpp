@@ -56,11 +56,12 @@ TEST(Impl, TypeInPlaceOfAParameterIsLocated) {
     unsigned Column;
     const char *Type;
   };
-  for (const Case &c : {Case{"impl Box<int> { }", 10, "int"},
-                        Case{"impl Box<Str> { }", 10, "Str"},
-                        Case{"impl Box<T[2]> { }", 10, "T[2]"},
-                        Case{"impl Show for Box<T, float> { }", 22, "float"},
-                        Case{"impl Box<List<int>> { }", 10, "List<int>"}}) {
+  for (const Case &c :
+       {Case{"impl Box<int> { }", 10, "int"},
+        Case{"impl Box<Str> { }", 10, "Str"},
+        Case{"impl Box<T[2]> { }", 10, "T[2]"},
+        Case{"impl Showable for Box<T, float> { }", 26, "float"},
+        Case{"impl Box<List<int>> { }", 10, "List<int>"}}) {
     auto r = parseWithDiags(std::string("class Box<T> { v: T; }\n") + c.Src +
                             "\nfn main() -> int => 0;\n");
     EXPECT_FALSE(r.Ok) << c.Src;
@@ -83,7 +84,7 @@ TEST(Impl, TypeInPlaceOfAParameterIsLocated) {
 TEST(Impl, GenericBlockNamesItsTypeParameters) {
   auto [ok, driver] = parse(R"(
     impl Box<T> { view fn get() -> T { return self.v; } }
-    impl Show for Pair<K, V> { view fn toString() -> Str { return ""; } }
+    impl Showable for Pair<K, V> { view fn toString() -> Str { return ""; } }
     impl Into<T> for gen::Box<T> { view fn into() -> T { return self.v; } }
   )");
   ASSERT_TRUE(ok);

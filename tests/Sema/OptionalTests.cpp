@@ -220,7 +220,7 @@ TEST(Optional, ConcatOnOptionalStrIsError) {
               "(use match)");
 }
 
-// `toString()` is the one method an optional has (the builtin `Show`):
+// `toString()` is the one method an optional has (the builtin `Showable`):
 // "None", or its value's text.  Any other needs the value unwrapped.
 TEST(Optional, ToStringOnOptionalIsItsText) {
   auto r = semaCheck(withNode(

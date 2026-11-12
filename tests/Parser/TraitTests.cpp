@@ -11,7 +11,7 @@ using namespace paykan::ast;
 
 TEST(Trait, DeclarationParses) {
   auto [ok, driver] = parse(R"(
-    trait Show { view fn toString() -> Str; }
+    trait Showable { view fn toString() -> Str; }
     trait Into<T> {
       view fn into() -> T;
       fn reset(n: inout int);
@@ -21,7 +21,7 @@ TEST(Trait, DeclarationParses) {
   ASSERT_TRUE(ok);
   const auto &traits = driver->getRoot()->getTraitDecls();
   ASSERT_EQ(traits.size(), 2u);
-  EXPECT_EQ(traits[0]->getName(), "Show");
+  EXPECT_EQ(traits[0]->getName(), "Showable");
   ASSERT_EQ(traits[0]->getMethods().size(), 1u);
   EXPECT_TRUE(traits[0]->getMethods()[0]->isView());
   EXPECT_EQ(traits[0]->getMethods()[0]->getBody(), nullptr);
@@ -32,7 +32,7 @@ TEST(Trait, DeclarationParses) {
 
 TEST(Trait, ImplForParses) {
   auto [ok, driver] = parse(R"(
-    impl Show for A { view fn toString() -> Str { return "A"; } }
+    impl Showable for A { view fn toString() -> Str { return "A"; } }
     impl Into<int> for geo::Point {}
     impl A {}
   )");
@@ -40,7 +40,7 @@ TEST(Trait, ImplForParses) {
   const auto &impls = driver->getRoot()->getImplDecls();
   ASSERT_EQ(impls.size(), 3u);
   EXPECT_EQ(impls[0]->getTypeName(), "A");
-  EXPECT_EQ(typeName(impls[0]->getTrait()), "Show");
+  EXPECT_EQ(typeName(impls[0]->getTrait()), "Showable");
   EXPECT_EQ(impls[1]->getTypeName(), "geo::Point");
   EXPECT_EQ(typeName(impls[1]->getTrait()), "Into<int>");
   EXPECT_EQ(impls[2]->getTrait(), nullptr);
@@ -48,8 +48,8 @@ TEST(Trait, ImplForParses) {
 
 TEST(Trait, BoundsParse) {
   auto [ok, driver] = parse(R"(
-    fn show<T: Show + Into<int>, U>(x: view T) -> Str { return ""; }
-    class Box<T: Show> { v: T; }
+    fn show<T: Showable + Into<int>, U>(x: view T) -> Str { return ""; }
+    class Box<T: Showable> { v: T; }
     fn plain<T>(x: T) -> T { return x; }
   )");
   ASSERT_TRUE(ok);
@@ -58,29 +58,29 @@ TEST(Trait, BoundsParse) {
   const auto &bounds = fns[0]->getTypeParamBounds();
   ASSERT_EQ(bounds.size(), 2u);
   ASSERT_EQ(bounds[0].size(), 2u);
-  EXPECT_EQ(typeName(bounds[0][0]), "Show");
+  EXPECT_EQ(typeName(bounds[0][0]), "Showable");
   EXPECT_EQ(typeName(bounds[0][1]), "Into<int>");
   EXPECT_TRUE(bounds[1].empty());
   EXPECT_TRUE(fns[1]->getTypeParamBounds().empty());
   const auto &box = driver->getRoot()->getGenericClassDecls()[0];
   ASSERT_EQ(box->getTypeParamBounds().size(), 1u);
-  EXPECT_EQ(typeName(box->getTypeParamBounds()[0][0]), "Show");
+  EXPECT_EQ(typeName(box->getTypeParamBounds()[0][0]), "Showable");
 }
 
 TEST(Trait, MalformedDeclarationsAreRejected) {
   for (const char *src : {
-           "trait { fn f(); }",            // no name
-           "trait S { fn f() {} }",        // a body
-           "trait S { fn f() }",           // no ';'
-           "trait S { x: int; }",          // a field
-           "trait S { fn f<T>(); }",       // a generic method
-           "trait S<T: Show> { fn f(); }", // a bound on its own
-           "trait S { fn f(); ",           // unclosed
-           "impl Show for { }",            // no type after for
-           "impl Show for Box<int> { }",   // a type, not a parameter
-           "impl Show for Box? { }",
-           "fn f<T: >(x: T) {}",       // an empty bound
-           "fn f<T: Show +>(x: T) {}", // a dangling '+'
+           "trait { fn f(); }",                // no name
+           "trait S { fn f() {} }",            // a body
+           "trait S { fn f() }",               // no ';'
+           "trait S { x: int; }",              // a field
+           "trait S { fn f<T>(); }",           // a generic method
+           "trait S<T: Showable> { fn f(); }", // a bound on its own
+           "trait S { fn f(); ",               // unclosed
+           "impl Showable for { }",            // no type after for
+           "impl Showable for Box<int> { }",   // a type, not a parameter
+           "impl Showable for Box? { }",
+           "fn f<T: >(x: T) {}",           // an empty bound
+           "fn f<T: Showable +>(x: T) {}", // a dangling '+'
        }) {
     auto [ok, _] = parse(std::string(src) + "\nfn main() -> int { return 0; }");
     EXPECT_FALSE(ok) << src;

@@ -817,7 +817,7 @@ private:
       if (!typeParams(f, params, bounds))
         return nullptr;
     }
-    // `impl Show for A`: (for TRAIT) after the type's name.
+    // `impl Showable for A`: (for TRAIT) after the type's name.
     Type *trait = nullptr;
     if (const SExpr *fl = f.optionalList("for")) {
       Fields tf(*this, *fl);

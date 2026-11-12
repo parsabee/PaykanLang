@@ -388,10 +388,10 @@ int)'`).
 
 A tuple's `toString()` shows each element through its own `toString()`:
 `None` for an absent optional, an object through its class's `toString`.  A
-tuple meets a `Show` bound (`fn show<T: Show>(x: view T)`, see
+tuple meets a `Showable` bound (`fn show<T: Showable>(x: view T)`, see
 [Traits](06-traits.md)), as `int` does, so `::io`'s `print`, `println`, `printerr`
-and `printerrln` (each `fn println<T: Show>(value: view T)`) print one.  A tuple
-with an element that does not implement `Show`, a function value, does not
+and `printerrln` (each `fn println<T: Showable>(value: view T)`) print one.  A tuple
+with an element that does not implement `Showable`, a function value, does not
 either: `io::println((1, f))` and `(1, f).toString()` are errors naming the
 element (`its element 1 has type '(int) -> int', which does not implement it`).
 `Str(t)` is `t.toString()` (`Str((1, "a"))` is `(1, a)`), and is the same error

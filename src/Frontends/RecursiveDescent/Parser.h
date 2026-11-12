@@ -190,7 +190,7 @@ private:
     StaticFn,    ///< an `impl` block's `static fn`: a body
   };
   ast::FuncDecl *parseFuncDecl(FuncKind kind = FuncKind::Free);
-  /// Type parameters and, given @p bounds, their bounds (`T: Show + Eq`).
+  /// Type parameters and, given @p bounds, their bounds (`T: Showable + Eq`).
   bool parseTypeParamList(std::vector<const std::string *> &out,
                           ast::TypeParamBounds *bounds);
   /// @p untyped: null when a parameter may leave out its type (a named

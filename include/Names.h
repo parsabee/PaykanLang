@@ -104,8 +104,10 @@ inline constexpr const char *kMethodCompareExchange = "compareExchange";
 inline constexpr const char *kMethodWalk = "__walk";
 
 // Traits
-inline constexpr const char *kTraitShow =
-    "Show"; ///< `view fn toString() -> Str`
+inline constexpr const char *kTraitShowable =
+    "Showable"; ///< `view fn toString() -> Str`
+/// What `Showable` was named through 0.3: an error that names it.
+inline constexpr const char *kTraitShowableWas = "Show";
 inline constexpr const char *kTraitHashable =
     "Hashable"; ///< `view fn hash() -> int`
 /// No methods: the types held in place and copied whole, which a class
@@ -126,8 +128,8 @@ inline constexpr const char *kMethodClone = "clone";
 inline constexpr const char *kMethodHash = "hash";
 /// The built-in traits an `impl ... for` block gives a class or a struct, so
 /// the conformances a module interface records (pkm IMPL,
-/// docs/design/pkm.md §3.5).  `Show` and `ValueType` are not: every class
-/// has `Show` through `Obj`, and the rest follow from a type's structure
+/// docs/design/pkm.md §3.5).  `Showable` and `ValueType` are not: every class
+/// has `Showable` through `Obj`, and the rest follow from a type's structure
 /// (src/Sema/SemaTraits.cpp, traitImplOwner).
 /// What a module interface records, where a conformance names its trait,
 /// for a class whose objects the module's code sends to another thread (a

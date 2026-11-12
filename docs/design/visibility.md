@@ -45,7 +45,7 @@ function '__f': the '__' prefix makes a member private to its class or struct; a
 
 `self.__x` reads and writes a private field in any method of the type that
 declares it, including methods in a later `impl` block, in a trait impl
-(`impl Show for Counter`), and in an instantiation of a generic class or
+(`impl Showable for Counter`), and in an instantiation of a generic class or
 struct (`List<int>`'s methods are `List<T>`'s).  Outside those methods every
 use is an error, with the same wording for a read, an assignment, an `inout`
 or `view` argument, a method call and a `static fn` call:

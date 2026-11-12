@@ -228,7 +228,7 @@ struct NoName<T> { v: T; }
 impl Named for NoName<T> {}
 fn greet<T: Named>(x: view T) -> Str { return x.name(); }
 fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn show<T: Showable>(x: view T) -> Str { return x.toString(); }
 fn twice<T: ValueType + Copyable>(x: T) -> (T, T) { return (x, x); }
 fn main() -> int {
   h = H(2.5);

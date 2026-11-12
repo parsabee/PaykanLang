@@ -217,8 +217,8 @@ imported with `import ::io;`.
 | `io::printerr(v)`    | Print to stderr, no newline             |
 | `io::printerrln(v)`  | Print to stderr, then a newline         |
 
-Each is `fn print<T: Show>(value: view T)`: it takes **exactly one** argument of any type
-that implements `Show` (an object, a `Str`, a number, a `bool`, a `char`, and a tuple, a
+Each is `fn print<T: Showable>(value: view T)`: it takes **exactly one** argument of any type
+that implements `Showable` (an object, a `Str`, a number, a `bool`, a `char`, and a tuple, a
 struct, an enum or an optional whose parts all do, so not one holding a function value)
 and writes its `toString()`. Paykan has no variadic functions or
 overloading, so there is no multi-argument form: `io::println(n)` prints a number on its
@@ -246,7 +246,7 @@ constructors**.
 ### To a string
 
 `Str(x)` works for every value that has a text: every type that implements the built-in
-trait `Show` ([Traits](06-traits.md)). It gives the text `x.toString()` gives, which is
+trait `Showable` ([Traits](06-traits.md)). It gives the text `x.toString()` gives, which is
 also what `io::println(x)` prints. A number, a `bool` and a `char` give theirs:
 
 ```pkn
@@ -345,7 +345,7 @@ fn main() -> int {
 Error:
 
 ```
-'Str' cannot convert a value of type 'F', which does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not implement it
+'Str' cannot convert a value of type 'F', which does not implement trait 'Showable': its field 'f' has type '(int) -> int', which does not implement it
 ```
 
 `+` joins two strings, so a value is converted first: `"x = " + Str(p)`. A `+` of a `Str`
