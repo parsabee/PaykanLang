@@ -60,7 +60,7 @@ import ::error as err;
 fn main() -> int {
   match io::open("notes.txt", "w") {
     w: Ok {
-      let f = move w.value;          // the file, which f now owns
+      f = move w.value;              // the file, which f now owns
       f.write("first line\n");
       f.write("second line\n");
     }
@@ -90,14 +90,19 @@ source file.
 `f.write(s)` makes no value, so it reports failure with an `err::Error` alone, whose code is
 `Ok` when it wrote. The example ignores it; `if !f.write(s).isOk() { ... }` checks it.
 
-There is no `close`: a file is closed automatically when the last reference to it goes
-away. A file is move-only, as every unique object is: above, `move w.value` takes it out of
-the result the `match` took apart, and `f` holds the only reference, so `notes.txt` is
-closed when the arm ends. Everything written is on disk once the file is closed, so a later
-`open` reads it back (the next example writes the file in a function of its own, which
-closes it when it returns). A file moved into a function (`save(move f)`) is handed on to it
-([When an object is destroyed](../language/16-memory.md#when-an-object-is-destroyed)): it is
-closed when that function returns, unless the function keeps it.
+There is no `close`: an `io::File` is a struct whose `__deinit__` closes the file
+([Structs](../language/11-structs.md#running-code-when-a-value-is-destroyed-__deinit__)),
+so the file is closed where the `File` is destroyed. A `File` is one value, which moves:
+above, `move w.value` takes it out of the result the `match` took apart, `f` owns it, and
+`notes.txt` is closed when the arm ends. Everything written is on disk once the file is
+closed, so a later `open` reads it back (the next example writes the file in a function of
+its own, which closes it when it returns). A file moved into a function (`save(move f)`) is
+closed when that function returns, unless the function hands it on.
+
+Reading and writing change the file: where the next read starts, what is waiting to be
+written. So `write` and the reads are plain `fn`s, not `view fn`s: the variable holding a
+file that is read or written is not a `let`, and a function that reads or writes a file it
+is given takes it `inout` (`fn load(f: inout io::File)`), not `view`.
 
 ## Reading
 
@@ -132,7 +137,7 @@ fn main() -> int {
 
   match io::open("shopping.txt", "r") {
     r: Ok {
-      let f = move r.value;
+      f = move r.value;
       n = 0;
       while True {
         match f.readln() {
@@ -456,7 +461,7 @@ fn addLine(tasks: inout list::TaskList, line: view Str) {
 fn save(tasks: view list::TaskList, path: view Str) -> bool {
   match io::open(path, "w") {
     w: Ok {
-      let f = move w.value;
+      f = move w.value;
       i = 0;
       while i < tasks.count {
         t: view = tasks.tasks[i];
@@ -580,7 +585,7 @@ your `PATH`. (It saves `tasks.txt` in the directory you run it from.)
 
 ## API
 
-The module declares four print functions, two functions that make a `File`, and the class
+The module declares four print functions, two functions that make a `File`, and the struct
 `File`. Every other name in `stdlib/io.pkn` starts with `_` and is the module's own.
 
 ### Printing
@@ -663,29 +668,47 @@ fn stdin() -> File
 ```
 
 The process's standard input. It cannot fail, and it is never closed: every call returns a
-`File` for the same stream, and it stays open when the `File`s go. Writing to it fails with
-`InvalidArgument` (`Bad file descriptor`).
+`File` for the same stream, and it stays open when the `File`s are destroyed. Writing to it
+fails with `InvalidArgument` (`Bad file descriptor`).
 
 #### `File`
 
 ```pkn
-class File { ... }
+struct File { ... }
 ```
 
 An open file, made by `open` or `stdin`. A program does not construct one: its initializer
 is `___init__`, private to `::io` (`io::File(...)` is `'io::File' cannot be constructed
-here: its initializer '___init__' is private to module '::io'`). A `File` is an object
-with one owner: assigning one moves it (`let f = move w.value;`), a `shared File` is held
-by several names, and the file is closed when the last reference to it goes; there is no
-`close`. Its `toString()` is `File@0x...`, and two `File`s are `==` when they are the
-same object (`io::stdin() == io::stdin()` is `False`: each call makes a new `File`). Every
-method is a `view fn`, so it can be called through a `view` parameter, and each reports
-failure with an [`::error`](error.md) `Error`: a write's alone, a read's in its `Result`.
+here: its initializer '___init__' is private to module '::io'`).
+
+A `File` is a struct with a `__deinit__`, which closes the file
+([Structs](../language/11-structs.md#running-code-when-a-value-is-destroyed-__deinit__)):
+
+- It is **one value with one owner**. Assigning or passing one moves it (`f = move
+  w.value;`, `save(move f)`), a copy is an error (`cannot copy 'f' (a 'File'); write 'move
+  f' to transfer it`), and the file is closed where the `File` is destroyed: at the end of
+  its variable's scope, when the object holding it goes, or where it is assigned over.
+  There is no `close`.
+- It is `Sendable`: a `File` moved into a task is read, written and closed there.
+- **Sharing goes through a box.** A file used under several names is held in a
+  `mem::Box<io::File>` ([`::memory`](memory.md)). Reads and writes change the file, so they
+  go through `get()`, which needs the box `shared mut`: `b.get().readln()`. A frozen box
+  (`atomic shared`) gives only `value()`, a `view`, through which nothing reads or writes.
+  The file is closed when the box goes.
+- `write`, `readln`, `readbytes` and `read` are plain `fn`s: each changes the file, so none
+  can be called through a `view` (`'f' is a 'view' parameter; 'readln' is not a 'view
+  fn'`). A function that reads or writes a file it does not keep takes it `inout`.
+- Each reports failure with an [`::error`](error.md) `Error`: a write's alone, a read's in
+  its `Result`.
+- `==` and `toString()` are a struct's built-in ones: two `File`s are equal when they name
+  the same open file, which only two `stdin()`s do, and `toString()` shows the handle
+  (`File(__handle: ...)`), a number that differs from run to run.
+- A `parallel for` body cannot make or destroy a `File`: opening and closing are I/O.
 
 #### `File.write`
 
 ```pkn
-view fn write(s: view Str) -> err::Error
+fn write(s: view Str) -> err::Error
 ```
 
 Writes `s` to the file. The error is `Ok` when it wrote, `InvalidArgument` (`Bad file
@@ -694,7 +717,7 @@ descriptor`) when the file is not open for writing (`stdin()`, a file opened wit
 #### `File.readln`
 
 ```pkn
-view fn readln() -> res::Result<Str, err::Error>
+fn readln() -> res::Result<Str, err::Error>
 ```
 
 The next line, with its `\n` when it has one (the last line of a file may not).
@@ -702,7 +725,7 @@ The next line, with its `\n` when it has one (the last line of a file may not).
 #### `File.readbytes`
 
 ```pkn
-view fn readbytes(n: int) -> res::Result<Str, err::Error>
+fn readbytes(n: int) -> res::Result<Str, err::Error>
 ```
 
 The next `n` bytes, or fewer at the end of the file. `InvalidArgument` when `n` is not
@@ -713,7 +736,7 @@ as much memory as there is left to read.
 #### `File.read`
 
 ```pkn
-view fn read() -> res::Result<Str, err::Error>
+fn read() -> res::Result<Str, err::Error>
 ```
 
 Everything that is left of the file.

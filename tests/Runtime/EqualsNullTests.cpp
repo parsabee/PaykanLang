@@ -63,12 +63,6 @@ TEST(EqualsNullOther, String) {
   Paykan_dispose((PaykanObject *)s);
 }
 
-TEST(EqualsNullOther, File) {
-  PaykanFile *f = PaykanFile_new();
-  EXPECT_EQ(equalsWithNullOther(PaykanFile_equals, (PaykanObject *)f), 0);
-  Paykan_dispose((PaykanObject *)f);
-}
-
 // Bit 0 of the ownership mask: set, `other` is handed over and released;
 // clear, it is lent and survives the call untouched.
 TEST(EqualsOwnership, ObjectReleasesOnlyWhatIsHandedOver) {
@@ -87,19 +81,6 @@ TEST(EqualsOwnership, StringReleasesOnlyWhatIsHandedOver) {
                              (PaykanObject *)b, 0),
             2);
   EXPECT_EQ(countAfterEquals(PaykanString_equals, (PaykanObject *)a,
-                             (PaykanObject *)b, 1),
-            1);
-  Paykan_dispose((PaykanObject *)a);
-  Paykan_dispose((PaykanObject *)b);
-}
-
-TEST(EqualsOwnership, FileReleasesOnlyWhatIsHandedOver) {
-  PaykanFile *a = PaykanFile_new();
-  PaykanFile *b = PaykanFile_new();
-  EXPECT_EQ(countAfterEquals(PaykanFile_equals, (PaykanObject *)a,
-                             (PaykanObject *)b, 0),
-            2);
-  EXPECT_EQ(countAfterEquals(PaykanFile_equals, (PaykanObject *)a,
                              (PaykanObject *)b, 1),
             1);
   Paykan_dispose((PaykanObject *)a);

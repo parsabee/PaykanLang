@@ -1,5 +1,5 @@
 // Isolates: the readln line buffer.
-// Runtime allocation site: PaykanFile_readln (File.c) — allocates (and grows)
+// Runtime allocation site: file_readln (File.c) — allocates (and grows)
 // the line buffer, then hands back a Str. Both the temporary buffer and the
 // returned Str must be released.
 //

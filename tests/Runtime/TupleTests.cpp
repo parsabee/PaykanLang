@@ -477,7 +477,7 @@ TEST(TupleEquals, NullReferences) {
 TEST(TupleEquals, ReferencesCompareThroughEquals) {
   TrackingHeap heap;
   gPointEqualsCalls = 0;
-  PaykanShared *err = PaykanShared_new((PaykanObject *)PaykanFile_new());
+  PaykanShared *err = PaykanShared_new(PaykanObject_new());
   Refs a = {point(3), err};
   Refs b = {point(3), err};
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 1); // distinct Points, the same x
@@ -489,10 +489,10 @@ TEST(TupleEquals, ReferencesCompareThroughEquals) {
   b.a = point(4);
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
   EXPECT_EQ(b.a->strong, 1);
-  // File's equals is identity: another File is not equal.
+  // Obj's equals is identity: another object is not equal.
   Paykan_release(b.a);
   b.a = point(3);
-  b.b = PaykanShared_new((PaykanObject *)PaykanFile_new());
+  b.b = PaykanShared_new(PaykanObject_new());
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
   release(a);
   release(b);

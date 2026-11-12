@@ -31,7 +31,7 @@ Printing is not one of them: a program that prints imports `::io`.
 
 | Module | What it has |
 |--------|-------------|
-| [`::io`](io.md) | Printing any `Showable` value (`print`, `println`, `printerr`, `printerrln`), files (`open` and the class `File`) and the standard input (`stdin()`) |
+| [`::io`](io.md) | Printing any `Showable` value (`print`, `println`, `printerr`, `printerrln`), files (`open` and the struct `File`) and the standard input (`stdin()`) |
 | [`::error`](error.md) | Errors as values: `ErrorCode`, the standard set of errors; `Error`, a code and a message; `none` and `fromErrno`, which make them |
 | [`::result`](result.md) | `Result<T, E>`, the value an operation made (`Ok`) or the error saying why it could not (`Err`); `ok` and `fail`, which make them |
 | [`::collections`](collections.md) | The containers `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`, `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and `listOf` and `listToString`; functions on strings: `split`, `join`, `lines`, `words`, `indexOf`, `contains`, `startsWith`, `endsWith`, `substring`, `trim`, `replace` and `repeat` |

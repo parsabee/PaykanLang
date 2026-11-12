@@ -78,7 +78,6 @@ TEST(ObjectVtable, VTableOfReadsTheHeader) {
   EXPECT_EQ(Paykan_vtable_of(obj), PaykanObject_vtable);
   PaykanString *s = PaykanString_new("x", 1);
   EXPECT_EQ(Paykan_vtable_of(s), PaykanString_vtable);
-  EXPECT_EQ(Paykan_vtable_of(&PaykanFile_Stdin), PaykanFile_Stdin.vtable);
   Paykan_dispose((PaykanObject *)s);
   Paykan_dispose(obj);
 }
