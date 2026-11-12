@@ -5585,3 +5585,64 @@ TEST(Lowering, ATypeArgumentsFormIsInANativeInstancesDescriptor) {
   EXPECT_NE(l.Text.find("= [8, 8, 4, 1, 1, 0, 0]\n"), std::string::npos)
       << l.Text;
 }
+
+// A wait is a call that does what is not known (docs/design/concurrency.md,
+// "Borrows across a wait"): a read in use across an `await` takes a
+// reference of its own, and so does one in use across a call of a function
+// that waits.  An awaited `view fn` of a struct in storage the function does
+// not own is lent a copy made where the call is.
+TEST(Lowering, AReadInUseAcrossAnAwaitIsHeld) {
+  auto l = lower(R"(
+    class Box { name: Str; }
+    struct Pair { a: int; b: int; }
+    impl Pair { async view fn sum() -> int { return self.a + self.b; } }
+    class Holder { p: Pair; }
+    async fn tick(k: int) -> int { return k; }
+    fn use(a: view Str, n: int) -> int { return a.len() + n; }
+    fn waits() -> int { return await tick(1); }
+    fn held(b: shared mut Box) -> int {
+      let t = tick(2);
+      return use(b.name, await t);
+    }
+    fn through(b: shared mut Box) -> int { return use(b.name, waits()); }
+    fn lent(h: view Holder) -> int { return await h.p.sum(); }
+    class Worker { n: int; async view fn work() -> int { return self.n; } }
+    class Team { w: Worker; }
+    fn recv(t: shared mut Team) -> int { return await t.w.work(); }
+    fn own() -> int {
+      p = Pair(1, 2);
+      return await p.sum();
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *name : {"held", "through"}) {
+    const std::string f = function(l.Text, name);
+    const std::string read = defined(f, "field.load");
+    ASSERT_FALSE(read.empty()) << f;
+    // (`retain lend` is the copy a box argument takes.)
+    EXPECT_TRUE(f.find("retain nonnull " + read + "\n") != std::string::npos ||
+                f.find("retain lend nonnull " + read + "\n") !=
+                    std::string::npos)
+        << f;
+    EXPECT_EQ(f.find("lent " + read), std::string::npos) << f;
+  }
+  const std::string held = function(l.Text, "held");
+  EXPECT_LT(held.find("retain nonnull"), held.find("await i64")) << held;
+  const std::string lent = function(l.Text, "lent");
+  EXPECT_NE(lent.find("local %lent."), std::string::npos) << lent;
+  EXPECT_LT(lent.find("mem.copy %lent.addr"), lent.find("call @Pair.sum("))
+      << lent;
+  EXPECT_EQ(function(l.Text, "own").find("%lent."), std::string::npos)
+      << l.Text;
+  // The awaited call's receiver, read from a field: its task has it until
+  // the wait is over.
+  const std::string recv = function(l.Text, "recv");
+  const std::string worker = defined(recv, "field.load");
+  ASSERT_FALSE(worker.empty()) << recv;
+  ASSERT_NE(recv.find("retain nonnull " + worker + "\n"), std::string::npos)
+      << recv;
+  EXPECT_LT(recv.find("retain nonnull " + worker), recv.find("await i64"))
+      << recv;
+  EXPECT_LT(recv.find("await i64"), recv.find("release " + worker)) << recv;
+}

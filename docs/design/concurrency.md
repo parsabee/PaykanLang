@@ -1177,6 +1177,21 @@ there` (proposed; owner may change).  A part of a `const` region needs
 neither, as it never changes.  Holds keep all of this memory-safe; the rule
 keeps it correct.
 
+The prototype has the rule for `await` (`Sema::checkBorrowsAcrossWait`,
+`Sema::reachedThrough`): an `inout` local or arm, and the receiver of a
+struct's async method, the one argument an awaited call takes by address
+there (an `async fn`'s parameters are by value).  How a place is reached is
+read from the place as written, through a borrowed result to everything its
+call borrowed, and a borrow counts where it is used after the wait
+(`Sema::usedAfterWait`).  A struct method's `self` counts as the frame's own
+parameter, which its caller checked or copied.  Storage nothing writes, a
+frozen object's or an immutable `shared` one's, is lent in place.  An
+`await` is Unknown in effectOf and to the reads in use across it
+(BorrowedReads), and the awaited call's own receiver is held until the wait
+is over.  A call with the Joins summary comes with `join` (#362): until
+then a call of an ordinary function that waits is not followed, so its
+`inout` arguments are unchecked.
+
 ### Failures and panics
 
 Expected failures are values that `await t` and `t.join()` hand back

@@ -439,3 +439,34 @@ fn main() -> int {
       "Just(value: b) Nothing Ok(value: b!) Left(a: b) False True True\n");
   g.expectNoLeaks("GenericCallsTakeTheOtherSideEitherWay");
 }
+
+// An `inout` arm's binding goes back to the subject after its last use,
+// and a local that borrows the binding keeps it in use: a write through
+// the local is the binding's.  (It was written back before that write.)
+TEST(EnumCodeGen, ABorrowOfAnInoutBindingKeepsItInUse) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+enum Account { Closed, Open(owner: int, balance: int) }
+fn dep(a: inout Account) {
+  match a {
+    o: inout Open {
+      x: inout = o.balance;
+      x = x + 5;
+      y: inout = x;
+      y = y * 2;
+    }
+    Closed { }
+  }
+}
+fn main() -> int {
+  a = Account::Open(1, 10);
+  dep(a);
+  io::println(a.toString());
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Open(owner: 1, balance: 30)\n");
+  g.expectNoLeaks("ABorrowOfAnInoutBindingKeepsItInUse");
+}

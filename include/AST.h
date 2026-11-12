@@ -1348,6 +1348,11 @@ private:
   // held `shared`, `atomic shared` or `locked` (#368): Copyable, so its clone
   // is the copy, the same object.
   bool CloneIsCopy = false;
+  // Set by Sema on an awaited call of an async `view fn` of a struct whose
+  // receiver is storage the function does not own (#368, "Borrows across a
+  // wait"): the task is lent a copy made where the call is, as another task
+  // may change the storage while this one waits.
+  bool SnapshotReceiver = false;
 
 public:
   MethodCallExpr(SourceLocation loc, Expr *receiver,
@@ -1363,6 +1368,8 @@ public:
   bool isFieldCall() const { return FieldCall; }
   void setCloneIsCopy(bool v) { CloneIsCopy = v; }
   bool cloneIsCopy() const { return CloneIsCopy; }
+  void setSnapshotReceiver(bool v) { SnapshotReceiver = v; }
+  bool snapshotsReceiver() const { return SnapshotReceiver; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodCallExpr;

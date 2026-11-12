@@ -750,6 +750,82 @@ task 't' may not be awaited before this 'return': it is spent on some paths only
 task 't' is not awaited before this 'return': a task handle is spent by 'await' (or 'move') on every path before its scope ends; the prototype has no 'join', 'cancel' or 'detach'
 ```
 
+### Borrows across an `await`
+
+Other tasks run while a task waits. An `inout` local, or an `inout` binding of a `match` arm,
+stays live across an `await` only when it names storage the waiting function owns: a variable
+of its own or a by-value parameter, followed by unique fields and elements (an owned path), or
+its own `inout` parameter, which its caller checked. Storage reached through `self`, a
+`shared` reference or a `view` parameter may change while the task waits, and what the borrow
+writes afterwards would undo it:
+
+```pkn
+class Counter {
+  n: int;
+}
+
+async fn tick(k: int) -> int {
+  return k;
+}
+
+impl Counter {
+  async fn add(k: int) -> int {
+    c: inout = self.n;
+    let e = await tick(10);
+    c = c + k;
+    return e;
+  }
+}
+
+fn main() -> int {
+  return 0;
+}
+```
+
+Error:
+
+```
+'self.n' is reached through 'self'; it cannot be borrowed 'inout' across an 'await': another task may change it there
+```
+
+Take the borrow after the `await`, or read and write the field itself. The borrow counts
+where it is used after the wait, on a path that reaches the use. One whose uses are all
+before the `await` is over before it: in what is awaited (`let r = await tick(c);`), in an
+earlier statement of its branch, in the branch not taken, a number read on the left of an
+operator or in a condition (`c + await tick(1)`), and behind a `return`, or a `break` or
+`continue` of the loop the borrow is declared in. A loop around the `await` makes every use
+in the loop one after it, and so does `[v; n]`, which may run `v` for each element. A place
+that waits itself (`x: inout = self.arr[await pick()];`) is borrowed across its own `await`.
+
+An `inout` arm's binding is a copy of the subject that goes back to it after the binding's
+last use, or on the way out of the arm. So an `await` anywhere in the arm up to that use is
+across the borrow, whatever the binding does after it; one after the last use is not.
+
+How a place is reached is read from the place as written. The slot a place names is the
+function's when the place is on an owned path, whatever reference the slot holds (`x: inout =
+s;` with `s` a `shared mut` parameter borrows the parameter). A part of what a `shared`
+reference names is in that object (`s.n`), and so is one reached through a call's borrowed
+result when anything that call borrowed is (`o.slot().sh.n`).
+
+A struct's async method is given its receiver's storage, which its task uses while the caller
+waits, so the same holds for the receiver. A method that changes `self` takes storage the
+caller owns (`await p.bump()` with `p` a local, a by-value or an `inout` parameter, or the
+`self` of a struct's own method), and `await self.pos.bump()` in a class's method is the
+error above. A `view fn` reads its receiver: one in storage the caller does not own (a `view`
+local or a `match` binding is in what it views) is lent a
+copy made at the call, which a Copyable struct has, and any other is an error (`'self.nm' is
+reached through 'self' and is not Copyable; it cannot be lent to an awaited call: another
+task may change it there`). Storage nothing writes, a frozen object's (`atomic shared`) or a
+`shared` one's, is lent where it is.
+
+A call of an ordinary function that waits is not followed in this version: an `inout`
+argument, or a struct receiver, given to a function that awaits inside is not checked at the
+call.
+
+What a statement has read from such storage and still uses after an `await` (`use(b.name,
+await t)`) takes a reference of its own before the wait, as it does across a call that may
+replace it ([Memory](16-memory.md)).
+
 ## What crosses to a task: the send check
 
 A task runs on another thread, so what it takes must be safe to use there. The **send
@@ -1805,6 +1881,14 @@ one.
   the right of `&&` or `||`) cannot spend one (`task 't' would be awaited on some paths only:
   'await' it before the condition`, `task 't' would be moved on some paths only: move it before
   the condition`).
+- An `inout` local or `match` binding live across an `await` names storage the function owns
+  (an owned path, or its own `inout` parameter): `'self.n' is reached through 'self'; it cannot
+  be borrowed 'inout' across an 'await': another task may change it there` (`through 'shared
+  mut' reference 's'`, `through 'view' parameter 'h'`). The receiver of a struct's async method
+  that changes `self` goes by the same rule; a `view fn`'s in storage the function does not own
+  is lent a copy, and is an error when it is not Copyable, unless nothing writes that storage
+  (an `atomic shared` or a `shared` object's). A read in use across an `await` takes a
+  reference of its own. A call of an ordinary function that waits is not followed.
 - `async fn main() -> int` is allowed in the program's own file, not in a module others import
   (`'async fn main' is a program's entry point: a module that others import cannot declare
   one`). In this version `await` is allowed in an ordinary function too, and blocks the thread.
@@ -1956,6 +2040,7 @@ one.
 | Task handle | `let t = fib(5);` with no `await` before the scope ends or a `return`; `await t` twice; `await t` in one branch only; `t = fib(4)` before `await t` |
 | Part that cannot cross | `move j` with a `shared`, `weak`, function-value or `Obj` part; a `shared` result of an `async fn` |
 | Async method | `let t = c.read();` with `c` a unique `Counter` (not awaited where it is called); an override of the other colour; `async fn __init__`; a `view` or `inout` parameter of an `async fn` |
+| Borrow across an `await` | `c: inout = self.n;` used after an `await`; an `inout` arm of `match self.s` with an `await` in it; `await self.pos.bump()` with `pos` a struct field; `await self.nm.size()` with `nm` a struct that is not Copyable |
 | Use after move | `move a` then `a.name`; a move in one branch; a move in a loop with no assignment before the next iteration |
 | Move of what is not a unique part | `move h.other` with `other: shared Job`; a move of a viewed variable; a move beside a borrow in one call |
 | Body of a `parallel for` | a reference, a `Str` or a function value of the enclosing function; a write that is not a reduction; an `inout` array written at another index; `break`, `continue`, `return`, `await`, a task started |

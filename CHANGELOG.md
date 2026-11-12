@@ -21,6 +21,15 @@ samples/concurrency/README.md.
   or an optional. The C of `--emit-c` runs a task where it is called, so it keeps the code of a
   module that has to do with tasks instead of linking its compiled code, and `--list-modules`
   does not name it (docs/c-backend.md).
+- Borrows across an `await` (#368; docs/language/19-concurrency.md, "Borrows across an `await`").
+  An `inout` local or `match` binding that is live across an `await` names storage the function
+  owns, an owned path or its own `inout` parameter: reached through `self`, a `shared` reference
+  or a `view` parameter it is an error, as another task may change it while this one waits. The
+  receiver of a struct's async method that changes `self` goes by the same rule, and a `view fn`'s
+  in such storage is lent a copy, which a struct that is not Copyable has none of; storage
+  nothing writes (an `atomic shared` or a `shared` object's) is lent where it is. A read in use
+  across an `await`, the awaited call's receiver among them, takes a reference of its own. A
+  call of an ordinary function that waits is not followed in this version.
 - `-O0` leaves a program with an `async fn` unoptimized (#368): it was compiled with the `-O1`
   pipeline, as its coroutines did not survive an unoptimized split.
 - `continue` ends an iteration of a `parallel for`, and a loop in its body has its own `break` and
@@ -375,6 +384,9 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- A write through a local that borrowed an `inout` arm's binding (`o: inout Open { x: inout =
+  o.balance; x = x + 5; }`) was lost: the binding went back to the subject after its own last
+  mention, before the write. A borrow of the binding keeps it in use.
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is

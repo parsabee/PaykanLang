@@ -1184,6 +1184,39 @@ bool Sema::checkAsyncMethodCall(const ast::MethodCallExpr *call,
                             : "'await' it where it is called"));
     return false;
   }
+  // A struct's method is given its receiver's storage, which the task uses
+  // while the caller waits (docs/design/concurrency.md, "Borrows across a
+  // wait").  Storage the frame owns is the task's meanwhile.  Any other may
+  // change under it: a method that changes `self` cannot borrow it, and a
+  // `view fn` is lent a copy made here, which only a Copyable value has.
+  // (A frozen object's never changes.)
+  const ast::Expr *recv = call->getReceiver();
+  ast::Type *recvTy = const_cast<ast::Expr *>(recv)->getResolvedType();
+  if (recvTy && ast::isa<ast::StructType>(recvTy)) {
+    // (Nothing writes a frozen object's storage, or a `shared` one's.)
+    bool stable = false;
+    const std::string why = reachedThrough(recv, &stable);
+    if (why.empty() || (stable && method->isView()))
+      return true;
+    if (!method->isView()) {
+      // (A `view` cannot call a method that changes `self`: reported.)
+      if (why.starts_with("through 'view'"))
+        return false;
+      error(recv->getLocation(),
+            "'" + placeText(recv) + "' is reached " + why +
+                "; it cannot be borrowed 'inout' across an 'await': another "
+                "task may change it there");
+      return false;
+    }
+    if (!isCopyable(recvTy)) {
+      error(recv->getLocation(),
+            "'" + placeText(recv) + "' is reached " + why +
+                " and is not Copyable; it cannot be lent to an awaited call: "
+                "another task may change it there");
+      return false;
+    }
+    const_cast<ast::MethodCallExpr *>(call)->setSnapshotReceiver(true);
+  }
   return true;
 }
 

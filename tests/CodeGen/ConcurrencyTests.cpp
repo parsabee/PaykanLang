@@ -357,6 +357,65 @@ TEST(Concurrency, ALambdaInDeadCodeLeavesItsStatementOpen) {
   EXPECT_EQ(r.ExitCode, 1);
 }
 
+// Borrows across an `await`: an `inout` local of the function's own storage
+// keeps its update, a struct's method that changes `self` is given storage
+// the caller owns, a `view fn` of a field of `self` or of a `view`
+// parameter reads a copy lent to it, and a read in use across a wait holds
+// what it read.
+TEST(Concurrency, BorrowsAcrossAnAwait) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    struct Pair { a: int; b: int; }
+    impl Pair {
+      async view fn sum() -> int { return self.a + self.b; }
+      async fn bump() -> int { self.a = self.a + 1; return self.a; }
+      async fn grow() -> int { return await self.bump() + await self.sum(); }
+    }
+    struct Named { name: Str; n: int; }
+    impl Named {
+      async view fn size() -> int { return self.name.len() + self.n; }
+    }
+    class Holder { p: Pair; nm: Named; label: Str; }
+    impl Holder {
+      async view fn work() -> int {
+        let s = await self.p.sum();
+        return s + self.label.len();
+      }
+    }
+    async fn tick(k: int) -> int { return k; }
+    fn use(a: view Str, n: int) -> int { return a.len() + n; }
+    fn viaView(h: view Holder) -> int { return await h.p.sum(); }
+    fn viaInout(p: inout Pair, q: view Pair) -> int {
+      n: inout = p.b;
+      let e = await tick(10);
+      n = n + e;
+      return await p.bump() + await p.sum() + await q.sum();
+    }
+    fn held(h: shared mut Holder) -> int {
+      let t = tick(2);
+      return use(h.label, await t);
+    }
+    fn frozen(h: atomic shared Holder) -> int {
+      return await h.p.sum() + await h.nm.size();
+    }
+    fn main() -> int {
+      h: mut = Holder(Pair(1, 2), Named("ab", 3), "lbl");
+      let w = await h.work();
+      p = Pair(3, 4);
+      let g = await p.grow();
+      let own = await h.nm.size() + await h.p.bump();
+      io::println(Str(w) + " " + Str(g) + " " + Str(viaView(h)) + " " +
+                  Str(viaInout(p, Pair(1, 1))) + " " + Str(own));
+      s: shared mut = Holder(Pair(0, 0), Named("n", 0), "shared");
+      let f: atomic shared = Holder(Pair(5, 6), Named("xyz", 1), "f");
+      io::println(Str(held(s)) + " " + Str(frozen(f)));
+      return 0;
+    })");
+  EXPECT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "6 12 4 26 7\n8 15\n");
+}
+
 // The program's own `async fn main` has no function that starts it but
 // the entry point: a call of it in the program starts its task, whichever
 // of the two is declared first.

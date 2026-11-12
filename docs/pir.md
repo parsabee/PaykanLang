@@ -1048,7 +1048,10 @@ CodeGen enforced, now in one place.
   arguments: a native function keeps nothing it is lent past the call
   (docs/language/03-functions.md, "Native Functions"), so it holds no
   Paykan value between calls to let go of or to call back into the
-  program's code with.
+  program's code with.  An `await` (the concurrency prototype) counts as a
+  call that does what is not known, and so does a call of a function that
+  waits: other tasks run meanwhile, the task awaited among them, which was
+  given what its call was.
 
   What a call given more may let go of is read from the code it runs, when
   the module lowers it (its own functions, a struct's method, a class's

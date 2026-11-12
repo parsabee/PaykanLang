@@ -460,6 +460,504 @@ fn main() -> int {
   expectCleanLines(r, {":10:", ":11:"});
 }
 
+// An `inout` borrow is live across an `await` only when it names storage
+// the waiting frame owns: an owned path, or its own `inout` parameter.
+// Reached through `self`, a `shared` reference or a `match` arm's subject
+// in such storage, another task may change it while this one waits.  A
+// borrow whose last use is in what is awaited is over before the wait.
+TEST(Concurrency, AnInoutBorrowAcrossAnAwait) {
+  auto r = semaCheck(R"(class Counter { n: int; }
+struct Pair { a: int; b: int; }
+class Holder { p: Pair; c: Counter; }
+async fn tick(k: int) -> int { return k; }
+impl Counter {
+  async fn add(k: int) -> int {
+    c: inout = self.n;
+    let e = await tick(10);
+    c = c + k;
+    return e;
+  }
+  async fn after(k: int) -> int {
+    let e = await tick(10);
+    c: inout = self.n;
+    c = c + k;
+    return e;
+  }
+}
+impl Holder {
+  async fn arm() -> int {
+    match self.c {
+      k: inout Counter {
+        let e = await tick(1);
+        k.n = k.n + e;
+      }
+    }
+    return 0;
+  }
+}
+async fn owned(k: int) -> int {
+  p = Pair(1, 2);
+  a: inout = p.a;
+  let e = await tick(k);
+  a = a + e;
+  return p.a;
+}
+async fn viaShared(s: shared mut Counter) -> int {
+  x: inout = s.n;
+  let r = await tick(x);
+  y: inout = s.n;
+  y = y + await tick(1);
+  z: inout = s.n;
+  w: inout = z;
+  let q = await tick(2);
+  w = w + q;
+  return r;
+}
+fn param(c: inout Counter, h: shared mut Holder) -> int {
+  n: inout = c.n;
+  let e = await tick(1);
+  n = n + e;
+  q: inout = h.p.a;
+  let f = await tick(2);
+  let g = await tick(3);
+  q = q + f + g;
+  return n;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":7:16: error: 'self.n' is reached through 'self'; it cannot be "
+       "borrowed 'inout' across an 'await': another task may change it there",
+       ":8:13: note: 'c' is used after this 'await'",
+       ":21:11: error: 'self.c' is reached through 'self'; it cannot be "
+       "borrowed 'inout' across an 'await'",
+       ":40:14: error: 's.n' is reached through 'shared mut' reference 's'; "
+       "it cannot be borrowed 'inout' across an 'await'",
+       ":43:14: error: 'z' is reached through 'shared mut' reference 's'; it "
+       "cannot be borrowed 'inout' across an 'await'",
+       ":52:14: error: 'h.p.a' is reached through 'shared mut' reference "
+       "'h'; it cannot be borrowed 'inout' across an 'await'"});
+  expectCleanLines(r, {":14:", ":31:", ":38:", ":49:", ":54:"});
+}
+
+// A struct's async method is given its receiver's storage, which its task
+// uses while the caller waits.  Storage the frame owns, the frame's own
+// `inout` parameter and a frozen object's are lent in place.  Any other is
+// not borrowed by a method that changes `self`, and a `view fn` is lent a
+// copy, which a value that is not Copyable has none of.
+TEST(Concurrency, AStructLentToAnAwaitedCall) {
+  auto r = semaCheck(R"(struct Pair { a: int; b: int; }
+impl Pair {
+  async view fn sum() -> int { return self.a + self.b; }
+  async fn bump() -> int { self.a = self.a + 1; return self.a; }
+  async view fn twice() -> int { return 2 * await self.sum(); }
+  async fn grow() -> int { return await self.bump() + await self.sum(); }
+}
+struct Named { name: Str; n: int; }
+impl Named {
+  async view fn size() -> int { return self.name.len() + self.n; }
+}
+class Holder { p: Pair; nm: Named; }
+impl Holder {
+  async fn work() -> int {
+    let s = await self.p.sum();
+    let a = await self.p.bump();
+    let b = await self.nm.size();
+    return s + a + b;
+  }
+}
+fn viaView(h: view Holder) -> int { return await h.p.sum(); }
+fn viaInout(p: inout Pair, q: view Pair, n: view Named) -> int {
+  return await p.bump() + await p.sum() + await q.sum() + await n.size();
+}
+fn frozen(h: atomic shared Holder) -> int {
+  return await h.p.sum() + await h.nm.size();
+}
+fn main() -> int {
+  h: mut = Holder(Pair(1, 2), Named("ab", 3));
+  p = Pair(3, 4);
+  return await h.nm.size() + await h.p.bump() + await p.grow();
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":16:19: error: 'self.p' is reached through 'self'; it cannot be "
+       "borrowed 'inout' across an 'await': another task may change it there",
+       ":17:19: error: 'self.nm' is reached through 'self' and is not "
+       "Copyable; it cannot be lent to an awaited call: another task may "
+       "change it there",
+       ":23:65: error: 'n' is reached through 'view' parameter 'n' and is "
+       "not Copyable; it cannot be lent to an awaited call"});
+  expectCleanLines(r, {":5:", ":6:", ":15:", ":21:", ":26:", ":31:"});
+}
+
+// How a borrowed place is reached is told from the place as written: what
+// a part is taken of, down to a call's borrowed result and everything that
+// call borrowed, and a place rooted in no variable too.  The slot a place
+// names is where the place is, whatever reference it holds.
+TEST(Concurrency, HowABorrowedPlaceIsReached) {
+  auto r = semaCheck(R"(class Counter { n: int; }
+class Holder { c: Counter; d: Counter; sh: shared mut Counter; }
+class Outer { h: Holder; }
+impl Outer { fn slot() -> inout Holder { return self.h; } }
+impl Holder { fn get() -> shared mut Counter { return self.sh; } }
+async fn tick(k: int) -> int { return k; }
+fn pick(a: inout int, b: inout int, first: bool) -> inout int {
+  return if first then a else b;
+}
+fn viaResult(c: shared mut Counter) -> int {
+  o: mut = Outer(Holder(Counter(1), Counter(2), c));
+  x: inout = o.slot().sh.n;
+  let e = await tick(1);
+  x = x + e;
+  return e;
+}
+impl Holder {
+  fn viaCall(k: int) -> int {
+    x: inout = self.get().n;
+    let e = await tick(10);
+    x = x + e + k;
+    return e;
+  }
+  fn viaCond(k: int) -> int {
+    x: inout = (if k > 0 then self.c else self.d).n;
+    let e = await tick(10);
+    x = x + e;
+    return e;
+  }
+}
+fn twoSources(s: shared mut Counter) -> int {
+  own = 0;
+  p: inout = pick(s.n, own, True);
+  q: inout = p;
+  let e = await tick(1);
+  q = q + e;
+  return own;
+}
+fn ownSlots(s: shared mut Counter) -> int {
+  x: inout = s;
+  let e = await tick(7);
+  x = Counter(e);
+  h: mut = Holder(Counter(1), Counter(2), Counter(3));
+  y: inout = h.sh;
+  let f = await tick(9);
+  y = Counter(f);
+  return s.n + h.sh.n;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":12:14: error: 'o.slot().sh.n' is reached through 'shared mut' "
+       "reference 'o.slot().sh'; it cannot be borrowed 'inout' across an "
+       "'await'",
+       ":19:16: error: 'self.get().n' is reached through 'shared mut' "
+       "reference 'self.get()'; it cannot be borrowed 'inout' across an "
+       "'await'",
+       ":25:16: error: '(if ... then self.c else self.d).n' is reached "
+       "through 'self'; it cannot be borrowed 'inout' across an 'await'",
+       ":34:14: error: 'p' is reached through 'shared mut' reference 's'; it "
+       "cannot be borrowed 'inout' across an 'await'"});
+  expectCleanLines(r, {":41:", ":45:"});
+}
+
+// A borrow is live across a wait only where it is used after it: not when
+// its uses are before the `await` in its statement or its branch, in what
+// an earlier `await` of the statement awaited, or in the branch not taken.
+// A loop around the wait runs again, so a use anywhere in it comes after.
+TEST(Concurrency, ABorrowsUsesAfterAWait) {
+  auto r = semaCheck(R"(class Counter { n: int; }
+async fn tick(k: int) -> int { return k; }
+fn incr(x: inout int) -> int { x = x + 1; return x; }
+impl Counter {
+  async fn two(k: int) -> int {
+    c: inout = self.n;
+    let r = await tick(c) + await tick(1);
+    return r;
+  }
+  async fn before(k: int) -> int {
+    c: inout = self.n;
+    if k > 0 { c = c + 1; let e = await tick(1); }
+    return 0;
+  }
+  async fn other(k: int) -> int {
+    c: inout = self.n;
+    if k > 0 { let e = await tick(1); } else { c = c + 1; }
+    return 0;
+  }
+  async fn last(k: int) -> int {
+    c: inout = self.n;
+    if k > 0 { c = c + 1; return await tick(1); }
+    return 0;
+  }
+  async fn loop() -> int {
+    c: inout = self.n;
+    for i in 0..3 {
+      let e = await tick(incr(c));
+    }
+    return 0;
+  }
+  async fn after(k: int) -> int {
+    c: inout = self.n;
+    if k > 0 { let e = await tick(1); c = c + e; }
+    return 0;
+  }
+  async fn target(k: int) -> int {
+    c: inout = self.n;
+    c = k + await tick(1);
+    return 0;
+  }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectErrors(r, {":26:16: error: 'self.n' is reached through 'self'",
+                   ":28:15: note: 'c' is used after this 'await'",
+                   ":33:16: error: 'self.n' is reached through 'self'",
+                   ":34:24: note: 'c' is used after this 'await'",
+                   ":38:16: error: 'self.n' is reached through 'self'",
+                   ":39:13: note: 'c' is used after this 'await'"});
+  expectCleanLines(r, {":6:", ":11:", ":16:", ":21:"});
+}
+
+// What a struct's `view fn` is lent in place: storage nothing writes, a
+// frozen object's or a `shared` one's, every way to it; and a struct
+// method's own `self`, which its caller checked or copied.
+TEST(Concurrency, WhatAnAwaitedViewFnIsLentInPlace) {
+  auto r = semaCheck(R"(struct Named { name: Str; n: int; }
+impl Named {
+  async view fn size() -> int { return self.name.len() + self.n; }
+  async view fn twice() -> int { return 2 * await self.size(); }
+}
+class Holder { nm: Named; }
+fn pick(a: view Named, b: view Named, first: bool) -> view Named {
+  return if first then a else b;
+}
+fn imm(h: shared Holder) -> int { return await h.nm.size(); }
+fn frozen(f: atomic shared Holder) -> int { return await f.nm.size(); }
+fn both(f: atomic shared Holder, g: shared Holder) -> int {
+  return await pick(f.nm, g.nm, False).size();
+}
+fn one(f: atomic shared Holder, s: shared mut Holder) -> int {
+  return await pick(f.nm, s.nm, False).size();
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":16:16: error: 'pick(...)' is reached through 'shared "
+                   "mut' reference 's' and is not Copyable; it cannot be lent "
+                   "to an awaited call: another task may change it there"});
+  expectCleanLines(r, {":4:", ":10:", ":11:", ":13:"});
+}
+
+// An `inout` arm's binding is a copy that goes back to the subject after
+// its last use, or on the way out of the arm: an `await` anywhere before
+// that is across the borrow, whatever the binding does after it.  One
+// after the last use is not.
+TEST(Concurrency, AnInoutArmIsWrittenBackAfterAWait) {
+  auto r = semaCheck(
+      R"(enum Account { Closed, Open(owner: int, balance: int) }
+class Counter { n: int; }
+class Bank { a: Account; c: Counter?; }
+async fn tick(k: int) -> int { return k; }
+impl Bank {
+  async fn inOperand() -> int {
+    match self.a {
+      o: inout Open { let e = await tick(o.balance); }
+      Closed { }
+    }
+    return 0;
+  }
+  async fn before(k: int) -> int {
+    match self.a {
+      o: inout Open { if k > 0 { o.balance += 5; let e = await tick(1); } }
+      Closed { }
+    }
+    return 0;
+  }
+  async fn onReturn(k: int) -> int {
+    match self.a {
+      o: inout Open { if k > 0 { o.balance += 5; return await tick(1); } }
+      Closed { }
+    }
+    return 0;
+  }
+  async fn classRef() -> int {
+    match self.c {
+      k: inout Counter { let e = await tick(k.n); }
+      None { }
+    }
+    return 0;
+  }
+  async fn after() -> int {
+    match self.a {
+      o: inout Open { o.balance += 5; let e = await tick(1); }
+      Closed { }
+    }
+    return 0;
+  }
+}
+fn owned(k: int) -> int {
+  a = Account::Open(1, 10);
+  match a {
+    o: inout Open { let e = await tick(o.balance); o.balance += e; }
+    Closed { }
+  }
+  return k;
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  expectErrors(r, {":7:11: error: 'self.a' is reached through 'self'",
+                   ":8:31: note: 'o' is used after this 'await'",
+                   ":14:11: error: 'self.a' is reached through 'self'",
+                   ":21:11: error: 'self.a' is reached through 'self'",
+                   ":28:11: error: 'self.c' is reached through 'self'"});
+  expectCleanLines(r, {":35:", ":44:"});
+}
+
+// What runs after a wait is what the path reaches: not what follows a
+// `return`, nor what follows a `break` or a `continue` in the loop the
+// borrow is declared in; a declaration of the borrow's name hides it; and
+// a number read on the left of an operator, or in a condition, was read
+// before the wait on the right, or in the branch.  `[v; n]` runs `v` again
+// as a loop does, and a place that waits is used after its own `await`.
+TEST(Concurrency, WhatRunsAfterAWait) {
+  auto r = semaCheck(R"(class Counter { n: int; arr: int[3]; }
+async fn tick(k: int) -> int { return k; }
+async fn mk(k: int) -> Counter { return Counter(k, [0, 0, 0]); }
+fn incr(x: inout int) -> int { x = x + 1; return x; }
+impl Counter {
+  async fn leaves(k: int) -> int {
+    c: inout = self.n;
+    if c > 100 { return await tick(c); }
+    c = c + k;
+    return 0;
+  }
+  async fn each(k: int) -> int {
+    for i in 0..3 {
+      c: inout = self.n;
+      if c > 100 { let e = await tick(c); continue; }
+      if c > 50 { let e = await tick(c); break; }
+      c = c + k;
+    }
+    return 0;
+  }
+  async fn hidden(k: int) -> int {
+    c: inout = self.n;
+    if k > 0 { c = c + 1; let e = await tick(1); c: int = 5; return c + e; }
+    return 0;
+  }
+  async fn left() -> int {
+    c: inout = self.n;
+    return c + await tick(1);
+  }
+  async fn cond() -> int {
+    c: inout = self.n;
+    return if c > 0 then await tick(1) else 0;
+  }
+  async fn range() -> int {
+    c: inout = self.n;
+    t = 0;
+    for i in 0..await tick(c) { t = t + 1; }
+    return t;
+  }
+  async fn outer(k: int) -> int {
+    c: inout = self.n;
+    for i in 0..3 {
+      if i > k { let e = await tick(1); continue; }
+      c = c + 1;
+    }
+    return 0;
+  }
+  async fn broken(k: int) -> int {
+    c: inout = self.n;
+    for i in 0..3 {
+      if i > k { let e = await tick(1); break; }
+    }
+    c = c + 1;
+    return 0;
+  }
+  async fn rep() -> int {
+    c: inout = self.n;
+    let v = [await mk(incr(c)); 3];
+    return v[2].n;
+  }
+  async fn place() -> int {
+    x: inout = self.arr[await tick(1)];
+    x = x + 5;
+    return x;
+  }
+  async fn target(k: int) -> int {
+    c: inout = self.n;
+    c = c + await tick(k);
+    return 0;
+  }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  expectErrors(r, {":41:16: error: 'self.n' is reached through 'self'",
+                   ":43:26: note: 'c' is used after this 'await'",
+                   ":49:16: error: 'self.n' is reached through 'self'",
+                   ":51:26: note: 'c' is used after this 'await'",
+                   ":57:16: error: 'self.n' is reached through 'self'",
+                   ":58:14: note: 'c' is used after this 'await'",
+                   ":62:16: error: 'self.arr[...]' is reached through 'self'",
+                   ":62:25: note: 'x' is used after this 'await'",
+                   ":67:16: error: 'self.n' is reached through 'self'",
+                   ":68:13: note: 'c' is used after this 'await'"});
+  expectCleanLines(r, {":7:", ":14:", ":22:", ":27:", ":31:", ":35:"});
+}
+
+// A `view` local, and an arm's binding of a move-only part, view what they
+// were made of: one of the function's own storage is lent in place to an
+// awaited call, as the storage itself is.
+TEST(Concurrency, AViewOfTheFramesOwnStorageIsLentInPlace) {
+  auto r = semaCheck(R"(struct Named { name: Str; n: int; }
+impl Named {
+  async view fn size() -> int { return self.name.len() + self.n; }
+}
+class Holder { nm: Named; on: Named?; }
+fn viaMatch() -> int {
+  o: Named? = Named("ab", 3);
+  match o {
+    n: Named { return await n.size(); }
+    None { return 0; }
+  }
+  return 1;
+}
+fn viaViewLocal() -> int {
+  n = Named("ab", 3);
+  v: view = n;
+  return await v.size();
+}
+fn notOwned(h: shared mut Holder) -> int {
+  v: view = h.nm;
+  return await v.size();
+}
+fn notOwnedArm(h: shared mut Holder) -> int {
+  match h.on {
+    n: Named { return await n.size(); }
+    None { return 0; }
+  }
+  return 1;
+}
+fn main() -> int { return viaMatch() + viaViewLocal(); }
+)");
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  expectErrors(r, {":21:16: error: 'v' is reached through 'shared mut' "
+                   "reference 'h' and is not Copyable; it cannot be lent to "
+                   "an awaited call",
+                   ":25:29: error: 'n' is reached through 'shared mut' "
+                   "reference 'h' and is not Copyable"});
+  expectCleanLines(r, {":9:", ":17:"});
+}
+
 // -- The send check
 
 // At an async call's arguments: a unique reference (a `Str` too) read from
