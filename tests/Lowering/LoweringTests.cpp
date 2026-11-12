@@ -1192,7 +1192,9 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
 // on keeps the rule without the types (docs/pir.md §7).  A read a call that
 // may let go of references does not hold is read by a `stable` load; one
 // in use at no such call (`self.s` across `setN`, which lets go of nothing)
-// is read as before.
+// is read as before.  A call handed an object for good (`move k`) may run
+// the `__deinit__` of a class derived from the object's, which no module
+// that may be imported knows: `byView`'s read is held (#378).
 TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
   auto l = lower(R"(
     class Box<T: Copyable> { v: T; view fn at(k: int) -> T { return self.v; } }
@@ -1306,7 +1308,7 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
            Case{"H.comparedB", ", H.b", "PaykanTuple_equals(", false, true},
            Case{"S.receiver", "ptr.load box", "call @B.setS(", false, true},
            Case{"byInout", "ptr.load box", "call @B.setS(", false, true},
-           Case{"byView", ", H.b", "call @B.note(", false, true},
+           Case{"byView", ", H.b", "call @B.note(", true, false},
            Case{"bySlice", "ptr.load box", "call @B.setS(", false, true},
            Case{"byLocal", ", H.b", "call @B.setS(", true, false},
        }) {
@@ -1314,6 +1316,72 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
     EXPECT_EQ(heldAcross(f, defined(f, c.Read), c.Call), c.Held) << c.Fn << "\n"
                                                                  << f;
     EXPECT_EQ(stableLoad(f, c.Read), c.Stable) << c.Fn << "\n" << f;
+  }
+}
+
+// An object that dies runs its `__deinit__`, the program's code: one that
+// stores through a `weak` reference replaces a slot the object does not
+// hold.  So a read is held across a call that is handed such an object for
+// good, one that makes it (its temporary dies in the expression) and one
+// that hands it back; not across a call that only borrows it, nor one that
+// is handed an object whose class declares none, in a program's main
+// module, where every class derived from it is known (#378).
+TEST(Lowering, AReadIsHeldAcrossACallThatMayRunADeinit) {
+  auto l = lower(R"(
+    class Label { text: Str; }
+    class Board { top: Label; }
+    class Bomb {
+      w: weak mut Board?;
+      n: int;
+      fn __deinit__() {
+        match self.w {
+          b: Board { b.top = Label("new"); }
+          None { }
+        }
+      }
+    }
+    class Dud { w: weak mut Board?; n: int; }
+    fn show(l: view Label, n: int) -> int { return n + l.text.len(); }
+    fn boom(x: Bomb) -> int { return x.n; }
+    fn peek(x: view Bomb) -> int { return x.n; }
+    fn dud(x: Dud) -> int { return x.n; }
+    fn mk(b: shared mut Board) -> Bomb { return Bomb(b, 7); }
+    fn moved(board: shared mut Board, bomb: Bomb) -> int {
+      return show(board.top, boom(move bomb));
+    }
+    fn made(board: shared mut Board) -> int {
+      return show(board.top, Bomb(board, 3).n);
+    }
+    fn handedBack(board: shared mut Board) -> int {
+      return show(board.top, mk(board).n);
+    }
+    fn lent(board: shared mut Board, bomb: view Bomb) -> int {
+      return show(board.top, peek(bomb));
+    }
+    fn none(board: shared mut Board, d: Dud) -> int {
+      return show(board.top, dud(move d));
+    }
+    fn main() -> int { return 0; }
+  )",
+                 "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  struct Case {
+    const char *Fn, *Call;
+    bool Held;
+  };
+  for (const Case &c :
+       {Case{"moved", "call @boom(", true}, Case{"made", "call @Bomb(", true},
+        Case{"handedBack", "call @mk(", true},
+        Case{"lent", "call @peek(", false},
+        Case{"none", "call @dud(", false}}) {
+    std::string f = function(l.Text, c.Fn);
+    // Its own reference, taken before the call (`show` is handed it).
+    const std::string read = defined(f, ", Board.top");
+    ASSERT_FALSE(read.empty()) << c.Fn << "\n" << f;
+    const size_t retain = findRetain(f, read);
+    EXPECT_EQ(retain != std::string::npos && retain < f.find(c.Call), c.Held)
+        << c.Fn << "\n"
+        << f;
   }
 }
 
