@@ -1886,6 +1886,36 @@ std::string Sema::deinitOfObject(const ast::ClassType *ct) const {
   // is not known here: docs/language/16-memory.md, "Fields and elements".)
   if (!Unit)
     return "";
+  // An instance of a generic class is one of its superclass's objects too,
+  // whichever instances the program makes.
+  for (const ast::ClassDecl *cd : Unit->getGenericClassDecls()) {
+    const ast::ClassType *with = nullptr;
+    bool derives = false;
+    for (const ast::ClassType *c =
+             cd->hasSuperClass() ? Ctx.lookupClassType(cd->getSuperClassName())
+                                 : nullptr;
+         c && !derives; c = c->getSuperClass()) {
+      derives = c == ct;
+      if (!derives && c->getDeinitMethod() && !with)
+        with = c;
+    }
+    if (!derives)
+      continue;
+    auto declares = [](const std::vector<ast::FuncDecl *> &methods) {
+      return std::any_of(methods.begin(), methods.end(),
+                         [](const ast::FuncDecl *fn) {
+                           return fn->getName() == names::kMethodDeinit;
+                         });
+    };
+    bool own = declares(cd->getMethods());
+    if (auto impls = TemplateImpls.find(cd); impls != TemplateImpls.end())
+      for (const ast::ImplDecl *im : impls->second)
+        own = own || declares(im->getMethods());
+    if (own || with)
+      return "a '" + ct->getName() + "' may be a '" + cd->getName() +
+             "', which runs the '__deinit__' of '" +
+             (own ? cd->getName() : with->getName()) + "'";
+  }
   for (const ast::ClassDecl *cd : Unit->getClassDecls()) {
     const ast::ClassType *d = Ctx.lookupClassType(cd->getName());
     const ast::ClassType *with = nullptr;

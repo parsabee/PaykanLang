@@ -2036,6 +2036,31 @@ fn main() -> int { return 0; }
                                                            << r.Diagnostics;
 }
 
+// An instance of a generic class is an object of its superclass too,
+// whichever instances the program makes: a `__deinit__` in the generic
+// class, or between it and the class named, keeps the fields as well.
+TEST(Deinit, NoFieldLeavesAnObjectAGenericSubclassMayBe) {
+  auto r = semaCheck(R"(class Base { name: Str; }
+class Sub<T> : Base { v: T; }
+impl Sub<T> { fn __deinit__() { } }
+class Other { name: Str; }
+class Quiet<T> : Other { v: T; }
+fn base(c: Base) -> Str { return move c.name; }
+fn other(c: Other) -> Str { return move c.name; }
+fn main() -> int {
+  let b: Base = Sub<int>("base", 1);
+  return 0;
+}
+)");
+  EXPECT_NE(r.Diagnostics.find(
+                ":6:34: error: cannot move 'c.name' out of 'c': a 'Base' may "
+                "be a 'Sub', which runs the '__deinit__' of 'Sub', which runs "
+                "on the whole object"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(".pkn:7:"), std::string::npos) << r.Diagnostics;
+}
+
 // Destroying an object runs its `__deinit__`.  An object dies in the code
 // that made it or in what that code hands it to, so making one is a call
 // of its `__deinit__`s in the par-safe check; and so is taking `inout` the
