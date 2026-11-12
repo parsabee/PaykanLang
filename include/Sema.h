@@ -586,6 +586,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// an owned variable leaves its slot, and the variable ends.  The field's
   /// type, or nullptr after an error.
   ast::Type *checkPartialMove(ast::UnaryExpr *node, ast::MemberAccessExpr *ma);
+  /// Why no field leaves an object of @p ct by `move` (#378): a
+  /// `__deinit__` that may run on the object, which is its class's, a
+  /// superclass's, or one of a class this module derives from it, and reads
+  /// the whole object.  Empty when none is known.
+  std::string deinitOfObject(const ast::ClassType *ct) const;
   /// The loop depth each variable was declared at, by varKey.
   std::unordered_map<std::string, unsigned> DeclLoopDepth;
   /// Set while an expression that is an `atomic` variable's handle (not
@@ -639,6 +644,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// and for `--emit-pkm`.  Without it, a module with a `main` is a program
   /// and knows every class derived from its own.
   bool OpenWorld = false;
+  /// The unit being checked (visitTranslationUnit).
+  const ast::TranslationUnit *Unit = nullptr;
   /// Whether @p owner, the scope a name is bound in, is outside the
   /// innermost `parallel for`.
   bool isOuterScope(Scope *owner) const;

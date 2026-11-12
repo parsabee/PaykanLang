@@ -28,7 +28,9 @@ samples/concurrency/README.md.
   built-in trait `Deinitializable`, whose name is reserved like the other built-in traits'.
   It needs no vtable slot (the generated `destroy` runs it), so no layout changes. Making an
   object counts as a call of its `__deinit__` in the par-safe check of a `parallel for` body,
-  and so does taking a `locked mut` cell's contents `inout`.
+  and so does taking a `locked mut` cell's contents `inout`. No field leaves by `move` an
+  object that runs one (`cannot move 'c.name' out of 'c': a 'C' has a '__deinit__', which runs
+  on the whole object`): its class's, a superclass's, or one of a class the module derives.
 - The built-in trait `Sendable` (#378; docs/language/06-traits.md, "Sendable"): the types whose
   ownership can move to another thread, which is what the send check finds. It has no methods and
   no `impl` block gives it. `T: Sendable` bounds a template that sends its value, makes it `atomic

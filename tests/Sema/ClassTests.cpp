@@ -1993,6 +1993,49 @@ fn main() -> int {
       << name.Diagnostics;
 }
 
+// A `__deinit__` runs on the whole object: no field leaves by `move` an
+// object that may run one, its class's, a superclass's or one of a class
+// the module derives from it.  (A class another module derives is not
+// known here.)
+TEST(Deinit, NoFieldLeavesAnObjectThatRunsOne) {
+  auto r = semaCheck(R"(import ::memory as mem;
+class Own { name: Str; fn __deinit__() { } }
+class Base { name: Str; }
+class Mid : Base { n: int; }
+class Leaf : Mid { fn __deinit__() { } }
+class Top { name: Str; fn __deinit__() { } }
+class Under : Top { n: int; }
+class Plain { name: Str; }
+class Holder { o: Own; p: Plain; }
+fn own(c: Own) -> Str { return move c.name; }
+fn base(c: Base) -> Str { return move c.name; }
+fn mid(c: Mid) -> Str { return move c.name; }
+fn under(c: Under) -> Str { return move c.name; }
+fn plain(c: Plain) -> Str { return move c.name; }
+fn held(h: Holder) -> Str { return move h.o.name; }
+fn holder(h: Holder) -> Plain { return move h.p; }
+fn swapped(c: mut Own) -> Str { return mem::replace(c.name, ""); }
+fn main() -> int { return 0; }
+)");
+  for (const char *want :
+       {":10:32: error: cannot move 'c.name' out of 'c': a 'Own' has a "
+        "'__deinit__', which runs on the whole object; write "
+        "'mem::replace(c.name, v)'",
+        ":11:34: error: cannot move 'c.name' out of 'c': a 'Base' may be a "
+        "'Leaf', which runs the '__deinit__' of 'Leaf'",
+        ":12:32: error: cannot move 'c.name' out of 'c': a 'Mid' may be a "
+        "'Leaf', which runs the '__deinit__' of 'Leaf'",
+        ":13:36: error: cannot move 'c.name' out of 'c': a 'Under' runs the "
+        "'__deinit__' of 'Top'",
+        ":15:36: error: cannot move 'h.o.name' out of 'h.o': a 'Own' has a "
+        "'__deinit__'"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  for (const char *line : {".pkn:14:", ".pkn:16:", ".pkn:17:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
 // Destroying an object runs its `__deinit__`.  An object dies in the code
 // that made it or in what that code hands it to, so making one is a call
 // of its `__deinit__`s in the par-safe check; and so is taking `inout` the
