@@ -1171,6 +1171,12 @@ program stops (`an object was kept by its '__deinit__'`). `await` is an error th
 destroyed where its last reference goes, which waits for no task`), and so is a call by name
 (`'__deinit__' cannot be called directly; it runs when the object is destroyed`).
 
+A `__deinit__` sees the whole object, so no field leaves by `move` an object that runs one:
+`let n = move c.name;` on an owned `c` is `cannot move 'c.name' out of 'c': a 'C' has a
+'__deinit__', which runs on the whole object; write 'mem::replace(c.name, v)'`, and so it is
+when a superclass has one or a class the module derives from `C` does
+([Memory](16-memory.md#ownership-transfers)).
+
 Every class implements the built-in trait `Deinitializable`
 ([Traits](06-traits.md#deinitializable)). A struct or an enum has no `__deinit__` in this
 version.
@@ -1395,6 +1401,7 @@ created for that argument list. See [Generics](13-generics.md).
 | `__init__` with a result type | `fn __init__() -> Str`: `'__init__' cannot have a result type: it sets up 'self' and returns nothing` |
 | `__deinit__` declared otherwise | One with a parameter, a result type, no body, or declared `static`, `view`, `shared` or `async`; one in a struct's `impl` block; a trait's requirement (`a trait cannot require '__deinit__'`): `'__deinit__' takes no parameters ('fn __deinit__() { ... }' runs when the object is destroyed)` (see [Deinitializers](#deinitializers)) |
 | `__deinit__` called or waiting | `x.__deinit__()`: `'__deinit__' cannot be called directly; it runs when the object is destroyed`; an `await` in its body |
+| A field moved out of an object that runs a `__deinit__` | `move c.name` where `c`'s class, a superclass, or a class the module derives from it declares one: `cannot move 'c.name' out of 'c': a 'C' has a '__deinit__', which runs on the whole object; write 'mem::replace(c.name, v)'` |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |
 | `__super__(…)` missing | A derived `__init__` whose base has one (other than the default one of a class with no fields) does not begin with `__super__(…)`: `'__init__' in class 'Dog' must call '__super__' as its first statement because its superclass 'Animal' has an '__init__'` |
 | `__super__(…)` twice or not first | A `__super__(…)` call that is not the first statement of `__init__`: a second one, after the first or under an `if` or a loop, or one after another statement: `'__super__' may be called only once, as the first statement of '__init__'`, at the call |

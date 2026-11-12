@@ -600,6 +600,15 @@ a a
 s ss
 ```
 
+`move n.name` in `keep` takes a field out of a variable the function owns, which ends the
+variable. An object that runs a `__deinit__` ([Classes](05-classes.md#deinitializers)) gives
+up no field this way, since its `__deinit__` runs on the whole object: `cannot move 'c.name'
+out of 'c': a 'C' has a '__deinit__', which runs on the whole object; write
+'mem::replace(c.name, v)'`. That is so when the object's class declares one, when a
+superclass does, and when a class the module derives from it does (the object may be one of
+those). A class that another module derives is not known where the field is moved, so its
+`__deinit__` is not to read a field that the module of its superclass moves out.
+
 ### `return` moves
 
 A `return` is always the last use of what it returns, so `return n` of a local variable or a
