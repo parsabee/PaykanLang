@@ -1921,7 +1921,7 @@ fn main() -> int {
   return 0;
 }
 )");
-  EXPECT_EQ(r.ErrorCount, 16u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 15u) << r.Diagnostics;
   for (const char *want :
        {":8:5: error: cannot copy 'self' (a unique 'mut Node'); a method "
         "borrows its receiver",
@@ -1941,8 +1941,6 @@ fn main() -> int {
         ":26:45: error: 'await' cannot be used in '__deinit__': an object is "
         "destroyed where its last reference goes, which waits for no task",
         ":27:39: error: duplicate method '__deinit__' in class 'F'",
-        ":32:10: error: '__deinit__' is a class's in this version: a struct "
-        "has none yet",
         ":34:17: error: '__deinit__' is a plain 'fn', not a 'static', 'view' "
         "or 'shared' one",
         ":35:14: error: a trait cannot require '__deinit__'",
@@ -1982,7 +1980,7 @@ fn main() -> int {
   EXPECT_NE(block.Diagnostics.find(
                 ":2:1: error: 'Deinitializable' is built in: every class is "
                 "Deinitializable, by the '__deinit__' it declares or by none, "
-                "and it cannot be implemented"),
+                "and a struct that declares one; it cannot be implemented"),
             std::string::npos)
       << block.Diagnostics;
   auto name = semaCheck("class Deinitializable { n: int; }\n"
@@ -2061,6 +2059,399 @@ fn main() -> int {
   EXPECT_EQ(r.Diagnostics.find(".pkn:7:"), std::string::npos) << r.Diagnostics;
 }
 
+// A struct's `__deinit__` makes it one value wherever its bytes go: it is
+// move-only (not Copyable, with no built-in clone), no field moves out of
+// it, and its `self` is not kept.  It is Deinitializable; a struct that
+// only holds one is not, and is move-only for it.
+TEST(Deinit, AStructWithOneIsOneValue) {
+  auto r = semaCheck(R"(struct Guard { id: int; name: Str; }
+impl Guard {
+  fn __deinit__() {
+    let me = self;
+    let n = move self.name;
+    keep(self);
+    self.id = 0;
+  }
+}
+struct Bad { n: int; }
+impl Bad { fn __deinit__() { let x = await tick(); } }
+struct Two { n: int; }
+impl Two { fn __deinit__() { } fn __deinit__() { } }
+struct St { n: int; }
+impl St { static fn __deinit__() { } }
+struct P { g: Guard; n: int; }
+struct Res { id: int; }
+impl Res { fn __deinit__() { } }
+impl Cloneable for Res { view fn clone() -> Self { return Res(self.id); } }
+fn keep(g: Guard) -> int { return g.id; }
+async fn tick() -> int { return 1; }
+fn need<T: Deinitializable>(x: view T) -> int { return 1; }
+fn copies<T: Copyable>(x: view T) -> int { return 1; }
+fn uses() -> int {
+  let g = Guard(1, "a");
+  let h = g;
+  let c = g.clone();
+  let f = fn() -> int { return g.id; };
+  let n = move g.name;
+  g.__deinit__();
+  return 0;
+}
+fn parts() -> int {
+  let p = P(Guard(2, "b"), 0);
+  let q = p;
+  let m = move p.g;
+  return 0;
+}
+fn bounds() -> int {
+  let g = Guard(3, "c");
+  let p = P(Guard(4, "d"), 0);
+  let r = Res(5);
+  let k = r.clone();
+  return need(g) + need(r) + need(p) + copies(g) + copies(p);
+}
+fn main() -> int { return 0; }
+)");
+  for (const char *want :
+       {":4:5: error: cannot copy 'self' (a 'Guard')",
+        ":5:13: error: cannot move 'self.name': 'move' takes a variable, or "
+        "a field of one it owns",
+        ":6:10: error: cannot copy 'self' (a 'Guard')",
+        ":11:38: error: 'await' cannot be used in '__deinit__': a value is "
+        "destroyed where its storage ends, which waits for no task",
+        ":13:32: error: struct 'Two' already has a method '__deinit__'",
+        ":15:18: error: '__deinit__' is a plain 'fn', not a 'static', 'view' "
+        "or 'shared' one ('fn __deinit__() { ... }' runs when the value is "
+        "destroyed)",
+        ":26:3: error: cannot copy 'g' (a 'Guard'); write 'move g' to "
+        "transfer it",
+        ":27:11: error: 'Guard' is not Cloneable: a struct with a "
+        "'__deinit__' is Cloneable only with an 'impl Cloneable for Guard' "
+        "block",
+        ":28:32: error: cannot capture 'g'",
+        ":29:11: error: cannot move 'g.name' out of 'g': a 'Guard' has a "
+        "'__deinit__', which runs on the whole value; write "
+        "'mem::replace(g.name, v)'",
+        ":30:3: error: '__deinit__' cannot be called directly; it runs when "
+        "the value is destroyed",
+        ":35:3: error: cannot copy 'p': 'P' holds unique field 'g' "
+        "('Guard'); write 'move p' to transfer it",
+        ":44:30: error: 'P' does not implement trait 'Deinitializable', "
+        "which 'need' requires of 'T'",
+        ":44:40: error: 'Guard' does not implement trait 'Copyable', which "
+        "'copies' requires of 'T': a struct with a '__deinit__' is "
+        "move-only",
+        ":44:52: error: 'P' does not implement trait 'Copyable', which "
+        "'copies' requires of 'T': it holds move-only field 'g' ('Guard')"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // A field moves out of a struct that only holds one, as any does.
+  for (const char *line : {".pkn:7:", ".pkn:36:", ".pkn:43:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// A struct with a `__deinit__` is one value whatever it holds: the copy
+// rule does not ask whether its fields are references.  And every instance
+// of a generic type is destroyed the same way.
+TEST(Deinit, AStructOfPlainFieldsIsOneValueToo) {
+  auto r = semaCheck(R"(struct Guard { id: int; }
+impl Guard {
+  fn __deinit__() { }
+  fn give() -> Guard { return self; }
+}
+struct Pair { g: Guard; n: int; }
+enum Slot { Full(g: Guard), Empty }
+struct Cond<T> { v: T; }
+impl Cond<T: Showable> { fn __deinit__() { } }
+class Late<T> { v: T; }
+impl Late<T: Copyable> { fn __deinit__() { } }
+fn eat(g: Guard) -> int { return g.id; }
+fn look(g: view Guard) -> int { return g.id; }
+fn uses() -> int {
+  let a = Guard(1);
+  let b = a;
+  let p = Pair(Guard(2), 0);
+  let q = p;
+  let t = (Guard(3), 1);
+  let u = t;
+  let xs = [Guard(4), Guard(5)];
+  let y = xs[0];
+  let s = Slot::Full(Guard(6));
+  let r = s;
+  let o: Guard? = Guard(7);
+  let n = o;
+  let f = fn() -> int { return a.id; };
+  return look(a) + eat(t.0) + look(xs[1]);
+}
+fn moves() -> int {
+  let a = Guard(1);
+  let b = move a;
+  let c = b;
+  let s = Slot::Full(Guard(6));
+  let r = move s;
+  return eat(move c) + look(a);
+}
+fn main() -> int { return 0; }
+)");
+  for (const char *want :
+       {":9:26: error: '__deinit__' cannot be in a conditional 'impl' block: "
+        "every 'Cond<T>' is destroyed the same way; declare it in 'impl "
+        "Cond<T>'",
+        ":11:26: error: '__deinit__' cannot be in a conditional 'impl' "
+        "block: every 'Late<T>' is destroyed the same way; declare it in "
+        "'impl Late<T>'",
+        ":4:24: error: cannot copy 'self' (a 'Guard'); a method borrows its "
+        "receiver",
+        ":16:3: error: cannot copy 'a' (a 'Guard'); write 'move a' to "
+        "transfer it",
+        ":18:3: error: cannot copy 'p': 'Pair' holds unique field 'g' "
+        "('Guard'); write 'move p' to transfer it",
+        ":20:3: error: cannot copy 't': '(Guard, int)' holds unique element "
+        "'.0' ('Guard'); write 'move t' to transfer it",
+        ":22:3: error: cannot copy 'xs[0]' (a 'Guard'); an element leaves "
+        "its array by 'mem::replace' or 'mem::take'",
+        ":24:3: error: cannot copy 's': 'Slot' holds unique field 'g' "
+        "('Guard'); write 'move s' to transfer it",
+        ":26:3: error: cannot copy 'o' (a 'Guard?'); write 'move o' to "
+        "transfer it",
+        ":27:32: error: cannot capture 'a' (a unique 'Guard'): a function "
+        "captures by copy",
+        ":28:24: error: cannot copy 't.0' (a 'Guard'); a field leaves by "
+        "'mem::replace' or 'mem::take'",
+        ":33:3: error: cannot copy 'b' (a 'Guard'); write 'move b' to "
+        "transfer it",
+        ":36:29: error: 'a' was moved at 32:11; it cannot be used after the "
+        "move"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // A move, a `view` and an element lent to one are no copies.
+  for (const char *line :
+       {".pkn:32:", ".pkn:35:", ".pkn:28:10:", ".pkn:28:32:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// What a `parallel for` body writes of the enclosing function was made
+// anywhere: an assignment over it, or what it is handed to `inout`, may
+// destroy it, so its `__deinit__` is the body's to be par-safe for.
+TEST(Deinit, AParallelBodyDestroysWhatItWritesOver) {
+  auto r = semaCheck(R"pkn(import ::io;
+import ::memory as mem;
+struct Loud { id: int; }
+impl Loud { fn __deinit__() { io::println("gone " + Str(self.id)); } }
+struct Calm { id: int; }
+impl Calm { fn __deinit__() { self.id = 0; } }
+fn clear(o: inout Loud?) { o = None; }
+fn main() -> int {
+  xs: Loud?[8] = [None; 8];
+  ys: Calm?[8] = [None; 8];
+  parallel for i in 0..8 { xs[i] = None; }
+  parallel for i in 0..8 { let old = mem::take(xs[i]); }
+  parallel for i in 0..8 { clear(xs[i]); }
+  parallel for i in 0..8 { ys[i] = None; }
+  parallel for i in 0..8 { let old = mem::take(ys[i]); }
+  return 0;
+}
+)pkn");
+  for (const char *want :
+       {":11:28: error: a 'parallel for' body cannot destroy a 'Loud': it "
+        "runs 'Loud.__deinit__', which calls '::io::println<Str>'",
+        ":12:48: error: a 'parallel for' body cannot destroy a 'Loud'",
+        ":13:34: error: a 'parallel for' body cannot destroy a 'Loud'"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // A `__deinit__` that is par-safe is the body's to run.
+  for (const char *line : {".pkn:14:", ".pkn:15:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// What a method of a struct with a `__deinit__` is called on stays the
+// value it is: `self` is not lent `inout` whole, to a parameter or a local,
+// which could put another value there (in `__deinit__`, the one being
+// destroyed would be handed on, and the new one never destroyed).
+TEST(Deinit, SelfStaysTheValueItIs) {
+  auto r = semaCheck(R"pkn(import ::memory as mem;
+struct Lock { name: Str; n: int; }
+fn bump(l: inout Lock) { l.n = l.n + 1; }
+fn rename(s: inout Str) { s = "x"; }
+impl Lock {
+  fn __deinit__() {
+    rename(self.name);
+    let old = mem::replace(self, Lock("b", 1));
+    x: inout = self;
+  }
+  fn helper() { bump(self); }
+  fn fields() { rename(self.name); }
+}
+struct Plain { n: int; }
+impl Plain { fn swapWith(other: inout Plain) { mem::swap(self, other); } }
+fn main() -> int { return 0; }
+)pkn");
+  for (const char *want :
+       {":8:28: error: 'self' cannot be passed to 'inout' parameter 'slot': "
+        "a 'Lock' has a '__deinit__', and what a method is called on stays "
+        "the value it is (lend its fields)",
+        ":9:5: error: 'self' cannot be bound 'inout': a 'Lock' has a "
+        "'__deinit__'",
+        ":11:22: error: 'self' cannot be passed to 'inout' parameter 'l'"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // Its fields are lent, and a struct without one swaps as it did.
+  for (const char *line : {".pkn:7:", ".pkn:12:", ".pkn:15:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// A `match` binding of a value that runs a `__deinit__` looks at the value
+// where it is, and nothing counts a value: what it reads is not assigned,
+// written or lent `inout` until its arm ends.  Another field of the object
+// is, and so is the subject in an arm that binds nothing or owns its value.
+TEST(Deinit, WhatAMatchBindingReadsIsNotReplaced) {
+  auto r = semaCheck(R"pkn(import ::memory as mem;
+struct Lock { name: Str; }
+impl Lock { fn __deinit__() { } }
+class Desk { o: Lock?; n: int; }
+enum Slot { Empty, Full(l: Lock, n: int) }
+fn clear(o: inout Lock?) { o = None; }
+fn main() -> int {
+  o: Lock? = Lock("a");
+  match o {
+    l: Lock { o = None; }
+    None { }
+  }
+  match o {
+    l: Lock { clear(o); }
+    None { }
+  }
+  let d: mut = Desk(Lock("b"), 0);
+  match d.o {
+    l: Lock { d.o = None; }
+    None { }
+  }
+  match d.o {
+    l: Lock { d.n = 2; }
+    None { d.o = Lock("e"); }
+  }
+  s = Slot::Full(Lock("c"), 1);
+  match s {
+    f: Full { s = Slot::Empty; }
+    Empty { }
+  }
+  match o {
+    l: Lock { d.n = 1; }
+    None { o = Lock("d"); }
+  }
+  match move o {
+    l: Lock { o = None; }
+    None { }
+  }
+  return 0;
+}
+)pkn");
+  for (const char *want :
+       {":10:15: error: 'o' cannot be assigned here: 'match' binding 'l' "
+        "reads a value of it that runs a '__deinit__' where it is replaced, "
+        "until its arm ends",
+        ":14:21: error: 'o' cannot be passed 'inout' here: 'match' binding "
+        "'l'",
+        ":19:15: error: 'd.o' cannot be written here: 'match' binding 'l'",
+        ":28:15: error: 's' cannot be assigned here: 'match' binding 'f'"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  for (const char *line :
+       {".pkn:23:", ".pkn:24:", ".pkn:32:", ".pkn:33:", ".pkn:36:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// The ways round the rules above that go through a holder or a temporary:
+// a method that changes the object holding what a binding reads, a subject
+// that is in what a call lent, `self` returned `inout`, a `view` of a part
+// of a temporary, a conditional subject's branch reading a temporary it
+// does not leave, and a part leaving a temporary object that runs a
+// `__deinit__` of its own.  A write of another field is none of them.
+TEST(Deinit, HoldersAndTemporariesKeepTheRules) {
+  auto r = semaCheck(R"pkn(import ::io;
+import ::memory as mem;
+struct Lock { name: Str; }
+impl Lock {
+  fn __deinit__() { }
+  fn me() -> inout Lock { return self; }
+}
+struct H { o: Lock?; n: int; }
+class Session { held: Lock?; n: int; }
+impl Session { fn release() { self.held = None; } }
+class Pool { s: Session; }
+impl Pool { fn reset() { self.s = Session(None, 0); } }
+class Loud { g: Lock; fn __deinit__() { } }
+fn pin(s: inout Session) -> inout Session { return s; }
+fn mkh(s: Str) -> H { return H(Lock(move s), 0); }
+fn mks(s: Str) -> shared mut Session { return Session(Lock(move s), 0); }
+fn mkl(s: Str) -> Loud { return Loud(Lock(move s)); }
+fn main() -> int {
+  s: mut = Session(Lock("a"), 0);
+  match s.held { l: Lock { s.release(); } None { } }
+  p: mut = Pool(Session(Lock("b"), 0));
+  match p.s.held { l: Lock { p.reset(); } None { } }
+  match pin(s).held { l: Lock { s.held = None; } None { } }
+  v: view = mkh("d").o;
+  let c = True;
+  match (if c then mks("e").held else mks("f").held) { l: Lock { } None { } }
+  let g = mkl("g").g;
+  h = H(Lock("h"), 0);
+  match h.o { l: Lock { h.n = 5; } None { } }
+  match s.held { l: Lock { s.n = 5; } None { } }
+  return 0;
+}
+)pkn");
+  for (const char *want :
+       {":6:34: error: 'self' cannot be returned 'inout': a 'Lock' has a "
+        "'__deinit__', and what a method is called on stays the value it is",
+        ":20:28: error: 's' cannot be changed by 'release' here: 'match' "
+        "binding 'l' reads a value of it that runs a '__deinit__' where it "
+        "is replaced, until its arm ends",
+        ":22:30: error: 'p' cannot be changed by 'reset' here: 'match' "
+        "binding 'l'",
+        ":23:33: error: 's.held' cannot be written here: 'match' binding 'l'",
+        ":24:3: error: 'v' cannot be a 'view' of 'mkh(...).o': it is a part "
+        "of a temporary, which is destroyed with the statement, and a "
+        "'Lock?' runs a '__deinit__' there; bind the value itself ('let v = "
+        "...')",
+        ":26:20: error: a branch of a 'match' subject cannot read "
+        "'mks(...).held': it is in a temporary, which is destroyed before "
+        "the arms run, and a 'Lock?' runs a '__deinit__' there; bind the "
+        "temporary to a variable first",
+        ":27:11: error: cannot move 'mkl(...).g' out of 'mkl(...)': a 'Loud' "
+        "has a '__deinit__', which runs on the whole object"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  for (const char *line : {".pkn:29:", ".pkn:30:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// Writing a plain field of an element destroys nothing, whatever else the
+// element holds.
+TEST(Deinit, AParallelBodyWritingAPlainFieldDestroysNothing) {
+  auto r = semaCheck(R"pkn(import ::io;
+struct Loud { id: int; }
+impl Loud { fn __deinit__() { io::println("gone " + Str(self.id)); } }
+struct Pair { o: Loud?; n: int; }
+fn main() -> int {
+  ps: Pair[8] = [Pair(None, 0); 8];
+  parallel for i in 0..8 { ps[i].n = i; }
+  parallel for i in 0..8 { ps[i].o = None; }
+  return 0;
+}
+)pkn");
+  EXPECT_EQ(r.Diagnostics.find(".pkn:7:"), std::string::npos) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(":8:28: error: a 'parallel for' body cannot "
+                               "destroy a 'Loud'"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // Destroying an object runs its `__deinit__`.  An object dies in the code
 // that made it or in what that code hands it to, so making one is a call
 // of its `__deinit__`s in the par-safe check; and so is taking `inout` the
@@ -2073,6 +2464,10 @@ class Holder { l: Loud; }
 class Base { n: int; }
 class Noisy : Base { fn __deinit__() { shout(1); } }
 class Slot { l: Loud?; b: Base; }
+struct Guard { n: int; }
+impl Guard { fn __deinit__() { shout(self.n); } }
+struct Calm { n: int; }
+impl Calm { fn __deinit__() { self.n = 0; } }
 fn mk(i: int) -> Base { return Base(i); }
 fn quiet(i: int) -> int { let q = Quiet(i); return q.n; }
 fn loud(i: int) -> int { let l = Loud(i); return l.n; }
@@ -2089,24 +2484,28 @@ fn main() -> int {
   parallel for i in 0..4 { s: mut = Slot(None, Base(i)); clear(s); }
   parallel for i in 0..4 { lock cell as c: inout { c.b = Base(i); } }
   parallel for i in 0..4 { lock cell as c: view { total += c.b.n; } }
+  parallel for i in 0..4 { let g = Guard(i); total += g.n; }
+  parallel for i in 0..4 { let c = Calm(i); total += c.n; }
   return 0;
 }
 )");
   for (const char *want :
-       {":17:36: error: a 'parallel for' body cannot destroy a 'Loud': it "
+       {":21:36: error: a 'parallel for' body cannot destroy a 'Loud': it "
         "runs 'Loud.__deinit__', which calls 'shout', which is a native "
         "function outside the par-safe list",
-        ":18:37: error: a 'parallel for' body cannot call 'loud', which calls "
+        ":22:37: error: a 'parallel for' body cannot call 'loud', which calls "
         "'Loud.__deinit__'",
-        ":19:37: error: a 'parallel for' body cannot call 'held', which calls "
+        ":23:37: error: a 'parallel for' body cannot call 'held', which calls "
         "'Loud.__deinit__'",
-        ":22:28: error: a 'parallel for' body cannot destroy a 'Noisy': it "
-        "runs 'Noisy.__deinit__'"})
+        ":26:28: error: a 'parallel for' body cannot destroy a 'Noisy': it "
+        "runs 'Noisy.__deinit__'",
+        ":28:36: error: a 'parallel for' body cannot destroy a 'Guard': it "
+        "runs 'Guard.__deinit__', which calls 'shout'"})
     EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
                                                            << r.Diagnostics;
   // Nothing with a `__deinit__` that is not par-safe is made in the
   // others, and a `view` of a cell's contents destroys nothing.
-  for (int line : {16, 20, 21, 23}) {
+  for (int line : {20, 24, 25, 27, 29}) {
     const std::string at = ".pkn:" + std::to_string(line) + ":";
     for (size_t pos = r.Diagnostics.find(at); pos != std::string::npos;
          pos = r.Diagnostics.find(at, pos + 1)) {

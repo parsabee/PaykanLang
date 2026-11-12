@@ -1136,7 +1136,7 @@ effect does not depend on that order. A function is par-safe unless it, or anyth
 - starts a task;
 - calls a function value, whether held in a variable, a field or an array;
 - makes a virtual call the compiler cannot resolve;
-- destroys an object whose `__deinit__` does one of these.
+- destroys an object or a value whose `__deinit__` does one of these.
 
 The compiler follows the calls itself, through recursion and across modules:
 
@@ -1173,9 +1173,14 @@ Destroying an object runs its `__deinit__` ([Classes](05-classes.md#deinitialize
 is a call like any other. An object dies in the code that made it or in what that code hands
 it to, so making one counts as a call of its `__deinit__` and of its superclasses' (`a
 'parallel for' body cannot destroy a 'Loud': it runs 'Loud.__deinit__', which calls ...`).
-The one thing a body can destroy that it did not make is what a `locked mut` cell holds:
-taking the contents `inout` counts for every object they may hold, of the classes their
-types name and, as with a virtual call, of the classes derived from those.
+A body can also destroy what it did not make, where it can write it: what a `locked mut`
+cell holds, taken `inout`, and an element of an array of the enclosing function at the
+loop's variable, which it may assign over (`xs[i] = None`) or hand to an `inout` parameter
+(`mem::take(xs[i])`). Each counts for every object that may be there, of the classes the
+type names and, as with a virtual call, of the classes derived from those. A value of a
+struct with a `__deinit__`
+([Structs](11-structs.md#running-code-when-a-value-is-destroyed-__deinit__)) counts the
+same way: where it is made, and where a body can write one it did not make.
 
 ## `locked mut` cells and `lock` blocks
 

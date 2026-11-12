@@ -221,13 +221,14 @@ private:
       pir::LocalId Local;
       ast::Type *ASTType;
       bool Weak = false; // released with weak.release, not release
+      bool Mem = false;  // a value held in memory, released in place
     };
-    /// Owned variables declared in this scope, in declaration order (the
-    /// `weak` ones among them).
+    /// What this scope's exit lets go, in declaration order: its owned
+    /// variables (the `weak` ones among them) and its values held in
+    /// memory that hold a reference or run a `__deinit__`.  They go in the
+    /// reverse order, a value among the references as it was declared
+    /// among them, so what a `__deinit__` prints or frees is in one order.
     std::vector<VarMeta> DeclOrder;
-    /// Values held in memory, holding references, declared in this scope:
-    /// their references are released at its exit.
-    std::vector<VarMeta> MemVars;
     /// `inout` parameters declared in this scope: their local holds the
     /// address of the caller's storage, of this type.
     std::unordered_map<std::string, pir::Type> InoutVars;
@@ -236,6 +237,10 @@ private:
     std::unordered_set<std::string> StableVars;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
+    /// The temporaries a `match` subject was read from, kept until the
+    /// match ends (emitMemMatchSubject): a MemTemp's value, type and
+    /// length each.
+    std::vector<std::tuple<Val, ast::Type *, Val>> PendingMemTemps;
     /// What keeps each `inout` local's storage alive (holdObjects): a box's
     /// slot (null ASTType) or a value held in memory.
     std::unordered_map<std::string, std::vector<VarMeta>> ObjectHolds;
@@ -653,6 +658,8 @@ private:
   Val emitMoveOutCheck(ast::Expr *e, Val v);
   /// The expression the `return` being lowered returns.
   const ast::Expr *TailReturn = nullptr;
+  /// Whether @p e is TailReturn, or a branch of the conditional it is.
+  bool isTailReturnLeaf(const ast::Expr *e) const;
   /// Stop the program unless every object @p v (of type @p ty, moved out
   /// of @p place) holds uniquely has no other holder.
   void emitMovedValueCheck(const std::string &place, ast::Type *ty,
@@ -1305,9 +1312,19 @@ private:
   MemLayout memLayout(ast::Type *ty);
   /// The byte offset of element @p i of a value of the tuple type @p tt.
   int64_t tupleElementOffset(const ast::TupleType *tt, size_t i);
-  /// True when @p ty (isMemType) holds references, at any depth: each such
-  /// slot owns a reference to its box.
+  /// True when letting go of a value of @p ty (isMemType) does something:
+  /// it holds references, at any depth (each such slot owns a reference to
+  /// its box), or a struct whose `__deinit__` runs (#378).
   static bool memHoldsRefs(const ast::Type *ty);
+  /// Where, in a value of the struct @p st that declares a `__deinit__`, the
+  /// byte is that says the storage holds a value of it: after its fields.
+  int64_t deinitFlagOffset(const ast::StructType *st);
+  /// The value of type @p ty at @p src was moved out, bytes and all: a
+  /// struct with a `__deinit__` in it is in the storage it moved to, so the
+  /// storage it left runs none when it is let go.  Wherever a copy of a
+  /// value's bytes retains its references (emitMemRetain), this follows for
+  /// the storage copied from: such a struct is never copied, only moved.
+  void emitMemMovedOut(const Val &src, ast::Type *ty);
   /// A value held in memory: the address of its bytes, and whether they are
   /// a temporary (a call's result, a literal) whose references the consumer
   /// takes over.
@@ -1360,6 +1377,14 @@ private:
         : V(std::move(v)), Ty(ty), Len(std::move(len)) {}
   };
   std::vector<MemTemp> MemTemps;
+  /// Set while a `match` subject that is looked at is read (#378), to the
+  /// block the match is in: releaseMemTemps keeps the temporaries made in
+  /// that block, which the match's scope then releases at its exit.  (One
+  /// made in a block of the subject's own, a conditional's branch, is that
+  /// block's to release.)
+  const pir::Block *KeepMemTempsIn = nullptr;
+  /// Releases one temporary of MemTemps.
+  void releaseMemTemp(const Val &v, ast::Type *ty, const Val &len);
   /// Release what was added to MemTemps since its size was @p mark.
   void releaseMemTemps(size_t mark);
   // -- The builtin Cloneable (LoweringClone.cpp, #369)
@@ -1415,8 +1440,12 @@ private:
   /// Release the references of the value of type @p ty at @p addr, those of
   /// a tagged union's current variant only, by a `switch` on its tag: the
   /// other variants' fields are zeros, and a union all zeros (never set, or
-  /// whose references were handed on) releases null references.
-  void emitMemReleaseByTag(const Val &addr, ast::Type *ty);
+  /// whose references were handed on) releases null references.  A struct
+  /// with a `__deinit__` runs it first, when the storage holds a value of
+  /// it.  With @p movedOut nothing is let go: the same walk says the value
+  /// left (emitMemMovedOut).
+  void emitMemReleaseByTag(const Val &addr, ast::Type *ty,
+                           bool movedOut = false);
   /// Call @p fn with the box in each reference slot of the value of type
   /// @p ty at @p addr, and the type of the reference the slot holds, or
   /// null for one that may hold null even in a value that is set: an
@@ -1467,6 +1496,12 @@ private:
   /// Copy the value of @p value into the place at @p dst (an assignment:
   /// @p value may read @p dst).
   void emitMemAssign(const Val &dst, ast::Expr *value);
+  /// Lets go of the value of @p ty at @p dst, which the caller stores over
+  /// next.  One that runs a struct's `__deinit__` is moved to a slot of its
+  /// own instead, whose address is returned: the caller releases it once
+  /// the new value is in place (#378).  A null Val when it was released
+  /// where it is.
+  Val emitMemSetAside(const Val &dst, ast::Type *ty);
   /// A parameter @p name of a type held in memory, whose value @p arg is the
   /// address of the caller's value: copied for a by-value one, the address
   /// kept for a `view` or `inout` one.

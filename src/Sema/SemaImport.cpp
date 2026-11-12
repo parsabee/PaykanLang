@@ -549,6 +549,9 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
                             st->getElementType(i))});
     if (auto *init = st->findMethod(names::kMethodInit))
       si.Methods.push_back(methodInfo(init));
+    // Its `__deinit__` is its layout's too: a value has a byte more.
+    if (auto *deinit = st->getDeinitMethod())
+      si.Methods.push_back(methodInfo(deinit));
     for (auto *m : st->getImplMethods())
       si.Methods.push_back(methodInfo(m));
     info.ExportedStructs.push_back(std::move(si));

@@ -292,9 +292,17 @@ class Expr : public ASTNode {
   const std::string *MovedFrom = nullptr;
   bool MovedFromParam = false;
   const Expr *MovedInto = nullptr;
+  // Set by Sema on a part read out of a temporary into an owner (`let g =
+  // make().g;`, #378) when the part runs a struct's `__deinit__`: the part
+  // leaves the temporary, which ends with the statement, so the lowering
+  // moves it and the temporary lets go of it without its `__deinit__`.
+  bool LeavesTemporary = false;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
+
+  void setLeavesTemporary(bool v = true) { LeavesTemporary = v; }
+  bool leavesTemporary() const { return LeavesTemporary; }
 
   void setMovedFrom(const std::string *place, bool fromParam,
                     const Expr *into = nullptr) {
@@ -2534,6 +2542,10 @@ class StructType : public TupleType {
   // is called directly), and its `__init__`, kept apart like a class's.
   std::vector<MethodDecl *> ImplMethods;
   MethodDecl *InitMethod = nullptr;
+  // Its `__deinit__`, when it declares one (#378): it runs where a value of
+  // the struct is destroyed, and a value of it has one byte more, after
+  // its fields, that says whether it is one still (not moved out).
+  MethodDecl *DeinitMethod = nullptr;
   // The payload of an enum's variant (`E::V` for `V(x: int)`): its enum and
   // the variant's index.  It has no constructor: `E::V(1)` makes the enum.
   EnumType *VariantEnum = nullptr;
@@ -2594,6 +2606,8 @@ public:
     return ImplMethods;
   }
   MethodDecl *getInitMethod() const { return InitMethod; }
+  /// The `__deinit__` this struct declares, or null.
+  MethodDecl *getDeinitMethod() const { return DeinitMethod; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_StructType;
@@ -2873,6 +2887,35 @@ inline bool isCountedRef(const Type *ty) {
 inline bool isMemType(const Type *ty) {
   return ty && (isa<FixedArrayType>(ty) || isa<TupleType>(ty) ||
                 isFunctionValue(ty) || isMemOptional(ty) || isPayloadEnum(ty));
+}
+
+/// Whether a value of @p ty runs a struct's `__deinit__` when it is
+/// destroyed (#378): a struct that declares one, or a struct, tuple,
+/// fixed-size array, optional or tagged union that holds such a struct in
+/// place.  (An object runs its own, in its `destroy`.)
+inline bool holdsDeinit(const Type *ty) {
+  if (!ty)
+    return false;
+  if (const auto *qt = dyn_cast<QualifiedType>(ty))
+    return holdsDeinit(qt->getInnerType());
+  if (const auto *ot = dyn_cast<OptionalType>(ty))
+    return holdsDeinit(ot->getInnerType());
+  if (const auto *ft = dyn_cast<FixedArrayType>(ty))
+    return holdsDeinit(ft->getElementType());
+  if (const auto *st = dyn_cast<StructType>(ty); st && st->getDeinitMethod())
+    return true;
+  if (const auto *tt = dyn_cast<TupleType>(ty)) {
+    for (const Type *e : tt->getElementTypes())
+      if (holdsDeinit(e))
+        return true;
+    return false;
+  }
+  if (const auto *et = dyn_cast<EnumType>(ty))
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (const StructType *payload = et->getPayload(i);
+          payload && holdsDeinit(payload))
+        return true;
+  return false;
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.

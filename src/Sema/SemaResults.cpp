@@ -182,6 +182,11 @@ std::string Sema::borrowedResultError(const ast::Expr *e, bool holder) {
     return why.empty() ? borrowedResultError(te->getFalseExpr(), holder) : why;
   }
   const bool inout = CurrentResult.Mode == ast::ParamMode::Inout;
+  // What a method of a struct with a `__deinit__` is called on stays the
+  // value it is (#378): a caller of an `inout` result could replace it.
+  if (inout)
+    if (std::string why = wholeSelfLent(e); !why.empty())
+      return "'self' cannot be returned 'inout': " + why;
   const std::string what =
       inout ? "an 'inout' result must be part of 'self' or of an 'inout' "
               "parameter"

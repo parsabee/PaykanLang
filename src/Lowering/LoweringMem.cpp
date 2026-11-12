@@ -68,6 +68,12 @@ bool holdsRef(const ast::Type *ty) {
   return false;
 }
 
+/// Whether letting go of a value of @p ty does something: it holds a
+/// reference to release, or a struct whose `__deinit__` runs (#378).
+bool needsDrop(const ast::Type *ty) {
+  return holdsRef(ty) || ast::holdsDeinit(ty);
+}
+
 int64_t alignTo(int64_t n, int64_t align) {
   return (n + align - 1) / align * align;
 }
@@ -97,7 +103,21 @@ bool isZeroLiteral(const ast::Expr *e) {
 } // namespace
 
 bool ModuleLowering::memHoldsRefs(const ast::Type *ty) {
-  return ast::isMemType(ty) && holdsRef(ty);
+  return ast::isMemType(ty) && needsDrop(ty);
+}
+
+// A struct with a `__deinit__` has one byte after its fields (#378): nonzero
+// while the storage holds a value of it.  The constructor sets it, a move
+// out of the storage clears it (emitMemMovedOut), and storage that is all
+// zeros (None, a tagged union's other variants, a slot never set) holds
+// none.  So what is let go of runs `__deinit__` exactly where a value is.
+int64_t ModuleLowering::deinitFlagOffset(const ast::StructType *st) {
+  int64_t size = 0;
+  for (ast::Type *e : st->getElementTypes()) {
+    MemLayout el = memLayout(e);
+    size = alignTo(size, el.Align) + el.Size;
+  }
+  return size;
 }
 
 ModuleLowering::MemLayout ModuleLowering::memLayout(ast::Type *ty) {
@@ -114,6 +134,10 @@ ModuleLowering::MemLayout ModuleLowering::memLayout(ast::Type *ty) {
       l.Size = alignTo(l.Size, el.Align) + el.Size;
       l.Align = std::max(l.Align, el.Align);
     }
+    // The byte that says a struct with a `__deinit__` holds a value.
+    if (auto *st = ast::dyn_cast<ast::StructType>(tt);
+        st && st->getDeinitMethod())
+      l.Size += 1;
     return {alignTo(l.Size, l.Align), l.Align};
   }
   Type t = toPIRType(ty);
@@ -181,6 +205,9 @@ Val ModuleLowering::copyToTemporary(const Val &addr, ast::Type *ty,
   Val copy = B.localAddr(tmp, name + ".addr");
   B.memCopy(copy, addr, Val::i64(l.Size));
   emitMemRetain(copy, ty);
+  // The value stays where it was read: the copy holds what it holds, and
+  // runs no `__deinit__` of its own.
+  emitMemMovedOut(copy, ty);
   return copy;
 }
 
@@ -191,16 +218,18 @@ Val ModuleLowering::copySliceToTemporary(const Val &addr, const Val &len,
   Val size = B.binary(Opcode::Mul, len, Val::i64(stride), "snap.size");
   Val copy = callRuntime(names::kPaykanMalloc, {size}, "snap.elems");
   B.memCopy(copy, addr, size);
-  if (holdsRef(elemTy))
-    forEachSlotUpTo(copy, 0, len, stride,
-                    [&](const Val &at) { emitMemRetain(at, elemTy); });
+  if (holdsRef(elemTy) || ast::holdsDeinit(elemTy))
+    forEachSlotUpTo(copy, 0, len, stride, [&](const Val &at) {
+      emitMemRetain(at, elemTy);
+      emitMemMovedOut(at, elemTy); // the elements stay where they are
+    });
   MemTemps.emplace_back(copy, st, len);
   return copy;
 }
 
 void ModuleLowering::releaseSliceCopy(const Val &copy, const Val &len,
                                       ast::SliceType *st) {
-  if (ast::Type *elemTy = st->getElementType(); holdsRef(elemTy))
+  if (ast::Type *elemTy = st->getElementType(); needsDrop(elemTy))
     forEachSlotUpTo(copy, 0, len, memLayout(elemTy).Size,
                     [&](const Val &at) { emitMemRelease(at, elemTy); });
   callRuntime(names::kPaykanFree, {copy});
@@ -379,16 +408,23 @@ Val ModuleLowering::emitMemAddress(ast::Expr *e) {
 }
 
 void ModuleLowering::releaseMemTemps(size_t mark) {
+  if (KeepMemTempsIn && B.block() == KeepMemTempsIn)
+    return;
   while (MemTemps.size() > mark) {
     auto [v, ty, len] = MemTemps.back();
     MemTemps.pop_back();
-    if (auto *st = ty ? ast::dyn_cast<ast::SliceType>(ty) : nullptr)
-      releaseSliceCopy(v, len, st);
-    else if (ty)
-      emitMemDrop(v, ty);
-    else
-      emitRelease(v);
+    releaseMemTemp(v, ty, len);
   }
+}
+
+void ModuleLowering::releaseMemTemp(const Val &v, ast::Type *ty,
+                                    const Val &len) {
+  if (auto *st = ty ? ast::dyn_cast<ast::SliceType>(ty) : nullptr)
+    releaseSliceCopy(v, len, st);
+  else if (ty)
+    emitMemDrop(v, ty);
+  else
+    emitRelease(v);
 }
 
 void ModuleLowering::forEachMemRef(
@@ -457,8 +493,19 @@ void ModuleLowering::emitMemRetain(const Val &addr, ast::Type *ty) {
 }
 
 void ModuleLowering::emitMemRelease(const Val &addr, ast::Type *ty) {
+  // A struct's `__deinit__` runs before its fields are let go: the walk
+  // that knows where each struct starts.
+  if (ast::holdsDeinit(ty)) {
+    emitMemReleaseByTag(addr, ty);
+    return;
+  }
   forEachMemRef(addr, ty,
                 [&](const Val &box, ast::Type *) { emitRelease(box); });
+}
+
+void ModuleLowering::emitMemMovedOut(const Val &src, ast::Type *ty) {
+  if (src && ast::holdsDeinit(ty))
+    emitMemReleaseByTag(src, ty, /*movedOut=*/true);
 }
 
 void ModuleLowering::emitMemDrop(const Val &local, ast::Type *ty) {
@@ -474,7 +521,7 @@ void ModuleLowering::emitMemDrop(const Val &local, ast::Type *ty) {
 }
 
 size_t ModuleLowering::memReleaseCount(ast::Type *ty) {
-  if (!holdsRef(ty))
+  if (!needsDrop(ty))
     return 0;
   if (auto it = MemReleaseCounts.find(ty); it != MemReleaseCounts.end())
     return it->second;
@@ -486,6 +533,10 @@ size_t ModuleLowering::memReleaseCount(ast::Type *ty) {
   } else if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     for (ast::Type *e : tt->getElementTypes())
       n += memReleaseCount(e);
+    // (A `__deinit__` is as much code as a release.)
+    if (auto *st = ast::dyn_cast<ast::StructType>(tt);
+        st && st->getDeinitMethod())
+      ++n;
   } else {
     const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
     const size_t each = memReleaseCount(inner.first);
@@ -509,48 +560,83 @@ std::string ModuleLowering::dropFunction(ast::Type *ty) {
   return name;
 }
 
-void ModuleLowering::emitMemReleaseByTag(const Val &addr, ast::Type *ty) {
-  if (!holdsRef(ty))
+void ModuleLowering::emitMemReleaseByTag(const Val &addr, ast::Type *ty,
+                                         bool movedOut) {
+  // Letting go visits what there is to let go of; a move out, the structs
+  // whose `__deinit__` the value it left would run.
+  auto visits = [&](const ast::Type *t) {
+    return movedOut ? ast::holdsDeinit(t) : needsDrop(t);
+  };
+  if (!visits(ty))
     return;
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    emitMemReleaseByTag(addr, qt->getInnerType(), movedOut);
+    return;
+  }
   if (ast::isPayloadEnum(ty)) {
     // The tag's variant only: every other one's fields are zeros.
     auto *et = ast::cast<ast::EnumType>(ty);
     pir::Switch *s = B.openSwitch(B.ptrLoad(addr, Type::I64, "tag"));
     for (size_t i = 0; i < et->getNumVariants(); ++i) {
       ast::StructType *payload = et->getPayload(i);
-      if (!payload || !holdsRef(payload))
+      if (!payload || !visits(payload))
         continue;
       B.enter(B.addCase(s, Val::i64(static_cast<int64_t>(i))));
       emitMemReleaseByTag(
           B.ptrAdd(addr, Val::i64(variantPayloadOffset(et, i)), "variant.addr"),
-          payload);
+          payload, movedOut);
       B.leave();
     }
     return;
   }
   if (ast::Type *shape = memShapeOf(ty); shape != ty) {
-    emitMemReleaseByTag(addr, shape);
+    emitMemReleaseByTag(addr, shape, movedOut);
     return;
   }
   if (ast::isCountedRef(ty)) {
-    emitRelease(B.ptrLoad(addr, Type::Box, "elem"));
+    if (!movedOut)
+      emitRelease(B.ptrLoad(addr, Type::Box, "elem"));
     return;
   }
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    // A struct's own `__deinit__` first, on the whole value; then its
+    // fields, each in turn.  One moved out of has none to run.
+    if (auto *st = ast::dyn_cast<ast::StructType>(tt);
+        st && st->getDeinitMethod()) {
+      Val flag = B.ptrAdd(addr, Val::i64(deinitFlagOffset(st)), "live.addr");
+      if (movedOut) {
+        B.ptrStore(flag, Val::boolean(false));
+      } else {
+        pir::If *live =
+            B.openIf(B.ptrLoad(flag, Type::Bool, "live"), /*withElse=*/false);
+        B.enter(*live->Then);
+        B.ptrStore(flag, Val::boolean(false));
+        pir::Function *deinit =
+            lookupTypeFunction(st->getName(), st->getName() + names::kNameSep +
+                                                  names::kMethodDeinit);
+        if (deinit)
+          B.call(deinit->Name, deinit->Sig, {addr});
+        else
+          reportInternalError("no function for '" + st->getName() + "." +
+                              names::kMethodDeinit + "'");
+        B.leave();
+      }
+    }
     for (size_t i = 0; i < tt->getArity(); ++i) {
-      if (!holdsRef(tt->getElementType(i)))
+      if (!visits(tt->getElementType(i)))
         continue;
       const int64_t off = tupleElementOffset(tt, i);
       emitMemReleaseByTag(off == 0 ? addr
                                    : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
-                          tt->getElementType(i));
+                          tt->getElementType(i), movedOut);
     }
     return;
   }
   const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
   ast::Type *elemTy = inner.first;
-  forEachSlot(addr, 0, inner.second, memLayout(elemTy).Size,
-              [&](const Val &at) { emitMemReleaseByTag(at, elemTy); });
+  forEachSlot(
+      addr, 0, inner.second, memLayout(elemTy).Size,
+      [&](const Val &at) { emitMemReleaseByTag(at, elemTy, movedOut); });
 }
 
 ast::Expr *ModuleLowering::wholeOf(ast::Expr *e) {
@@ -666,6 +752,21 @@ void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
     e = u->getOperand();
   }
   ast::Type *ty = e == UnwrappedExpr ? e->getResolvedType() : memTypeOf(e);
+  // A local a `return` hands on (Sema: its last use) leaves with its
+  // bytes when it holds a struct with a `__deinit__` (#378): the result is
+  // the value, and the local's teardown finds zeros.
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e);
+      id && ast::holdsDeinit(ty) && isTailReturnLeaf(e) && CurrentScope &&
+      CurrentScope->findOwner(id->getName()) &&
+      CurrentScope->inoutType(id->getName()) == Type::Void) {
+    MemValue from = emitMemRead(e);
+    if (from.Addr && !from.Temp) {
+      const Val size = Val::i64(memLayout(ty).Size);
+      B.memCopy(dst, from.Addr, size);
+      B.memZero(from.Addr, size);
+      return;
+    }
+  }
   // A tagged union's variant: its tag, then its fields, in place.
   if (auto *call = ast::dyn_cast<ast::CallExpr>(e);
       call && call->getVariantEnum()) {
@@ -696,8 +797,15 @@ void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
     if (!src.Addr)
       return;
     B.memCopy(dst, src.Addr, Val::i64(memLayout(ty).Size));
-    if (!src.Temp)
+    if (!src.Temp) {
       emitMemRetain(dst, ty);
+      // A struct with a `__deinit__` is never copied.  A part of a
+      // temporary leaves it (Sema): the temporary, which ends with the
+      // statement, lets go of the part without its `__deinit__`.  Any
+      // other read is the compiler's own second look at a value that
+      // stays where it is.
+      emitMemMovedOut(e->leavesTemporary() ? src.Addr : dst, ty);
+    }
     releaseMemTemps(mark);
     return;
   }
@@ -903,9 +1011,30 @@ void ModuleLowering::emitMemAssign(const Val &dst, ast::Expr *value) {
   // The new references are taken before the old ones go (`xs = xs;`).
   if (!src.Temp)
     emitMemRetain(src.Addr, ty);
-  emitMemRelease(dst, ty);
+  const Val old = emitMemSetAside(dst, ty);
   B.memCopy(dst, src.Addr, Val::i64(memLayout(ty).Size));
+  if (!src.Temp) // as in emitMemInit
+    emitMemMovedOut(value->leavesTemporary() ? src.Addr : dst, ty);
+  if (old)
+    emitMemRelease(old, ty);
   releaseMemTemps(mark);
+}
+
+Val ModuleLowering::emitMemSetAside(const Val &dst, ast::Type *ty) {
+  if (!ast::holdsDeinit(ty)) {
+    emitMemRelease(dst, ty);
+    return Val();
+  }
+  // A `__deinit__` is the program's code: it may reach the storage the
+  // value is in, through another reference to the object that holds it,
+  // and read or assign it.  So the value leaves the storage first, and is
+  // destroyed once the new one is there, as a reference that is replaced
+  // is released after the store.
+  const MemLayout l = memLayout(ty);
+  const pir::LocalId slot = B.addMemLocal("mem.old", l.Size, l.Align);
+  const Val old = B.localAddr(slot, "mem.old.addr");
+  B.memCopy(old, dst, Val::i64(l.Size));
+  return old;
 }
 
 // -- Tuples and structs: their layouts, text and equality

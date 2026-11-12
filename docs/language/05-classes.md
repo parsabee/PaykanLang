@@ -1178,8 +1178,12 @@ when a superclass has one or a class the module derives from `C` does
 ([Memory](16-memory.md#ownership-transfers)).
 
 Every class implements the built-in trait `Deinitializable`
-([Traits](06-traits.md#deinitializable)). A struct or an enum has no `__deinit__` in this
-version.
+([Traits](06-traits.md#deinitializable)). A struct declares a `__deinit__` too, which runs
+where a value of it is destroyed
+([Structs](11-structs.md#running-code-when-a-value-is-destroyed-__deinit__)); an enum has
+none. A generic class's goes in a block of every instance, `impl Box<T>`, not in a
+conditional one (`'__deinit__' cannot be in a conditional 'impl' block: every 'Box<T>' is
+destroyed the same way; declare it in 'impl Box<T>'`).
 
 ## Inheritance
 
@@ -1399,7 +1403,7 @@ created for that argument list. See [Generics](13-generics.md).
 | Field read before it is assigned | `self.count = self.start;` in `__init__` before `self.start` is assigned on every path: `field 'start' is read before it is assigned` |
 | `self` used before every field is assigned | A method called on `self`, `self` passed, stored, returned or captured in `__init__` before every field is assigned, or in `__super__(...)`'s arguments: `'self' is used before every field is assigned: 'start' is not assigned yet` |
 | `__init__` with a result type | `fn __init__() -> Str`: `'__init__' cannot have a result type: it sets up 'self' and returns nothing` |
-| `__deinit__` declared otherwise | One with a parameter, a result type, no body, or declared `static`, `view`, `shared` or `async`; one in a struct's `impl` block; a trait's requirement (`a trait cannot require '__deinit__'`): `'__deinit__' takes no parameters ('fn __deinit__() { ... }' runs when the object is destroyed)` (see [Deinitializers](#deinitializers)) |
+| `__deinit__` declared otherwise | One with a parameter, a result type, no body, or declared `static`, `view`, `shared` or `async`; one in a conditional `impl` block of a generic class; a trait's requirement (`a trait cannot require '__deinit__'`): `'__deinit__' takes no parameters ('fn __deinit__() { ... }' runs when the object is destroyed)` (see [Deinitializers](#deinitializers)) |
 | `__deinit__` called or waiting | `x.__deinit__()`: `'__deinit__' cannot be called directly; it runs when the object is destroyed`; an `await` in its body |
 | A field moved out of an object that runs a `__deinit__` | `move c.name` where `c`'s class, a superclass, or a class the module derives from it declares one: `cannot move 'c.name' out of 'c': a 'C' has a '__deinit__', which runs on the whole object; write 'mem::replace(c.name, v)'` |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |

@@ -270,6 +270,10 @@ bool Sema::checkMethodReceiver(const ast::MethodCallExpr *call,
 }
 
 bool Sema::sharesStorage(const ast::Type *ty) {
+  // A value that runs a `__deinit__` is one value however plain its fields:
+  // a copy of it would be a second one to destroy (#378).
+  if (ty && ast::holdsDeinit(ty))
+    return true;
   // A tagged union shares what its variants' fields do.
   if (const auto *et = ty ? ast::dyn_cast<ast::EnumType>(ty) : nullptr) {
     for (size_t i = 0; i < et->getNumVariants(); ++i)

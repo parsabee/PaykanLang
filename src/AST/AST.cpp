@@ -427,12 +427,18 @@ void StructType::addMethod(MethodDecl *m) {
     InitMethod = m;
     return;
   }
+  if (m->getName() == names::kMethodDeinit) {
+    DeinitMethod = m;
+    return;
+  }
   ImplMethods.push_back(m);
 }
 
 MethodDecl *StructType::findMethod(const std::string &name) const {
   if (name == names::kMethodInit)
     return InitMethod;
+  if (name == names::kMethodDeinit)
+    return DeinitMethod;
   for (auto *m : ImplMethods)
     if (m->getName() == name)
       return m;

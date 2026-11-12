@@ -225,6 +225,8 @@ public:
   }
 
   void enter(Block &b) { Stack.push_back(&b); }
+  /// The block instructions are added to now (null outside a function).
+  const Block *block() const { return Stack.empty() ? nullptr : Stack.back(); }
   void leave() {
     assert(Stack.size() > 1 && "cannot leave the function body");
     Stack.pop_back();
