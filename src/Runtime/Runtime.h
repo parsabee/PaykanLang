@@ -549,6 +549,13 @@ static inline void Paykan_release_nonnull_inline(PaykanShared *shared) {
     Paykan_release(shared);
 }
 
+/// PaykanString_owned, inline: only an immortal object is the function's (a
+/// literal's static string; any other immortal one it gives back).  NULL
+/// and every other object are the value themselves, with no call.
+static inline PaykanShared *PaykanString_owned_inline(PaykanShared *s) {
+  return s && s->strong == PAYKAN_REF_MAX ? PaykanString_owned(s) : s;
+}
+
 /// PaykanShared_get, inline: the identity.
 static inline PaykanObject *PaykanShared_get_inline(PaykanShared *shared) {
   return shared;

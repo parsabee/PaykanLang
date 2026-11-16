@@ -440,6 +440,10 @@ inline constexpr const char *kPaykanRetainNonNullInline =
     "Paykan_retain_nonnull_inline";
 inline constexpr const char *kPaykanReleaseNonNullInline =
     "Paykan_release_nonnull_inline";
+/// PaykanString_owned's test of its argument, in place (#363): Runtime.h's
+/// static inline function for the C path; the LLVM path emits the same.
+inline constexpr const char *kPaykanStringOwnedInline =
+    "PaykanString_owned_inline";
 
 // Tracking heap allocator.  Generated code allocates object structs through
 // kPaykanMalloc too, so its allocations are counted with the runtime's own

@@ -156,6 +156,11 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   the same value, carry the attribute `pir.nonnull`: the LLVM path makes no
   test for null there, and the C path calls
   `Paykan_retain_nonnull_inline` or `Paykan_release_nonnull_inline`.
+* **A string made its holder's own** (`PaykanString_owned`, a string stored
+  where it may be changed in place: docs/pir.md §4) tests its argument in
+  place: null, and an object whose count is not the immortal one, is the
+  value itself, and only an immortal object makes the call.  The C path
+  calls Runtime.h's `static inline` `PaykanString_owned_inline`.
 * **A buffer's length** (`memory::Buffer`'s `len()`, the native function
   bound to `PaykanBuffer_len`) is read in place: the LLVM path loads the
   buffer's `len`, and the C path calls Runtime.h's `static inline`

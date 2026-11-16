@@ -4070,6 +4070,52 @@ TEST(Driver, AStringLiteralAllocatesNothing) {
   std::filesystem::remove_all(dir);
 }
 
+// A string stored where it may be changed in place is tested in place for
+// being a literal's static object (#363): the runtime's PaykanString_owned
+// is called only for an immortal one, so a `None` stored in a `Str?` field
+// calls nothing (every `Error(code, None)` the standard library returns on
+// success), and the C path calls Runtime.h's PaykanString_owned_inline.
+TEST(Driver, AStoredStringIsTestedInPlaceForALiteral) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+struct Status { code: int; message: Str?; }
+fn ok() -> Status { return Status(0, None); }
+fn failed(why: Str) -> Status { return Status(1, move why); }
+fn main() -> int {
+  let a = ok();
+  let b = failed("a literal");
+  let c = failed("built " + Str(a.code));
+  io::println(Str(a.code + b.code + c.code));
+  return 0;
+}
+)");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "2\n");
+  auto [irRc, ir] = run(paykanRun() + " -O2 --emit-llvm " + src + " 2>&1");
+  ASSERT_EQ(irRc, 0) << ir;
+  // (A function's name follows its module's, the file's: `..._Sok(`.)
+  auto function = [&](const std::string &name) {
+    const size_t start = ir.find("_S" + name + "(");
+    const size_t define = ir.rfind("define ", start);
+    return start == std::string::npos || define == std::string::npos
+               ? std::string()
+               : ir.substr(define, ir.find("\n}\n", start) - define);
+  };
+  const std::string ok = function("ok"), failed = function("failed");
+  ASSERT_FALSE(ok.empty()) << ir;
+  ASSERT_FALSE(failed.empty()) << ir;
+  EXPECT_EQ(ok.find("@PaykanString_owned("), std::string::npos) << ok;
+  // The call is behind the test of the count (offset 8) for the immortal one.
+  EXPECT_NE(failed.find("@PaykanString_owned("), std::string::npos) << failed;
+  EXPECT_NE(failed.find(", 2147483647"), std::string::npos) << failed;
+  auto [cRc, code] = run(paykanRun() + " --emit-c " + src + " 2>&1");
+  ASSERT_EQ(cRc, 0) << code;
+  EXPECT_NE(code.find("PaykanString_owned_inline("), std::string::npos) << code;
+  EXPECT_EQ(code.find(" PaykanString_owned("), std::string::npos) << code;
+  std::filesystem::remove(src);
+}
+
 // --version, -v and --list-* answer after `pkm` too, as --help does, where
 // they said "cannot open ''" (finding 72).
 TEST(Driver, InformationOptionsAnswerAfterPkm) {

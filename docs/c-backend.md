@@ -217,7 +217,10 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   `-Warray-bounds` follows into a later write of one of its fields.  A call
   of the native function bound to `PaykanBuffer_len` (`memory::Buffer`'s
   `len()`) calls `Runtime.h`'s `static inline` `PaykanBuffer_len_inline`,
-  which reads the buffer's `len` in place, as the LLVM path does.
+  which reads the buffer's `len` in place, as the LLVM path does.  A call
+  of `PaykanString_owned` (a string stored where it may be changed,
+  [pir.md §4](pir.md)) calls `PaykanString_owned_inline`, which calls the
+  function only for an immortal object.
   Native functions and other modules' functions are declared `extern` from
   their PIR signatures.
 * **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted

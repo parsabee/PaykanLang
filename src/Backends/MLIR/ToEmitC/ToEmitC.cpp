@@ -310,8 +310,8 @@ struct RuntimeDeclLowering : CPattern<func::FuncOp> {
 
 /// The function a call @p op of a runtime function calls: Runtime.h's
 /// inline fast path of Paykan_retain and Paykan_release, with no test for
-/// null when the shared lowering marks the box never null (kNonNullAttr);
-/// the function itself for any other.
+/// null when the shared lowering marks the box never null (kNonNullAttr),
+/// and of PaykanString_owned; the function itself for any other.
 StringRef calledRuntime(func::CallOp op) {
   StringRef callee = op.getCallee();
   const bool nonnull = op->hasAttr(kNonNullAttr);
@@ -321,6 +321,8 @@ StringRef calledRuntime(func::CallOp op) {
   if (callee == names::kPaykanRelease)
     return nonnull ? names::kPaykanReleaseNonNullInline
                    : names::kPaykanReleaseInline;
+  if (callee == names::kPaykanStringOwned)
+    return names::kPaykanStringOwnedInline;
   return callee;
 }
 

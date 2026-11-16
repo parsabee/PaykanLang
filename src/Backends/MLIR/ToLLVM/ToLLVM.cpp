@@ -873,6 +873,78 @@ struct InlineReferenceCountsPass
   }
 };
 
+// -- A string made its holder's own
+
+/// Each call of PaykanString_owned (#363) with its test inline, as
+/// Runtime.h's PaykanString_owned_inline, which the C path calls: a null
+/// box, and an object whose count is not the immortal one, is the value
+/// itself; only an immortal object makes the call.  So a store of a string
+/// that is no literal's costs a load and a compare, and one of a None that
+/// LLVM sees (`Error(code, None)`) nothing.  At every -O.
+struct InlineStringOwnedPass
+    : public PassWrapper<InlineStringOwnedPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InlineStringOwnedPass)
+
+  StringRef getArgument() const override { return "pir-inline-string-owned"; }
+  StringRef getDescription() const override {
+    return "Inline the test PaykanString_owned makes of its argument";
+  }
+
+  void runOnOperation() override {
+    std::vector<LLVM::CallOp> calls;
+    getOperation().walk([&](LLVM::CallOp call) {
+      std::optional<StringRef> callee = call.getCallee();
+      if (callee && *callee == names::kPaykanStringOwned)
+        calls.push_back(call);
+    });
+    for (LLVM::CallOp call : calls)
+      expand(call);
+  }
+
+  /// `head: ...; r = call(box); rest` becomes
+  ///
+  ///   head:    ...; cond_br (box == null), done(box), check
+  ///   check:   n = load i32 (box + 8); cond_br (immortal), slow, done(box)
+  ///   slow:    r = call(box); br done(r)
+  ///   done(v): rest, with v for r
+  static void expand(LLVM::CallOp call) {
+    MLIRContext *ctx = call.getContext();
+    Location loc = call.getLoc();
+    Value box = call.getArgOperands().front();
+    Type ptr = llvmPtr(ctx);
+    Type count = IntegerType::get(ctx, 8 * sizeof(PaykanObject::strong));
+    Block *head = call->getBlock();
+    Block *slow = head->splitBlock(Block::iterator(call));
+    Block *done = slow->splitBlock(std::next(Block::iterator(call)));
+    Value own = done->addArgument(ptr, loc);
+    call.getResult().replaceAllUsesWith(own);
+    OpBuilder b(ctx);
+    b.setInsertionPointToEnd(slow);
+    LLVM::BrOp::create(b, loc, ValueRange{call.getResult()}, done);
+    Block *check = b.createBlock(slow);
+
+    b.setInsertionPointToEnd(head);
+    Value null = LLVM::ZeroOp::create(b, loc, ptr);
+    Value isNull =
+        LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::eq, box, null);
+    LLVM::CondBrOp::create(b, loc, isNull, ValueRange{box}, ValueRange(),
+                           DenseI32ArrayAttr(), done, check);
+
+    b.setInsertionPointToEnd(check);
+    Value at = LLVM::GEPOp::create(b, loc, ptr, b.getI8Type(), box,
+                                   ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(
+                                       offsetof(PaykanObject, strong))});
+    Value n = LLVM::LoadOp::create(b, loc, count, at);
+    Value immortal = LLVM::ICmpOp::create(
+        b, loc, LLVM::ICmpPredicate::eq, n,
+        LLVM::ConstantOp::create(b, loc, count,
+                                 b.getIntegerAttr(count, PAYKAN_REF_MAX)));
+    // The call is the rare path: laid out away from the common one.
+    LLVM::CondBrOp::create(b, loc, immortal, ValueRange(), ValueRange{box},
+                           b.getDenseI32ArrayAttr({1, 2000}), slow, done);
+  }
+};
+
 // -- A buffer's length
 
 /// Each call of PaykanBuffer_len reads the buffer's `len` in place, as
@@ -946,6 +1018,7 @@ void addLLVMDialectPasses(PassManager &pm) {
   pm.addPass(createReconcileUnrealizedCastsPass());
   pm.addPass(std::make_unique<DropDeadCodePass>());
   pm.addPass(std::make_unique<InlineReferenceCountsPass>());
+  pm.addPass(std::make_unique<InlineStringOwnedPass>());
   pm.addPass(std::make_unique<InlineBufferLengthsPass>());
 }
 
