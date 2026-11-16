@@ -349,9 +349,20 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// @p implicitMove: @p src,
   /// an owned local or by-value parameter, leaves as by `move` (a `return`,
   /// always its last use).
+  /// @p stored: the slot is one a string may be changed in place through
+  /// whatever its own qualifier says: a field, an element or a payload
+  /// (written as what holds it is), what an `inout` binding names, or a
+  /// native function's parameter (#363, Expr::isUnshared).  A `mut`
+  /// parameter is the callee's to make its own (the lowering's
+  /// declareParam): not every caller sees that it is `mut`.
   bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                           const std::string &what, ast::SourceLocation loc,
-                          bool implicitMove = false, bool materialize = true);
+                          bool implicitMove = false, bool materialize = true,
+                          bool stored = false);
+  /// Marks the `Str` @p e, a method's receiver that the method changes in
+  /// place, as not a literal's shared object where it is a temporary, in
+  /// each branch of a conditional (#363, Expr::isUnshared).
+  void unshareTemporary(ast::Expr *e);
   /// The branches of @p e, through nested conditionals, in order; @p e
   /// alone when it is no conditional.
   static std::vector<ast::Expr *> conditionalBranches(const ast::Expr *e);

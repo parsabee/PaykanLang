@@ -44,6 +44,15 @@ PaykanString *PaykanString_new(const char *data, int64_t len) {
   return s;
 }
 
+PaykanShared *PaykanString_owned(PaykanShared *s) {
+  // Another immortal object (None) is what it is: the value may be an Obj.
+  if (!s || s->strong != PAYKAN_REF_MAX || s->vtable != PaykanString_vtable)
+    return s;
+  const PaykanString *lit = (const PaykanString *)s;
+  return PaykanShared_new(
+      (PaykanObject *)PaykanString_new(lit->data, lit->len));
+}
+
 PaykanString *PaykanString_from_int(int64_t value) {
   char buf[32];
   int n = snprintf(buf, sizeof(buf), "%lld", (long long)value);
@@ -323,6 +332,12 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other) {
   PaykanString *lhs = (PaykanString *)self;
   PaykanString *rhs = (PaykanString *)other;
+  // A literal's static object is in no place a string is changed through
+  // (the compiler gives every such place a string of its own, #363): one
+  // here is a compiler bug, stopped before it writes the program's data.
+  if (PAYKAN_UNLIKELY(lhs->strong == PAYKAN_REF_MAX))
+    Paykan_runtime_panic("internal error: 'concat' on a string literal's "
+                         "shared object (please report it)");
   int64_t oldLen = lhs->len;
   int64_t newLen = oldLen + rhs->len;
   lhs->data = (char *)Paykan_realloc(lhs->data, (size_t)newLen + 1);

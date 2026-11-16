@@ -353,6 +353,12 @@ private:
 
   /// Address (ptr) of the interned C-string global holding @p content.
   Val internString(const std::string &content);
+  /// The module's static string object of @p content (a `strobj` global,
+  /// one per text): a shared string literal's value, an `obj` that is
+  /// immortal (#363).
+  Val internStringObject(const std::string &content);
+  std::unordered_map<std::string, std::string>
+      InternedStringObjects; // content -> @sym
 
   // -- Declarations
 
@@ -1595,12 +1601,21 @@ private:
   /// second is `<name>.len`).
   static void nameParams(pir::Function &fn, size_t first,
                          const std::vector<ast::Param> &params);
-  /// Declare parameter @p name of a function being emitted, of type @p astTy
-  /// and mode @p mode, whose value is @p params[@p at] (and the next one for
-  /// a slice), in the current scope; returns how many values it takes.
+  /// Declare parameter @p name of a function being emitted, of type @p astTy,
+  /// mode @p mode and qualifier @p qual, whose value is @p params[@p at]
+  /// (and the next one for a slice), in the current scope; returns how many
+  /// values it takes.  A `mut` parameter that may be a string is made the
+  /// function's own string here (#363): its callers do not all know it is
+  /// `mut` (a function value's type and an overridden method's signature do
+  /// not say so), and the body owns it either way (emitParamPrologue).
   size_t declareParam(const std::string &name,
                       const std::vector<pir::Value> &params, size_t at,
-                      ast::Type *astTy, ast::ParamMode mode);
+                      ast::Type *astTy, ast::ParamMode mode,
+                      ast::Qualifier qual);
+  /// @p box, the value of @p expr, as a string of its own where Sema marked
+  /// it (#363, Expr::isUnshared): PaykanString_owned takes the one
+  /// reference @p box carries and gives one back.
+  Val ownIfUnshared(const ast::Expr *expr, const Val &box);
   /// Store @p v into variable @p name (local @p local) when it is an
   /// `inout` parameter, through its address; false for any other variable.
   bool storeInout(const std::string &name, pir::LocalId local, const Val &v);

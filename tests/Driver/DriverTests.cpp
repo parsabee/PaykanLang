@@ -4026,6 +4026,50 @@ TEST(Driver, RunTracksTheHeapUnderPaykanTrackHeap) {
   std::filesystem::remove_all(dir);
 }
 
+// A string literal is one static object for all its evaluations (#363): a
+// loop that compares against one, passes one and prints with one makes no
+// string, so what the program allocates does not grow with its iterations.
+// (Each literal made a string of two heap blocks, every time, before.)
+TEST(Driver, AStringLiteralAllocatesNothing) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("literals");
+  auto allocations = [&](int rounds, const char *args) {
+    std::ofstream(dir / "lit.pkn")
+        << "import ::io;\n"
+           "fn isBrace(c: Str) -> bool { return c == \"{\"; }\n"
+           "fn main() -> int {\n"
+           "  n = 0;\n"
+           "  for i in 0.." +
+               std::to_string(rounds) +
+               " {\n"
+               "    if isBrace(\"x\") { n += 1; }\n"
+               "    if isBrace(\"{\") { n += 2; }\n"
+               "    let kept = \"kept\";\n"
+               "    n += kept.len() - 4;\n"
+               "  }\n"
+               "  io::println(\"done\");\n"
+               "  return n / " +
+               std::to_string(rounds) + ";\n}\n";
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                         args + " --track-heap lit.pkn 2>&1");
+    EXPECT_EQ(rc, 2) << out;
+    EXPECT_NE(out.find("done\n"), std::string::npos) << out;
+    EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
+    const std::string key = "total allocations : ";
+    const size_t at = out.find(key);
+    EXPECT_NE(at, std::string::npos) << out;
+    return at == std::string::npos ? -1
+                                   : std::stoi(out.substr(at + key.size()));
+  };
+  for (const char *args : {"-O0", "-O2"}) {
+    const int few = allocations(1, args);
+    const int many = allocations(500, args);
+    EXPECT_GE(few, 0) << args;
+    EXPECT_EQ(few, many) << args;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 // --version, -v and --list-* answer after `pkm` too, as --help does, where
 // they said "cannot open ''" (finding 72).
 TEST(Driver, InformationOptionsAnswerAfterPkm) {

@@ -119,7 +119,8 @@ void ModuleLowering::lowerStructMethod(ast::StructDecl *sd, ast::StructType *st,
     size_t at = 1;
     for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
       at += declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
-                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
+                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode,
+                         funcDecl->getParams()[i].Qual);
     emitBody(funcDecl->getBody());
   }
   emitImplicitReturn(fn->Sig);

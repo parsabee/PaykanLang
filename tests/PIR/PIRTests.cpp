@@ -1902,3 +1902,51 @@ TEST(PIR, BitwiseInstructionsAreI64Only) {
                           "  %e = xor %d, 9223372036854775807")),
             "");
 }
+
+// A `strobj` is a static string object over its bytes (#363): its address is
+// an `obj`, where a `cstr`'s is a `ptr`, and it prints as it reads.
+TEST(PIR, AStringObjectIsAnObjWhereACStrIsAPtr) {
+  const std::string text = R"(module "m"
+cstr @.c0 = "raw" len 3
+strobj @.s0 = "hello" len 5
+
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.PaykanString_length(obj) -> i64
+
+fn @main() -> i64 {
+  %n.1 = call @$rt.PaykanString_length(@.s0)
+  %b.2 = box @.s0
+  release %b.2
+  %f.3 = call @$rt.PaykanString_new(@.c0, 3)
+  %fb.4 = box %f.3
+  release %fb.4
+  ret %n.1
+}
+)";
+  EXPECT_EQ(verifyText(text), "");
+  EXPECT_EQ(reprint(text), text);
+  ParseError err;
+  auto p = parseProgram(text, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  ASSERT_EQ(p->Modules[0].CStrs.size(), 2u);
+  EXPECT_FALSE(p->Modules[0].CStrs[0].Object);
+  EXPECT_TRUE(p->Modules[0].CStrs[1].Object);
+  // Each is the type it is: no string is made from an object, and no
+  // object's method is called on bytes.
+  std::string swapped = text;
+  swapped.replace(swapped.find("PaykanString_length(@.s0)"),
+                  std::string("PaykanString_length(@.s0)").size(),
+                  "PaykanString_length(@.c0)");
+  EXPECT_NE(verifyText(swapped).find("has type ptr, expected obj"),
+            std::string::npos)
+      << verifyText(swapped);
+  swapped = text;
+  swapped.replace(swapped.find("PaykanString_new(@.c0, 3)"),
+                  std::string("PaykanString_new(@.c0, 3)").size(),
+                  "PaykanString_new(@.s0, 3)");
+  EXPECT_NE(verifyText(swapped).find("has type obj, expected ptr"),
+            std::string::npos)
+      << verifyText(swapped);
+  // The length is the text's, as a cstr's.
+  EXPECT_FALSE(parseProgram("module \"m\"\nstrobj @s = \"ab\" len 3\n", err));
+}

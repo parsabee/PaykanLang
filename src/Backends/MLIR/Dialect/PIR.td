@@ -105,7 +105,12 @@ def PIR_Number : AnyTypeOf<[I64, F64]>;
 
 def PIR_CStrOp : PIR_Op<"cstr", [Symbol]> {
   let summary = "NUL-terminated literal data (`cstr`), its address a `ptr`";
-  let arguments = (ins SymbolNameAttr:$sym_name, StrAttr:$value);
+  let description = [{
+    With `object` (`strobj`), a static string object over the data, immortal
+    by its counts: its address is an `obj`.
+  }];
+  let arguments = (ins SymbolNameAttr:$sym_name, StrAttr:$value,
+                       UnitAttr:$object);
   let assemblyFormat = "$sym_name `=` $value attr-dict";
 }
 

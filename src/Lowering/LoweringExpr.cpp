@@ -46,6 +46,14 @@ Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
   Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
   assert(!ChainValues.count(visitedFirst(node)) &&
          "a chain link's visitor emits the link it visits first");
+  // A `Str` stored where it may be changed in place, or held by several
+  // names, is not a literal's static object (#363, Expr::isUnshared): the
+  // reference it carries is exchanged for one to a string of its own.
+  // (A variable's box is read here as it is, with no reference of its own
+  // to exchange: what takes one does it, emitAsSharedRaw.)
+  if (v && v.Ty == Type::Box && node->isUnshared() &&
+      !ast::isa<ast::StringLiteral>(node) && !ast::isa<ast::Identifier>(node))
+    v = L.callRuntime(kPaykanStringOwned, {v}, "own");
   if (!v || !isOptionalWrap(node))
     return v;
   return L.emitSome(v, node->getCoercedType());
@@ -184,10 +192,15 @@ Val ModuleLowering::ExprEmitter::visitNoneLiteral(ast::NoneLiteral *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
-  // Every value use of a literal is a fresh PaykanString* over the interned
-  // data: a tracked string temporary, owned like a concatenation's result
-  // (boxed by a new owner, destroyed after a borrowing use).  Only the
-  // runtime-call operand `@.strN` itself is a raw C string.
+  // A literal is one static string object for all its evaluations (#363):
+  // immortal, so no retain or release writes it and nothing frees it.  It
+  // is only ever in a place nothing changes a string through: a bare `Str`
+  // variable or parameter, or the middle of an expression.  Where it is
+  // stored anywhere else (Sema: Expr::isUnshared) it is a new string
+  // instead: a tracked string temporary, owned like a concatenation's
+  // result (boxed by a new owner, destroyed after a borrowing use).
+  if (!node->isUnshared())
+    return L.internStringObject(node->getValue());
   return L.wrapStringLiteral(L.internString(node->getValue()),
                              node->getValue().size());
 }
@@ -438,9 +451,15 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
       L.B.ptrStore(addr, Val::null(Type::Box));
       return box;
     }
-    // `move` before a temporary: the temporary, owned already.
-    if (!ast::isa<ast::Identifier>(node->getOperand()))
-      return visit(node->getOperand());
+    // `move` before a temporary: the temporary, owned already.  A string
+    // temporary (`move "a"`, `move (a + b)`) is boxed, as its owner takes it.
+    if (!ast::isa<ast::Identifier>(node->getOperand())) {
+      Val v = visit(node->getOperand());
+      ast::Type *ty = node->getResolvedType();
+      return v && v.Ty == Type::Obj && ty && ast::isCountedRef(ty)
+                 ? L.emitSharedNew(v)
+                 : v;
+    }
     auto *id = ast::cast<ast::Identifier>(node->getOperand());
     // `move` of an `atomic` variable where its value is wanted: the value.
     if (L.holdsBox(id->getName()) &&

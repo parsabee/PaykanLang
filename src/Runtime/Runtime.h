@@ -271,6 +271,12 @@ struct PaykanString {
 
 // Constructor / destructor.
 PaykanString *PaykanString_new(const char *data, int64_t len);
+/// A string its holder may change in place, or share with others who may:
+/// @p s itself unless it is a literal's static object (immortal: its
+/// strong count is PAYKAN_REF_MAX), which every evaluation of the literal
+/// names; then a new string of its text, holding the one reference the
+/// caller had.  NULL for NULL.
+PaykanShared *PaykanString_owned(PaykanShared *s);
 PaykanString *PaykanString_from_int(int64_t value);
 /// The bits of @p value printed as an unsigned 64-bit integer (`unsigned`).
 PaykanString *PaykanString_from_uint(int64_t value);

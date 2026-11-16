@@ -540,9 +540,10 @@ private:
     if (!parseString(m.Name, "the module name (a string)"))
       return false;
     while (Cur.Kind != Tok::End && !isWord("module")) {
-      if (isWord("cstr")) {
-        advance();
+      if (isWord("cstr") || isWord("strobj")) {
         CStrGlobal g;
+        g.Object = isWord("strobj");
+        advance();
         if (!parseSymbol(g.Name) || !expect(Tok::Equals, "'='") ||
             !parseString(g.Data, "a string"))
           return false;

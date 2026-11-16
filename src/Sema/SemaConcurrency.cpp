@@ -2653,7 +2653,8 @@ std::vector<ast::Expr *> Sema::conditionalBranches(const ast::Expr *e) {
 
 bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                               const std::string &what, ast::SourceLocation loc,
-                              bool implicitMove, bool materialize) {
+                              bool implicitMove, bool materialize,
+                              bool stored) {
   // A conditional's value is one of its branches: each flows as it would
   // alone; the conditional is what becomes a cell or a frozen object.
   if (auto *te = src ? ast::dyn_cast<ast::TernaryExpr>(src) : nullptr) {
@@ -2661,7 +2662,7 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
     BranchWalk walk(*this);
     for (ast::Expr *b : conditionalBranches(te))
       ok = checkQualifiedFlow(dst, b, what, loc, implicitMove,
-                              /*materialize=*/false) &&
+                              /*materialize=*/false, stored) &&
            ok;
     // Made a cell or frozen as a whole, so its branches are both new values
     // or both of the form: a cell beside a new object would be one, or two.
@@ -2743,6 +2744,26 @@ bool Sema::checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
   }
   if (materialize && !value && !materializeFlow(dst, src, loc))
     return false;
+  // A string literal is one static object for every evaluation (#363),
+  // which nothing can tell from a string of its own while it is where no
+  // string is changed in place: in a bare `Str` variable or parameter
+  // (neither is lent `inout`, appended to or assigned through), or on its
+  // way through an expression.  Anywhere else a unique `Str` is stored, it
+  // is made a string of its own there (the lowering: PaykanString_owned; a
+  // literal is simply a new string):
+  //  - a `mut` slot, where it may be appended to;
+  //  - a field, an element or a payload (@p stored): written as what holds
+  //    it is, which may gain `mut` by `move` with no flow of the string;
+  //  - any other form, `shared`, `shared mut`, `atomic shared`, a cell:
+  //    several names hold it, a change shows through all of them, and a
+  //    `weak` reference sees it go.
+  // So the object is never in a place `concat` can reach, and a read of
+  // such a place always names the string a later change is made to.
+  // A `Str` held as an `Obj` is one still: a `match` gives it back.
+  if (!value && sq.Form == ast::QualForm::Unique &&
+      ast::mayBeStringLiteral(ty, Ctx.getStrTy(), Ctx.getObjTy()) &&
+      (stored || dst.Mut || dst.Form != ast::QualForm::Unique))
+    src->setUnshared();
   return checkCopyRule(src, loc, implicitMove);
 }
 
@@ -2769,6 +2790,16 @@ bool Sema::materializeFlow(ast::Qualifier dst, ast::Expr *src,
   }
   src->setMaterialize(dst.Form);
   return true;
+}
+
+void Sema::unshareTemporary(ast::Expr *e) {
+  if (ast::isa<ast::TernaryExpr>(e)) {
+    for (ast::Expr *b : conditionalBranches(e))
+      unshareTemporary(b);
+    return;
+  }
+  if (!isCopyPlace(e))
+    e->setUnshared();
 }
 
 bool Sema::isCopyPlace(const ast::Expr *e) {

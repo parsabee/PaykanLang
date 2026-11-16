@@ -652,7 +652,7 @@ void print(const Module &m, std::ostream &os) {
   printEscaped(m.Name, os);
   os << "\n";
   for (const CStrGlobal &g : m.CStrs) {
-    os << "cstr ";
+    os << (g.Object ? "strobj " : "cstr ");
     printSymbol(g.Name, os);
     os << " = ";
     printEscaped(g.Data, os);

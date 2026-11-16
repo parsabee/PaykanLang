@@ -76,7 +76,7 @@ enum Table : size_t {
   kFunctions
 };
 constexpr size_t kTableCount = 8;
-constexpr size_t kMinRecordBytes[kTableCount] = {2, 2, 2, 2, 1, 1, 8, 8};
+constexpr size_t kMinRecordBytes[kTableCount] = {2, 3, 2, 2, 1, 1, 8, 8};
 constexpr uint8_t kMaxSymbolKind = 9;
 constexpr uint8_t kMaxLinkage = 2;
 constexpr size_t kMinIndexEntryBytes = 5 + 32;
@@ -145,6 +145,7 @@ public:
     for (const CStrGlobal &g : m.CStrs) {
       str(g.Name);
       W.str(g.Data);
+      W.u8(g.Object ? 1 : 0);
     }
     W.uleb(m.Datas.size());
     for (const DataGlobal &g : m.Datas) {
@@ -500,7 +501,13 @@ public:
     g.K = k ? ExternGlobal::VTable : ExternGlobal::Object;
     return true;
   }
-  bool cstr(CStrGlobal &g) { return str(g.Name) && R.str(g.Data); }
+  bool cstr(CStrGlobal &g) {
+    uint8_t object = 0;
+    if (!str(g.Name) || !R.str(g.Data) || !R.u8(object) || object > 1)
+      return false;
+    g.Object = object != 0;
+    return true;
+  }
   bool data(DataGlobal &g) {
     uint64_t n;
     if (!str(g.Name) || !R.count(n))

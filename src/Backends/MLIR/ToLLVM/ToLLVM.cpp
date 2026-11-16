@@ -330,9 +330,44 @@ struct CStrLowering : PIRPattern<P::CStrOp> {
   LogicalResult matchAndRewrite(P::CStrOp op, OpAdaptor,
                                 ConversionPatternRewriter &r) const override {
     std::string data = op.getValue().str();
+    const int64_t len = static_cast<int64_t>(data.size());
     data.push_back('\0');
     Type t = LLVM::LLVMArrayType::get(r.getI8Type(), data.size());
-    constantGlobal(r, op, t, op.getSymName(), r.getStringAttr(data), 1);
+    if (!op.getObject()) {
+      constantGlobal(r, op, t, op.getSymName(), r.getStringAttr(data), 1);
+      return success();
+    }
+    // A string object (`strobj`): Runtime.h's PaykanString over the bytes,
+    // `{ vtable, strong, weak, data, len }`, its strong count the immortal
+    // one, which no retain or release writes.
+    Location loc = op.getLoc();
+    const std::string bytes = (op.getSymName() + ".bytes").str();
+    auto b = LLVM::GlobalOp::create(r, loc, t, /*isConstant=*/true,
+                                    LLVM::Linkage::Private, bytes,
+                                    r.getStringAttr(data), 1);
+    b.setUnnamedAddr(LLVM::UnnamedAddr::Global);
+    Type i32 = r.getI32Type();
+    Type i64 = r.getI64Type();
+    Type object = LLVM::LLVMStructType::getLiteral(
+        getContext(), {ptr(), i32, i32, ptr(), i64});
+    auto g = LLVM::GlobalOp::create(r, loc, object, /*isConstant=*/false,
+                                    LLVM::Linkage::Private, op.getSymName(),
+                                    Attribute(), 8);
+    Block *init = r.createBlock(&g.getInitializerRegion());
+    r.setInsertionPointToStart(init);
+    Value v = LLVM::UndefOp::create(r, loc, object);
+    auto set = [&](Value field, int64_t at) {
+      v = LLVM::InsertValueOp::create(r, loc, v, field, ArrayRef<int64_t>{at});
+    };
+    set(LLVM::AddressOfOp::create(r, loc, ptr(), names::kPaykanStringVtable),
+        0);
+    set(LLVM::ConstantOp::create(r, loc, i32, r.getI32IntegerAttr(INT32_MAX)),
+        1);
+    set(LLVM::ConstantOp::create(r, loc, i32, r.getI32IntegerAttr(0)), 2);
+    set(LLVM::AddressOfOp::create(r, loc, ptr(), bytes), 3);
+    set(LLVM::ConstantOp::create(r, loc, i64, r.getI64IntegerAttr(len)), 4);
+    LLVM::ReturnOp::create(r, loc, v);
+    r.eraseOp(op);
     return success();
   }
 };

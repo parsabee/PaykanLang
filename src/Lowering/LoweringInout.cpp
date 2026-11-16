@@ -50,6 +50,7 @@
 // read lives until it is used, whatever the call does to the variable.
 
 #include "LoweringInternal.h"
+#include "Names.h"
 
 #include <algorithm>
 #include <cassert>
@@ -308,7 +309,7 @@ void ModuleLowering::emitParamPrologue(const pir::Function &fn) {
 size_t ModuleLowering::declareParam(const std::string &name,
                                     const std::vector<pir::Value> &params,
                                     size_t at, ast::Type *astTy,
-                                    ast::ParamMode mode) {
+                                    ast::ParamMode mode, ast::Qualifier qual) {
   const pir::Value &arg = params[at];
   if (auto *st = ast::dyn_cast<ast::SliceType>(astTy)) {
     // The address of the elements, reached as an `inout` array's, and their
@@ -329,7 +330,14 @@ size_t ModuleLowering::declareParam(const std::string &name,
   pir::LocalId local = B.addLocal(name, arg.Ty);
   if (mode == ast::ParamMode::View)
     B.markView(local);
-  B.store(local, Val(pir::Operand::value(arg), arg.Ty));
+  Val value(pir::Operand::value(arg), arg.Ty);
+  // A `mut` string is the function's to change in place: never a literal's
+  // static object, whatever its caller knew of the parameter.
+  if (mode == ast::ParamMode::Value && arg.Ty == Type::Box && qual.Mut &&
+      qual.Form == ast::QualForm::Unique &&
+      ast::mayBeStringLiteral(astTy, ASTCtx.getStrTy(), ASTCtx.getObjTy()))
+    value = callRuntime(names::kPaykanStringOwned, {value}, name + ".str");
+  B.store(local, value);
   // Ref-typed parameters arrive as owned +1 boxes: declared as owned, the
   // scope cleanup releases them.
   if (arg.Ty == Type::Ptr)

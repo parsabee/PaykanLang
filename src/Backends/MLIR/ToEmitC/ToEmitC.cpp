@@ -819,8 +819,36 @@ struct CStrLowering : CPattern<P::CStrOp> {
   using CPattern::CPattern;
   LogicalResult matchAndRewrite(P::CStrOp op, OpAdaptor,
                                 ConversionPatternRewriter &r) const override {
-    constantArray(r, op, op.getSymName(), opaque(getContext(), "char"),
-                  op.getValue().size() + 1, cStringInitializer(op.getValue()));
+    if (!op.getObject()) {
+      constantArray(r, op, op.getSymName(), opaque(getContext(), "char"),
+                    op.getValue().size() + 1,
+                    cStringInitializer(op.getValue()));
+      return success();
+    }
+    // A string object (`strobj`): Runtime.h's PaykanString over the bytes,
+    // immortal by its strong count.
+    const std::string bytes = (op.getSymName() + "_bytes").str();
+    const size_t n = op.getValue().size() + 1;
+    emitc::GlobalOp::create(
+        r, op.getLoc(), bytes,
+        emitc::ArrayType::get({static_cast<int64_t>(n)},
+                              opaque(getContext(), "char")),
+        emitc::OpaqueAttr::get(r.getContext(),
+                               cStringInitializer(op.getValue())),
+        /*extern_specifier=*/false, /*static_specifier=*/true,
+        /*const_specifier=*/true);
+    std::string init = "{PaykanString_vtable, PAYKAN_REF_MAX, 0, (char *)";
+    init += bytes;
+    init += ", ";
+    init += std::to_string(op.getValue().size());
+    init += "}";
+    emitc::GlobalOp::create(r, op.getLoc(), op.getSymName(),
+                            opaque(getContext(), "PaykanString"),
+                            emitc::OpaqueAttr::get(r.getContext(), init),
+                            /*extern_specifier=*/false,
+                            /*static_specifier=*/true,
+                            /*const_specifier=*/false);
+    r.eraseOp(op);
     return success();
   }
 };
@@ -952,7 +980,8 @@ void prepare(ModuleOp m, Unit &u) {
       continue;
     }
     StringRef name = SymbolTable::getSymbolName(&op);
-    bool isObject = isa<P::ExternObjectOp>(op);
+    auto str = dyn_cast<P::CStrOp>(op);
+    bool isObject = isa<P::ExternObjectOp>(op) || (str && str.getObject());
     u.Addresses[name] = (isObject ? "&" : "") + name.str();
   }
   for (Operation *op : unused)

@@ -249,6 +249,7 @@ inline constexpr const char *kPaykanObjectNone = "PaykanObject_None";
 inline constexpr const char *kPaykanStringFromChar = "PaykanString_from_char";
 inline constexpr const char *kPaykanStringCharAt = "PaykanString_char_at";
 inline constexpr const char *kPaykanStringNew = "PaykanString_new";
+inline constexpr const char *kPaykanStringOwned = "PaykanString_owned";
 inline constexpr const char *kPaykanStringDestroy = "PaykanString_destroy";
 inline constexpr const char *kPaykanStringFromInt = "PaykanString_from_int";
 inline constexpr const char *kPaykanStringFromUint = "PaykanString_from_uint";
@@ -596,6 +597,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicPureVirtual,
     // String
     kPaykanStringNew,
+    kPaykanStringOwned,
     kPaykanStringDestroy,
     kPaykanStringConcat,
     kPaykanStringCharAt,

@@ -219,6 +219,14 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- A string literal is one static string for all its evaluations and allocates nothing
+  (#363); each evaluation made a new string of two heap blocks before, so `c == "{"` in a
+  loop allocated on every turn. The shared string is only ever in a bare `Str` variable or
+  parameter or in the middle of an expression; stored anywhere else (a `mut` slot, a field,
+  an element, a `shared` name) it becomes a string of its own, as every literal was, so
+  nothing a program does can tell. A function makes a `mut` parameter its own as it
+  starts, so a call through a function value or an overridden method needs to know nothing. PIR has a `strobj` global for the object (docs/pir.md
+  §4), the runtime `PaykanString_owned`, and a `.pkm`'s `CStrRec` a byte more.
 - **Breaking:** in a module that others import, a field leaves by `move` only an object whose
   class nothing can extend: `move c.name` on a class that is not `final` (nor an instance of
   a generic class) is `cannot move 'c.name' out of 'c': a class another module derives from
@@ -485,6 +493,8 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- `move` before a string temporary (`x: mut Str = move "lit";`, `move (a + b)`) failed in
+  the compiler with `PIR verification failed: stored value ... has type obj, expected box`.
 - An `atomic` parameter of a generic function called with its type arguments inferred took
   a new cell instead of the place's handle, so the callee's change was lost: `bump(n, "x")`
   left `n` as it was where `bump<Str>(n, "x")` changed it. The same holds for a generic

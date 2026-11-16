@@ -11,7 +11,12 @@ another. It ends by adding some text helpers to `tasks`.
 
 `Str` is the string type: a built-in, heap-allocated, reference-counted class type (a
 `final` one: `cannot inherit from 'Str': class is final`). A string literal produces a
-`Str`. It is written in double quotes and must close on the line it opens: a raw newline
+`Str`. Evaluating one allocates nothing: the program holds one string for each literal, and
+every evaluation gives that one. No program can tell: the shared string is only ever in a
+bare `Str` variable or parameter or in the middle of an expression, where nothing changes a
+string, and it becomes a string of its own where it is stored anywhere else (a `mut`
+variable or parameter, a field, an element, a `shared` name). `c == "{"` in a loop compares against the
+same string each time. It is written in double quotes and must close on the line it opens: a raw newline
 inside a literal is a compile-time error (`unterminated string literal (string literals
 cannot span multiple lines; use \n)`). Special characters are written with escapes:
 

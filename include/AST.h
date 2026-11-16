@@ -298,12 +298,26 @@ class Expr : public ASTNode {
   // leaves the temporary, which ends with the statement, so the lowering
   // moves it and the temporary lets go of it without its `__deinit__`.
   bool LeavesTemporary = false;
+  // Set by Sema on a unique `Str` (or the `Obj` one is seen as) where it is
+  // stored in a place a string may be changed through or several names hold
+  // (#363): a `mut` slot, a field, an element or a payload, what an `inout`
+  // binding names, a native function's parameter, a slot of any other form
+  // (`shared`, `shared mut`, `atomic shared`, `locked mut`), and a temporary
+  // that is the receiver of `concat`.  Its value is not a literal's shared
+  // static object there: the lowering makes a literal a new string, and any
+  // other value its own (PaykanString_owned).  A `mut` parameter is not
+  // marked by its callers alone: the function makes it its own
+  // (ModuleLowering::declareParam), as a function value's type and an
+  // overridden method's signature do not say `mut`.
+  bool Unshared = false;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   void setLeavesTemporary(bool v = true) { LeavesTemporary = v; }
   bool leavesTemporary() const { return LeavesTemporary; }
+  void setUnshared(bool v = true) { Unshared = v; }
+  bool isUnshared() const { return Unshared; }
 
   void setMovedFrom(const std::string *place, bool fromParam,
                     const Expr *into = nullptr) {
@@ -2984,6 +2998,16 @@ inline Type *stripOptional(Type *ty) {
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return ot->getInnerType();
   return ty;
+}
+
+/// Whether a value of type @p ty may be a string literal's static object
+/// (#363, Expr::isUnshared): a `Str`, or the `Obj` a `Str` is seen as, also
+/// under an optional.  @p str and @p obj are the context's two types.
+inline bool mayBeStringLiteral(Type *ty, const Type *str, const Type *obj) {
+  if (!ty)
+    return false;
+  const Type *t = stripOptional(ty);
+  return t == str || t == obj;
 }
 
 /// Returns true when a value of type @p src stored into a slot of type

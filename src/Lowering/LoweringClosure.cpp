@@ -247,7 +247,7 @@ void ModuleLowering::emitLambdaBody(ast::LambdaExpr *node) {
       size_t at = 1;
       for (const ast::Param &p : node->getParams())
         at += declareParam(p.getName(), call->Params, at,
-                           canonicalizeDeclType(p.ParamType), p.Mode);
+                           canonicalizeDeclType(p.ParamType), p.Mode, p.Qual);
       emitBody(node->getBody());
     }
     emitImplicitReturn(call->Sig);
