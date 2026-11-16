@@ -296,6 +296,78 @@ TEST(Buffer, ValuesWithNoRoomForTheTrackingHeaderAreOutOfMemory) {
   Paykan_release(buf);
 }
 
+// The last value popped leaves with its references, none counted, and its
+// slot is gone; two values swapped trade places the same way.
+TEST(Buffer, PopAndSwapMoveValues) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kStr.head, 2);
+  PaykanShared *a = str("a");
+  PaykanShared *b = str("b");
+  PaykanBuffer_set(&kStr.head, &buf, 0, &a);
+  PaykanBuffer_set(&kStr.head, &buf, 1, &b);
+  PaykanBuffer_swap(&kStr.head, &buf, 0, 1);
+  EXPECT_EQ(boxAt(kStr, buf, 0), b);
+  EXPECT_EQ(boxAt(kStr, buf, 1), a);
+  PaykanBuffer_swap(&kStr.head, &buf, 1, 1);
+  EXPECT_EQ(boxAt(kStr, buf, 1), a);
+  EXPECT_EQ(a->strong, 2);
+  EXPECT_EQ(b->strong, 2);
+  PaykanShared *got = nullptr;
+  PaykanBuffer_pop(&kStr.head, &got, &buf);
+  EXPECT_EQ(got, a);
+  EXPECT_EQ(a->strong, 2); // the buffer's reference is `got`'s now
+  EXPECT_EQ(PaykanBuffer_len(&kStr.head, obj(buf)), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kStr.head, obj(buf), 0), 1);
+  Paykan_release(got);
+  Paykan_release(a);
+  Paykan_release(b);
+  Paykan_release(buf); // its one value
+}
+
+// A shrink sets the values it drops aside before it drops them: a few bytes
+// on the stack, more in an allocation, and an emptied buffer's in its whole
+// storage, which it gives up (the next value grows it again).
+TEST(Buffer, ShrinkDropsValuesItHasSetAside) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kStr.head, 0);
+  PaykanShared *a = str("a");
+  const int64_t n = 100; // 800 bytes of references
+  PaykanBuffer_grow(&kStr.head, &buf, n);
+  for (int64_t i = 0; i < n; ++i)
+    PaykanBuffer_set(&kStr.head, &buf, i, &a);
+  EXPECT_EQ(a->strong, 1 + n);
+  PaykanBuffer_shrink(&kStr.head, &buf, 2); // on the stack
+  EXPECT_EQ(a->strong, 1 + n - 2);
+  PaykanBuffer_shrink(&kStr.head, &buf, 50); // in an allocation
+  EXPECT_EQ(a->strong, 1 + n - 52);
+  EXPECT_EQ(PaykanBuffer_len(&kStr.head, obj(buf)), n - 52);
+  EXPECT_EQ(boxAt(kStr, buf, n - 53), a);
+  PaykanBuffer_shrink(&kStr.head, &buf, n - 52); // the whole storage
+  EXPECT_EQ(a->strong, 1);
+  EXPECT_EQ(PaykanBuffer_len(&kStr.head, obj(buf)), 0);
+  PaykanBuffer_grow(&kStr.head, &buf, 1);
+  PaykanBuffer_set(&kStr.head, &buf, 0, &a);
+  EXPECT_EQ(boxAt(kStr, buf, 0), a);
+  Paykan_release(buf);
+  Paykan_release(a);
+}
+
+TEST(BufferDeath, PopAndSwapPanicAsAReadDoes) {
+  PaykanShared *buf = PaykanBuffer_new(&kStr.head, 2);
+  PaykanShared *out = nullptr;
+  EXPECT_DEATH(PaykanBuffer_pop(&kStr.head, &out, &buf),
+               "buffer value 1 was never set");
+  PaykanShared *none = PaykanBuffer_new(&kStr.head, 0);
+  EXPECT_DEATH(PaykanBuffer_pop(&kStr.head, &out, &none),
+               "buffer index 18446744073709551615 out of bounds \\(len=0\\)");
+  Paykan_release(none);
+  EXPECT_DEATH(PaykanBuffer_swap(&kStr.head, &buf, 0, 2),
+               "buffer index 2 out of bounds \\(len=2\\)");
+  EXPECT_DEATH(PaykanBuffer_swap(&kStr.head, &buf, -1, 0),
+               "buffer index 18446744073709551615 out of bounds");
+  Paykan_release(buf);
+}
+
 TEST(BufferDeath, OutOfBoundsPanics) {
   PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
   EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), 3),
@@ -479,6 +551,14 @@ TEST(Buffer, TheFunctionsDoWhatTheLoweringKnowsOfThem) {
        [](PaykanShared **b) { PaykanBuffer_tryGrow(&kStr.head, b, 100); }},
       {paykan::names::kPaykanBufferShrink,
        [](PaykanShared **b) { PaykanBuffer_shrink(&kStr.head, b, 1); }},
+      {paykan::names::kPaykanBufferPop,
+       [](PaykanShared **b) {
+         PaykanShared *got = nullptr;
+         PaykanBuffer_pop(&kStr.head, &got, b);
+         Paykan_release(got); // as its caller lets go of it
+       }},
+      {paykan::names::kPaykanBufferSwap,
+       [](PaykanShared **b) { PaykanBuffer_swap(&kStr.head, b, 0, 0); }},
   };
   for (const paykan::names::BufferFunction &f :
        paykan::names::kPaykanBufferFunctions) {

@@ -7,6 +7,7 @@
 #include "Names.h"
 #include "Runtime.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -1215,7 +1216,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Val memResult;
     if (ast::isMemType(node->getResolvedType()))
       memResult = L.emitMemResultSlot(node->getResolvedType());
-    Val result = L.emitNativeCall(*native, args, memResult);
+    Val result = L.emitNativeCall(*native, args, memResult, &keep);
     // A runtime function that never returns (`_panic`'s): nothing after
     // its call runs, so nothing its arguments hold is released after it.
     if (isNoReturnRuntimeFunction(native->getNativeSymbol())) {
@@ -1447,6 +1448,312 @@ Val ModuleLowering::ExprEmitter::emitAtomicMethodCall(ast::MethodCallExpr *node,
                                  exact));
   L.releaseAfterCall(keep);
   return L.B.cast(swapped, Type::Bool, "swapped.bool");
+}
+
+std::optional<Val>
+ModuleLowering::emitBufferNative(const ast::FuncDecl &node,
+                                 const std::vector<Val> &args,
+                                 const Val &memResult, std::vector<Val> *keep) {
+  enum class Fn { Get, IsSet, Set, Pop, Swap, Grow };
+  const std::string &symbol = node.getNativeSymbol();
+  Fn fn;
+  size_t arity = 2;
+  if (symbol == kPaykanBufferGet) {
+    fn = Fn::Get;
+  } else if (symbol == kPaykanBufferIsSet) {
+    fn = Fn::IsSet;
+  } else if (symbol == kPaykanBufferTryGrow) {
+    fn = Fn::Grow;
+  } else if (symbol == kPaykanBufferPop) {
+    fn = Fn::Pop;
+    arity = 1;
+  } else if (symbol == kPaykanBufferSet) {
+    fn = Fn::Set;
+    arity = 3;
+  } else if (symbol == kPaykanBufferSwap) {
+    fn = Fn::Swap;
+    arity = 3;
+  } else {
+    return std::nullopt;
+  }
+  // As ::memory declares them: one type argument, then the buffer (borrowed
+  // by a read, `inout` for a change), the index or the count and, for a
+  // store, the value (for an exchange, the other index).
+  const bool changes = fn != Fn::Get && fn != Fn::IsSet;
+  if (node.getTypeArgs().size() != 1 || node.getParams().size() != arity ||
+      args.size() != arity || args[0].Ty != (changes ? Type::Ptr : Type::Box) ||
+      (arity > 1 && args[1].Ty != Type::I64))
+    return std::nullopt;
+  // One slot more at the end, as `push` asks: any other count is the
+  // function's.
+  if (fn == Fn::Grow && !(std::holds_alternative<int64_t>(args[1].Op.V) &&
+                          std::get<int64_t>(args[1].Op.V) == 1))
+    return std::nullopt;
+  // The value's type, as emitTypeDescriptor describes it to the runtime:
+  // its size, and the words that are all 0 only in a value never set.
+  ast::Type *arg = node.getTypeArgs().front();
+  ast::Type *canon = canonicalizeDeclType(arg);
+  auto *qt = ast::dyn_cast<ast::QualifiedType>(arg);
+  ast::Type *elem =
+      qt ? ASTCtx.getQualifiedType(qt->getQualifier(), canon) : canon;
+  const bool inMemory = ast::isMemType(canon);
+  const Type slotTy = inMemory ? Type::Ptr : toPIRType(canon);
+  // A value held in memory, a counted reference or a number: of any other
+  // (an `atomic` cell's handle) the runtime knows more than this does.
+  if (!inMemory && slotTy == Type::Box &&
+      !ast::isCountedRef(ast::stripOptional(canon)))
+    return std::nullopt;
+  // A struct with a `__deinit__` is the runtime's too: its drop runs none
+  // (::memory refuses a buffer of one; a function bound by other code may
+  // still be given one).
+  if (ast::holdsDeinit(canon))
+    return std::nullopt;
+  // The result ::memory declares: the value for a read (`get`'s `view T`,
+  // `pop`'s `T`), an `int` for `isSet` and `tryGrow`, none for a store and
+  // an exchange.  A function bound to give anything else is the runtime's.
+  ast::Type *retTy = canonicalizeDeclType(node.getReturnType());
+  const ast::ParamMode mode = node.getResultMode();
+  bool fits = false;
+  switch (fn) {
+  case Fn::Get:
+  case Fn::Pop:
+    fits =
+        retTy && ast::isMemType(retTy) == inMemory &&
+        mode ==
+            (fn == Fn::Get ? ast::ParamMode::View : ast::ParamMode::Value) &&
+        (inMemory ? memResult && memLayout(retTy).Size == memLayout(canon).Size
+                  : toPIRType(retTy) == slotTy);
+    break;
+  case Fn::IsSet:
+  case Fn::Grow:
+    fits = retTy == ASTCtx.getIntTy() && mode == ast::ParamMode::Value;
+    break;
+  case Fn::Set:
+    fits = (!retTy || retTy == ASTCtx.getVoidTy()) && args[2].Ty == slotTy;
+    break;
+  case Fn::Swap:
+    fits = (!retTy || retTy == ASTCtx.getVoidTy()) && args[2].Ty == Type::I64;
+    break;
+  }
+  if (!fits)
+    return std::nullopt;
+  ast::Type *shape = memShapeOf(canon);
+  const int64_t size =
+      ast::isa<ast::TupleType>(shape) || ast::isa<ast::FixedArrayType>(shape)
+          ? memLayout(shape).Size
+          : pir::storeSize(toPIRType(shape));
+  const std::vector<int64_t> unset = unsetWords(canon, 0);
+
+  Val box = changes ? B.ptrLoad(args[0], Type::Box, "buf.box") : args[0];
+  Val buf = B.cast(emitSharedGet(box, "buf.obj"), Type::Ptr, "buf.ptr");
+  Val lenAddr =
+      B.ptrAdd(buf, Val::i64(offsetof(PaykanBuffer, len)), "buf.len.addr");
+  Val len = B.ptrLoad(lenAddr, Type::I64, "buf.len");
+  const Val index = arity > 1 ? args[1] : Val();
+  // The index is an `unsigned`: one of 2^63 or more is past any length.
+  auto checkIndex = [&](const Val &i) {
+    pir::If *s = B.openIf(B.ucmp(CmpPred::Ge, i, len, "idx.bad"),
+                          /*withElse=*/false);
+    B.enter(*s->Then);
+    callRuntime(kPaykanPanicBufferIndex, {i, len});
+    B.emitUnreachable();
+    B.leave();
+  };
+  // (The storage's address is read as the bits a `ptr.load` has.)
+  auto slotAt = [&](const Val &i) {
+    Val data =
+        B.cast(B.ptrLoad(B.ptrAdd(buf, Val::i64(offsetof(PaykanBuffer, data)),
+                                  "buf.data.addr"),
+                         Type::I64, "buf.data.bits"),
+               Type::Ptr, "buf.data");
+    return B.ptrAdd(data, B.binary(Opcode::Mul, i, Val::i64(size), "elem.off"),
+                    "elem.addr");
+  };
+  auto slotAddr = [&] { return slotAt(index); };
+  auto capacity = [&] {
+    return B.ptrLoad(
+        B.ptrAdd(buf, Val::i64(offsetof(PaykanBuffer, cap)), "buf.cap.addr"),
+        Type::I64, "buf.cap");
+  };
+
+  // Whether the value at @p slot was ever set: no value where every value
+  // of the type is one (zero bytes are 0, False, None).
+  auto isSet = [&](const Val &slot) {
+    Val set;
+    for (int64_t off : unset) {
+      Val word =
+          B.ptrLoad(off ? B.ptrAdd(slot, Val::i64(off), "unset.addr") : slot,
+                    Type::I64, "unset.word");
+      Val nonzero = B.cmp(CmpPred::Ne, word, Val::i64(0), "set");
+      set = set ? B.select(set, Val::boolean(true), nonzero, "set") : nonzero;
+    }
+    return set;
+  };
+  auto checkSet = [&](const Val &slot, const Val &i) {
+    Val set = isSet(slot);
+    if (!set)
+      return;
+    pir::If *s = B.openIf(B.unary(Opcode::Not, set, "unset"),
+                          /*withElse=*/false);
+    B.enter(*s->Then);
+    callRuntime(kPaykanPanicBufferUnset, {i});
+    B.emitUnreachable();
+    B.leave();
+  };
+
+  switch (fn) {
+  case Fn::IsSet: {
+    pir::LocalId out = B.addLocal("isset", Type::I64);
+    B.store(out, Val::i64(0));
+    pir::If *s = B.openIf(B.ucmp(CmpPred::Lt, index, len, "idx.ok"),
+                          /*withElse=*/false);
+    B.enter(*s->Then);
+    Val set = unset.empty() ? Val() : isSet(slotAddr());
+    B.store(out, set ? B.select(set, Val::i64(1), Val::i64(0), "isset")
+                     : Val::i64(1));
+    B.leave();
+    return B.load(out, "isset");
+  }
+  case Fn::Get: {
+    checkIndex(index);
+    Val slot = slotAddr();
+    checkSet(slot, index);
+    // A `view` result: the value it names, copied (emitNativeCall).
+    if (inMemory) {
+      B.memCopy(memResult, slot, Val::i64(size));
+      emitMemRetain(memResult, retTy);
+      emitMemMovedOut(memResult, retTy); // the value stays where it is
+      return memResult;
+    }
+    Val v = B.ptrLoad(slot, slotTy, "r.val");
+    if (v.Ty == Type::Box)
+      emitRetain(v, /*lend=*/false, retTy);
+    return v;
+  }
+  case Fn::Pop: {
+    // The last value leaves with the references it owns, and its slot
+    // goes, while there is one and the allocation stays as it is.  The
+    // function has the rest: an empty buffer's panic, and the allocation
+    // halved once a quarter of it is in use (Runtime.h,
+    // PAYKAN_BUFFER_MIN_CAP).
+    Val cap = capacity();
+    Val last = B.binary(Opcode::Sub, len, Val::i64(1), "buf.last");
+    Val some = B.cmp(CmpPred::Gt, len, Val::i64(0), "buf.some");
+    Val small =
+        B.cmp(CmpPred::Lt, cap, Val::i64(int64_t{2} * PAYKAN_BUFFER_MIN_CAP),
+              "cap.small");
+    Val used = B.cmp(CmpPred::Gt, last,
+                     B.binary(Opcode::Shr, cap, Val::i64(2), "cap.quarter"),
+                     "cap.used");
+    Val kept = B.select(small, Val::boolean(true), used, "cap.kept");
+    pir::LocalId out = 0;
+    if (!inMemory)
+      out = B.addLocal("popped", slotTy);
+    pir::If *s =
+        B.openIf(B.select(some, kept, Val::boolean(false), "pop.inplace"),
+                 /*withElse=*/true);
+    B.enter(*s->Then);
+    Val slot = slotAt(last);
+    checkSet(slot, last);
+    if (inMemory)
+      B.memCopy(memResult, slot, Val::i64(size));
+    else
+      B.store(out, B.ptrLoad(slot, slotTy, "popped"));
+    B.ptrStore(lenAddr, last);
+    B.leave();
+    B.enter(*s->Else);
+    Val called = emitNativeSymbolCall(node, args, memResult);
+    if (!inMemory)
+      B.store(out, called);
+    B.leave();
+    return inMemory ? memResult : B.load(out, "popped");
+  }
+  case Fn::Swap: {
+    // Each value goes to the other's slot with the references it owns.
+    checkIndex(index);
+    checkIndex(args[2]);
+    pir::If *s = B.openIf(B.cmp(CmpPred::Ne, index, args[2], "swap.two"),
+                          /*withElse=*/false);
+    B.enter(*s->Then);
+    Val a = slotAt(index);
+    Val b = slotAt(args[2]);
+    if (inMemory) {
+      const MemLayout l = memLayout(canon);
+      Val tmp = B.localAddr(B.addMemLocal("swap", l.Size, l.Align), "swap.tmp");
+      B.memCopy(tmp, a, Val::i64(size));
+      B.memCopy(a, b, Val::i64(size));
+      B.memCopy(b, tmp, Val::i64(size));
+    } else {
+      Val va = B.ptrLoad(a, slotTy, "swap.a");
+      Val vb = B.ptrLoad(b, slotTy, "swap.b");
+      B.ptrStore(a, vb);
+      B.ptrStore(b, va);
+    }
+    B.leave();
+    return Val();
+  }
+  case Fn::Grow: {
+    // Room for one more slot: it is zeros, as every new slot is.  With no
+    // room the function grows the allocation, or says why it could not.
+    pir::LocalId out = B.addLocal("errno", Type::I64);
+    pir::If *s = B.openIf(B.cmp(CmpPred::Lt, len, capacity(), "buf.room"),
+                          /*withElse=*/true);
+    B.enter(*s->Then);
+    B.memZero(slotAt(len), Val::i64(size));
+    B.ptrStore(lenAddr, B.binary(Opcode::Add, len, Val::i64(1), "buf.len"));
+    B.store(out, Val::i64(0));
+    B.leave();
+    B.enter(*s->Else);
+    B.store(out, emitNativeSymbolCall(node, args, memResult));
+    B.leave();
+    return B.load(out, "errno");
+  }
+  case Fn::Set: {
+    checkIndex(index);
+    Val slot = slotAddr();
+    const Val &v = args[2];
+    auto same = [&](const Val &other) {
+      return v.isValue() && other.isValue() && v.id() == other.id();
+    };
+    // A value that is the caller's own moves in: a reference it would
+    // release after the call (@p keep), or a temporary held in memory (a
+    // `move`d value's bytes, a result), which is left zeros for its release
+    // to find.  Any other is borrowed: the slot takes references of its
+    // own to what it holds, before it lets go of the old value's, which may
+    // be the same.  The old value has left the slot when it is released, as
+    // what that runs may read the buffer.
+    if (inMemory) {
+      const bool moved =
+          keep &&
+          std::any_of(MemTemps.begin(), MemTemps.end(), [&](const MemTemp &t) {
+            return t.Ty && !t.Len && same(t.V);
+          });
+      if (!moved)
+        emitMemRetain(v, elem);
+      const MemLayout l = memLayout(canon);
+      Val old = B.localAddr(B.addMemLocal("old", l.Size, l.Align), "old.addr");
+      B.memCopy(old, slot, Val::i64(size));
+      B.memCopy(slot, v, Val::i64(size));
+      if (moved)
+        B.memZero(v, Val::i64(size));
+      emitMemRelease(old, elem);
+    } else if (slotTy == Type::Box) {
+      auto own = keep ? std::find_if(keep->begin(), keep->end(), same)
+                      : std::vector<Val>::iterator();
+      if (keep && own != keep->end())
+        keep->erase(own);
+      else
+        emitRetain(v, /*lend=*/false, elem);
+      Val old = B.ptrLoad(slot, Type::Box, "old");
+      B.ptrStore(slot, v);
+      emitRelease(old);
+    } else {
+      B.ptrStore(slot, v);
+    }
+    return Val();
+  }
+  }
+  return std::nullopt;
 }
 
 ast::Expr *

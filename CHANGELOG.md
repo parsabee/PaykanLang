@@ -219,6 +219,21 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- A `mem::Buffer<T>` reads, stores, exchanges and pops its values in place (#364). Every
+  access went through a generic runtime function that found the value's size and
+  references in a type descriptor at run time; the compiler knows `T`, and now emits the
+  bounds check, the load or the store and the counts itself, as it did for numbers read
+  with `at`. A value moves into a slot (`set`, `push`) and out of one (`pop`) with no
+  count, `swap` trades the bytes, and `push` and `pop` call the runtime only when the
+  allocation changes. With objects in the buffer, built at `-O2`: 200 million reads of a
+  field through `at` take 0.13 s (1.33 s before), 100 million `swap`s 0.13 s (7.39 s), 100
+  million `pop` and `push` pairs 0.40 s (5.43 s), and moving 100 million objects from one
+  buffer to another with `dst.set(i, src.pop())` 0.18 s (4.57 s); through `inout`
+  parameters that is 3.05 s (7.64 s), what is left being the check of a value moved out of
+  borrowed storage. A value a store overwrites, or a shrink drops, has left the buffer
+  when it is let go: a `__deinit__` that reads the buffer finds the new value, where it
+  found the object it was running for, and one that changes the buffer (a push, a pop,
+  another buffer in its place) leaves it whole, where it crashed.
 - A string literal is one static string for all its evaluations and allocates nothing
   (#363); each evaluation made a new string of two heap blocks before, so `c == "{"` in a
   loop allocated on every turn. The shared string is only ever in a bare `Str` variable or

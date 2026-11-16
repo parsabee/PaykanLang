@@ -21,9 +21,6 @@
 #include <stdint.h>
 #include <string.h>
 
-/// The capacity a buffer never shrinks below on its own.
-#define PAYKAN_BUFFER_MIN_CAP 8
-
 static void PaykanBuffer_destroy(PaykanObject *self);
 static void PaykanBuffer_walk(PaykanObject *self);
 
@@ -157,8 +154,7 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
   buffer_check_index(buf, i);
   void *v = buffer_value(buf, i);
   if (buffer_unset((const PaykanType *)t, v))
-    Paykan_runtime_panic("buffer value %llu was never set",
-                         (unsigned long long)i);
+    Paykan_panic_buffer_unset(i);
   return v;
 }
 
@@ -201,8 +197,48 @@ void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
            sizeof(PaykanShared *));
     Paykan_retain_inline(ref);
   }
-  PaykanType_drop(t, slot);
-  memmove(slot, v, (size_t)t->size);
+  if (t->nrefs == 0) {
+    memmove(slot, v, (size_t)t->size);
+    return;
+  }
+  // The old value leaves the slot before it is dropped: what that runs (a
+  // `__deinit__`) may read the buffer, and finds the new value there.
+  unsigned char aside[64];
+  const size_t size = (size_t)t->size;
+  void *old = size <= sizeof aside ? aside : Paykan_malloc(size);
+  memcpy(old, slot, size);
+  memmove(slot, v, size);
+  PaykanType_drop(t, old);
+  if (old != aside)
+    Paykan_free(old);
+}
+
+/// Halve the allocation while at most a quarter of it is in use (never
+/// below PAYKAN_BUFFER_MIN_CAP), so a grow / shrink pair never reallocates
+/// twice.
+static void buffer_fit(PaykanBuffer *buf) {
+  int64_t cap = buf->cap;
+  while (cap / 2 >= PAYKAN_BUFFER_MIN_CAP && buf->len <= cap / 4)
+    cap /= 2;
+  if (cap < buf->cap)
+    buffer_realloc(buf, cap);
+}
+
+void PaykanBuffer_pop(void *t, void *out, void *b) {
+  const size_t size = (size_t)((const PaykanType *)t)->size;
+  PaykanBuffer *buf = buffer_at(b);
+  void *slot = PaykanBuffer_get(t, (PaykanObject *)buf, buf->len - 1);
+  // The value's references leave with its bytes: nothing of it is dropped.
+  memcpy(out, slot, size);
+  buf->len -= 1;
+  buffer_fit(buf);
+}
+
+void PaykanBuffer_swap(void *t, void *b, int64_t i, int64_t j) {
+  PaykanBuffer *buf = buffer_at(b);
+  buffer_check_index(buf, i);
+  buffer_check_index(buf, j);
+  Paykan_mem_swap(t, buffer_value(buf, i), buffer_value(buf, j));
 }
 
 void PaykanBuffer_reserve(void *t, void *b, int64_t n) {
@@ -234,20 +270,51 @@ int64_t PaykanBuffer_tryReserve(void *t, void *b, int64_t n) {
   return n < 0 ? ENOMEM : buffer_try_lengthen(buffer_at(b), n);
 }
 
-/// Drop the last @p by values.  Once at most a quarter of the allocation is
-/// in use it is halved (never below PAYKAN_BUFFER_MIN_CAP), so a grow /
-/// shrink pair never reallocates twice.
+/// Drop the last @p by values, then see to the allocation (buffer_fit).
+///
+/// The values leave the buffer before they are dropped: what a drop runs (a
+/// `__deinit__`) may read the buffer or change it, and finds none of them
+/// in it, nor writes over one still to drop.  A buffer that is emptied
+/// gives them its whole storage; a few bytes go to the stack, more to an
+/// allocation (with no memory for one they are dropped where they are,
+/// past the buffer's new end).  A drop may also let go of the buffer
+/// itself, by assigning the place that names it, so it is held until the
+/// allocation is seen to.
 void PaykanBuffer_shrink(void *t, void *b, int64_t by) {
   (void)t;
   PaykanBuffer *buf = buffer_at(b);
   if (by < 0 || by > buf->len)
     Paykan_runtime_panic("buffer shrink by %llu: it has only %llu values",
                          (unsigned long long)by, (unsigned long long)buf->len);
-  buffer_drop(buf, buf->len - by, buf->len);
   buf->len -= by;
-  int64_t cap = buf->cap;
-  while (cap / 2 >= PAYKAN_BUFFER_MIN_CAP && buf->len <= cap / 4)
-    cap /= 2;
-  if (cap < buf->cap)
-    buffer_realloc(buf, cap);
+  const PaykanType *type = buf->type;
+  if (type->nrefs == 0 || by == 0) {
+    buffer_fit(buf);
+    return;
+  }
+  Paykan_retain((PaykanShared *)buf);
+  unsigned char few[256];
+  const size_t size = (size_t)type->size;
+  const size_t bytes = (size_t)by * size;
+  unsigned char *aside = few;
+  const int whole = bytes > sizeof few && buf->len == 0;
+  if (whole) {
+    aside = buf->data;
+    buf->data = NULL;
+    buf->cap = 0;
+  } else if (bytes > sizeof few) {
+    aside = (unsigned char *)Paykan_tryRealloc(NULL, bytes);
+  }
+  if (!aside) {
+    buffer_drop(buf, buf->len, buf->len + by);
+  } else {
+    if (!whole)
+      memcpy(aside, buffer_value(buf, buf->len), bytes);
+    for (int64_t i = 0; i < by; ++i)
+      PaykanType_drop(type, aside + (size_t)i * size);
+    if (aside != few)
+      Paykan_free(aside);
+  }
+  buffer_fit(buf);
+  Paykan_release((PaykanShared *)buf);
 }

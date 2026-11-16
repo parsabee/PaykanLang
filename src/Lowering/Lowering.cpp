@@ -2221,7 +2221,45 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
 
 Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
                                    const std::vector<Val> &args,
-                                   const Val &memResult) {
+                                   const Val &memResult,
+                                   std::vector<Val> *keep) {
+  if (std::optional<Val> inPlace =
+          emitBufferNative(node, args, memResult, keep)) {
+    // The module binds the symbol all the same: a C symbol has one
+    // signature in a program, whichever of its bindings call it
+    // (checkNativeSymbols).
+    declareNativeSymbol(node, sema::nativeSignature(ASTCtx, node));
+    return *inPlace;
+  }
+  return emitNativeSymbolCall(node, args, memResult);
+}
+
+const pir::Function *
+ModuleLowering::declareNativeSymbol(const ast::FuncDecl &node,
+                                    const pir::Signature &csig) {
+  const std::string name = pir::nativeName(node.getNativeSymbol());
+  auto [it, fresh] = FuncByName.try_emplace(name, nullptr);
+  if (fresh) {
+    Funcs.emplace_back();
+    pir::Function &ext = Funcs.back();
+    ext.Name = name;
+    ext.Sig = csig;
+    ext.IsExtern = true;
+    it->second = &ext;
+  } else if (it->second->Sig != csig) {
+    // Sema gives a C symbol one signature in a module (checkNativeSymbol).
+    reportInternalError("native function '" + node.getName() +
+                        "' binds C symbol '" + node.getNativeSymbol() +
+                        "', which this module declares with another "
+                        "signature");
+    return nullptr;
+  }
+  return it->second;
+}
+
+Val ModuleLowering::emitNativeSymbolCall(const ast::FuncDecl &node,
+                                         const std::vector<Val> &args,
+                                         const Val &memResult) {
   ast::Type *retTy = canonicalizeDeclType(node.getReturnType());
   const Type ret = retTy ? toPIRType(retTy) : Type::Void;
   const bool memRet = ast::isMemType(retTy);
@@ -2269,24 +2307,10 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
                         "' do not match its C signature");
     return Val();
   }
-  const std::string name = pir::nativeName(node.getNativeSymbol());
-  auto [it, fresh] = FuncByName.try_emplace(name, nullptr);
-  if (fresh) {
-    Funcs.emplace_back();
-    pir::Function &ext = Funcs.back();
-    ext.Name = name;
-    ext.Sig = csig;
-    ext.IsExtern = true;
-    it->second = &ext;
-  } else if (it->second->Sig != csig) {
-    // Sema gives a C symbol one signature in a module (checkNativeSymbol).
-    reportInternalError("native function '" + node.getName() +
-                        "' binds C symbol '" + node.getNativeSymbol() +
-                        "', which this module declares with another "
-                        "signature");
+  const pir::Function *ext = declareNativeSymbol(node, csig);
+  if (!ext)
     return Val();
-  }
-  Val result = B.call(name, csig, cargs, "r");
+  Val result = B.call(ext->Name, csig, cargs, "r");
   if (memRet) {
     // A view result: the value it names, copied.
     if (viewResult) {

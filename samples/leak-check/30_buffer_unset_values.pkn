@@ -9,9 +9,10 @@
 // None of these types but int and Maybe<int> is Cloneable, so the buffers
 // have no copy(): swap() is the checked read.
 //
-// Runtime sites: PaykanType_isUnset (Type.c) through PaykanBuffer_isSet,
-// PaykanBuffer_copy and PaykanBuffer_set (Buffer.c), and the Strs and the
-// closures the slots hold.
+// Sites: the test of a value never set and the stores and exchanges the
+// lowering emits in place for a buffer (emitBufferNative; PaykanBuffer_isSet,
+// PaykanBuffer_set and PaykanBuffer_swap in Buffer.c do the same), and the
+// Strs and the closures the slots hold.
 //
 // Expected under --track-heap: live blocks : 0.
 

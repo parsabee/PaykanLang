@@ -295,6 +295,11 @@ void Paykan_panic_buffer_index(int64_t index, int64_t len) {
                        (unsigned long long)index, (unsigned long long)len);
 }
 
+void Paykan_panic_buffer_unset(int64_t index) {
+  Paykan_runtime_panic("buffer value %llu was never set",
+                       (unsigned long long)index);
+}
+
 void Paykan_panic_int_to_char(int64_t value) {
   Paykan_runtime_panic(
       "char<int>(%lld): the value is outside the char range 0..255",

@@ -819,6 +819,13 @@ void PaykanLocked_unlock(PaykanObject *cell);
 // of bounds, a count the memory is not there for (2^63 or more never is),
 // shrinking by more than len and reading a value never set panic, with the
 // index or count printed unsigned.
+//
+// The compiler knows a buffer's type where it calls these, so it emits the
+// ones that read, store or exchange a value, pop the last or add a slot
+// there is room for in place (src/Lowering, emitBufferNative): the layout
+// below, the panics' texts and what each function does to a value's
+// references are its to keep to.  A value that is overwritten or dropped
+// has left the buffer when it is let go, here and there.
 
 typedef struct PaykanBuffer {
   PaykanMethod *vtable; // points to PaykanBuffer_vtable
@@ -831,6 +838,11 @@ typedef struct PaykanBuffer {
 } PaykanBuffer;
 
 extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
+
+/// The capacity a buffer never shrinks below on its own.  A shrink halves
+/// the allocation once at most a quarter of it is in use, down to this (the
+/// lowering's shrink in place leaves that case to PaykanBuffer_shrink).
+#define PAYKAN_BUFFER_MIN_CAP 8
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
 int64_t PaykanBuffer_len(void *t, PaykanObject *b);
@@ -849,6 +861,13 @@ void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i);
 /// checked read tests first.
 int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i);
 void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
+/// Move the last value to @p out (uninitialised), with the references it
+/// owns, none retained or released, and drop its slot, as PaykanBuffer_shrink
+/// by 1 does.  It panics as PaykanBuffer_get of that value does: on an empty
+/// buffer (the index it prints is the one before 0) or a value never set.
+void PaykanBuffer_pop(void *t, void *out, void *b);
+/// Values @p i and @p j trade places, each with the references it owns.
+void PaykanBuffer_swap(void *t, void *b, int64_t i, int64_t j);
 void PaykanBuffer_reserve(void *t, void *b, int64_t n);
 void PaykanBuffer_grow(void *t, void *b, int64_t by);
 void PaykanBuffer_shrink(void *t, void *b, int64_t by);
@@ -926,6 +945,9 @@ PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
 /// it) and @p len and abort: a buffer's element read in place by the
 /// generated code (the concurrency prototype) at an index outside 0..len-1.
 PAYKAN_NORETURN void Paykan_panic_buffer_index(int64_t index, int64_t len);
+/// A read of a buffer's value that was never set (PaykanBuffer_get, and the
+/// read the lowering emits in place of calling it).
+PAYKAN_NORETURN void Paykan_panic_buffer_unset(int64_t index);
 
 /// Print a diagnostic and abort: a `for` loop whose step, computed when the
 /// loop starts, is 0 (a constant 0 is a compile error).

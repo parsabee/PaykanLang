@@ -395,6 +395,37 @@ class's walk (§5) passes a `.typeN` global too, the descriptor of each
 `bytes` global (raw constant bytes) is part of the format, though the lowering
 emits none.
 
+The standard library's `memory::Buffer<T>` reaches its storage through
+generic native functions (`PaykanBuffer_*`, `Runtime.h`, "Buffer"), which
+find a value's size and references in its `.typeN` descriptor at run time.
+Where the lowering instantiates one it knows `T`, so a call of one that
+reads, stores, exchanges, pops or adds a value is emitted in place
+(`emitBufferNative`, #364) and names no descriptor:
+
+- `PaykanBuffer_get` and `PaykanBuffer_isSet`: the length and the storage's
+  address are loaded from the buffer's object, the index is tested unsigned
+  against the length (`Paykan_panic_buffer_index`), and the words that are
+  all 0 only in a value never set are tested (`Paykan_panic_buffer_unset`);
+  the read is then a `ptr.load` and a `retain`, or a `mem.copy` and the
+  retains of the references in it;
+- `PaykanBuffer_set`: the slot takes the value, and the old one is released
+  once it has left the slot.  A value that is the caller's own, a `move` or
+  a temporary, moves in: nothing is retained, where the runtime's function,
+  which borrows its arguments, retains what the caller then releases;
+- `PaykanBuffer_swap`: the two slots' bytes trade places;
+- `PaykanBuffer_pop`: the last value's bytes are the result and the length
+  is one less, with no count; and `PaykanBuffer_tryGrow` by the constant 1:
+  the next slot is zeroed and the length is one more.  Both call the
+  function when the allocation is to change (no room; a quarter or less of
+  it in use), and the pop for an empty buffer's panic.
+
+So a loop over a buffer of objects calls nothing but a panic, and moving a
+value from one buffer to another counts nothing.  A function bound with
+another signature than `::memory`'s (its parameters or its result), a count
+that is no constant 1, and a type the lowering does not read in place (an
+`atomic` cell's handle, a struct with a `__deinit__`, which the runtime's
+drop does not run) call the runtime as before.
+
 Every symbol a function body references must be declared in its module: a call
 to a runtime function needs the `extern fn`, a field access needs the `class`
 (or `extern class`), a `vtable.addr` needs the class or `extern vtable`.  The
@@ -1478,6 +1509,7 @@ Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
 Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 Paykan_panic_index(i64, i64) -> void    ; the index, the length
 Paykan_panic_buffer_index(i64, i64) -> void ; a buffer's element read in place: the index (printed unsigned), the length
+Paykan_panic_buffer_unset(i64) -> void  ; a buffer's element read in place that was never set: the index
 Paykan_panic_for_step() -> void         ; a `for` loop's computed step is 0
 Paykan_panic_float_to_type(f64, ptr, i64) -> void   ; the value, the target type's name and its length
 Paykan_panic_to_char(i64, i64, ptr, i64) -> void    ; `char<S>`: the value, whether S is unsigned, S's name and its length

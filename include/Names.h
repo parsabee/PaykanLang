@@ -292,6 +292,8 @@ inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
 inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
 inline constexpr const char *kPaykanBufferShrink = "PaykanBuffer_shrink";
 inline constexpr const char *kPaykanBufferIsSet = "PaykanBuffer_isSet";
+inline constexpr const char *kPaykanBufferPop = "PaykanBuffer_pop";
+inline constexpr const char *kPaykanBufferSwap = "PaykanBuffer_swap";
 /// `mem::swap<T>(a: inout T, b: inout T)`: each place takes the other's
 /// value, with the references it owns (#369).
 inline constexpr const char *kPaykanMemSwap = "Paykan_mem_swap";
@@ -303,11 +305,12 @@ inline constexpr const char *kPaykanBufferTryReserve =
 /// ABI symbol): what the C of --emit-c calls instead.  The LLVM path reads
 /// the buffer's `len` itself (src/Backends/MLIR/ToLLVM/ToLLVM.cpp).
 inline constexpr const char *kPaykanBufferLenInline = "PaykanBuffer_len_inline";
-/// What each Buffer function may do to the values a buffer holds: drop some
-/// of them, of its type argument's type (the one it overwrites, the ones it
-/// shrinks away), or none.  None of them replaces the buffer an `inout Obj`
-/// handle names, keeps a value, or runs program code.  The lowering reads a
-/// call of one by it (src/Lowering/LoweringHolds.cpp, nativeEffect), and
+/// What each Buffer function may do to the values a buffer holds: let go of
+/// some of them, of its type argument's type (the one it overwrites, the
+/// ones it shrinks away, the one it moves out to its caller), or none.  None of
+/// them replaces the buffer an `inout Obj` handle names, keeps a value, or runs
+/// program code.  The lowering reads a call of one by it
+/// (src/Lowering/LoweringHolds.cpp, nativeEffect), and
 /// tests/Runtime/BufferTests.cpp checks it against src/Runtime/Buffer.c.
 struct BufferFunction {
   const char *Symbol;
@@ -319,7 +322,8 @@ inline constexpr BufferFunction kPaykanBufferFunctions[] = {
     {kPaykanBufferSet, true},         {kPaykanBufferReserve, false},
     {kPaykanBufferGrow, false},       {kPaykanBufferShrink, true},
     {kPaykanBufferIsSet, false},      {kPaykanBufferTryGrow, false},
-    {kPaykanBufferTryReserve, false},
+    {kPaykanBufferTryReserve, false}, {kPaykanBufferPop, true},
+    {kPaykanBufferSwap, false},
 };
 
 // The concurrency prototype's `atomic int` cell (src/Runtime/Atomic.c).
@@ -421,6 +425,8 @@ inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
 /// index outside 0..len-1: the runtime's own message, the index unsigned.
 inline constexpr const char *kPaykanPanicBufferIndex =
     "Paykan_panic_buffer_index";
+inline constexpr const char *kPaykanPanicBufferUnset =
+    "Paykan_panic_buffer_unset";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -597,6 +603,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicToChar,
     kPaykanPanicIndex,
     kPaykanPanicBufferIndex,
+    kPaykanPanicBufferUnset,
     kPaykanPanicForStep,
     kPaykanPanicPureVirtual,
     // String
@@ -649,7 +656,7 @@ inline constexpr const char *kNoReturnRuntimeFunctions[] = {
     kPaykanPanicFloatToType, kPaykanPanicIntToChar,   kPaykanPanicToChar,
     kPaykanPanicIndex,       kPaykanPanicBufferIndex, kPaykanPanicForStep,
     kPaykanPanicPureVirtual, kPaykanPanicMessage,     kPaykanPanicValue,
-    kPaykanUnreachableView,
+    kPaykanUnreachableView,  kPaykanPanicBufferUnset,
 };
 /// The runtime functions that write no memory a program can reach: they
 /// read memory, and the panic of a bad index or an unset slot writes only
