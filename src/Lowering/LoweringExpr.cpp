@@ -1450,6 +1450,80 @@ Val ModuleLowering::ExprEmitter::emitAtomicMethodCall(ast::MethodCallExpr *node,
   return L.B.cast(swapped, Type::Bool, "swapped.bool");
 }
 
+int64_t ModuleLowering::nativeValueSize(ast::Type *ty) {
+  ast::Type *shape = memShapeOf(canonicalizeDeclType(ty));
+  return ast::isa<ast::TupleType>(shape) || ast::isa<ast::FixedArrayType>(shape)
+             ? memLayout(shape).Size
+             : pir::storeSize(toPIRType(shape));
+}
+
+std::optional<Val> ModuleLowering::emitMoveNative(const ast::FuncDecl &node,
+                                                  const std::vector<Val> &args,
+                                                  const Val &memResult) {
+  const std::string &symbol = node.getNativeSymbol();
+  const bool swap = symbol == kPaykanMemSwap;
+  if (!swap && symbol != kPaykanMemMoveOut)
+    return std::nullopt;
+  // As ::memory and ::collections declare them: one type argument and its
+  // places, `inout`; a move out gives the value.
+  const size_t arity = swap ? 2 : 1;
+  if (node.getTypeArgs().size() != 1 || node.getParams().size() != arity ||
+      args.size() != arity)
+    return std::nullopt;
+  for (size_t i = 0; i < arity; ++i)
+    if (node.getParams()[i].Mode != ast::ParamMode::Inout ||
+        args[i].Ty != Type::Ptr)
+      return std::nullopt;
+  ast::Type *canon = canonicalizeDeclType(node.getTypeArgs().front());
+  const bool inMemory = ast::isMemType(canon);
+  const Type slotTy = inMemory ? Type::Ptr : toPIRType(canon);
+  // Each place holds a `T`: one of another type, even of T's size, is read
+  // as the runtime reads it, by its bytes.
+  for (size_t i = 0; i < arity; ++i) {
+    ast::Type *place = canonicalizeDeclType(node.getParams()[i].ParamType);
+    if (!place || ast::isMemType(place) != inMemory ||
+        nativeValueSize(place) != nativeValueSize(canon) ||
+        (!inMemory && toPIRType(place) != slotTy))
+      return std::nullopt;
+  }
+  ast::Type *retTy = canonicalizeDeclType(node.getReturnType());
+  const int64_t size = nativeValueSize(canon);
+  if (swap) {
+    if (retTy && retTy != ASTCtx.getVoidTy())
+      return std::nullopt;
+    // Each place takes the other's value with the references it owns.  The
+    // two are read before either is written: they may be one place.
+    if (inMemory) {
+      const MemLayout l = memLayout(canon);
+      Val a = B.localAddr(B.addMemLocal("swap.a", l.Size, l.Align), "a.addr");
+      Val b = B.localAddr(B.addMemLocal("swap.b", l.Size, l.Align), "b.addr");
+      B.memCopy(a, args[0], Val::i64(size));
+      B.memCopy(b, args[1], Val::i64(size));
+      B.memCopy(args[0], b, Val::i64(size));
+      B.memCopy(args[1], a, Val::i64(size));
+    } else {
+      Val a = B.ptrLoad(args[0], slotTy, "swap.a");
+      Val b = B.ptrLoad(args[1], slotTy, "swap.b");
+      B.ptrStore(args[0], b);
+      B.ptrStore(args[1], a);
+    }
+    return Val();
+  }
+  if (!retTy || node.getResultMode() != ast::ParamMode::Value ||
+      ast::isMemType(retTy) != inMemory ||
+      (inMemory ? !memResult || memLayout(retTy).Size != memLayout(canon).Size
+                : toPIRType(retTy) != slotTy))
+    return std::nullopt;
+  // The value leaves with the references it owns, and zeros stay.
+  Val v = memResult;
+  if (inMemory)
+    B.memCopy(memResult, args[0], Val::i64(size));
+  else
+    v = B.ptrLoad(args[0], slotTy, "moved");
+  B.memZero(args[0], Val::i64(size));
+  return v;
+}
+
 std::optional<Val>
 ModuleLowering::emitBufferNative(const ast::FuncDecl &node,
                                  const std::vector<Val> &args,
@@ -1498,12 +1572,7 @@ ModuleLowering::emitBufferNative(const ast::FuncDecl &node,
       qt ? ASTCtx.getQualifiedType(qt->getQualifier(), canon) : canon;
   const bool inMemory = ast::isMemType(canon);
   const Type slotTy = inMemory ? Type::Ptr : toPIRType(canon);
-  // A value held in memory, a counted reference or a number: of any other
-  // (an `atomic` cell's handle) the runtime knows more than this does.
-  if (!inMemory && slotTy == Type::Box &&
-      !ast::isCountedRef(ast::stripOptional(canon)))
-    return std::nullopt;
-  // A struct with a `__deinit__` is the runtime's too: its drop runs none
+  // A struct with a `__deinit__` is the runtime's: its drop runs none
   // (::memory refuses a buffer of one; a function bound by other code may
   // still be given one).
   if (ast::holdsDeinit(canon))
@@ -1537,11 +1606,7 @@ ModuleLowering::emitBufferNative(const ast::FuncDecl &node,
   }
   if (!fits)
     return std::nullopt;
-  ast::Type *shape = memShapeOf(canon);
-  const int64_t size =
-      ast::isa<ast::TupleType>(shape) || ast::isa<ast::FixedArrayType>(shape)
-          ? memLayout(shape).Size
-          : pir::storeSize(toPIRType(shape));
+  const int64_t size = nativeValueSize(canon);
   const std::vector<int64_t> unset = unsetWords(canon, 0);
 
   Val box = changes ? B.ptrLoad(args[0], Type::Box, "buf.box") : args[0];

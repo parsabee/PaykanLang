@@ -2602,6 +2602,144 @@ fn main() -> int {
   std::filesystem::remove(src);
 }
 
+// A value swapped or moved out of its place (#365) is exchanged in place:
+// no program calls the runtime's Paykan_mem_swap or Paykan_mem_move_out for
+// `mem::swap`, `mem::replace`, `mem::take` or a container's move out of a
+// node, on the LLVM path or the C path, and an instance of `take` is two
+// loads and two stores.
+TEST(Driver, AValueIsSwappedAndMovedOutInPlace) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+import ::memory as mem;
+import ::collections as cl;
+class Disk {
+  size: int;
+  next: Disk?;
+}
+struct Pair { name: Str; disk: Disk; }
+enum Shape { Named(s: Str), Sized(n: int), Empty }
+class Towers {
+  piles: Disk?[3];
+  moves: int;
+}
+impl Towers {
+  fn pushDisk(disk: mut Disk, pile: int) {
+    let top = mem::take(self.piles[pile]);
+    disk.next = move top;
+    self.piles[pile] = move disk;
+  }
+  fn popDiskFrom(pile: int) -> Disk {
+    let top = mem::take(self.piles[pile]);
+    match move top {
+      d: Disk {
+        out: mut = move d;
+        self.piles[pile] = mem::take(out.next);
+        return move out;
+      }
+      _ { return Disk(-1, None); }
+    }
+  }
+  fn moveDisks(disks: int, from: int, to: int) {
+    if disks == 1 {
+      self.pushDisk(self.popDiskFrom(from), to);
+      self.moves = self.moves + 1;
+    } else {
+      let other = 3 - from - to;
+      self.moveDisks(disks - 1, from, other);
+      self.pushDisk(self.popDiskFrom(from), to);
+      self.moves = self.moves + 1;
+      self.moveDisks(disks - 1, other, to);
+    }
+  }
+  view fn height(pile: int) -> int {
+    n = 0;
+    match self.piles[pile] {
+      d: Disk { n = d.size; }
+      _ {}
+    }
+    return n;
+  }
+}
+fn show(s: view Shape) -> Str {
+  match s {
+    n: Named { return "named " + n.s; }
+    z: Sized { return "sized " + Str(z.n); }
+    _ { return "empty"; }
+  }
+}
+fn main() -> int {
+  // the Towers shape: a disk leaves a pile and joins another by moves
+  t: mut = Towers([None, None, None], 0);
+  i = 7;
+  while i > 0 {
+    t.pushDisk(Disk(i, None), 0);
+    i = i - 1;
+  }
+  t.moveDisks(7, 0, 1);
+  io::println(Str(t.moves) + " " + Str(t.height(0)) + " " + Str(t.height(1)));
+  // objects and strings
+  a: mut Str = "a" + Str(1);
+  b: mut Str = "b";
+  mem::swap(a, b);
+  let was = mem::replace(a, "c");
+  o: mut Disk? = Disk(5, None);
+  let got = mem::take(o);
+  match got {
+    d: Disk { io::println(a + b + was + " " + Str(d.size) + " " + Str(o == None)); }
+    _ {}
+  }
+  // numbers, and values held in memory
+  x = 1;
+  y = 2;
+  mem::swap(x, y);
+  f = 1.5;
+  let g = mem::replace(f, 2.5);
+  p = Pair("p", Disk(1, None));
+  q = Pair("q", Disk(2, None));
+  mem::swap(p, q);
+  let r = mem::replace(p, Pair("r", Disk(3, None)));
+  u = ("one", 1);
+  v = ("two", 2);
+  mem::swap(u, v);
+  s1 = Shape::Named("a name");
+  s2 = Shape::Sized(4);
+  mem::swap(s1, s2);
+  fa = fn(n: int) => n + x;
+  fb = fn(n: int) => n * 10;
+  mem::swap(fa, fb);
+  io::println(Str(x) + Str(y) + " " + Str(g) + Str(f) + " " + p.name + Str(p.disk.size) + q.name + Str(q.disk.size) + r.name + Str(r.disk.size) + " " + u.0 + Str(v.1) + " " + show(s1) + ", " + show(s2) + " " + Str(fa(3)) + " " + Str(fb(3)));
+  // a container's value moved out of its node
+  l: mut = cl::LinkedList<Pair>();
+  l.pushBack(Pair("first", Disk(8, None)));
+  l.pushBack(Pair("second", Disk(9, None)));
+  let front = l.popFront();
+  let back = l.popBack();
+  io::println(front.name + Str(front.disk.size) + " " + back.name + Str(back.disk.size) + " " + Str(l.len()));
+  return 0;
+}
+)");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out.rfind("127 0 1\n", 0), 0u) << out;
+  auto [irRc, ir] = run(paykanRun() + " -O2 --emit-llvm " + src + " 2>&1");
+  ASSERT_EQ(irRc, 0) << ir;
+  EXPECT_EQ(ir.find("@Paykan_mem_swap("), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("@Paykan_mem_move_out("), std::string::npos) << ir;
+  auto [pirRc, pir] = run(paykanRun() + " --emit-pir " + src + " 2>&1");
+  ASSERT_EQ(pirRc, 0) << pir;
+  const size_t takeAt = pir.find("fn @\"$::memory::take<Disk>\"(");
+  ASSERT_NE(takeAt, std::string::npos) << pir;
+  const std::string take =
+      pir.substr(takeAt, pir.find("\n}\n", takeAt) - takeAt);
+  EXPECT_EQ(take.find("call "), std::string::npos) << take;
+  EXPECT_NE(take.find("ptr.store"), std::string::npos) << take;
+  auto [cRc, code] = run(paykanRun() + " --emit-c " + src + " 2>&1");
+  ASSERT_EQ(cRc, 0) << code;
+  EXPECT_EQ(code.find("Paykan_mem_swap("), std::string::npos) << code;
+  EXPECT_EQ(code.find("Paykan_mem_move_out("), std::string::npos) << code;
+  std::filesystem::remove(src);
+}
+
 // A char ordered against a number is Sema's error on every path, as `==`
 // on the pair is: `run`, `build` and `--emit-c` each report it and stop.
 // `c < n` got past Sema and failed PIR verification (`cmp operands have

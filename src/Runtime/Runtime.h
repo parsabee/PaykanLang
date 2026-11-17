@@ -875,6 +875,8 @@ void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 /// each with the references it owns (none is retained or released).
 void Paykan_mem_swap(void *t, void *a, void *b);
 /// The value at @p slot, moved to @p out; @p slot holds zeros.
+/// (The compiler emits both in place where it knows the type, as it does
+/// the Buffer functions: src/Lowering, emitMoveNative.)
 void Paykan_mem_move_out(void *t, void *out, void *slot);
 /// PaykanBuffer_grow and PaykanBuffer_reserve that report a failure
 /// instead of panicking: 0, or ENOMEM (the memory, or the size, is not
