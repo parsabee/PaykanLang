@@ -585,14 +585,17 @@ n = apply(square, 3);               // 9: apply borrows square
 | `equals`   | `view fn equals(other: Obj) -> bool` | Identity comparison  |
 | `destroy`  | (compiler-generated)            | Destructor — final, runs on last release |
 
-`None` is an `Obj` literal representing the absence of a value.
+An `Obj` is always an object of some class: there is no object of `Obj` itself (`Obj()` is
+an error), and `None` is not one. `None` is the absent value of an optional type:
 
 ### Optional Types
 
 Any reference type `T` (a class or `Str`), the primitives `int`, `float`, `bool`, `char`
 and the sized numeric types, and an enum, a tuple, a struct or a function value of at most
 64 bytes have an optional form `T?` that holds either a `T` or `None`. A `T` converts to
-`T?` implicitly; a `T?` is unwrapped with `match`. See [Optionals](12-optionals.md).
+`T?` implicitly; a `T?` is unwrapped with `match`. `None` has no type of its own: it takes
+the optional type its context expects, so `x = None;` is an error and `x: Node? = None;`
+is how it is written. See [Optionals](12-optionals.md).
 
 ```pkn
 n: Node? = None;
@@ -667,7 +670,7 @@ enums.
 | Boolean        | `bool`  | `True`, `False`   |
 | Character      | `char`  | `'a'`, `'\n'`, `'\t'` |
 | String         | `Str`   | `"hello"`, `""`   |
-| None           | `Obj`   | `None`            |
+| None           | the optional type the context expects (`T?`); none of its own | `None`            |
 
 An integer literal is written in decimal (`255`), in hexadecimal after `0x` (`0xFF`, with
 digits of either case) or in binary after `0b` (`0b1111_1111`). A `_` may stand between

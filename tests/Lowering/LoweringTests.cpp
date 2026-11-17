@@ -3211,7 +3211,10 @@ TEST(Lowering, PrintedOrComparedTupleUsesALayout) {
   EXPECT_EQ(count(m, ", @.tuple1)"), 2u) << m;
 }
 
-TEST(Lowering, PrintedOptionalSubstitutesTheNoneSingleton) {
+// An optional reference's text (#394): "None" for the null one, a new
+// string, and the object's own `toString` otherwise.  No object stands for
+// None.
+TEST(Lowering, AnAbsentReferencesTextIsNone) {
   auto l = lower(R"(
     class N {}
     impl N { fn __init__() {} }
@@ -3220,10 +3223,21 @@ TEST(Lowering, PrintedOptionalSubstitutesTheNoneSingleton) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("cmp eq %"), std::string::npos) << m;
-  EXPECT_NE(m.find("select %opt.isnone"), std::string::npos) << m;
-  EXPECT_NE(m.find("@$rt.PaykanObject_None"), std::string::npos) << m;
-  EXPECT_NE(l.Text.find("extern obj @$rt.PaykanObject_None"), std::string::npos)
+  EXPECT_NE(m.find("%opt.isnone.3 = cmp eq %recv.obj.2, null obj"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(m.find("if %opt.isnone.3 {\n"
+                   "    %opt.str.4 = call @$rt.PaykanString_new(@.str0, 4)"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(m.find("vcall %recv.obj.2 : (obj) -> box [1] ()"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(l.Text.find("cstr @.str0 = \"None\" len 4"), std::string::npos)
+      << l.Text;
+  EXPECT_EQ(l.Text.find("extern obj"), std::string::npos) << l.Text;
+  // `return None;` of an optional reference is the null one.
+  EXPECT_NE(function(l.Text, "find").find("ret null box"), std::string::npos)
       << l.Text;
 }
 
@@ -3587,8 +3601,8 @@ TEST(Lowering, PrintingAnOptionalValueFormatsIt) {
   EXPECT_NE(m.find("call @$rt.PaykanString_from_int("), std::string::npos) << m;
   EXPECT_NE(m.find("call @$rt.PaykanString_from_bool("), std::string::npos)
       << m;
-  // An optional value is formatted in place: not through the None object.
-  EXPECT_EQ(m.find("PaykanObject_None"), std::string::npos) << m;
+  // An optional value is formatted in place: no object's `toString`.
+  EXPECT_EQ(m.find("vcall"), std::string::npos) << m;
 }
 
 // -- Modules
@@ -3978,21 +3992,23 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
     fn PaykanString_new(x: int) -> int { return x + 1; }
     fn Paykan_println(s: Str) { n = s.len(); }
     fn Paykan_panic_div_by_zero() { n = "mine".len(); }
-    fn PaykanObject_None() -> int { return 4; }
+    fn PaykanString_vtable() -> int { return 4; }
     fn z() -> int { return 0; }
+    fn isText(o: view Obj) -> bool {
+      match o { s: Str { return True; } _ { return False; } }
+    }
     fn main() -> int {
       Paykan_println("x");
       Paykan_panic_div_by_zero();
       fresh: mut Str = "new"; // a literal in a `mut` slot is a new string
-      a: Str? = None;
-      s = a.toString();
-      return PaykanString_new(1) + PaykanObject_None() + 5 / z();
+      t = isText(fresh);
+      return PaykanString_new(1) + PaykanString_vtable() + 5 / z();
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   const pir::Module &m = l.Program.Modules[0];
   for (const char *name : {"PaykanString_new", "Paykan_println",
-                           "Paykan_panic_div_by_zero", "PaykanObject_None"}) {
+                           "Paykan_panic_div_by_zero", "PaykanString_vtable"}) {
     const pir::Function *fn = m.findFunction(name);
     ASSERT_NE(fn, nullptr) << name << "\n" << l.Text;
     EXPECT_FALSE(fn->IsExtern) << name;
@@ -4010,7 +4026,11 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
   EXPECT_NE(l.Text.find("extern fn @$rt.PaykanString_new(ptr, i64) -> obj"),
             std::string::npos)
       << l.Text;
-  EXPECT_NE(l.Text.find("extern obj @$rt.PaykanObject_None"), std::string::npos)
+  EXPECT_NE(l.Text.find("extern vtable @$rt.PaykanString_vtable"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "isText").find("@$rt.PaykanString_vtable"),
+            std::string::npos)
       << l.Text;
   std::string mainFn = function(l.Text, "main");
   EXPECT_EQ(count(mainFn, "call @Paykan_println("), 1u) << mainFn;
@@ -4019,7 +4039,7 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
       << mainFn;
   EXPECT_EQ(count(mainFn, "call @PaykanString_new(1)"), 1u) << mainFn;
   EXPECT_EQ(count(mainFn, "call @$rt.PaykanString_new(@.str"), 1u) << mainFn;
-  EXPECT_EQ(count(mainFn, "@$rt.PaykanObject_None,"), 1u) << mainFn;
+  EXPECT_EQ(count(mainFn, "call @PaykanString_vtable()"), 1u) << mainFn;
 
   pir::ParseError perr;
   auto parsed = pir::parseProgram(l.Text, perr);

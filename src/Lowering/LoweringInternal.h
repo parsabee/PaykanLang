@@ -368,7 +368,6 @@ private:
   /// Declare a runtime extern object/vtable global by its C symbol and
   /// return a Val naming it (`@$rt.<symbol>`).
   Val externGlobal(const std::string &symbol, pir::ExternGlobal::Kind kind);
-  Val externObject(const std::string &symbol);
   Val externVTable(const std::string &symbol);
   /// Get-or-create a module function (body filled in later).
   pir::Function *getOrCreateFunction(const std::string &name,
@@ -973,9 +972,9 @@ private:
   /// The text of the optional value @p opt, of the AST type @p astTy when
   /// known (an `unsigned?` prints unsigned).
   Val emitOptionalToString(const Val &opt, ast::Type *astTy = nullptr);
-  /// The raw object @p raw of an optional reference printed by a print
-  /// builtin, with the None object for a null one.
-  Val emitNoneObject(const Val &raw);
+  /// An absent optional's text, "None", as a `Str` result: a new string
+  /// in a box of its own.
+  Val emitNoneText();
   Val emitOptionalEquality(ast::BinaryExpr *node);
 
   // -- Statements

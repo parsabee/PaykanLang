@@ -1,0 +1,54 @@
+import ::io;
+
+// `Obj?` is an optional like any other (#394): an object of any class, or
+// None.  An `Obj` converts to a present one, `None` is its absent value,
+// and a match on it tells the classes apart: a subclass arm is an exact
+// test, the `Obj` arm every other present value.
+class Animal {
+  name: Str;
+}
+
+impl Animal {
+  fn __init__(n: Str) { self.name = move n; }
+}
+
+class Dog : Animal { }
+
+impl Dog {
+  fn __init__(n: Str) { __super__(move n); }
+}
+
+fn describe(o: view Obj?) -> Str {
+  match o {
+    d: Dog { return "a dog"; }
+    a: Animal { return "an animal"; }
+    s: Str { return "the text " + s; }
+    x: Obj { return "some object"; }
+    None { return "nothing"; }
+  }
+}
+
+fn find(found: bool) -> Obj? {
+  return if found then Dog("rex") else None;
+}
+
+fn main() -> int {
+  a: Obj? = None;
+  io::println(describe(a));
+  a = "hello";
+  io::println(describe(a));
+  let plain: Obj = Animal("cat");
+  let b: Obj? = move plain;        // an Obj converts to a present Obj?
+  io::println(describe(b));
+  io::println(describe(find(True)) + ", " + describe(find(False)));
+
+  // A None beside values is the absent value of their type.
+  let xs = [None, Dog("d"), Animal("a")];   // an Animal?[3]
+  match xs[0] {
+    x: Animal { io::println(x.name); }
+    None { io::println("empty"); }
+  }
+  let any: Obj?[2] = [None, "s"];
+  io::println(any[0] == None && any[1] != None);
+  return 0;
+}

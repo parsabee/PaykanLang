@@ -51,12 +51,6 @@ TEST(EqualsNullOther, Object) {
   Paykan_dispose(obj);
 }
 
-TEST(EqualsNullOther, NoneSingleton) {
-  // None's equals goes through its own static vtable implementation.
-  PaykanObject *none = &PaykanObject_None;
-  EXPECT_EQ(equalsWithNullOther(vtEquals(none), none), 0);
-}
-
 TEST(EqualsNullOther, String) {
   PaykanString *s = PaykanString_new("hello", 5);
   EXPECT_EQ(equalsWithNullOther(PaykanString_equals, (PaykanObject *)s), 0);

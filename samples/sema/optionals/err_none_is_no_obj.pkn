@@ -1,0 +1,6 @@
+// `None` is not an object (#394): an `Obj` is always an object of a class,
+// and the variable that may hold nothing is an `Obj?`.
+fn main() -> int {
+  let o: Obj = None;   // error: None is not a value of type 'Obj': it is the absent value of an optional ('Obj?')
+  return 0;
+}

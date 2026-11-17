@@ -283,14 +283,14 @@ fn @main() -> i64 {
   %"Pair<Str, int>.shared".2 = box %obj.1
   %"x y".3 = unbox %"Pair<Str, int>.shared".2
   %c.4 = cmp eq %"x y".3, null obj
-  %o.5 = select %c.4, @$rt.PaykanObject_None, %"x y".3
+  %o.5 = select %c.4, @$rt.Paykan_an_object, %"x y".3
   call @$rt.Paykan_println(%o.5)
   release %"Pair<Str, int>.shared".2
   %r.6 = call @helper(1)
   ret %r.6
 }
 
-extern obj @$rt.PaykanObject_None
+extern obj @$rt.Paykan_an_object
 extern fn @helper(i64) -> i64 module "lib"
 extern fn @$rt.Paykan_println(obj) -> void
 module "lib"
@@ -1617,7 +1617,7 @@ fn @f() -> i64 {
 TEST(PIRVerifier, RuntimeExternsHaveRuntimeNames) {
   std::string errs = verifyText(R"(module "main"
 extern fn @Paykan_println(obj) -> void
-extern obj @PaykanObject_None
+extern obj @Paykan_an_object
 cstr @$rt.s = "x" len 1
 fn @$rt.f() -> i64 {
   ret 1
@@ -1630,7 +1630,7 @@ fn @main() -> i64 {
                       "'@$rt.<symbol>'"),
             std::string::npos)
       << errs;
-  EXPECT_NE(errs.find("extern global '@PaykanObject_None' is not named "
+  EXPECT_NE(errs.find("extern global '@Paykan_an_object' is not named "
                       "'@$rt.<symbol>'"),
             std::string::npos)
       << errs;

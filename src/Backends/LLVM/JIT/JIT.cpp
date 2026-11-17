@@ -46,7 +46,6 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectDestroy,   reinterpret_cast<void *>(&PaykanObject_destroy)},
     {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
     {kPaykanObjectEquals,    reinterpret_cast<void *>(&PaykanObject_equals)},
-    {kPaykanObjectNone,      reinterpret_cast<void *>(&PaykanObject_None)},
 
     {kPaykanStringNew,       reinterpret_cast<void *>(&PaykanString_new)},
     {kPaykanStringOwned,     reinterpret_cast<void *>(&PaykanString_owned)},

@@ -3507,6 +3507,13 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
                       InferenceConflict &conflict) {
   if (!pattern || !actual)
     return true;
+  // A `None` argument says nothing about a type parameter (#394): it is the
+  // absent value of whatever optional the parameter turns out to be.  One
+  // left open by it must be written (`first<int>(None)`).
+  if (auto *aq = ast::dyn_cast<ast::QualifiedType>(actual);
+      actual == Ctx.getNoneTy() ||
+      (aq && aq->getInnerType() == Ctx.getNoneTy()))
+    return true;
   // `mut T`, `shared T` & co. (the prototype): the form is the slot's, the
   // type parameter is the plain type.
   // Against a part of the same form (`(shared T) -> int` against a
@@ -3606,14 +3613,9 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
 
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(pattern)) {
     // `T?` against `U?` or a plain `U` (a `U` widens to `U?`) binds T to U.
-    // A bare `None` argument is typed Obj and says nothing about T, so it
-    // binds nothing: if no other argument determines T the call must spell
-    // its type arguments, rather than silently instantiating with Obj.
     if (auto *aot = ast::dyn_cast<ast::OptionalType>(actual))
       return unifyTypes(ot->getInnerType(), aot->getInnerType(), typeParams,
                         bindings, conflict);
-    if (actual == Ctx.getObjTy())
-      return true;
     return unifyTypes(ot->getInnerType(), actual, typeParams, bindings,
                       conflict);
   }
@@ -3819,11 +3821,20 @@ bool Sema::inferTypeArgs(const std::string &templateName,
       }
   }
   out.clear();
+  // A None among the arguments (#394) types nothing: a parameter it leaves
+  // open, or one bound to a literal that holds it (`(None, 1)` for a `T`),
+  // is not inferred.
+  const bool noneArgument =
+      std::any_of(argTypes.begin(), argTypes.end(),
+                  [&](ast::Type *t) { return holdsUntypedNone(t); });
   for (auto *p : typeParams) {
     auto it = bindings.find(*p);
-    if (it == bindings.end()) {
+    if (it == bindings.end() || holdsUntypedNone(it->second)) {
       error(loc, "cannot infer type parameter '" + *p + "' of '" + shown +
-                     "' from the call arguments");
+                     "' from the call arguments" +
+                     (noneArgument ? ": None is the absent value of an "
+                                     "optional, and says nothing of its type"
+                                   : ""));
       note(loc, hint);
       return false;
     }

@@ -14,7 +14,7 @@ namespace names {
 
 inline constexpr const char *kLen = "len";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
-/// How an absent optional prints (the None object's toString).
+/// How an absent optional prints, and how `None` is written.
 inline constexpr const char *kNoneText = "None";
 
 // Built-in class names
@@ -243,7 +243,6 @@ inline constexpr const char *kPaykanMovedUnique = "Paykan_moved_unique";
 inline constexpr const char *kPaykanMovedUniqueMem = "Paykan_moved_unique_mem";
 inline constexpr const char *kPaykanPanicMoved = "Paykan_panic_moved";
 inline constexpr const char *kPaykanObjectVtable = "PaykanObject_vtable";
-inline constexpr const char *kPaykanObjectNone = "PaykanObject_None";
 
 // String
 inline constexpr const char *kPaykanStringFromChar = "PaykanString_from_char";
@@ -637,8 +636,6 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStructEquals,
     kPaykanEnumToString,
     kPaykanEnumEquals,
-    // Globals (objects and singletons)
-    kPaykanObjectNone,
     // Builtin methods inherited into user-class vtable slots
     kPaykanObjectDestroy,
     kPaykanObjectToString,

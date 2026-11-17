@@ -99,16 +99,18 @@ TEST_F(Weak, DisposeDestroysAndFreesAnUnboxedObject) {
   EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
 
-TEST_F(Weak, ImmortalNoneAlwaysLoads) {
-  PaykanShared *none = PaykanShared_new(&PaykanObject_None);
-  PaykanWeak *w = Paykan_weak_new(none);
-  Paykan_release(none);
+TEST_F(Weak, AnImmortalObjectAlwaysLoads) {
+  // As a string literal's object is: no reference counts it.
+  PaykanObject immortal = {PaykanObject_vtable, PAYKAN_REF_MAX, 0};
+  PaykanShared *held = PaykanShared_new(&immortal);
+  PaykanWeak *w = Paykan_weak_new(held);
+  Paykan_release(held);
   PaykanShared *loaded = Paykan_weak_load(w);
-  EXPECT_EQ(loaded, &PaykanObject_None);
+  EXPECT_EQ(loaded, &immortal);
   Paykan_release(loaded);
   Paykan_weak_release(w);
-  EXPECT_EQ(PaykanObject_None.strong, PAYKAN_REF_MAX);
-  EXPECT_EQ(PaykanObject_None.weak, 0);
+  EXPECT_EQ(immortal.strong, PAYKAN_REF_MAX);
+  EXPECT_EQ(immortal.weak, 0);
 }
 
 // -- Weak references touched while an object dies

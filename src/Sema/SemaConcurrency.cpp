@@ -1572,8 +1572,8 @@ bool Sema::checkBorrowQualifiers(const ast::ParamModes &modes,
     // (a program writes none): a `weak` field names a `shared` object, a
     // `weak mut` one a `shared mut` object.
     if (modes.mode(i) == ast::ParamMode::View && i < quals.size() &&
-        quals[i].Form == ast::QualForm::Shared &&
-        !ast::isa<ast::NoneLiteral>(args[i]) && !(q == quals[i])) {
+        quals[i].Form == ast::QualForm::Shared && !isNoneValue(args[i]) &&
+        !(q == quals[i])) {
       const char *form = quals[i].Mut ? "weak mut" : "weak";
       std::string msg = "cannot pass '";
       msg += text;
@@ -2182,6 +2182,11 @@ ast::Type *Sema::checkMove(ast::UnaryExpr *node) {
       error(node->getLocation(),
             "cannot move a conditional: write 'move' in each branch that "
             "names a variable");
+      return nullptr;
+    }
+    // `move None` (#394): nothing holds a None for a move to take.
+    if (ast::isa<ast::NoneLiteral>(operand)) {
+      errorNoneAlone(node->getLocation(), "move");
       return nullptr;
     }
     // `move` before a temporary (a call, a constructor, a literal): it is

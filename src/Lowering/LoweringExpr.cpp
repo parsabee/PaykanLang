@@ -185,11 +185,17 @@ Val ModuleLowering::ExprEmitter::visitCharLiteral(ast::CharLiteral *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitNoneLiteral(ast::NoneLiteral *node) {
-  // `None` of an optional value type: the absent value.
-  if (ast::isValueOptional(node->getResolvedType()))
-    return L.B.none(L.toPIRType(node->getResolvedType()), "none");
-  // The immortal None singleton, as a raw object.
-  return L.externObject(kPaykanObjectNone);
+  // The absent value of the optional Sema gave the literal (#394): of an
+  // optional value type, the value with no presence flag; of an optional
+  // reference, the null one.  (One held in memory is written in place:
+  // emitMemValue.)
+  ast::Type *ty = node->getResolvedType();
+  if (ast::isValueOptional(ty))
+    return L.B.none(L.toPIRType(ty), "none");
+  if (ty && ast::isa<ast::OptionalType>(ty) && ast::isRefType(ty))
+    return Val::null(Type::Obj);
+  L.reportInternalError("a None that is no optional's absent value");
+  return Val();
 }
 
 Val ModuleLowering::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
@@ -863,11 +869,6 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
       ownedArgs.push_back(ev);
     if (L.exprAlreadyShared(argExpr) && v.Ty == Type::Box)
       v = L.emitSharedGet(v, "unboxed");
-    // An optional reference printed: the None object for a null one, so it
-    // prints as "None".
-    if (v.Ty == Type::Obj &&
-        ast::isa<ast::OptionalType>(argExpr->getResolvedType()))
-      v = L.emitNoneObject(v);
     Type paramTy = i < sig.Params.size() ? sig.Params[i] : Type::Void;
     v = L.coerceBoolToI64(v, paramTy);
     args.push_back(v);
@@ -1988,13 +1989,7 @@ Val ModuleLowering::ExprEmitter::emitOptionalToStringCall(
     pir::If *s = L.B.openIf(L.emitMemOptionalIsNone(addr, recvResolved),
                             /*withElse=*/true);
     L.B.enter(*s->Then);
-    L.B.store(text,
-              L.emitSharedNew(L.callRuntime(kPaykanStringNew,
-                                            {L.internString(kNoneText),
-                                             Val::i64(static_cast<int64_t>(
-                                                 std::strlen(kNoneText)))},
-                                            "opt.str"),
-                              "str.shared"));
+    L.B.store(text, L.emitNoneText());
     L.B.leave();
     L.B.enter(*s->Else);
     Val payload =
@@ -2022,12 +2017,23 @@ Val ModuleLowering::ExprEmitter::emitOptionalToStringCall(
     return L.emitSharedNew(L.emitOptionalToString(v, recvResolved),
                            "str.shared");
   }
+  // An optional reference: "None" for the null one, else its object's own
+  // text.
   Receiver receiver = L.emitReceiver(node->getReceiver());
   if (!receiver)
     return Val();
   const pir::Function &toString = L.declareRuntime(kPaykanObjectToString);
-  Val str =
-      L.B.vcall(L.emitNoneObject(receiver.Raw), "", 1, toString.Sig, {}, "str");
+  pir::LocalId text = L.B.addLocal("opt.str", Type::Box);
+  pir::If *s = L.B.openIf(
+      L.B.cmp(CmpPred::Eq, receiver.Raw, Val::null(Type::Obj), "opt.isnone"),
+      /*withElse=*/true);
+  L.B.enter(*s->Then);
+  L.B.store(text, L.emitNoneText());
+  L.B.leave();
+  L.B.enter(*s->Else);
+  L.B.store(text, L.B.vcall(receiver.Raw, "", 1, toString.Sig, {}, "str"));
+  L.B.leave();
+  Val str = L.B.load(text, "opt.str");
   L.releaseIfOwned(receiver.Owned);
   return str;
 }

@@ -182,25 +182,6 @@ int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other,
   return Paykan_equals_drop_other(other, owned, result);
 }
 
-// -- None singleton: an immortal Obj whose toString is "None".
-
-static void PaykanNone_destroy(PaykanObject *self) { (void)self; }
-
-static PaykanShared *PaykanNone_toString(PaykanObject *self) {
-  (void)self;
-  return PaykanShared_new((PaykanObject *)PaykanString_new("None", 4));
-}
-
-static PaykanMethod PaykanNone_vtable[PAYKAN_OBJECT_SLOTS] = {
-    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanNone_destroy,
-    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanNone_toString,
-    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
-    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
-};
-
-// Immortal: no thread writes its count.
-PaykanObject PaykanObject_None = {PaykanNone_vtable, PAYKAN_REF_MAX, 0};
-
 // -- Runtime panics
 
 void Paykan_runtime_panic(const char *fmt, ...) {

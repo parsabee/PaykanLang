@@ -106,35 +106,6 @@ TEST(ObjectVtable, DestroyViaVtable) {
   Paykan_free(obj);
 }
 
-// -- PaykanObject_None singleton
-
-TEST(ObjectNone, ToStringReturnsNone) {
-  PaykanShared *shared = vtToString(&PaykanObject_None)(&PaykanObject_None);
-  PaykanString *s = (PaykanString *)PaykanShared_get(shared);
-  ASSERT_NE(s, nullptr);
-  EXPECT_STREQ(s->data, "None");
-  Paykan_release(shared);
-}
-
-TEST(ObjectNone, EqualsOnlyItself) {
-  EXPECT_EQ(paykanTestEquals(vtEquals(&PaykanObject_None), &PaykanObject_None,
-                             &PaykanObject_None),
-            1);
-  PaykanObject *other = PaykanObject_new();
-  EXPECT_EQ(
-      paykanTestEquals(vtEquals(&PaykanObject_None), &PaykanObject_None, other),
-      0);
-  Paykan_dispose(other);
-}
-
-TEST(ObjectNone, DestroyIsNoOp) {
-  // Must not free the immortal singleton.
-  PaykanDestroyFn destroy = vtDestroy(&PaykanObject_None);
-  destroy(&PaykanObject_None);
-  // Still accessible after "destroy".
-  EXPECT_NE(PaykanObject_None.vtable, nullptr);
-}
-
 // -- The pure virtual trap
 
 // The function of a pure virtual method, its slot's target until a subclass

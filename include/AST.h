@@ -125,6 +125,7 @@ public:
     NK_TaskType,      // the result of an async call (the concurrency prototype)
     NK_QualifiedType, // `shared T`, `const T`, ... as written (the prototype)
     NK_PoisonType,
+    NK_NoneType, // a `None` not yet given its optional type (Sema-internal)
     NK_FunctionType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
 
@@ -2691,6 +2692,24 @@ public:
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_PoisonType;
   }
+};
+
+// The type of a `None` that nothing has given its type yet (#394).
+//
+// `None` has no type of its own in the language: it is the absent value of
+// the optional its context expects (`x: Node? = None;`, `return None;` from
+// a function of a `T?`, `x == None`).  The expression checker types
+// bottom-up, so a `None` literal starts with this placeholder, and the slot
+// it flows into gives the literal its optional type (Sema::checkAssignable).
+// A `None` that reaches no optional slot is an error (`x = None;`), so the
+// placeholder never types a variable, a type argument or a result, and never
+// reaches the lowering.  It has no spelling; diagnostics show it as `None`.
+// One canonical instance per ASTContext (ASTContext::getNoneTy).
+class NoneType : public Type {
+public:
+  explicit NoneType(SourceLocation loc) : Type(NK_NoneType, loc) {}
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_NoneType; }
 };
 
 // The type of a `view T[]` or `inout T[]` parameter: a slice, the address of

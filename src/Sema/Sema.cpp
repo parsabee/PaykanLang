@@ -308,7 +308,7 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   //   T  -> T?   implicit widening (a present value);
   //   S? -> T?   when S -> T (covariant in the wrapped type).
   // The `None` literal is handled by checkAssignable, which sees the
-  // expression; its static type is `Obj`, which is NOT assignable to `T?`.
+  // expression and gives it the slot's type (#394).
   //   An optional primitive `int?` holds its value inline, so a plain `int`
   //   (or, for `float?`, an `int` after promotion) widens to a present
   //   value, but an `S?` only converts to `T?` when the representation is
@@ -432,13 +432,13 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
     src->setNewAtomicCell(at);
     return true;
   }
-  // `None` into an optional slot: statically the literal is `Obj` (a design
-  // decision — see docs/language/12-optionals.md), but in this position it
-  // denotes the absent `T?` value.  Record that contextual type on the
-  // literal so the lowering emits a null box rather than boxing the `None`
-  // singleton, which is how a present `Obj` value spells None.
-  if (ast::isa<ast::NoneLiteral>(src) && ast::isa<ast::OptionalType>(dst)) {
-    src->setResolvedType(dst);
+  // `None` (or a conditional of Nones) is the absent value of the optional
+  // slot it flows into (#394): the slot's type is recorded on the literal,
+  // for the lowering.  It is a value of no other type, `Obj` included.
+  if (srcTy == Ctx.getNoneTy()) {
+    if (!src || !dst || !ast::isa<ast::OptionalType>(dst))
+      return false;
+    giveNoneType(src, dst);
     return true;
   }
   // A literal whose elements take the destination's element types (`[1, 2]`
@@ -540,17 +540,17 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
     return ast::wrapsInOptional(d, s) && isAssignable(ast::stripOptional(d), s);
   };
   // One element flowing into slot type @p d: a nested literal is adopted
-  // recursively, `None` takes an optional slot's type (a null box, as in
+  // recursively, `None` takes an optional slot's type (as in
   // checkAssignable), and a primitive is wrapped for an optional primitive
   // slot.  Returns the element's (possibly new) type.
   auto adoptOperand = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
     ast::Type *t = e->getResolvedType();
     if (!t)
       return t;
-    if (ast::isa<ast::NoneLiteral>(e)) {
+    if (t == Ctx.getNoneTy()) {
       if (!ast::isa<ast::OptionalType>(d))
         return t;
-      e->setResolvedType(d);
+      giveNoneType(e, d);
       return d;
     }
     if (ast::isa<ast::ArrayLiteralExpr>(e) ||
@@ -600,6 +600,16 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
 
 bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
                                      ast::Type *srcTy) {
+  // `None` where no optional is due (#394): it is no value of the slot's
+  // type.
+  if (srcTy == Ctx.getNoneTy() && dst != Ctx.getVoidTy()) {
+    error(loc, "None is not a value of type '" + typeName(dst) +
+                   "': it is the absent value of an optional" +
+                   (makesOptional(dst)
+                        ? " ('" + typeName(Ctx.getOptionalType(dst)) + "')"
+                        : ""));
+    return true;
+  }
   auto *srcOT = ast::dyn_cast<ast::OptionalType>(srcTy);
   if (!srcOT || ast::isa<ast::OptionalType>(dst))
     return false;
@@ -618,6 +628,111 @@ bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
     return false;
   errorOptionalUnwrap(loc, srcOT);
   return true;
+}
+
+bool Sema::isNoneValue(const ast::Expr *e) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return isNoneValue(te->getTrueExpr()) && isNoneValue(te->getFalseExpr());
+  return ast::isa<ast::NoneLiteral>(e);
+}
+
+void Sema::errorNoneAlone(ast::SourceLocation loc, const std::string &what) {
+  error(loc, "cannot " + what +
+                 " None: it is the absent value of an optional, and no "
+                 "value until a slot of an optional type takes it");
+}
+
+void Sema::giveNoneType(ast::Expr *e, ast::Type *optTy) {
+  if (auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    giveNoneType(te->getTrueExpr(), optTy);
+    giveNoneType(te->getFalseExpr(), optTy);
+  }
+  e->setResolvedType(optTy);
+}
+
+bool Sema::holdsUntypedNone(const ast::Type *ty) {
+  if (!ty || ty == Ctx.getNoneTy())
+    return ty != nullptr;
+  // A struct's fields have the types it declares them with, and no other
+  // type has parts a literal's None could be.
+  const bool structural =
+      ast::isa<ast::OptionalType>(ty) || ast::isa<ast::QualifiedType>(ty) ||
+      ast::isa<ast::FixedArrayType>(ty) || ast::isa<ast::SliceType>(ty) ||
+      ast::isa<ast::FunctionType>(ty) ||
+      (ast::isa<ast::TupleType>(ty) && !ast::isa<ast::StructType>(ty));
+  if (!structural || NoneFreeTypes.count(ty))
+    return false;
+  bool holds = false;
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
+    holds = holdsUntypedNone(ot->getInnerType());
+  } else if (const auto *qt = ast::dyn_cast<ast::QualifiedType>(ty)) {
+    holds = holdsUntypedNone(qt->getInnerType());
+  } else if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    holds = holdsUntypedNone(ft->getElementType());
+  } else if (const auto *st = ast::dyn_cast<ast::SliceType>(ty)) {
+    holds = holdsUntypedNone(st->getElementType());
+  } else if (const auto *fn = ast::dyn_cast<ast::FunctionType>(ty)) {
+    holds = holdsUntypedNone(fn->getReturnType());
+    for (size_t i = 0; !holds && i < fn->getNumParams(); ++i)
+      holds = holdsUntypedNone(fn->getParamType(i));
+  } else {
+    const auto *tt = ast::cast<ast::TupleType>(ty);
+    for (size_t i = 0; !holds && i < tt->getArity(); ++i)
+      holds = holdsUntypedNone(tt->getElementType(i));
+  }
+  // A canonical type is what it is for good.
+  if (!holds)
+    NoneFreeTypes.insert(ty);
+  return holds;
+}
+
+bool Sema::checkNotUntypedNone(ast::Type *ty, const std::string &name,
+                               ast::SourceLocation loc) {
+  if (!holdsUntypedNone(ty))
+    return true;
+  if (ty == Ctx.getNoneTy())
+    error(loc, "cannot infer the type of '" + name +
+                   "' from None: write the optional it is, as in '" + name +
+                   ": T? = None'");
+  else
+    error(loc, "cannot infer the type of '" + name + "' from '" + typeName(ty) +
+                   "': a None takes the type of the optional it flows into, "
+                   "so write the variable's type");
+  return false;
+}
+
+bool Sema::makesOptional(const ast::Type *ty) const {
+  return ty &&
+         (ast::isRefType(ty) || ast::isFunctionValue(ty) ||
+          ast::isa<ast::EnumType>(ty) || ast::isa<ast::TupleType>(ty) ||
+          (ast::isa<ast::BuiltinType>(ty) && ty != Ctx.getVoidTy())) &&
+         !ast::isa<ast::OptionalType>(ty);
+}
+
+void Sema::reportUntypedNones() {
+  // After another error a slot may not have been reached (an import's
+  // failure another import reported counts none here, and poisons what
+  // this module takes from it).
+  if (hasErrors() || RepeatedImportFailures != 0)
+    return;
+  // The literals by address: one visited twice is reported once.
+  std::unordered_set<const ast::NoneLiteral *> reported;
+  for (const VisitedNone &none : NoneLiterals) {
+    if (none.Literal->getResolvedType() != Ctx.getNoneTy() ||
+        !reported.insert(none.Literal).second)
+      continue;
+    // In the file, and under the instantiations, it was visited in.
+    std::vector<InstantiationFrame> savedStack = std::move(InstantiationStack);
+    InstantiationStack = none.Frames;
+    {
+      OriginSource inOrigin(*this, none.Origin);
+      error(none.Literal->getLocation(),
+            "None has no type here: it is the absent value of an optional, "
+            "and nothing says which (write the type where the value goes, "
+            "as in 'x: T? = None')");
+    }
+    InstantiationStack = std::move(savedStack);
+  }
 }
 
 void Sema::errorOptionalUnwrap(ast::SourceLocation loc,
@@ -2099,8 +2214,12 @@ ast::Type *Sema::ExprChecker::visitCharLiteral(ast::CharLiteral *) {
   return S.Ctx.getCharTy();
 }
 
-ast::Type *Sema::ExprChecker::visitNoneLiteral(ast::NoneLiteral *) {
-  return S.Ctx.getObjTy();
+ast::Type *Sema::ExprChecker::visitNoneLiteral(ast::NoneLiteral *node) {
+  // No type of its own (#394): the optional slot it flows into gives it
+  // one (giveNoneType), and one no slot typed is an error
+  // (reportUntypedNones).
+  S.NoneLiterals.push_back({node, S.CurrentOrigin, S.InstantiationStack});
+  return S.Ctx.getNoneTy();
 }
 
 ast::Type *Sema::ExprChecker::visitStringLiteral(ast::StringLiteral *) {
@@ -2814,10 +2933,29 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   node->getLHS()->setResolvedType(lhsTy);
   node->getRHS()->setResolvedType(rhsTy);
 
+  // `x == None`, `None != x` (#394): None is the absent value of the other
+  // operand's optional, which only an optional has.
+  if (const bool lhsNone = lhsTy == S.Ctx.getNoneTy();
+      equality && (lhsNone || rhsTy == S.Ctx.getNoneTy())) {
+    ast::Type *other = lhsNone ? rhsTy : lhsTy;
+    if (!ast::isa<ast::OptionalType>(other)) {
+      S.error(node->getLocation(),
+              other == S.Ctx.getNoneTy()
+                  ? std::string("cannot compare None with None: it is the "
+                                "absent value of an optional, and neither "
+                                "operand is one")
+                  : "cannot compare '" + typeName(other) +
+                        "' with None: only an optional is ever None");
+      return nullptr;
+    }
+    S.giveNoneType(lhsNone ? node->getLHS() : node->getRHS(), other);
+    return S.Ctx.getBoolTy();
+  }
+
   // Optional operands (issue #5).  The only operators defined on a
   // `T?` are == and !=, in exactly two forms:
-  //   x == None / None != x   — a null check on the box (the lowering never
-  //                             dispatches `equals` for this form);
+  //   x == None / None != x   — a test of absence, above (the lowering
+  //                             never dispatches `equals` for this form);
   //   a == b, both optional   — both None: equal; one None: not equal;
   //                             otherwise the usual `equals` dispatch.
   // Anything else needs the value unwrapped with `match`.
@@ -2830,9 +2968,6 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
       S.errorOptionalUnwrap(node->getLocation(), lhsOpt ? lhsOpt : rhsOpt);
       return nullptr;
     }
-    if (ast::isa<ast::NoneLiteral>(node->getLHS()) ||
-        ast::isa<ast::NoneLiteral>(node->getRHS()))
-      return S.Ctx.getBoolTy();
     if (lhsOpt && rhsOpt) {
       ast::Type *li = lhsOpt->getInnerType();
       ast::Type *ri = rhsOpt->getInnerType();
@@ -3347,6 +3482,13 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return nullptr;
     // `m::E::V(x)` names a variant of an enum of the failed module `m`.
     const std::string &callee = node->getCalleeName();
+    // `Obj()` (#394): the root of the hierarchy has no object of its own.
+    if (callee == names::kObj) {
+      S.error(node->getLocation(),
+              "cannot make an 'Obj': it is the root of the class hierarchy, "
+              "and every object is one of a class");
+      return nullptr;
+    }
     const auto sep = callee.rfind(names::kQualSep);
     if (!S.isFailedImportUse(callee) && !S.isImportClashUse(callee) &&
         (sep == std::string::npos ||
@@ -3482,6 +3624,12 @@ ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
   S.WantAtomicHandle = false;
   if (!recvTy)
     return nullptr;
+  // `None.clone()` (#394): no optional's absent value yet, so no receiver.
+  if (recvTy == S.Ctx.getNoneTy()) {
+    S.errorNoneAlone(node->getLocation(),
+                     "call '" + node->getMethodName() + "' on");
+    return nullptr;
+  }
   if (auto *at = ast::dyn_cast<ast::AtomicType>(recvTy))
     return S.checkAtomicMethodCall(node, at);
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy);
@@ -3999,9 +4147,20 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     }
     elemTys.push_back(ty);
   }
-  ast::Type *elemTy = elemTys.front();
-  for (size_t i = 1; i < elemTys.size(); ++i) {
+  // A None element is the absent value of the others' common type, as an
+  // optional (#394): `[None, Node(1)]` is a `Node?[2]`.
+  ast::Type *elemTy = nullptr;
+  bool anyNone = false;
+  for (size_t i = 0; i < elemTys.size(); ++i) {
     auto *ty = elemTys[i];
+    if (ty == S.Ctx.getNoneTy()) {
+      anyNone = true;
+      continue;
+    }
+    if (!elemTy) {
+      elemTy = ty;
+      continue;
+    }
     if (!typesEqual(elemTy, ty)) {
       // int <-> float promotion across elements.
       if (elemTy == S.Ctx.getIntTy() && ty == S.Ctx.getFloatTy()) {
@@ -4031,6 +4190,37 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
         return nullptr;
       }
     }
+  }
+  if (!elemTy) {
+    S.error(node->getLocation(),
+            "an array literal of None alone has no element type: write the "
+            "array's type, as in 'xs: T?[" +
+                std::to_string(n) + "] = ...'");
+    return nullptr;
+  }
+  if (anyNone && !ast::isa<ast::OptionalType>(elemTy)) {
+    if (!S.makesOptional(elemTy)) {
+      S.error(node->getLocation(),
+              "an array of '" + typeName(elemTy) +
+                  "' has no None element: there is no optional of '" +
+                  typeName(elemTy) + "'");
+      return nullptr;
+    }
+    // As where `T?` is written (resolveType): a value held in place has a
+    // size limit.
+    if (ast::isMemType(elemTy) && !ast::isFunctionValue(elemTy) &&
+        !S.checkOptionalValueSize(elemTy, node->getLocation(),
+                                  "an array element beside None"))
+      return nullptr;
+    elemTy = S.Ctx.getOptionalType(elemTy);
+  }
+  // Elements that hold a None no slot typed (`[(None, 1), (None, 2)]`).
+  if (S.holdsUntypedNone(elemTy)) {
+    S.error(node->getLocation(),
+            "cannot infer the array's element type from '" + typeName(elemTy) +
+                "': a None takes the type of the optional it flows into, so "
+                "write the array's type");
+    return nullptr;
   }
   if (ast::isa<ast::SliceType>(elemTy)) {
     S.errorFixedArrayHere(node->getLocation(), elemTy, "an array element");
@@ -4138,10 +4328,13 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
       fixed = S.Ctx.getFixedArrayType(elemTy, fixed->getLength(), elemQual);
     }
     if (!S.checkAssignable(elemTy, ty, elem)) {
-      S.error(elem->getLocation(),
-              "array literal element of type '" + typeName(ty) +
-                  "' does not match the element type '" + typeName(elemTy) +
-                  "' of '" + typeName(fixed) + "'");
+      // A None where the elements are no optionals says so (#394).
+      if (ty != S.Ctx.getNoneTy() ||
+          !S.diagnoseOptionalNarrowing(elem->getLocation(), elemTy, ty))
+        S.error(elem->getLocation(),
+                "array literal element of type '" + typeName(ty) +
+                    "' does not match the element type '" + typeName(elemTy) +
+                    "' of '" + typeName(fixed) + "'");
       ok = false;
     } else if (!S.checkViewNotStored(elem, ty)) {
       ok = false;
@@ -4311,13 +4504,15 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   //   if c then x else None   — `T?` when x is a reference type T (or T?);
   //   if c then a else b      — `T?` when either side is optional and the
   //                             wrapped types unify (equal, or class LCA).
-  // A `None` branch is re-typed to the optional result (see checkAssignable)
-  // so the lowering produces a null box for it.
+  // A `None` branch (or a conditional of Nones) takes the optional result
+  // as its type (giveNoneType), which the lowering emits its absent value
+  // for.  Two None branches have no type yet (the test above): the slot the
+  // conditional flows into gives it.
   {
     ast::Expr *trueExpr = node->getTrueExpr();
     ast::Expr *falseExpr = node->getFalseExpr();
-    bool trueNone = ast::isa<ast::NoneLiteral>(trueExpr);
-    bool falseNone = ast::isa<ast::NoneLiteral>(falseExpr);
+    bool trueNone = trueTy == S.Ctx.getNoneTy();
+    bool falseNone = falseTy == S.Ctx.getNoneTy();
     ast::Type *result = nullptr;
     if (trueNone != falseNone) {
       ast::Type *valueTy = trueNone ? falseTy : trueTy;
@@ -4325,11 +4520,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
       // primitive (`int` -> `int?`).
       if (ast::isa<ast::OptionalType>(valueTy))
         result = valueTy;
-      else if (ast::isRefType(valueTy) || ast::isFunctionValue(valueTy) ||
-               ast::isa<ast::EnumType>(valueTy) ||
-               ast::isa<ast::TupleType>(valueTy) ||
-               (ast::isa<ast::BuiltinType>(valueTy) &&
-                valueTy != S.Ctx.getVoidTy()))
+      else if (S.makesOptional(valueTy))
         result = S.Ctx.getOptionalType(valueTy);
     } else if (ast::isa<ast::OptionalType>(trueTy) ||
                ast::isa<ast::OptionalType>(falseTy)) {
@@ -4346,9 +4537,9 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     }
     if (result) {
       if (trueNone)
-        trueExpr->setResolvedType(result);
+        S.giveNoneType(trueExpr, result);
       if (falseNone)
-        falseExpr->setResolvedType(result);
+        S.giveNoneType(falseExpr, result);
       // A plain primitive branch of an optional primitive result is its
       // present value.
       if (ast::wrapsInOptional(result, trueTy))
@@ -4581,6 +4772,16 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
               std::to_string(tt->getArity()) + " elements)");
     return bindTargetsAfterError();
   }
+  // An element that is a None no slot typed (`(a, b) = (None, 1);`) would
+  // give its target no type (#394).
+  if (holdsUntypedNone(tt)) {
+    error(node->getValue()->getLocation(),
+          "cannot destructure a value of type '" + typeName(tt) +
+              "': a None has no type until a slot of an optional type takes "
+              "it, and a destructuring stores each element as it is; assign "
+              "the None on its own");
+    return bindTargetsAfterError();
+  }
   // The lowering extracts the elements from this resolved type.
   node->getValue()->setResolvedType(tt);
 
@@ -4789,6 +4990,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     processImport(imp);
 
   visit(tu);
+  reportUntypedNones();
   // A binder is poisoned only after its declaration's error was reported, so
   // a program without errors has none, and the poison type never reaches the
   // lowering.  Guard that invariant: never hand such a program on.  An
@@ -5043,6 +5245,14 @@ bool Sema::textConversion(ast::Type *source, ast::SourceLocation loc,
     pair = {names::kString, name, names::kString};
     return true;
   }
+  // `Str(None)` (#394): None is no value until an optional's type says
+  // which absent value it is.
+  if (source == Ctx.getNoneTy()) {
+    error(loc, std::string("'") + names::kString +
+                   "' cannot convert None: it is the absent value of an "
+                   "optional, and nothing here says which");
+    return false;
+  }
   if (!hasText(source)) {
     const std::string why = noTextReason(source);
     error(loc, std::string("'") + names::kString +
@@ -5136,6 +5346,12 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
   ast::Type *argTy = argTypes[0];
   if (!argTy)
     return nullptr; // already reported
+  // `Str<Node?>(None)` (#394): the optional written is the one the None is
+  // the absent value of.
+  if (argTy == Ctx.getNoneTy() && ast::isa<ast::OptionalType>(source)) {
+    giveNoneType(node->getArguments()[0], source);
+    argTy = source;
+  }
   // The source type is written out, so the argument must have exactly that
   // type: no int -> float promotion, no unwrapping of an optional.
   if (!typesEqual(argTy, source)) {
@@ -5652,7 +5868,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       declarePoisoned(CurrentScope, varName);
       return false;
     }
-    if (!checkNotVoidValue(valTy, varName, node->getLocation())) {
+    if (!checkNotVoidValue(valTy, varName, node->getLocation()) ||
+        !checkNotUntypedNone(valTy, varName, node->getLocation())) {
       declarePoisoned(CurrentScope, varName);
       return false;
     }
@@ -6685,6 +6902,14 @@ ast::Type *Sema::returnedType(ast::CompoundStmt *body,
               braces + "'");
     return nullptr;
   }
+  // A None no slot typed (#394): the expression gives the result no type.
+  if (holdsUntypedNone(ty)) {
+    error(value->getLocation(),
+          subject + " has no type: None is the absent value of an optional, "
+                    "and an inferred result does not say which; write the "
+                    "result type ('-> T?')");
+    return nullptr;
+  }
   return ty;
 }
 
@@ -6836,17 +7061,7 @@ bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {
   return ok;
 }
 
-namespace {
-
-/// Whether @p e is `None`, or a conditional each of whose branches is: a
-/// value of no class.
-bool isNoneValue(const ast::Expr *e) {
-  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
-    return isNoneValue(te->getTrueExpr()) && isNoneValue(te->getFalseExpr());
-  return ast::isa<ast::NoneLiteral>(e);
-}
-
-} // namespace
+namespace {} // namespace
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {
   // The name must not shadow a type, a function or a reserved name (#126);
@@ -7010,6 +7225,12 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         declarePoisoned(CurrentScope, node->getName());
         return false;
       }
+      // A weak local's None is reported with its own text, below.
+      if (!node->isWeak() &&
+          !checkNotUntypedNone(initTy, node->getName(), node->getLocation())) {
+        declarePoisoned(CurrentScope, node->getName());
+        return false;
+      }
       declTy = initTy;
     }
   }
@@ -7024,8 +7245,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   // A `weak` local holds a weak reference: its type is `T?` of a class `T`
   // (`y: weak = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
-  // class: inferred, it would be a weak reference to the None value itself,
-  // which never reads None.
+  // class, so it infers none.
   if (node->isWeak()) {
     if (!node->getType() && node->getInitExpr() &&
         isNoneValue(node->getInitExpr())) {

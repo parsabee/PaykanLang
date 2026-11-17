@@ -1,0 +1,7 @@
+// `None` has no type of its own (#394): it is the absent value of the
+// optional its context expects, so a variable declared with it alone needs
+// its type written.
+fn main() -> int {
+  let x = None;   // error: cannot infer the type of 'x' from None: write the optional it is, as in 'x: T? = None'
+  return 0;
+}

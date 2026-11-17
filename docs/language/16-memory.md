@@ -450,9 +450,7 @@ A store takes nothing from the object's owners: `u: weak mut = a;` above, and `c
 A `weak` local written without a type takes the class of its initializer (`u: weak mut =
 a;` above is a `Node?`) and the form written, `weak` or `weak mut`. `None` has no class:
 `a: weak = None;` is an error (`cannot infer the class of weak local 'a' from None; write
-'a: weak T? = None'`), and `a: weak Node? = None;` starts it as nothing. An `Obj` that holds
-`None` is the `None` value, not nothing: `a: weak = x;` with `x` a `shared Obj` after `x =
-None;` refers to it and never reads `None` ([Optionals](12-optionals.md#not-supported-yet)).
+'a: weak T? = None'`), and `a: weak Node? = None;` starts it as nothing.
 
 A lambda that captures a `weak` variable captures it weakly, so a closure can refer to the
 object that stores it without forming a cycle (see
@@ -1008,11 +1006,10 @@ copied.
 
 ## `None`
 
-`None` is a singleton `Obj` representing the absence of a value. Because it is a shared global
-rather than an allocation, retaining and releasing it is harmless and it is never destroyed.
-`None` is what an optional holds when it holds nothing (the `msg` of an `Error` that has no
-message, say), distinguished with `match` (see
-[Optionals](12-optionals.md#unwrapping-with-match)). A read like `readln` at end of input
+`None` is not an object: it is what an optional holds when it holds nothing (the `msg` of
+an `Error` that has no message, say), distinguished with `match` (see
+[Optionals](12-optionals.md#unwrapping-with-match)). It allocates nothing, and there is
+nothing to retain, release or destroy. A read like `readln` at end of input
 holds no `None`: it returns an `Err` whose code is `EndOfFile`
 ([End of file](../stdlib/io.md#end-of-file-failed-reads-and-buffering)).
 
@@ -1020,7 +1017,7 @@ holds no `None`: it returns an `Err` whose code is `EndOfFile`
 
 A value of optional type `T?` of a reference type `T` (see [Optionals](12-optionals.md)) is the **same
 reference** as a `T`, the object's address; the
-absent value is represented by a *null reference* rather than by the `None` singleton. This
+absent value is represented by a *null reference*. This
 means an optional costs nothing extra: retaining, releasing, moving or destroying an absent
 `T?` is a no-op, a `None` stored into an optional field or array slot releases the previous
 value and allocates nothing, and `x == None` is a plain null test. A `T?` never becomes an `Obj`

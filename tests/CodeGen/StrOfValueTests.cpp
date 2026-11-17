@@ -52,8 +52,8 @@ TEST(StrOfValue, IsTheTextToStringGives) {
           + same(E::A) + same(E::B(4, "c" + Str(5))) + same(Color::Green));
       ob: Obj = Q(6);
       io::println(same(P(7)) + same(Q(8)) + same(Plain(9)) + same(ob));
-      n = None;
-      io::println(Str(Str(None) == n.toString()) + " " + Str(None));
+      n: Obj? = None;
+      io::println(Str(Str(n) == n.toString()) + " " + Str(n));
       return 0;
     }
   )");

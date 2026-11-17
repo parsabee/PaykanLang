@@ -89,7 +89,7 @@ TEST(Optional, OptionalIsNotAnObj) {
   const char *msg = "cannot use optional 'Node?' as 'Obj': an optional is not "
                     "an object; unwrap it with match";
   expectError(withNode("n: Node? = None; o: Obj = n;"), msg);
-  expectError(withNode("n: Node? = None; o: Obj = None; o = n;"), msg);
+  expectError(withNode("n: Node? = None; o: Obj = \"o\"; o = n;"), msg);
   expectError(std::string(kNodeClass) +
                   "fn take(o: Obj) { }\n"
                   "fn main() -> int { n: Node? = None; take(n); return 0; }\n",
@@ -100,7 +100,7 @@ TEST(Optional, OptionalIsNotAnObj) {
               msg);
   expectError(std::string(kNodeClass) +
                   "class H { o: Obj; }\n"
-                  "impl H { fn __init__() { self.o = None; } }\n"
+                  "impl H { fn __init__() { self.o = \"o\"; } }\n"
                   "fn main() -> int { h: mut = H(); n: Node? = None; h.o = n; "
                   "return 0; }\n",
               msg);
@@ -434,6 +434,307 @@ TEST(Optional, MatchBindingIsNarrowedToArmType) {
   )"));
 }
 
+// ─── `None` has no type of its own (#394) ───────────────────────────────────
+
+// With no optional to be the absent value of, `None` is an error, and the
+// diagnostic says to write the type.
+TEST(OptionalNone, WithoutADestinationIsAnError) {
+  expectError(withNode("x = None;"),
+              "cannot infer the type of 'x' from None: write the optional it "
+              "is, as in 'x: T? = None'");
+  expectError(withNode("let x = None;"),
+              "cannot infer the type of 'x' from None");
+  expectError(withNode("c = True; y = if c then None else None;"),
+              "cannot infer the type of 'y' from None");
+  expectError(withNode("t = (None, 1);"),
+              "cannot infer the type of 't' from '(None, int)': a None takes "
+              "the type of the optional it flows into, so write the "
+              "variable's type");
+  const char *destructured =
+      "cannot destructure a value of type '(None, int)': a None has no type "
+      "until a slot of an optional type takes it, and a destructuring stores "
+      "each element as it is; assign the None on its own";
+  expectError(withNode("a, b = (None, 1);"), destructured);
+  expectError(withNode("a: Node?, b: int = (None, 1);"), destructured);
+  expectError(withNode("xs = [None, None];"),
+              "an array literal of None alone has no element type: write the "
+              "array's type, as in 'xs: T?[2] = ...'");
+  expectError(withNode("xs = [None; 3];"),
+              "an array literal of None alone has no element type");
+  // Nor does a sibling give an inner literal its type.
+  expectError(withNode("xs = [[None, None], [None, Node(1)]];"),
+              "an array literal of None alone has no element type");
+  expectError(withNode("xs = [(None, 1), (None, 2)];"),
+              "cannot infer the array's element type from '(None, int)': a "
+              "None takes the type of the optional it flows into, so write "
+              "the array's type");
+  expectError(withNode("None;"),
+              "None has no type here: it is the absent value of an optional, "
+              "and nothing says which");
+  expectError(withNode("io::println(None);"),
+              "cannot infer type parameter 'T' of 'io::println' from the call "
+              "arguments: None is the absent value of an optional, and says "
+              "nothing of its type");
+  expectError(withNode("s = Str(None);"),
+              "'Str' cannot convert None: it is the absent value of an "
+              "optional, and nothing here says which");
+  // No receiver, and nothing for a `move` to take (a temporary is moved
+  // as it is; a None is no value yet).
+  const std::string alone =
+      " None: it is the absent value of an optional, and no value until a "
+      "slot of an optional type takes it";
+  expectError(withNode("s = None.toString();"),
+              "cannot call 'toString' on" + alone);
+  expectError(withNode("x = None.clone();"), "cannot call 'clone' on" + alone);
+  expectError(withNode("c = True; x = (if c then None else None).clone();"),
+              "cannot call 'clone' on" + alone);
+  expectError(withNode("x: Node? = move None;"), "cannot move" + alone);
+  expectError(std::string(kNodeClass) +
+                  "fn take(n: Node?) -> bool { return n == None; }\n"
+                  "fn main() -> int { take(move None); return 0; }\n",
+              "cannot move" + alone);
+  expectError(withNode("match None { _ { } }"), "'None'");
+  expectError("fn f() => None;\nfn main() -> int { return 0; }\n",
+              "the result of 'f' has no type: None is the absent value of an "
+              "optional, and an inferred result does not say which; write "
+              "the result type ('-> T?')");
+  expectError("fn main() -> int { f = fn() => None; return 0; }\n",
+              "the lambda's result has no type");
+}
+
+// `None` is no object: no slot of a class type takes it, `Obj` included, and
+// nothing but an optional compares with it.
+TEST(OptionalNone, IsNoObj) {
+  const char *noObj = "None is not a value of type 'Obj': it is the absent "
+                      "value of an optional ('Obj?')";
+  expectError(withNode("o: Obj = None;"), noObj);
+  expectError(withNode("o: Obj = \"o\"; o = None;"), noObj);
+  expectError("fn take(o: Obj) { }\nfn main() -> int { take(None); return 0; "
+              "}\n",
+              noObj);
+  expectError("fn give() -> Obj { return None; }\n"
+              "fn main() -> int { return 0; }\n",
+              noObj);
+  expectError("class H { o: Obj; }\n"
+              "impl H { fn __init__() { self.o = None; } }\n"
+              "fn main() -> int { return 0; }\n",
+              noObj);
+  expectError(withNode("xs: Obj[2] = [None, Node(1)];"), noObj);
+  expectError(std::string(kNodeClass) +
+                  "fn count(xs: view Obj[]) -> int { return xs.len(); }\n"
+                  "fn main() -> int { return count([None, Node(1)]); }\n",
+              noObj);
+  expectError(withNode("xs: Node[3] = [None; 3];"),
+              "None is not a value of type 'Node'");
+  expectError(withNode("n: Node = None;"),
+              "None is not a value of type 'Node': it is the absent value of "
+              "an optional ('Node?')");
+  expectError(withNode("i: int = None;"),
+              "None is not a value of type 'int': it is the absent value of "
+              "an optional ('int?')");
+  expectError(withNode("o: Obj = Node(1); b = o == None;"),
+              "cannot compare 'Obj' with None: only an optional is ever None");
+  expectError(withNode("n = Node(1); b = None != n;"),
+              "cannot compare 'Node' with None: only an optional is ever "
+              "None");
+  expectError(withNode("i = 1; b = i == None;"),
+              "cannot compare 'int' with None: only an optional is ever None");
+  expectError(withNode("b = None == None;"),
+              "cannot compare None with None: it is the absent value of an "
+              "optional, and neither operand is one");
+  // The root has no object of its own.
+  expectError(withNode("o: Obj = Obj();"),
+              "cannot make an 'Obj': it is the root of the class hierarchy, "
+              "and every object is one of a class");
+}
+
+// A `None` element of an array literal with no declared type is the absent
+// value of the other elements' common type.
+TEST(OptionalNone, ArrayLiteralTakesTheOthersOptional) {
+  expectOk(std::string(kNodeClass) + R"(
+    fn two(xs: Node?[2]) -> int { return xs.len(); }
+    fn three(xs: view Node?[]) -> int { return xs.len(); }
+    fn ints(xs: int?[3]) -> int { return xs.len(); }
+    fn main() -> int {
+      two([None, Node(1)]);
+      xs = [None, Node(1)];
+      two(move xs);
+      n: Node? = Node(2);
+      ys = [None, move n];
+      two(move ys);
+      zs = [Node(1), None, Leaf(2)];
+      three(zs);
+      is = [1, None, 3];
+      ints(is);
+      ss = ["a", None];
+      match ss[1] { s: Str { } None { } }
+      ts = [(1, "a"), None];
+      match ts[0] { t: (int, Str) { } None { } }
+      return 0;
+    }
+  )");
+  // The literal's type, as a mismatch names it.
+  expectError(withNode("xs = [None, Node(1)]; bad: int = xs;"),
+              "initializer of type 'Node?[2]' does not match declared type "
+              "'int'");
+  expectError(withNode("xs = [1, None]; bad: Str = xs;"),
+              "initializer of type 'int?[2]' does not match declared type "
+              "'Str'");
+  // Elements that are a `T` and a `T?` still disagree, a None aside.
+  expectError(withNode("n: Node? = None; xs = [None, move n, Node(1)];"),
+              "array literal has inconsistent element types: 'Node?' and "
+              "'Node'");
+  // A type with no optional has no None element.
+  expectError(withNode("xs = [None, [1, 2]];"), "'int[2]'");
+}
+
+// `Obj?` is an optional like any other: an `Obj` converts to a present one,
+// `None` is its absent value, and a match on it dispatches on the class.
+TEST(OptionalNone, ObjOptionalIsAnOrdinaryOptional) {
+  expectOk(std::string(kNodeClass) + R"(
+    class Box { any: Obj?; w: weak Obj?; }
+    impl Box { fn __init__() { self.any = None; } }
+    fn pick(c: bool) -> Obj? { return if c then None else Node(1); }
+    fn what(o: view Obj?) -> int {
+      match o {
+        l: Leaf { return 1; }
+        n: Node { return 2; }
+        s: Str  { return 3; }
+        x: Obj  { return 4; }
+        None    { return 0; }
+      }
+    }
+    fn present(o: Obj?) -> bool {
+      match o {
+        x: Obj { return True; }
+        None   { return False; }
+      }
+    }
+    fn main() -> int {
+      o: Obj = Node(1);
+      y: Obj? = move o;
+      z: Obj? = None;
+      z = Leaf(2);
+      z = "text";
+      z = None;
+      b: mut = Box();
+      b.any = Node(3);
+      b.any = None;
+      eq = y == None || z != None || b.any == None || b.w == None;
+      n = what(y) + what(z) + what(None) + what(pick(True));
+      ok = present(move y);
+      xs: Obj?[2] = [None, "s"];
+      t: (Obj?, int) = (None, 1);
+      return 0;
+    }
+  )");
+  // An `Obj?` is no `Node?`, and the `Obj` arm covers every present value.
+  expectError(withNode("y: Obj? = None; n: Node? = move y;"),
+              "initializer of type 'Obj?' does not match declared type "
+              "'Node?'");
+  expectError(std::string(kNodeClass) +
+                  "fn f(o: Obj?) -> int { match o { x: Obj { return 1; } } }\n"
+                  "fn main() -> int { return 0; }\n",
+              "does not always return a value");
+  expectError(std::string(kNodeClass) +
+                  "fn f(o: Obj?) -> int {\n"
+                  "  match o { x: Obj { return 1; } n: Node { return 2; } "
+                  "None { return 0; } }\n"
+                  "}\n"
+                  "fn main() -> int { return 0; }\n",
+              "unreachable arm: the 'Obj' arm above already matches every "
+              "non-None value");
+}
+
+// A conditional of two Nones is the absent value of the optional it flows
+// into, as a None is.
+TEST(OptionalNone, ConditionalOfNonesTakesTheSlotsType) {
+  expectOk(std::string(kNodeClass) + R"(
+    class Kid { key: int; parent: weak Kid?; up: weak mut Kid?; }
+    fn take(n: Node?) -> bool { return n == None; }
+    fn give(c: bool) -> Node? { return if c then None else None; }
+    fn main() -> int {
+      c = True;
+      // A weak field's parameter of a generated `__init__`, and its store.
+      k: mut = Kid(1, if c then None else None, if c then None else None);
+      k.parent = if c then None else None;
+      xs: Node?[3] = [if c then None else None; 3];
+      v: int? = if c then None else None;
+      w: Node? = if c then None else (if c then None else None);
+      t: (int, Str)? = if c then None else None;
+      u: (int?, Node?) = (if c then None else None, None);
+      take(if c then None else None);
+      b = v == (if c then None else None);
+      e = if c then (if c then None else None) else Node(1);
+      match e { n: Node { } None { } }
+      return 0;
+    }
+  )");
+}
+
+// The explicit conversion writes the optional its `None` is the absent
+// value of; the inferred one has nothing to go by.
+TEST(OptionalNone, AnExplicitConversionTypesItsNone) {
+  expectOk(withNode(R"(
+    c = True;
+    a: Str = Str<Node?>(None);
+    b: Str = Str<int?>(None);
+    d: Str = Str<(int, Str)?>(None);
+    e: Str = Str<Node?>(if c then None else None);
+  )"));
+  expectError(withNode("a = Str<Node>(None);"),
+              "argument of 'Str<Node>' has type 'None', expected 'Node'");
+  expectError(withNode("a = Str(None);"), "'Str' cannot convert None");
+}
+
+// A type parameter is never inferred from a `None` argument; an `Obj` given
+// for a `T?` binds `T` to `Obj`.
+TEST(OptionalNone, TypeArgumentsAreNotInferredFromNone) {
+  const std::string fns = std::string(kNodeClass) +
+                          "fn wrap<T>(x: T?) -> T? { return move x; }\n"
+                          "fn same<T>(x: T) -> T { return move x; }\n"
+                          "fn orElse<T>(a: T?, b: T) -> T { return move b; }\n";
+  expectOk(fns + R"(
+    fn main() -> int {
+      a = wrap<Node>(None);
+      b = orElse(None, Node(3));
+      c: int? = same<int?>(None);
+      o: Obj = Node(1);
+      d: Obj? = wrap(move o);
+      return 0;
+    }
+  )");
+  for (const char *call : {"wrap(None)", "same(None)", "same((None, 1))"})
+    expectError(fns + "fn main() -> int { a = " + call + "; return 0; }\n",
+                "from the call arguments: None is the absent value of an "
+                "optional, and says nothing of its type");
+}
+
+// A template is checked once more with a class of its own for each type
+// parameter, and what that check finds is dropped: a `None` it leaves
+// untyped (behind `x + x`, which no such class has) is dropped with it.
+TEST(OptionalNone, ATemplatesArchetypeCheckReportsNoNone) {
+  expectOk(R"(import ::io;
+    fn pad<T>(x: T, fill: T?) -> T { return move x; }
+    fn twice<T>(x: T) -> T { return pad(x + x, None); }
+    fn show<T>(x: T, fill: int?) -> int { return 1; }
+    fn calls<T>(x: T) -> int { return show(x.size(), None); }
+    class Sized { n: int; view fn size() -> int { return self.n; } }
+    impl Sized { fn __init__(n: int) { self.n = n; } }
+    fn main() -> int {
+      io::println(twice(2));
+      io::println(calls(Sized(3)));
+      return 0;
+    }
+  )");
+  // In an instance the program uses, an untyped None is still reported.
+  expectError(R"(
+    fn drop<T>(x: T) { None; }
+    fn main() -> int { drop(1); return 0; }
+  )",
+              "None has no type here");
+}
+
 // ─── the existing Obj-subject match is unchanged ────────────────────────────
 
 TEST(Optional, ObjSubjectMatchStillWorks) {
@@ -452,7 +753,7 @@ TEST(Optional, ObjSubjectMatchStillWorks) {
 TEST(Optional, NoneArmOnObjSubjectIsStillAnError) {
   expectError(R"(
     fn main() -> int {
-      o: Obj = None;
+      o: Obj = "o";
       match o {
         None { }
         _    { }
@@ -674,6 +975,38 @@ fn main() -> int {
   std::filesystem::remove_all(tmp);
 }
 
+// A `None` no slot types in an instance of another module's template is
+// reported in that module's file, under the instantiation that made it
+// (#394).  The module itself compiles: its template is checked per instance.
+TEST(OptionalModule, AnUntypedNoneInAnotherModulesTemplateIsReportedThere) {
+  auto tmp = (paykan::test::tempDir() / "pkn_none_mod").string();
+  std::filesystem::remove_all(tmp);
+  auto lib = writeFile(tmp, "lib.pkn",
+                       "fn idle<T>(x: T) {\n  None;\n}\n"
+                       "fn fine<T>(x: T?) -> bool {\n"
+                       "  return x == None;\n}\n");
+  EXPECT_TRUE(semaCheckFile(lib, tmp).Ok);
+  auto ok = writeFile(tmp, "ok.pkn",
+                      "import lib;\n"
+                      "fn main() -> int { b = lib::fine<int>(None); return 0; "
+                      "}\n");
+  auto good = semaCheckFile(ok, tmp);
+  EXPECT_TRUE(good.Ok) << good.Diagnostics;
+  auto main = writeFile(tmp, "main.pkn",
+                        "import lib;\n"
+                        "fn main() -> int { lib::idle(1); return 0; }\n");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("lib.pkn:2:3: error: None has no type here"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("main.pkn:2:20: note: in instantiation of "
+                               "'lib::idle<int>' requested here"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 TEST(OptionalModule, ExportedOptionalReturnIsStillOptional) {
   // The imported return type must be `Node?` (not degraded to Node/Obj):
   // narrowing it without a match is the optional-unwrap error.
@@ -772,7 +1105,7 @@ TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
       ps: (Node?, int)[1] = [(None, 5)];
       ps[0] = (None, 6);
       n: (Str, (Node?, int?)) = ("n", (None, None));
-      c: (Obj, int) = (None, 1);
+      c: (Obj?, int) = (None, 1);
       return 0;
     }
   )");
@@ -780,18 +1113,24 @@ TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
 
 TEST(OptionalTuple, NoneInTupleLiteralStillNeedsAnOptionalSlot) {
   expectError("fn main() -> int { a: (int, Str) = (None, \"a\"); return 0; }",
-              "initializer of type '(Obj, Str)' does not match declared type "
+              "initializer of type '(None, Str)' does not match declared type "
               "'(int, Str)'");
   expectError(std::string(kNodeClass) +
                   "fn main() -> int { b: (Node?, int) = (None, None); "
                   "return 0; }",
-              "initializer of type '(Obj, Obj)' does not match declared type "
-              "'(Node?, int)'");
-  // Without a destination a bare `None` is still `Obj`.
+              "initializer of type '(None, None)' does not match declared "
+              "type '(Node?, int)'");
+  // No `Obj` slot takes one either (#394).
+  expectError("fn main() -> int { c: (Obj, int) = (None, 1); return 0; }",
+              "initializer of type '(None, int)' does not match declared type "
+              "'(Obj, int)'");
+  // Without a destination a `None` has no type, and nor has the tuple.
   expectError(std::string(kNodeClass) +
                   "fn main() -> int { t = (None, 1); n: Node? = t.0; "
                   "return 0; }",
-              "does not match declared type 'Node?'");
+              "cannot infer the type of 't' from '(None, int)': a None takes "
+              "the type of the optional it flows into, so write the "
+              "variable's type");
 }
 
 // #71: an array literal with a declared element type takes it when its

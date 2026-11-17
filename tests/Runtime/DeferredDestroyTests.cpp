@@ -179,12 +179,14 @@ TEST_F(DeferredDestroy, SurvivingChildIsNotQueued) {
   EXPECT_EQ(gLog, std::vector<int>({1, 2}));
 }
 
-TEST_F(DeferredDestroy, NoneInsideDestroyIsHandled) {
-  // The immortal None released inside a destroy never dies (its strong
-  // count is PAYKAN_REF_MAX, never written), so nothing is queued for it.
-  PaykanShared *none = PaykanShared_new(&PaykanObject_None);
-  Paykan_release(makeNode(1, {none, makeNode(2, {})}));
-  EXPECT_EQ(PaykanObject_None.strong, PAYKAN_REF_MAX);
+TEST_F(DeferredDestroy, AnImmortalObjectInsideDestroyIsHandled) {
+  // An immortal object (a string literal's is one) released inside a
+  // destroy never dies: its strong count is PAYKAN_REF_MAX, never written,
+  // so nothing is queued for it.
+  PaykanObject immortal = {PaykanObject_vtable, PAYKAN_REF_MAX, 0};
+  PaykanShared *held = PaykanShared_new(&immortal);
+  Paykan_release(makeNode(1, {held, makeNode(2, {})}));
+  EXPECT_EQ(immortal.strong, PAYKAN_REF_MAX);
   EXPECT_EQ(gLog, std::vector<int>({1, 2}));
 }
 

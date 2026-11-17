@@ -249,7 +249,8 @@ TEST(Tuple, PrintedAndShown) {
     io::println(t);
     io::print(t);
     io::printerrln((1, 2.5));
-    io::println(((1, 'c'), None));
+    u: ((int, char), Str?) = ((1, 'c'), None);
+    io::println(u);
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -361,8 +362,8 @@ TEST(Tuple, EqualitySameTypeOk) {
     b = (1, "x");
     eq: bool = a == b;
     ne: bool = a != b;
-    n = ((1, 2.5), None);
-    m = ((1, 2.5), None);
+    n: ((int, float), Str?) = ((1, 2.5), None);
+    m: ((int, float), Str?) = ((1, 2.5), None);
     eq2: bool = n == m;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

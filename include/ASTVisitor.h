@@ -85,6 +85,7 @@ namespace ast {
   NODE(NK_TaskType, TaskType, TaskType)                                        \
   NODE(NK_QualifiedType, QualifiedType, QualifiedType)                         \
   NODE(NK_PoisonType, PoisonType, PoisonType)                                  \
+  NODE(NK_NoneType, NoneType, NoneType)                                        \
   NODE(NK_FunctionType, FunctionType, FunctionType)                            \
   NODE(NK_GenericType, GenericType, GenericType)
 

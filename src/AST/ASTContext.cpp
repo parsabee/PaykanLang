@@ -19,6 +19,7 @@ ASTContext::ASTContext()
   CharTy = BuiltinTys[BuiltinType::Char];
   VoidTy = BuiltinTys[BuiltinType::Void];
   PoisonTy = make<PoisonType>(SourceLocation());
+  NoneTy = make<NoneType>(SourceLocation());
   // Every builtin class is allocated before any is populated, so a method
   // signature can name any of them.
   ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
@@ -430,6 +431,9 @@ std::string typeName(Type *ty) {
   // so that it cannot be mistaken for a source type if it ever is.
   if (isa<PoisonType>(ty))
     return "<error>";
+  // A `None` with no optional type yet (ast::NoneType): shown as written.
+  if (isa<NoneType>(ty))
+    return names::kNoneText;
   return "unknown";
 }
 

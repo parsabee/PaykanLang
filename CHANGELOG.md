@@ -219,6 +219,25 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- `None` is no longer an `Obj` (#394; docs/language/12-optionals.md, "`None` and its
+  context"). It is the absent value of the optional its context expects and has no type of
+  its own, so an `Obj` is always an object of a class and `Obj?` is an optional like any
+  other: an object or `None`, matched with subclass arms, an `Obj` arm and a `None` arm.
+  **Breaking**: `x = None;` no longer declares an `Obj` (`cannot infer the type of 'x'
+  from None: write the optional it is, as in 'x: T? = None'`); `o: Obj = None`, a `None`
+  argument or result for an `Obj`, `[None, x]` into an `Obj[2]` and `x == None` with `x` of
+  a type that is no optional are errors (`None is not a value of type 'Obj': it is the
+  absent value of an optional ('Obj?')`, `cannot compare 'Node' with None: only an
+  optional is ever None`); `io::println(None)` and `Str(None)` are errors too, as nothing
+  says which optional's `None` it is (an absent optional still prints `None`). Write the
+  optional type: `o: Obj? = None`. What a `None` beside values means is inferred now:
+  `[None, Node(1)]` is a `Node?[2]` (it was an `Obj[2]`), `[None, move n]` with `n: Node?`
+  is accepted, and a conditional of two `None`s takes the type of the optional it flows
+  into. The runtime's object that stood for `None` is gone (`PaykanObject_None`): a file
+  read's "nothing" is a null reference like every other absent reference, and an `Obj`
+  converted to an `Obj?` is always present, where one holding `None` gave an `Obj?` that
+  compared unequal to `None`. `Obj()` has a diagnostic of its own (`cannot make an 'Obj':
+  it is the root of the class hierarchy, and every object is one of a class`).
 - `mem::swap`, `mem::replace`, `mem::take` and the containers' move of a value out of a
   node exchange their values in place (#365): each called a runtime function that copied
   byte by byte to the size a type descriptor gave. The check of a value moved out of

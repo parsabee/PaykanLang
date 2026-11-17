@@ -3,8 +3,9 @@
 Sometimes a value may be missing: a search finds nothing, a string is not a number, a task
 has no deadline. PaykanLang expresses this with **optional types**. A `T?` holds either a
 value of type `T` or `None`, without giving up the static type: a `next: Node?` field is a
-`Node` or nothing, never a `Str`, and a `count: int?` is an `int` or nothing. The compiler
-makes sure you check which before using the value. This chapter shows how to declare,
+`Node` or nothing, never a `Str`, and a `count: int?` is an `int` or nothing. In meaning it
+is an enum of two cases, a present `T` and `None`. The compiler makes sure you check which
+before using the value. This chapter shows how to declare,
 unwrap and compare optionals, and `tasks` learns to look tasks up and to give them an
 optional deadline; then it gives the precise rules.
 
@@ -12,7 +13,8 @@ optional deadline; then it gives the precise rules.
 
 Add `?` to a type to make it optional: `Str?`, `int?`, `Task?`. Any class, `Str`, `int`,
 `float`, `bool`, `char` and the sized numeric types can be optional, and so can enums,
-tuples, structs and function values. `None` is the absent value:
+tuples, structs and function values. `None` is the absent value of whichever optional the
+context expects; it is not a value of any class, and has no type of its own:
 
 ```pkn
 import ::io;
@@ -191,9 +193,12 @@ True
 
 ## Things to know
 
-- `None` on its own has the type `Obj`, the root class. So `x = None;` declares an `Obj`
-  variable, not an optional: write the type, as in `x: Task? = None;`. The same goes for
-  an array literal holding `None`: `ts: Task?[8] = [None; 8]` needs its annotation.
+- `None` has no type of its own: it takes the optional type its context expects. So
+  `x = None;` is an error (`cannot infer the type of 'x' from None: write the optional it
+  is, as in 'x: T? = None'`): write the type, as in `x: Task? = None;`. The same goes for
+  an array literal of `None` alone: `ts: Task?[8] = [None; 8]` needs its annotation.
+- `None` is not an object. An `Obj`, the root class, is always an object of some class,
+  and an `Obj?` is an optional like any other: an object, or `None`.
 - `T?[n]` is an array whose elements may be `None` ([Arrays](#arrays)); an array cannot
   itself be optional.
 - Enums, tuples and structs have optionals too (`Direction?`, `(int, Str)?`, `Point?`),
@@ -306,8 +311,10 @@ no task called 'walk the dog'
   can be optional (see [Optional Primitives](#optional-primitives) and [Optional Enums,
   Tuples and Structs](#optional-enums-tuples-and-structs)). `void?`, a written `T??` and optional
   fixed-size arrays (`int[3]?`) are rejected.
-- `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
-  to `T` — unwrap it with `match`.
+- `None` is the absent value of the optional its context expects, and of nothing else: it
+  has no type of its own and is not an `Obj` (see [`None` and its
+  context](#none-and-its-context)). A `T` converts to `T?` implicitly; a `T?` **never**
+  converts back to `T` — unwrap it with `match`.
 - On a `T?` you may: assign it, pass and return it, store it in fields and arrays,
   compare it with `==`/`!=` against `None` or another optional, call `toString()` on it
   (`"None"` or the value's text), and `match` on it. Everything else (fields, other methods,
@@ -330,8 +337,47 @@ a = None;                 // back to absent
 r = c.clone();            // inferred Node?, when Node is Cloneable
 ```
 
-A `Leaf?` converts to `Node?` when `Leaf` is a subclass of `Node`. An `Obj` (other than the
-literal `None`) does **not** convert to `Node?`: it might be anything.
+A `Leaf?` converts to `Node?` when `Leaf` is a subclass of `Node`. An `Obj` does **not**
+convert to `Node?`: it might be anything. It converts to `Obj?`, as every `T` converts to its
+`T?`, and the result is always present.
+
+### `None` and its context
+
+`None` is the absent value of an optional, and the context says which: the type of the
+variable, field, element, parameter or result it flows into, the other operand of `==` or
+`!=`, the other branch of a conditional expression, or the other elements of an array
+literal. With no such context it has no type, and the program is rejected:
+
+```pkn
+x = None;                 // error: cannot infer the type of 'x' from None: write the
+                          //        optional it is, as in 'x: T? = None'
+o: Obj = None;            // error: None is not a value of type 'Obj': it is the absent
+                          //        value of an optional ('Obj?')
+io::println(None);        // error: cannot infer type parameter 'T' of 'io::println' ...
+s = Str(None);            // error: 'Str' cannot convert None: ...
+```
+
+A generic function's type parameter is never inferred from a `None` argument, so write it
+where no other argument gives it: `first<int>(None, 4)`.
+
+### `Obj?`
+
+`Obj?` is an ordinary optional: an object of any class, or `None`. Nothing but `None` makes
+it absent, and a `match` on it tells the classes apart as on any class optional:
+
+```pkn
+fn describe(o: view Obj?) -> Str {
+  match o {
+    d: Dog { return "a dog"; }       // exactly a Dog
+    s: Str { return "the text " + s; }
+    x: Obj { return "some object"; } // any other present value
+    None   { return "nothing"; }
+  }
+}
+```
+
+An `Obj` itself is never `None`: there is no object that stands for it, and no way to make
+an `Obj` that is not an object of a class (`Obj()` is an error).
 
 The narrowing direction is always an error:
 
@@ -387,8 +433,8 @@ match maybe {
 - The subject can be any optional expression: a variable, a field (`match self.next { … }`), a
   call result, an array element.
 
-Matching on an `Obj` subject is unchanged, and a `None` arm is only valid on an optional
-subject. A read's result is a `Result`, an enum, not an optional: `match io::stdin().readln() {
+A `None` arm is only valid on an optional subject: a subject of a class type, `Obj`
+included, is never `None`. A read's result is a `Result`, an enum, not an optional: `match io::stdin().readln() {
 line: Ok { … } _ { … } }` is a variant-mode match (see [Input and output](../stdlib/io.md)).
 
 ---
@@ -556,9 +602,12 @@ match xs[0] { n: Node { … } None { … } }
 ```
 
 An array literal containing `None` takes its destination's element type
-(`xs: Node?[2] = [None, n]`, and `slots: Node?[8] = [None; 8]` is eight empty slots).
-Without a declared destination a bare `None` is `Obj`: `xs = [None, Node(1)]` is an
-`Obj[2]`, and `xs = [None, n]` (with `n: Node?`) is an error. Annotate the variable.
+(`xs: Node?[2] = [None, move n]`, and `slots: Node?[8] = [None; 8]` is eight empty slots).
+Without a declared destination its `None` elements are the absent value of the other
+elements' common type: `xs = [None, Node(1)]` is a `Node?[2]`, `xs = [None, move n]` with
+`n: Node?` too, and `[1, None, 3]` is an `int?[3]`. A literal of `None` alone (`[None,
+None]`, `[None; 8]`) has no element type, also as an element of another literal
+(`[[None, None], [None, Node(1)]]`): annotate the variable.
 
 ---
 
@@ -580,9 +629,11 @@ nested: (Str, (int?, Node?))[1] = [("a", (1, None))];
 A literal still has to fit: `(None, "a")` is not an `(int, Str)`, and
 `[("a", 1), ("b", nb)]` is not a `(Str, int)[2]` ("array literal element of type '(Str, int?)'
 does not match the element type '(Str, int)' of '(Str, int)[2]'"). There is no promotion inside a tuple
-literal either (`(1, 2)` is not a `(float, int)`). Where there is no destination, as in
-`t = (None, 1)`, a `None` is `Obj` and the elements of an array literal must agree on their
-own.
+literal either (`(1, 2)` is not a `(float, int)`). Where there is no destination the
+elements of an array literal must agree on their own (a `None` among them aside, see
+[Arrays](#arrays)), and a tuple literal's `None` has no type: `t = (None, 1)` is an error
+(`cannot infer the type of 't' from '(None, int)': ...`), so write `t: (Node?, int) =
+(None, 1)`.
 
 ---
 
@@ -648,6 +699,17 @@ Retaining, releasing and destroying an absent optional are no-ops. See [Memory](
 | `duplicate 'None' arm in match on 'T?'` | two `None` arms |
 | `match arm type 'float' does not match the optional subject type 'int?'` | an arm other than the primitive on an optional primitive |
 | `cannot use optional 'T?' as 'Obj': an optional is not an object` | a `T?` where an `Obj` is expected (declaration, assignment, argument, return, field or array store) |
+| `None is not a value of type 'T': it is the absent value of an optional ('T?')` | `None` where a `T` that is no optional is expected, `Obj` included (declaration, assignment, argument, return, field or array store) |
+| `cannot infer the type of 'x' from None: write the optional it is, as in 'x: T? = None'` | `x = None;`, or a conditional of two `None`s, declaring a variable with no type |
+| `cannot infer the type of 't' from '(None, int)': a None takes the type of the optional it flows into, so write the variable's type` | a literal holding `None` declaring a variable with no type |
+| `an array literal of None alone has no element type: write the array's type, as in 'xs: T?[2] = ...'` | `[None, None]`, `[None; n]` with no declared destination |
+| `cannot infer the array's element type from '(None, int)': a None takes the type of the optional it flows into, so write the array's type` | `[(None, 1), (None, 2)]` with no declared destination |
+| `cannot destructure a value of type '(None, int)': a None has no type until a slot of an optional type takes it, and a destructuring stores each element as it is; assign the None on its own` | `a, b = (None, 1);`, with the targets' types written too |
+| `cannot call 'clone' on None: it is the absent value of an optional, and no value until a slot of an optional type takes it` | a method call on `None` (or `cannot move None: ...` for `move None`) |
+| `cannot compare 'T' with None: only an optional is ever None` | `x == None` or `x != None` with `x` of a type that is no optional |
+| `cannot infer type parameter 'T' of 'f' from the call arguments: None is the absent value of an optional, and says nothing of its type` | a `None` argument for a parameter whose type parameter no other argument gives |
+| `'Str' cannot convert None: it is the absent value of an optional, and nothing here says which` | `Str(None)` |
+| `None has no type here: it is the absent value of an optional, and nothing says which (write the type where the value goes, as in 'x: T? = None')` | `None` anywhere else that expects no optional (`None;`) |
 | `'v' is a 'view' parameter; a 'view' is not converted, and parameter 1 of 'f' is a 'view T?'` | a `view T` passed to a `view T?` parameter, or bound to a `view T?` local |
 | `non-void function 'f' does not always return a value` | a `T` arm without `None` / `_` as the last statement of a non-void function |
 
@@ -656,18 +718,6 @@ Retaining, releasing and destroying an absent optional are no-ops. See [Memory](
 ## Not supported yet
 
 Flow typing (`if x != None { x.foo(); }` does not narrow `x`), `if let`, the `??` default
-and `?.` chaining operators, optional fixed-size arrays, and typing `None` in a literal that has no
-declared destination (`xs = [None, n]`).
-
-`None` itself keeps the static type `Obj`: it is accepted wherever a `T?` is expected, but an
-`Obj` variable holding `None` is not (`n: Node? = someObj` is an error even when `someObj` is
-`None` at run time). A `None` arm is accepted only on an optional subject; on an `Obj` subject
-use `_`.
-
-An `Obj` converts to `Obj?` as it is, so an `Obj` holding `None` becomes an `Obj?` that holds
-the `None` value, not an absent one: after `x = None;`, `y: Obj? = x;` gives `y == None`
-False, and `match y` takes its `Obj` arm. The same goes for a `weak` local (`a: weak = x;`
-with `x` a `shared Obj`, or `a: weak = f();` with `f` returning `shared Obj`), a weak
-reference to the `None` value, which never goes away, so it never reads `None` either. Where
-nothing is meant, write `None` where the optional is: `y: Obj? = None;`, `a: weak Obj? =
-None;`.
+and `?.` chaining operators, optional fixed-size arrays, and an array literal that mixes a
+`T` and a `T?` element with no declared destination (`[n, Node(1)]` with `n: Node?`;
+annotate the variable).

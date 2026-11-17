@@ -301,7 +301,7 @@ data  @.type0 = [8, 8, 0, 0, 0]    ; constant i64 words: a `PaykanType` descript
 data  @.tuple0 = [2, 0, 0, 4, 8]   ; constant i64 words: a tuple layout (`ptr`)
 bytes @.b0    = [0, 4]             ; constant bytes (`ptr`)
 
-extern obj    @$rt.PaykanObject_None   ; runtime object singletons (`obj`)
+extern obj    @$rt.Paykan_an_object    ; a runtime object, by its C symbol (`obj`); the lowering emits none today
 extern vtable @$rt.PaykanString_vtable ; runtime vtable globals (`ptr`)
 
 class Point {                      ; layout + vtable, see §5 (`: Super` names
@@ -1417,7 +1417,9 @@ CodeGen enforced, now in one place.
   `unwrap`s are `==`, and a `match` arm binding the primitive is its
   `unwrap`.  An optional's `toString()` (optionals are `Showable`) is a branch
   on `is_some`: the value's text (`PaykanString_from_int` & co. for a
-  primitive) when present, `"None"` otherwise.  An
+  primitive) when present, `"None"` otherwise; a reference optional's is a
+  branch on `null`, a new `"None"` string or the object's own `toString`
+  through its vtable (no object stands for `None`).  An
   element of an `int?[n]` & co. is the optional itself, the optional's size
   in the array's `mem` (16 bytes for `int?` and `float?`, 2 for `bool?` and
   `char?`), read and written in place, and so is an `int?` element of a
@@ -1492,8 +1494,8 @@ CodeGen enforced, now in one place.
 ## 8. Runtime ABI (extern declarations the lowering may emit)
 
 Signatures in PIR types, by C symbol: each is declared under its runtime
-name (`extern fn @$rt.Paykan_free(ptr) -> void`, `extern obj
-@$rt.PaykanObject_None`, §3).  `bool` never appears at the ABI: a Paykan `bool`
+name (`extern fn @$rt.Paykan_free(ptr) -> void`, `extern vtable
+@$rt.PaykanString_vtable`, §3).  `bool` never appears at the ABI: a Paykan `bool`
 crossing into the runtime is `cast` to `i64` first.
 
 ```
@@ -1580,8 +1582,6 @@ Paykan_deinit_end(obj, i64) -> void     ; after them, with what `Paykan_deinit_b
 Paykan_moved_unique(box) -> i64         ; 1 when every object the value holds uniquely has a strong count of 1, or is immortal
 Paykan_moved_unique_mem(ptr, ptr) -> i64 ; the same for a value held in memory: its type descriptor (§4), its address
 Paykan_panic_moved(ptr) -> void         ; stops the program: "a value moved out of '<place>' is still borrowed"; never returns
-; globals
-extern obj PaykanObject_None
 ; runtime classes' vtables, their type identities for `match`
 extern vtable PaykanObject_vtable   extern vtable PaykanString_vtable
 ```

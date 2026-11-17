@@ -357,7 +357,7 @@ TEST(Leak, CallTemporaryInEquality) {
     impl Thing {
       fn __init__(x: int) { self.n = x; }
     }
-    fn process() -> Obj { return Thing(5); }
+    fn process() -> Obj? { return Thing(5); }
     fn main() -> int {
       if process() == None { io::println("none"); }
       else { io::println("something"); }

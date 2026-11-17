@@ -4,7 +4,7 @@
 //            the text `x.toString()` gives: an optional, present and None
 //            (`int?`, `Str?`, a class's), a tuple, a struct, an enum with
 //            and without fields, an object (its own `toString()`, or one
-//            inherited from a superclass), an `Obj` and `None`; in a generic
+//            inherited from a superclass), an `Obj` and an absent `Obj?`; in a generic
 //            function, for each type it is instantiated with; and `Str(s)`
 //            and `Str<Str>(s)` of a `Str`, which are the string itself.
 // expect-stdout: None 5 hi None
@@ -68,7 +68,8 @@ fn main() -> int {
   // Objects: their toString(), dispatched on what they are.
   let n = Named(5, 6, "n");
   let ob: Obj = Point(7, 8);
-  io::println(Str(n) + " " + Str(ob) + " " + Str(None));
+  let absent: Obj? = None;
+  io::println(Str(n) + " " + Str(ob) + " " + Str(absent));
 
   // In a generic function, for each type it is instantiated with.
   io::println(show(Point(9, 9)) + " " + show((1, "x")) + " " + show(42) + " "

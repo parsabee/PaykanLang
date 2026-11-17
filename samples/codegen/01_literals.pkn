@@ -44,8 +44,9 @@ fn main() -> int {
   io::println("empty='" + empty + "'");
 
   // ---- None literal ---------------------------------------------------------
-  // None is an unowned class var; just declaring it must not crash.
-  let n: Obj = None;
+  // None is the absent value of an optional; just declaring one must not
+  // crash.
+  let n: Obj? = None;
   io::println("none decl ok");
 
   return 0;

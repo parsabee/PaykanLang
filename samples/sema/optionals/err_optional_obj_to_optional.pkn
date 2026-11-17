@@ -1,5 +1,5 @@
-// `None` is the only `Obj`-typed value that flows into a `T?`; an arbitrary
-// `Obj` does not (it might be anything but a Node).
+// An `Obj` does not flow into a `Node?`: it might be anything but a Node.  (It
+// converts to an `Obj?`, always a present one.)
 class Node {
   v: int;
 }
