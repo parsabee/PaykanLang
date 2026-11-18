@@ -36,6 +36,7 @@ constexpr uint64_t kModuleRec = 1;
 constexpr uint64_t kDiagFileRec = 1;
 /// Class and enum record flags.
 constexpr uint8_t kDeclLocal = 1;
+constexpr uint8_t kClassFinal = 2; // a class record's: a `final class`
 /// A class field's flags byte: bit 0 for a `weak` field.
 constexpr uint8_t kFieldWeak = 1;
 /// Record tags below this are required (§3.2).
@@ -161,7 +162,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
     record(decls, static_cast<uint64_t>(DeclTag::Class), [&](ByteWriter &v) {
       v.uleb(strs.intern(c->Name));
       v.uleb(strs.intern(c->SuperClassName));
-      v.u8(c->IsLocal ? kDeclLocal : 0);
+      v.u8((c->IsLocal ? kDeclLocal : 0) | (c->Final ? kClassFinal : 0));
       v.uleb(strs.intern(c->OriginModule));
       v.uleb(c->Fields.size());
       for (const ClassRec::Field &f : c->Fields) {
@@ -580,6 +581,7 @@ Status Reader::readDecls(Interface &out) {
               !str(v, c.OriginModule) || !detail::readCount(v, n, 2))
             return true;
           c.IsLocal = flags & kDeclLocal;
+          c.Final = flags & kClassFinal;
           c.Fields.resize(static_cast<size_t>(n));
           for (ClassRec::Field &f : c.Fields) {
             uint8_t fflags;

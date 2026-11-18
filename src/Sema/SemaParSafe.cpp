@@ -129,7 +129,7 @@ struct Sema::ParSafety {
     return (ct && Local.count(ct)) || (st && Local.count(st));
   }
   bool isExact(const ast::ClassType *ct) const {
-    return ct == S.Ctx.getStrTy() ||
+    return ct == S.Ctx.getStrTy() || ct->isFinal() ||
            ct->getName().find('<') != std::string::npos;
   }
 

@@ -22,7 +22,7 @@ inline constexpr std::string_view kKeywords[] = {
     "import", "as", "class", "struct", "enum", "match", "fn", "native",
     "return", "if", "then", "else", "elif", "while", "for", "break", "continue",
     "True", "False", "None", "_", "view", "inout", "let", "weak", "impl",
-    "static", "trait",
+    "static", "trait", "final",
     // The concurrency prototype (docs/design/concurrency.md).
     "move", "async", "await", "parallel", "atomic", "shared", "locked", "lock",
     "mut"};

@@ -17,7 +17,7 @@
 import ::memory as mem;
 
 // One key/value pair, linked to the next one in its bucket.
-class Entry {
+final class Entry {
   key: Str;
   value: float;
   next: Entry?;   // the next entry in the same bucket, or None

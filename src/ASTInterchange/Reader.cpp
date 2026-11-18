@@ -1054,11 +1054,18 @@ private:
         return fail(v, "a field cannot be declared with let"), nullptr;
       fields.push_back(vd);
     }
-    if (!methodList(f, methods, FuncKind::ClassMethod) || !f.done())
+    if (!methodList(f, methods, FuncKind::ClassMethod))
+      return nullptr;
+    // A `final class` ends with `(final)`.
+    const SExpr *final = f.optionalList("final");
+    if (final && !final->Items.empty())
+      return fail(*final, "(final) takes no fields"), nullptr;
+    if (!f.done())
       return nullptr;
     auto *cd = Ctx.make<ClassDecl>(loc, *name, *super, std::move(fields),
                                    std::move(methods), std::move(params));
     cd->setTypeParamBounds(std::move(bounds));
+    cd->setFinal(final != nullptr);
     return cd;
   }
 
