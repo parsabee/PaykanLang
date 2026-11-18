@@ -999,8 +999,37 @@ private:
   /// as a borrowed box, an `inout` argument as its address, a value as is.
   /// A value held in memory crosses by address: its argument in @p args is
   /// one, and a result of one is written to @p memResult.
+  /// @p keep: the references among @p args that are the caller's own, which
+  /// it releases after the call; one a function emitted in place takes over
+  /// (emitBufferNative) leaves the list.
   Val emitNativeCall(const ast::FuncDecl &node, const std::vector<Val> &args,
-                     const Val &memResult = Val());
+                     const Val &memResult = Val(),
+                     std::vector<Val> *keep = nullptr);
+  /// emitNativeCall's call of the C symbol itself, whatever the function.
+  Val emitNativeSymbolCall(const ast::FuncDecl &node,
+                           const std::vector<Val> &args, const Val &memResult);
+  /// The module's declaration of the C symbol @p node binds, with the
+  /// signature @p csig; null, with an internal error reported, when the
+  /// module declares the symbol with another.
+  const pir::Function *declareNativeSymbol(const ast::FuncDecl &node,
+                                           const pir::Signature &csig);
+  /// emitNativeCall of one of the runtime's Buffer functions that reads,
+  /// stores or exchanges values (PaykanBuffer_get, _isSet, _set, _swap), or
+  /// adds or removes a slot at the end (_tryGrow by the constant 1, and
+  /// _pop, while the allocation stays as it is: the function is called for
+  /// the rest), emitted in place (#364): the runtime walks the value's
+  /// PaykanType, which is known here.  The bounds check,
+  /// the address, the test of a value never set and the counts of the
+  /// references the value holds are what Buffer.c does, but for a store of
+  /// a value that is the caller's
+  /// own (one of @p keep, or a temporary held in memory: a `move`, a
+  /// result): it moves in, where the runtime, which borrows its arguments,
+  /// retains what the caller then releases.  No value for any other
+  /// function, or for one bound with another signature than ::memory's.
+  std::optional<Val> emitBufferNative(const ast::FuncDecl &node,
+                                      const std::vector<Val> &args,
+                                      const Val &memResult,
+                                      std::vector<Val> *keep);
   /// The native function of this module named @p name, or nullptr.
   const ast::FuncDecl *localNative(const std::string &name) const;
   /// The PaykanType (src/Runtime/Runtime.h) a generic native function is

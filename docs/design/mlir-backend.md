@@ -164,7 +164,9 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
 * **A buffer's length** (`memory::Buffer`'s `len()`, the native function
   bound to `PaykanBuffer_len`) is read in place: the LLVM path loads the
   buffer's `len`, and the C path calls Runtime.h's `static inline`
-  `PaykanBuffer_len_inline`.  The LLVM path also declares
+  `PaykanBuffer_len_inline`.  (A read, a store, an exchange and a pop of
+  an element are emitted in place by the lowering, as PIR: docs/pir.md §4.)
+  The LLVM path also declares
   `PaykanBuffer_get` as writing no memory the program reaches
   (`names::kReadOnlyRuntimeFunctions`: it reads, and the panic of a bad
   index writes only the C library's streams before it aborts), so LLVM

@@ -1944,6 +1944,33 @@ TEST(Driver, ModulesBindACSymbolWithOneSignature) {
   std::filesystem::remove_all(dir);
 }
 
+// A native function the lowering emits in place (#364) is still its
+// module's binding of the symbol: a program with a module that binds
+// PaykanBuffer_isSet another way than ::memory does is rejected whether or
+// not anything calls the runtime's function.
+TEST(Driver, AFunctionEmittedInPlaceStillBindsItsSymbol) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_inplace_clash_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "odd.pkn")
+      << "native fn oIsSet<T>(b: view Obj, i: int) -> bool = "
+         "\"PaykanBuffer_isSet\";\n"
+         "fn has(b: view Obj, i: int) -> bool { return oIsSet<Str>(b, i); }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport ::memory as mem;\nimport odd;\n"
+         "fn main() -> int {\n  b = mem::Buffer<Str>();\n  b.push(\"a\");\n"
+         "  b.push(\"b\");\n  b.swap(0, 1);\n  io::println(b.at(0));\n"
+         "  return 0;\n}\n";
+  auto r = run(paykanRun() + " --no-module-cache " +
+               (dir / "main.pkn").string() + " 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(r.out, "error: native functions of modules 'main' and 'odd' bind C "
+                   "symbol 'PaykanBuffer_isSet' with different signatures\n");
+  std::filesystem::remove_all(dir);
+}
+
 // Finding 89: two imports binding one qualifier name each module by its
 // canonical name, so a system module keeps its `::` on whichever side of
 // the message it is; it was `import of module 'io': qualifier 'util'
@@ -2455,6 +2482,123 @@ fn main() -> int {
   ASSERT_EQ(cRc, 0) << code;
   EXPECT_NE(code.find("= PaykanBuffer_len_inline("), std::string::npos) << code;
   EXPECT_EQ(code.find("= PaykanBuffer_len("), std::string::npos) << code;
+  std::filesystem::remove(src);
+}
+
+// A memory::Buffer of objects, and of structs that hold them, is read,
+// stored into, exchanged and popped in place (#364): the lowering knows the
+// element's type, so it emits what the runtime's generic functions did by
+// walking the type's descriptor.  No program calls PaykanBuffer_get, _set,
+// _isSet or _swap, a walk's loop calls nothing but a panic and the slow
+// paths of a count, and a store or a pop of a value moved counts nothing
+// (the one retain of `set` is its parameter's, for a caller that lends it).
+// What is left to the runtime is the allocation: PaykanBuffer_tryGrow with
+// no room, and PaykanBuffer_pop when the allocation is to shrink.
+TEST(Driver, ABufferOfObjectsIsReadStoredAndMovedInPlace) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+import ::memory as mem;
+class Node { id: int; }
+struct Pair { name: Str; node: Node; }
+fn sum(items: view mem::Buffer<Node>) -> int {
+  total = 0;
+  i: unsigned = 0;
+  while i < items.len() {
+    total = total + items.at(i).id;
+    i = i + 1;
+  }
+  return total;
+}
+fn relocate(src: inout mem::Buffer<Node>, dst: inout mem::Buffer<Node>) {
+  dst.grow(src.len());
+  i: unsigned = src.len();
+  while i > 0 {
+    i = i - 1;
+    dst.set(i, src.pop());
+  }
+}
+fn main() -> int {
+  a = mem::Buffer<Node>();
+  b = mem::Buffer<Node>();
+  for i in 0..100 {
+    a.push(Node(i));
+  }
+  a.swap(0, 99);
+  relocate(a, b);
+  pairs = mem::Buffer<Pair>();
+  pairs.push(Pair("p" + Str(1), Node(7)));
+  pairs.push(Pair("q", Node(8)));
+  pairs.set(1, Pair("s", Node(9)));
+  pairs.swap(0, 1);
+  let last = pairs.pop();
+  io::println(Str(sum(b)) + " " + Str(b.at(0).id) + " " + Str(a.len()) + " " +
+              last.name + Str(last.node.id) + " " + pairs.at(0).name);
+  return 0;
+}
+)");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "4950 99 0 p17 s\n");
+  auto [irRc, ir] = run(paykanRun() + " -O2 --emit-llvm " + src + " 2>&1");
+  ASSERT_EQ(irRc, 0) << ir;
+  for (const char *gone :
+       {"@PaykanBuffer_get(", "@PaykanBuffer_set(", "@PaykanBuffer_isSet(",
+        "@PaykanBuffer_swap(", "@PaykanBuffer_copy(", "@PaykanType_copy(",
+        "@PaykanType_drop("})
+    EXPECT_EQ(ir.find(gone), std::string::npos) << gone;
+  EXPECT_NE(ir.find("@PaykanBuffer_tryGrow("), std::string::npos) << ir;
+  EXPECT_NE(ir.find("@PaykanBuffer_pop("), std::string::npos) << ir;
+  // (A function's name follows its module's, the file's: `..._Ssum(`.)
+  const size_t sumAt = ir.find("_Ssum(");
+  ASSERT_NE(sumAt, std::string::npos) << ir;
+  const size_t sumStart = ir.rfind("define ", sumAt);
+  const std::string sum =
+      ir.substr(sumStart, ir.find("\n}\n", sumAt) - sumStart);
+  for (size_t at = sum.find("call "); at != std::string::npos;
+       at = sum.find("call ", at + 1)) {
+    const std::string callee = sum.substr(sum.find('@', at), 24);
+    EXPECT_TRUE(callee.rfind("@Paykan_panic_buffer_", 0) == 0 ||
+                callee.rfind("@Paykan_retain(", 0) == 0 ||
+                callee.rfind("@Paykan_release(", 0) == 0 ||
+                callee.rfind("@llvm.", 0) == 0)
+        << callee << " in " << sum;
+  }
+  auto [pirRc, pir] = run(paykanRun() + " --emit-pir " + src + " 2>&1");
+  ASSERT_EQ(pirRc, 0) << pir;
+  auto function = [&](const std::string &name) {
+    const size_t start = pir.find("fn @" + name + "(");
+    return start == std::string::npos
+               ? std::string()
+               : pir.substr(start, pir.find("\n}\n", start) - start);
+  };
+  auto count = [](const std::string &text, const std::string &what) {
+    size_t n = 0;
+    for (size_t at = text.find(what); at != std::string::npos;
+         at = text.find(what, at + 1))
+      ++n;
+    return n;
+  };
+  for (const char *elem : {"Node", "Pair"}) {
+    const std::string buffer = std::string("Buffer<") + elem + ">.";
+    const std::string set = function(buffer + "set");
+    const std::string pop = function(buffer + "pop");
+    const std::string swap = function(buffer + "swap");
+    ASSERT_FALSE(set.empty()) << pir;
+    ASSERT_FALSE(pop.empty()) << pir;
+    ASSERT_FALSE(swap.empty()) << pir;
+    EXPECT_EQ(count(set, "retain "), elem == std::string("Node") ? 1u : 0u)
+        << set;
+    EXPECT_EQ(count(pop, "retain "), 0u) << pop;
+    EXPECT_EQ(count(pop, "release "), 0u) << pop;
+    EXPECT_EQ(count(pop, "Paykan_moved_unique"), 0u) << pop;
+    EXPECT_EQ(count(pop, "call @$c.PaykanBuffer_pop("), 1u) << pop;
+    EXPECT_EQ(count(swap, "retain ") + count(swap, "release "), 0u) << swap;
+    EXPECT_EQ(count(set + swap, "call @$c.PaykanBuffer_s"), 0u) << set << swap;
+  }
+  auto [cRc, code] = run(paykanRun() + " --emit-c " + src + " 2>&1");
+  ASSERT_EQ(cRc, 0) << code;
+  EXPECT_EQ(code.find("PaykanBuffer_get("), std::string::npos) << code;
+  EXPECT_EQ(code.find("PaykanBuffer_set("), std::string::npos) << code;
   std::filesystem::remove(src);
 }
 

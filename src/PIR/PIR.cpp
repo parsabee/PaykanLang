@@ -46,6 +46,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanPanicToChar, {{kI64, kI64, kPtr, kI64}, kVoid}},
     {kPaykanPanicIndex, {{kI64, kI64}, kVoid}},
     {kPaykanPanicBufferIndex, {{kI64, kI64}, kVoid}},
+    {kPaykanPanicBufferUnset, {{kI64}, kVoid}},
     {kPaykanPanicForStep, {{}, kVoid}},
     {kPaykanPanicPureVirtual, {{kPtr, kI64, kPtr, kI64}, kVoid}},
     {kPaykanStringNew, {{kPtr, kI64}, kObj}},

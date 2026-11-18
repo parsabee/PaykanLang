@@ -45,9 +45,12 @@ native fn _new<T>(n: unsigned) -> Obj = "PaykanBuffer_new";
 native fn _len<T>(b: view Obj) -> unsigned = "PaykanBuffer_len";
 native fn _isSet<T>(b: view Obj, i: unsigned) -> int = "PaykanBuffer_isSet";
 native fn _get<T>(b: view Obj, i: unsigned) -> view T = "PaykanBuffer_get";
-// The runtime's copy of slot `i`: a second reference to what the slot
-// holds, which only a move out of the slot (pop, swap) may make.
-native fn _copy<T>(b: view Obj, i: unsigned) -> T = "PaykanBuffer_copy";
+// The value of the last slot, which moves out with what it owns, and the
+// slot goes.  It panics on an unset slot, as _get does.
+native fn _pop<T>(b: inout Obj) -> T = "PaykanBuffer_pop";
+// Slots `i` and `j` trade values, each with what it owns.
+native fn _swap<T>(b: inout Obj, i: unsigned, j: unsigned)
+                   = "PaykanBuffer_swap";
 native fn _set<T>(b: inout Obj, i: unsigned, v: view T) = "PaykanBuffer_set";
 native fn _reserve<T>(b: inout Obj, n: unsigned)
                       -> int = "PaykanBuffer_tryReserve";
@@ -75,13 +78,13 @@ impl Buffer<T> {
   view fn at(i: unsigned) -> view T { return _get<T>(self.__data, i); }
 
   // Store `v` in slot `i`, dropping the value there: `OutOfRange` past the
-  // end (and `v` is dropped).  The slot takes its own reference to what `v`
-  // holds, and `v`'s goes when the call returns: `v` moves in.
+  // end (and `v` is dropped).  `v` moves in: the slot takes over what it
+  // holds, and nothing is counted.
   fn set(i: unsigned, v: T) -> err::Error {
     if i >= _len<T>(self.__data) {
       return _errorOf(err::ErrorCode::OutOfRange);
     }
-    _set(self.__data, i, v);
+    _set(self.__data, i, move v);
     return err::none();
   }
 
@@ -113,20 +116,19 @@ impl Buffer<T> {
     if errno != 0 {
       return err::fromErrno(errno);
     }
-    _set(self.__data, _len<T>(self.__data) - 1, v);
+    let last = _len<T>(self.__data) - 1;
+    _set(self.__data, last, move v);
     return err::none();
   }
 
-  // Remove the last slot and return its value, which moves out: _copy takes
-  // a reference of its own to what the slot holds, and the shrink drops the
-  // slot's.  It panics on an empty buffer or an unset slot, as at() does.
+  // Remove the last slot and return its value, which moves out with what
+  // it owns: nothing is counted.  It panics on an empty buffer or an unset
+  // slot, as at() does.
   fn pop() -> T {
     if _len<T>(self.__data) == 0 {
       _panic("pop from an empty Buffer");
     }
-    let v = _copy<T>(self.__data, _len<T>(self.__data) - 1);
-    _shrink<T>(self.__data, 1);
-    return v;
+    return _pop<T>(self.__data);
   }
 
   // Exchange slots `i` and `j`: `OutOfRange` when either is past the end,
@@ -140,10 +142,7 @@ impl Buffer<T> {
     if _isSet<T>(self.__data, i) == 0 || _isSet<T>(self.__data, j) == 0 {
       return _errorOf(err::ErrorCode::NotFound);
     }
-    let a = _copy<T>(self.__data, i);
-    let b = _copy<T>(self.__data, j);
-    _set(self.__data, i, b);
-    _set(self.__data, j, a);
+    _swap<T>(self.__data, i, j);
     return err::none();
   }
 }
