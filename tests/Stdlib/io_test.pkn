@@ -2,8 +2,8 @@ import ::io;
 import ::error as err;
 import ::result as res;
 
-// ::io's File: open and write (the file closes with its last reference),
-// read back, the error of a write on a file opened for reading (which the
+// ::io's File: open and write (the file closes where its File is destroyed;
+// a File in a variable is written through an `inout` arm), read back, the error of a write on a file opened for reading (which the
 // reads after it do not inherit), the end of the file, which a read of up
 // to 2^60 bytes finds too (a read's buffer is about what it reads), a read
 // of up to 2^40 bytes of a short file, a missing file, a path or a mode
@@ -24,7 +24,7 @@ fn write(path: Str) {
   w = io::open(path, "w");
   io::println(codeOf(w) == "Ok");
   match w {
-    f: Ok { io::println(err::name(f.value.write("one\ntwo\n").code)); }
+    f: inout Ok { io::println(err::name(f.value.write("one\ntwo\n").code)); }
     _ { }
   }
 }

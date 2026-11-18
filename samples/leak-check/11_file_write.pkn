@@ -1,6 +1,6 @@
-// Isolates: a File object from a successful open() for writing.
-// Runtime allocation site: PaykanFile_new (File.c) — allocates the file handle
-// wrapper. The handle must be closed and freed by ARC destroy at end of scope.
+// Isolates: a File from a successful open() for writing.
+// Runtime allocation site: file_new (File.c) — allocates the runtime's file.
+// The File's `__deinit__` must close and free it at the end of its scope.
 //
 // Expected under --track-heap: live blocks : 0.
 //

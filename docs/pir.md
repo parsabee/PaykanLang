@@ -41,7 +41,7 @@ Design rules:
 | `bool`| true/false                                                        | `int64_t` or `_Bool` (backend's choice; `0`/`1` at the ABI) |
 | `char`| one byte                                                          | `int8_t`     |
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
-| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
+| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
 | `ptr` | any other pointer: vtable addresses, literal data, type descriptors and tuple layouts, the address of a slot, a task (§6) | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
 | `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, a fixed-size array or a tuple. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
@@ -1967,9 +1967,9 @@ destination owns the reference and releases it at the end of its own scope
 (docs/language/16-memory.md, "Ownership transfers").  What changes is only
 that the object may die when the destination lets go rather than when the
 variable's scope ends.  A `weak` reference made elsewhere can see that, and
-so can what the object's destruction does: an `io::File` handed on at its
-last use is closed, and what was written to it flushed, when the
-destination lets it go.
+so can what the object's destruction does: an object whose `__deinit__`
+closes a file, handed on at its last use, closes it, and what was written
+to it is flushed, when the destination lets it go.
 
 **Never moved:** `self` (an `obj` local, or a struct method's `ptr`),
 `inout` parameters and locals (a `ptr`), a slot whose address is taken

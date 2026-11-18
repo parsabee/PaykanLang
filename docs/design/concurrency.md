@@ -969,9 +969,9 @@ of a `view` argument, so nothing comes to own a frozen or `const` (the mut
 model: immutable) object or
 count an `atomic shared` one plainly; otherwise the runtime object it
 returns is immutable or locks itself.  `io::stdin()`
-is `File(_stdin())` (stdlib/io.pkn:121-122), a new unique `File` around the
-one immortal `PaykanFile_Stdin` (src/Runtime/File.c:248-254, 345-346) on
-every call and thread, so the runtime locks it (proposed; owner may change).
+is `File(_stdin())` (stdlib/io.pkn), a new `File` naming the runtime's one
+stdin file (src/Runtime/File.c, `PaykanFile_Stdin`) on every call and
+thread, so the runtime locks its reads and writes (#378).
 
 ### Counting
 
@@ -1527,9 +1527,9 @@ a frozen object, which writes nothing, so readers on any thread share no
 written cache line; a hold through the reference holds it ([Owned paths and
 borrowed roots](#owned-paths-and-borrowed-roots)).  The runtime keeps an
 invariant: no runtime object reachable from a crossable value writes when
-read, so none keeps a lazy cache.  `io::File`, whose `view fn`s do I/O
-(stdlib/io.pkn:86-99), holds an `Obj` (stdlib/io.pkn:76-77) and never
-crosses; Stdin locks itself.
+read, so none keeps a lazy cache.  `io::File` is a struct holding its
+file's address (#378): it crosses by a move, its reads and writes are no
+`view fn`s, so nothing reads a frozen one; Stdin locks itself.
 
 **Freeing.**  The thread that releases the last reference (an
 acquire-release subtract, after every reader's last read) thaws the

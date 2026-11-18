@@ -1,9 +1,10 @@
-// 17_file.pkn — io::File: open, write, readln, equals, toString
+// 17_file.pkn — io::File: open, write, readln, ==
 // Exercises: io::open() returning a res::Result<io::File, err::Error> (`Ok`
 //            with the file on success, `Err` with the error on failure),
 //            File.write(), File.readln() returning a Result too (`Err` at
-//            the end), File.toString(), File.equals(), the file closed when
-//            the last reference goes.
+//            the end), `==` on two Files, the file closed where its File
+//            is destroyed (a File is a struct with a `__deinit__`: it
+//            moves, and a variable that writes or reads it is not `let`).
 //
 // args: {tmpdir}
 
@@ -23,7 +24,7 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 fn writelines(path: view Str) -> int {
   match io::open(path, "w") {
     w: Ok {
-      let f = move w.value;
+      f = move w.value;
       f.write("line one\n");
       f.write("line two\n");
       f.write("line three\n");
@@ -54,18 +55,6 @@ fn readlines(path: view Str) -> int {
   return 0;
 }
 
-fn showToString(path: view Str) {
-  match io::open(path, "r") {
-    e: Err {
-      io::printerrln("showToString: " + e.error.message());
-    }
-    r: Ok {
-      let s = r.value.toString();
-      io::println(s);   // File@0x...
-    }
-  }
-}
-
 fn showEquals(path: view Str) {
   match io::open(path, "r") {
     e: Err {
@@ -77,8 +66,8 @@ fn showEquals(path: view Str) {
           io::printerrln("showEquals inner: " + e2.error.message());
         }
         r2: Ok {
-          let eq = r.value.equals(r2.value);
-          io::println(Str(eq));  // False — different handles
+          let eq = r.value == r2.value;
+          io::println(Str(eq));  // False: two opens, two files
         }
       }
     }
@@ -96,15 +85,11 @@ fn main(args: view Str[]) -> int {
   io::println("=== read lines ===");
   readlines(path);
 
-  // --- 3. toString shows File@ prefix --------------------------------------
-  io::println("=== toString ===");
-  showToString(path);
-
-  // --- 4. equals: identity -------------------------------------------------
+  // --- 3. ==: two opens of one path are two files -------------------------
   io::println("=== equals ===");
   showEquals(path);
 
-  // --- 5. open nonexistent file — the result's error says why --------------
+  // --- 4. open nonexistent file — the result's error says why --------------
   io::println("=== open failure ===");
   match io::open("/no/such/file_sample_17.txt", "r") {
     e: Err {

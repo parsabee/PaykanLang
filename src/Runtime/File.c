@@ -7,83 +7,22 @@
 #include "RuntimeInternal.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// -- VTable
+// A file is no object: an io::File (stdlib/io.pkn) is a struct holding the
+// address of one of these as an `int`, and closes it in its `__deinit__`
+// (Paykan_io_close).  Nothing counts it; the File that holds it is the one
+// owner, which moves.
 
-PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS] = {
-    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanFile_destroy,
-    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanFile_toString,
-    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanFile_equals,
-    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
-    [PAYKAN_SLOT_FILE_WRITE] = (PaykanMethod)PaykanFile_write,
-    [PAYKAN_SLOT_FILE_READLN] = (PaykanMethod)PaykanFile_readln,
-    [PAYKAN_SLOT_FILE_READBYTES] = (PaykanMethod)PaykanFile_readbytes,
-    [PAYKAN_SLOT_FILE_READ] = (PaykanMethod)PaykanFile_read,
-};
-
-// -- Constructor
-
-PaykanFile *PaykanFile_new(void) {
+/// A new file over the open stream @p handle.
+static PaykanFile *file_new(FILE *handle) {
   PaykanFile *f = (PaykanFile *)Paykan_malloc(sizeof(PaykanFile));
-  f->vtable = PaykanFile_vtable;
-  f->strong = 0; // unowned until boxed
-  f->weak = 0;
-  f->handle = NULL;
+  f->handle = handle;
   f->lastOp = PAYKAN_FILE_OP_NONE;
   return f;
-}
-
-// -- Methods
-
-PaykanShared *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj,
-                              int64_t *err) {
-  PaykanString *path = (PaykanString *)pathObj;
-  PaykanString *mode = (PaykanString *)modeObj;
-  // fopen reads each up to its first NUL byte: a path or a mode holding one
-  // would open another file, or in another mode.
-  if (memchr(path->data, '\0', (size_t)path->len) ||
-      memchr(mode->data, '\0', (size_t)mode->len)) {
-    *err = EINVAL;
-    return (PaykanShared *)0;
-  }
-  FILE *handle = fopen(path->data, mode->data);
-  if (!handle) {
-    *err = errno;
-    return (PaykanShared *)0;
-  }
-  PaykanFile *f = PaykanFile_new();
-  f->handle = handle;
-  return PaykanShared_new((PaykanObject *)f);
-}
-
-void PaykanFile_destroy(PaykanObject *self) {
-  PaykanFile *f = (PaykanFile *)self;
-  if (f->handle)
-    fclose(f->handle);
-}
-
-PaykanShared *PaykanFile_toString(PaykanObject *self) {
-  char buf[32];
-  int n = snprintf(buf, sizeof(buf), "File@%p", (void *)self);
-  return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
-}
-
-int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other,
-                          uint64_t owned) {
-  PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && self == o;
-  return Paykan_equals_drop_other(other, owned, result);
-}
-
-/// Whether @p f is closed, which a read or write reports and skips.
-static int file_closed(const PaykanFile *f, const char *op) {
-  if (f->handle)
-    return 0;
-  fprintf(stderr, "paykan: %s on closed File\n", op);
-  return 1;
 }
 
 // C lets a read follow a write on a stream opened for update ("r+", "w+",
@@ -142,19 +81,10 @@ static PaykanShared *file_read_result(char *buf, size_t used) {
   return result;
 }
 
-void PaykanFile_write(PaykanObject *self, PaykanObject *strObj) {
-  PaykanFile *f = (PaykanFile *)self;
-  PaykanString *str = (PaykanString *)strObj;
-  if (file_closed(f, "write"))
-    return;
-  (void)file_write(f, str);
-}
-
-PaykanShared *PaykanFile_readln(PaykanObject *self) {
-  PaykanFile *f = (PaykanFile *)self;
-  if (file_closed(f, "readln") || file_start_read(f))
+/// The next line of @p f, with its newline when it has one, or None.
+static PaykanShared *file_readln(PaykanFile *f) {
+  if (file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
-  // One line, including the trailing '\n' when there is one.
   size_t cap = 128;
   size_t used = 0;
   char *buf = (char *)Paykan_tryMalloc(cap);
@@ -177,12 +107,12 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   return file_read_result(buf, used);
 }
 
-/// The most bytes PaykanFile_readbytes allocates before any are read.
+/// The most bytes file_readbytes allocates before any are read.
 #define PAYKAN_READBYTES_FIRST ((size_t)64 * 1024)
 
-PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
-  PaykanFile *f = (PaykanFile *)self;
-  if (file_closed(f, "readbytes") || n <= 0 || file_start_read(f))
+/// Up to @p n bytes of @p f, n positive, or None.
+static PaykanShared *file_readbytes(PaykanFile *f, int64_t n) {
+  if (file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
   // @p n is a maximum: the buffer starts at 64 KiB at most and doubles each
   // time a read fills it, up to n, so a large n on a short file allocates
@@ -209,9 +139,9 @@ PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
   return file_read_result(buf, used);
 }
 
-PaykanShared *PaykanFile_read(PaykanObject *self) {
-  PaykanFile *f = (PaykanFile *)self;
-  if (file_closed(f, "read") || file_start_read(f))
+/// The rest of @p f, or None.
+static PaykanShared *file_read(PaykanFile *f) {
+  if (file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
   size_t cap = 4096;
   size_t used = 0;
@@ -232,25 +162,9 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
   return file_read_result(buf, used);
 }
 
-// -- Stdin singleton: an immortal PaykanFile wrapping C's stdin.
+// -- Stdin: the file over C's stdin, which nothing closes.
 
-static void PaykanStdin_destroy(PaykanObject *self) { (void)self; }
-
-static PaykanMethod PaykanStdin_vtable[PAYKAN_FILE_SLOTS] = {
-    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanStdin_destroy,
-    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanFile_toString,
-    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanFile_equals,
-    [PAYKAN_SLOT_WALK] = (PaykanMethod)PaykanObject_walk,
-    [PAYKAN_SLOT_FILE_WRITE] = (PaykanMethod)PaykanFile_write,
-    [PAYKAN_SLOT_FILE_READLN] = (PaykanMethod)PaykanFile_readln,
-    [PAYKAN_SLOT_FILE_READBYTES] = (PaykanMethod)PaykanFile_readbytes,
-    [PAYKAN_SLOT_FILE_READ] = (PaykanMethod)PaykanFile_read,
-};
-
-PaykanFile PaykanFile_Stdin = {
-    .vtable = PaykanStdin_vtable,
-    .strong = PAYKAN_REF_MAX, // immortal
-    .weak = 0,
+static PaykanFile PaykanFile_Stdin = {
     .handle = NULL, // stdin is not a constant expression: set at startup
     .lastOp = PAYKAN_FILE_OP_NONE,
 };
@@ -259,21 +173,40 @@ __attribute__((constructor)) static void PaykanFile_Stdin_init(void) {
   PaykanFile_Stdin.handle = stdin;
 }
 
+// Every File that `io::stdin()` makes names that one file, and a File is
+// Sendable: two tasks may each hold one.  A read or a write of it takes
+// this lock, so `lastOp` has one writer at a time and a line read on one
+// thread is whole.  Any other file has one File, which one thread holds.
+static pthread_mutex_t stdin_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void file_enter(const PaykanFile *f) {
+  if (f == &PaykanFile_Stdin)
+    pthread_mutex_lock(&stdin_lock);
+}
+
+static void file_leave(const PaykanFile *f) {
+  if (f == &PaykanFile_Stdin)
+    pthread_mutex_unlock(&stdin_lock);
+}
+
 // -- The standard library's ::io (stdlib/io.pkn)
 //
-// An io::File holds one of these objects as its handle, which the natives
-// bound to these functions take borrowed (`view Obj`).  Each reports a
-// failure as C's errno, which ::error turns into an Error: a write returns
-// it (0 when it succeeded), a read returns NULL with it in `*err` (an
-// int64_t, the native's `inout int`), 0 there meaning the end of the file.
+// An io::File holds the address of its file as an `int`, which the natives
+// bound to these functions take.  Each reports a failure as C's errno,
+// which ::error turns into an Error: a write returns it (0 when it
+// succeeded), a read returns NULL with it in `*err` (an int64_t, the
+// native's `inout int`), 0 there meaning the end of the file.
 
-/// @p h as a file, or a panic naming @p op: an io::File made from an object
-/// that is not one.
-static PaykanFile *io_file(PaykanObject *h, const char *op) {
-  if (!h || (Paykan_vtable_of(h) != PaykanFile_vtable &&
-             Paykan_vtable_of(h) != PaykanStdin_vtable))
-    Paykan_runtime_panic("io::File.%s on an object that is not a file", op);
-  return (PaykanFile *)h;
+/// The file an io::File's handle @p file names.  Only ::io makes a handle
+/// (File's initializer and its field are the module's), so one that is
+/// zero is the runtime's own mistake.
+static PaykanFile *io_file(int64_t file, const char *op) {
+  if (!file)
+    Paykan_runtime_panic("io::File.%s on no file", op);
+  // The native ABI passes a struct's `int` field as an int64_t: the
+  // address Paykan_io_open returned in one.
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  return (PaykanFile *)(intptr_t)file;
 }
 
 /// A read's result as a `Str?`: the text, or NULL with the errno of the
@@ -292,58 +225,81 @@ static PaykanShared *io_read_result(PaykanFile *f, PaykanShared *r,
   return (PaykanShared *)0;
 }
 
-PaykanShared *Paykan_io_open(PaykanObject *path, PaykanObject *mode,
-                             void *err) {
-  return PaykanFile_open(path, mode, (int64_t *)err);
+int64_t Paykan_io_open(PaykanObject *pathObj, PaykanObject *modeObj,
+                       void *err) {
+  PaykanString *path = (PaykanString *)pathObj;
+  PaykanString *mode = (PaykanString *)modeObj;
+  // fopen reads each up to its first NUL byte: a path or a mode holding one
+  // would open another file, or in another mode.
+  if (memchr(path->data, '\0', (size_t)path->len) ||
+      memchr(mode->data, '\0', (size_t)mode->len)) {
+    *(int64_t *)err = EINVAL;
+    return 0;
+  }
+  FILE *handle = fopen(path->data, mode->data);
+  if (!handle) {
+    *(int64_t *)err = errno;
+    return 0;
+  }
+  return (int64_t)(intptr_t)file_new(handle);
 }
 
-int64_t Paykan_io_write(PaykanObject *file, PaykanObject *str) {
+void Paykan_io_close(int64_t file) {
+  if (!file)
+    return;
+  PaykanFile *f = io_file(file, "close");
+  if (f == &PaykanFile_Stdin)
+    return;
+  // What the writes left in C's buffer is written out here; a File has no
+  // way to report that it could not be (`__deinit__` returns nothing).
+  (void)fclose(f->handle);
+  Paykan_free(f);
+}
+
+int64_t Paykan_io_write(int64_t file, PaykanObject *str) {
   PaykanFile *f = io_file(file, "write");
   PaykanString *s = (PaykanString *)str;
-  if (!f->handle)
-    return EBADF;
+  int err = 0;
+  file_enter(f);
   if (file_write(f, s) != (size_t)s->len) {
-    int err = errno ? errno : EIO;
+    err = errno ? errno : EIO;
     // The failure is this call's, reported now: the next read of the stream
     // is not to mistake the error flag for its own.
     clearerr(f->handle);
-    return err;
   }
-  return 0;
+  file_leave(f);
+  return err;
 }
 
-PaykanShared *Paykan_io_readln(PaykanObject *file, void *err) {
+PaykanShared *Paykan_io_readln(int64_t file, void *err) {
   PaykanFile *f = io_file(file, "readln");
-  if (!f->handle) {
-    *(int64_t *)err = EBADF;
-    return (PaykanShared *)0;
-  }
+  file_enter(f);
   errno = 0;
-  return io_read_result(f, PaykanFile_readln((PaykanObject *)f),
-                        (int64_t *)err);
+  PaykanShared *r = io_read_result(f, file_readln(f), (int64_t *)err);
+  file_leave(f);
+  return r;
 }
 
-PaykanShared *Paykan_io_readbytes(PaykanObject *file, int64_t n, void *err) {
+PaykanShared *Paykan_io_readbytes(int64_t file, int64_t n, void *err) {
   PaykanFile *f = io_file(file, "readbytes");
-  if (!f->handle || n <= 0) {
-    *(int64_t *)err = f->handle ? EINVAL : EBADF;
+  if (n <= 0) {
+    *(int64_t *)err = EINVAL;
     return (PaykanShared *)0;
   }
+  file_enter(f);
   errno = 0;
-  return io_read_result(f, PaykanFile_readbytes((PaykanObject *)f, n),
-                        (int64_t *)err);
+  PaykanShared *r = io_read_result(f, file_readbytes(f, n), (int64_t *)err);
+  file_leave(f);
+  return r;
 }
 
-PaykanShared *Paykan_io_read(PaykanObject *file, void *err) {
+PaykanShared *Paykan_io_read(int64_t file, void *err) {
   PaykanFile *f = io_file(file, "read");
-  if (!f->handle) {
-    *(int64_t *)err = EBADF;
-    return (PaykanShared *)0;
-  }
+  file_enter(f);
   errno = 0;
-  return io_read_result(f, PaykanFile_read((PaykanObject *)f), (int64_t *)err);
+  PaykanShared *r = io_read_result(f, file_read(f), (int64_t *)err);
+  file_leave(f);
+  return r;
 }
 
-PaykanShared *Paykan_io_stdin(void) {
-  return PaykanShared_new((PaykanObject *)&PaykanFile_Stdin);
-}
+int64_t Paykan_io_stdin(void) { return (int64_t)(intptr_t)&PaykanFile_Stdin; }

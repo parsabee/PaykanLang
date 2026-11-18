@@ -2431,6 +2431,59 @@ fn main() -> int {
                                                            << r.Diagnostics;
 }
 
+// ::io's File is a struct with a `__deinit__` (#378): it is one value, and
+// its reads and writes change it, so none goes through a `view`, a `let` or
+// a frozen box.
+TEST(Deinit, AFileIsOneValueThatItsReadsAndWritesChange) {
+  auto r = semaCheck(R"(import ::io;
+import ::memory as mem;
+fn peek(f: view io::File) -> int {
+  match f.readln() { l: Ok { return 1; } _ { return 0; } }
+}
+fn drain(f: inout io::File) -> int {
+  match f.readln() { l: Ok { return 1; } _ { return 0; } }
+}
+async fn send(f: io::File) -> int { return drain(f); }
+fn need<T: Sendable + Deinitializable>(x: view T) -> int { return 1; }
+fn copies<T: Copyable>(x: view T) -> int { return 1; }
+fn main() -> int {
+  a = io::stdin();
+  let b = a;
+  let c = io::stdin();
+  c.write("x");
+  let frozen: atomic shared = mem::Box(io::stdin());
+  frozen.get().readln();
+  frozen.value().readln();
+  let sh: shared mut = mem::Box(io::stdin());
+  sh.get().readln();
+  let n = drain(a) + need(a) + copies(a);
+  let t = await send(move a);
+  return n + t;
+}
+)");
+  for (const char *want :
+       {":4:9: error: 'f' is a 'view' parameter; 'readln' is not a 'view fn'",
+        ":14:3: error: cannot copy 'a' (a 'File'); write 'move a' to "
+        "transfer it",
+        ":16:3: error: 'c' is declared with 'let'; its value cannot change, "
+        "and 'write' is not a 'view fn'",
+        ":18:3: error: 'frozen' is frozen (an 'atomic shared Box<File>'); "
+        "'get' is not a 'view fn'",
+        ":19:3: error: the result of 'value' is a 'view'; 'readln' is not a "
+        "'view fn'",
+        ":22:32: error: 'File' does not implement trait 'Copyable', which "
+        "'copies' requires of 'T': a struct with a '__deinit__' is "
+        "move-only"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+  // Through a `shared mut` box, an `inout` parameter, the bounds it meets
+  // and a move into a task.
+  for (const char *line : {".pkn:7:", ".pkn:9:", ".pkn:21:", ".pkn:22:17:",
+                           ".pkn:22:27:", ".pkn:23:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
 // Writing a plain field of an element destroys nothing, whatever else the
 // element holds.
 TEST(Deinit, AParallelBodyWritingAPlainFieldDestroysNothing) {
@@ -2450,6 +2503,27 @@ fn main() -> int {
                                "destroy a 'Loud'"),
             std::string::npos)
       << r.Diagnostics;
+}
+
+// Closing a file is I/O: a `parallel for` body that may destroy a File, the
+// one a `locked mut` cell holds, is refused; one that only reads the cell
+// destroys nothing.
+TEST(Deinit, DestroyingAFileIsNotParSafe) {
+  auto r = semaCheck(R"(import ::io;
+class Desk { f: io::File?; n: int; }
+fn main() -> int {
+  let cell: locked mut Desk = Desk(None, 0);
+  parallel for i in 0..4 { lock cell as d: inout { d.n = i; } }
+  parallel for i in 0..4 { lock cell as d: view { let n = d.n; } }
+  return 0;
+}
+)");
+  EXPECT_NE(r.Diagnostics.find(
+                ":5:28: error: a 'parallel for' body cannot destroy a 'File': "
+                "it runs 'File.__deinit__', which is not par-safe"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(".pkn:6:"), std::string::npos) << r.Diagnostics;
 }
 
 // Destroying an object runs its `__deinit__`.  An object dies in the code

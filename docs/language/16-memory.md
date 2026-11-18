@@ -24,7 +24,7 @@ Types come in two kinds, and the kind decides how a value is stored and whether 
   do. A function value holds a reference to its closure, the object that keeps its
   captures, and is copied: the copies share the closure, which counts them (a function
   that captures nothing has no closure, and is just the function's address).
-- **Reference types**: class instances (an `io::File` too), `Str`, and optional values of
+- **Reference types**: class instances, `Str`, and optional values of
   them. They live on the heap, and variables, fields, array elements and tuple elements hold
   references to them: one reference each, its owner's, unless the reference is `shared`.
 
@@ -37,7 +37,7 @@ In detail:
 | **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied when Copyable (`shared` elements, and the `shared` references their structs hold, retained); moved otherwise |
 | **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied when Copyable (`shared` references retained); moved otherwise |
 | **Function value** | `(T1, T2) -> R`: a lambda or a named function | Inline, 16 bytes: the code's address and a reference to its closure, a heap object holding the captured variables (copied when the lambda is made; none when nothing is captured) | Moved: the code and the closure go together; the captures are released with the closure |
-| **Reference** | class instances (an `io::File` among them), `Str`, optionals `T?` of these | Heap | Moved (`move`), cloned (`clone()`) or lent to a borrow; a `shared` reference copied, its count adjusted |
+| **Reference** | class instances, `Str`, optionals `T?` of these | Heap | Moved (`move`), cloned (`clone()`) or lent to a borrow; a `shared` reference copied, its count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
 independent values. A reference type has identity, and one owner: `q = move p` hands the
@@ -130,8 +130,9 @@ When a release drops the count to zero:
    on.
 
 This is **deterministic**: an object is destroyed at the exact point its last reference is
-released, in a well-defined order, with no background collector and no pause. An `io::File`, for
-example, is closed as soon as the last reference to it goes away.
+released, in a well-defined order, with no background collector and no pause. A class with
+a `__deinit__` runs it there: an object holding an open [`io::File`](../stdlib/io.md), for
+example, closes the file as soon as the last reference to the object goes away.
 
 Destruction is **iterative**: deep chains are freed without stack growth. A linked list of a
 million nodes, a deeply nested tree, or a long chain of objects linked through array or tuple
@@ -709,9 +710,10 @@ destination, so it may be destroyed before the variable's scope would have ended
 can see that. A [`weak` reference](#weak-references) elsewhere reads `None` as soon as the
 destination lets go: the object is a `shared` one then, the only kind a weak reference
 names, and `move` hands on a `shared` variable's reference as it does a unique one's. And
-what destroying the object does happens then: an
+what destroying the object does happens then: its `__deinit__` runs when the destination
+lets go. A value with a `__deinit__` follows the same rule: an
 [`io::File`](../stdlib/io.md) moved into a function is closed, and what was written to it is
-on disk, when that function returns (unless it keeps the file), so a later `open` of the
+on disk, when that function returns (unless it hands the file on), so a later `open` of the
 same path in the caller reads it back.
 
 ```pkn

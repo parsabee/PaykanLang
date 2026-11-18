@@ -27,7 +27,7 @@ fn writeSource(path: view Str) -> int {
       return 1;
     }
     w: Ok {
-      let f = move w.value;
+      f = move w.value;
       f.write("first line\n");
       f.write("second line\n");
       f.write("third line\n");
@@ -37,7 +37,8 @@ fn writeSource(path: view Str) -> int {
   // the File destroyed when the match ends -> fclose -> data flushed
 }
 
-fn copy(inFile: view io::File, outFile: view io::File) {
+// Reading and writing change a file, so each is taken `inout`.
+fn copy(inFile: inout io::File, outFile: inout io::File) {
   while True {
     match inFile.readln() {
       line: Ok {
@@ -61,13 +62,15 @@ fn copyFile(src: view Str, dst: view Str) -> int {
           return 1;
         }
         output: Ok {
-          copy(input.value, output.value);
+          from = move input.value;
+          to = move output.value;
+          copy(from, to);
         }
       }
     }
   }
   return 0;
-  // both File handles destroyed when the matches end -> fclose
+  // both Files destroyed when their scope ends -> fclose
 }
 
 fn printFile(path: view Str) -> int {

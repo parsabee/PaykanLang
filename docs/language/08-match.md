@@ -11,7 +11,7 @@ by the static type of the subject; you do not select it explicitly:
 
 | Subject type | Mode | Arms compare against |
 |--------------|------|----------------------|
-| A class type (`Obj`, a user class, `io::File`, …) | **type mode** | the **runtime class** of the object |
+| A class type (`Obj`, a user class, …) | **type mode** | the **runtime class** of the object |
 | An `enum` | **variant mode** | the enum's **variants** (and binds a variant's fields) |
 | A builtin (`int`, `float`, `bool`, `char`, `Str`, a sized numeric type) | **value mode** | **literal** values |
 | An optional `T?` | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |

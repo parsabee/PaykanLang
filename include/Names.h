@@ -365,6 +365,7 @@ inline constexpr const char *kPaykanLockedUnlock = "PaykanLocked_unlock";
 // The standard library's ::io (stdlib/io.pkn): reached only through its
 // `native fn`s
 inline constexpr const char *kPaykanIoOpen = "Paykan_io_open";
+inline constexpr const char *kPaykanIoClose = "Paykan_io_close";
 inline constexpr const char *kPaykanIoWrite = "Paykan_io_write";
 inline constexpr const char *kPaykanIoReadln = "Paykan_io_readln";
 inline constexpr const char *kPaykanIoReadBytes = "Paykan_io_readbytes";

@@ -201,6 +201,22 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- **Breaking:** `io::File` is a struct that closes its file in its `__deinit__` (#378;
+  docs/stdlib/io.md, "`File`"), where it was a class around a counted runtime object. The file is
+  closed where the `File` is destroyed: at the end of its variable's scope, with the object or
+  box holding it, where it is assigned over. What changes for a program:
+  - `write`, `readln`, `readbytes` and `read` are plain `fn`s, since each changes the file: the
+    variable holding a file that is read or written is not a `let` (`f = move w.value;`), a
+    function given a file to read or write takes it `inout`, not `view`, and none is called on a
+    frozen value. As `view fn`s they let a frozen `File` be read from several tasks at once.
+  - A `File` is one value: it moves, and a copy is an error. A file under several names goes in
+    a `mem::Box<io::File>` (a `shared mut` box, read through `get()`), where a `shared File` did.
+  - `==` and `toString()` are a struct's built-in ones: two `File`s are equal when they name the
+    same open file (`io::stdin() == io::stdin()` is now `True`), `toString()` is
+    `File(__handle: ...)` where it was `File@0x...`, and `File.equals` is gone.
+  - The runtime's file is no object: `PaykanFile` has no header and no vtable, the `PaykanFile_*`
+    functions are gone, the `Paykan_io_*` functions take the file as an `int64_t`, and
+    `Paykan_io_close` is new.
 - **Breaking:** the built-in trait `Show` is `Showable` (#378), so the built-in traits are all
   named as adjectives (`Copyable`, `Cloneable`, `Hashable`, `Showable`). Nothing else about it
   changes. The old name is an error that names the new one (`'Show' is now 'Showable'`), in a
