@@ -255,7 +255,7 @@ void Parser::report(SourceLocation loc, const std::string &msg) {
   } else {
     std::cerr << "error @" << loc.getLineStart() << "." << loc.getColumnStart()
               << "-" << loc.getLineEnd() << "." << loc.getColumnEnd() << ": "
-              << msg << "\n";
+              << sema::DiagEngine::printed(msg) << "\n";
   }
 }
 
@@ -1471,8 +1471,10 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     while (at(Tok::String))
       pieces += consume().StrValue;
     if (std::string_view why = names::cSymbolProblem(pieces); !why.empty())
-      error(symbolLoc, "the C symbol '" + pieces + "' of native function '" +
-                           name + "' " + std::string(why));
+      // (The string is the program's: printed as it is.)
+      error(symbolLoc, "the C symbol '" + sema::DiagEngine::verbatim(pieces) +
+                           "' of native function '" + name + "' " +
+                           std::string(why));
     const std::string &symbol = intern(pieces);
     if (!expect(Tok::Semi, "after a native function"))
       return nullptr;

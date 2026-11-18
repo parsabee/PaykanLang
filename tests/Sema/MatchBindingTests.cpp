@@ -90,7 +90,8 @@ fn main() -> int {
 }
 )");
   expectErrors(r, {"error: cannot store a 'shared mut Node' in variable "
-                   "'back', a 'mut Node'"});
+                   "'back', a 'mut' reference: a 'shared mut' reference is "
+                   "stored only as 'shared mut'"});
   auto fine = semaCheck(R"(import ::memory as mem;
 class Node { v: int; }
 fn main() -> int {
@@ -230,8 +231,10 @@ fn main() -> int {
           "holds one",
           ":14:32: error: 'n' binds part of a conditional whose branches have "
           "two forms, 'shared Base' and 'mut Base': a binding holds one",
-          ":15:51: error: cannot move 'n': it is a 'view', a borrow",
-          ":16:38: error: cannot move 'n': it is a 'view', a borrow",
+          ":15:51: error: cannot move 'n': it is a 'view' borrow, and what it "
+          "names stays with its owner",
+          ":16:38: error: cannot move 'n': it is a 'view' borrow, and what it "
+          "names stays with its owner",
           ":21:3: error: 'ls' is 'locked': reach its contents in 'lock ls",
           ":23:14: error: 'lc' is 'locked': reach its contents in 'lock lc"});
   for (const char *line : {":17:", ":18:", ":19:", ":23:2", ":23:3"})

@@ -113,7 +113,8 @@ or a Copyable value goes in as it is). It comes out lent, by `at` (the slot itse
 `view`, nothing copied); moved, by `pop`; or as a clone the caller keeps, by `get` and
 `copy`, which only a buffer of Cloneable values has: they are in an `impl Buffer<T:
 Cloneable>` block, so a `Buffer<int>` or a `Buffer<Str>` has them and a `Buffer<Node>` of
-a class that is not Cloneable has neither (`no method 'get' on type 'Buffer<Node>'`). A
+a class that is not Cloneable has neither (`no method 'get' on type 'Buffer<Node>': 'get'
+is in 'impl Buffer<T: Cloneable>', and 'Node' is not 'Cloneable'`). A
 value is dropped when its slot is overwritten or shrunk away, or the buffer goes. Every
 index and count is an `unsigned`.
 

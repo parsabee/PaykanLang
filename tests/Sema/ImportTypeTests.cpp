@@ -1264,3 +1264,47 @@ fn main() -> int { return 0; }
         << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// Why an instance of another module's template lacks a method is read from
+// that template's blocks alone.  A block of that module's trait is not this
+// module's trait of the same name: no member of this one is said to be in
+// it.  Nothing the reason looks at is instantiated or reported: the errors
+// are the call's.
+TEST(Module, AMissingMethodOfAForeignBlockIsNotGuessedFromALocalTrait) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_foreign_block").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "widgets.pkn", R"(// A module.
+class Wrap<T> { v: T; }
+impl Wrap<T> { view fn show() -> Str { return self.v.nothing(); } }
+trait Conv { view fn conv() -> int; }
+trait Into2<U> { view fn into2() -> int; }
+class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = move v; } }
+impl Conv for Box<T: Copyable> { view fn conv() -> int { return 1; } }
+impl Into2<Wrap<T>> for Box<T: Copyable> { view fn into2() -> int { return 2; } }
+impl Box<T: Copyable> { view fn get() -> int { return 3; } }
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(import widgets as w;
+trait Conv { view fn other() -> int; }
+class Node { key: int; }
+fn main() -> int {
+  let b = w::Box<Node>(Node(1));
+  let x = b.other();
+  let y = b.conv();
+  let z = b.get();
+  return b.nosuch();
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:6:11: error: no method 'other' on type 'Box<Node>'\n"
+            "main.pkn:7:11: error: no method 'conv' on type 'Box<Node>': "
+            "'conv' is in 'impl Conv for Box<T: Copyable>', and 'Node' is not "
+            "'Copyable'\n"
+            "main.pkn:8:11: error: no method 'get' on type 'Box<Node>': 'get' "
+            "is in 'impl Box<T: Copyable>', and 'Node' is not 'Copyable'\n"
+            "main.pkn:9:10: error: no method 'nosuch' on type 'Box<Node>'\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

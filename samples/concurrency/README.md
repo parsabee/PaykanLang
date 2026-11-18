@@ -138,7 +138,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   the await), and every task handle in a variable is spent, by `await` or
   by `move`, on every path before its scope ends and before the variable
   takes another task: `task 't' is not awaited before this 'return'`,
-  `task 't' may not be awaited when its scope ends: it is spent on some
+  `task 't' is not awaited on every path before its scope ends: it is spent on some
   paths only`, `task 't' is replaced before it is awaited`.  The design's
   typestate reduced to the one operation the prototype has (no `join`,
   `cancel` or `detach`), so that no task is dropped while it runs; a
@@ -230,7 +230,15 @@ and `task::spawnOn`, event loops pinned per thread, cancellation, timers,
 and the task-handle typestate beyond `await` (a task handle in a field, an
 element or a tuple is not followed by the await check).
 
-Not in yet: the migration tool and the diagnostics' final wording.  A `locked` type argument and an `atomic
+No migration tool: `paykan migrate`, the design's rewriter of v0.3 programs,
+is not built and is not part of v0.4 (docs/design/concurrency.md,
+"Migration"); each error names its fix (`write 'move a' to transfer it, or
+declare it 'shared Node'`).  The diagnostics' wording is settled: the
+design's table, "Diagnostics", lists the messages of each of its situations
+that the language has, and tests/Sema/DiagnosticsTableTests.cpp has a
+program for each.
+
+A `locked` type argument and an `atomic
 shared` or `locked` tuple or array element are errors (`List<shared Node>`
 and `(int, shared Node)` are there).
 Non-atomic

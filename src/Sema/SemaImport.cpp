@@ -390,7 +390,7 @@ std::string Sema::checkModuleFile(const std::filesystem::path &file,
   std::string resolved = module_utils::realPath(file);
   if (resolved.empty()) {
     error(loc, std::string(kind) + " '" + module + "' not found (tried " +
-                   shown + ")");
+                   DiagEngine::verbatim(shown) + ")");
     return "";
   }
   // `lib/m.pkn/` -- a directory where the module's file should be (#120).
@@ -954,9 +954,11 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
       return true;
     case K::NotFound:
     case K::Rejected:
-      error(loc, r.Outcome == K::NotFound
-                     ? std::string(kind) + " '" + canonical + "' " + r.Message
-                     : r.Message);
+      // (The resolver's words, with the paths it tried.)
+      error(loc, (r.Outcome == K::NotFound
+                      ? std::string(kind) + " '" + canonical + "' "
+                      : std::string()) +
+                     DiagEngine::verbatim(r.Message));
       // Reported once, here: a later import of the module adds a note.
       if (FailedModules)
         FailedModules->insert(canonical);

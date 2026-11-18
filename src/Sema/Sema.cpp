@@ -2611,7 +2611,8 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     }
     if (S.LockDepth > 0) {
       S.error(node->getLocation(), "'await' cannot be used in a 'lock' "
-                                   "block: a wait holding a lock");
+                                   "block: the task would wait while it "
+                                   "holds the lock");
       return nullptr;
     }
     if (S.CurrentClassCtx &&
@@ -3854,10 +3855,25 @@ ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
 
   if (!method && ct && node->getMethodName() == names::kMethodClone &&
       node->getNumArguments() == 0 && !S.isErroneousClass(ct)) {
-    S.error(node->getLocation(),
-            "class '" + ct->getName() +
-                "' is not Cloneable: write 'impl Cloneable for " +
-                ct->getName() + " {}' to derive its 'clone', or write one");
+    // An instance whose template is Cloneable under a bound it does not
+    // meet says so: there is no block to write for it.
+    const std::string unmet =
+        S.unmetBlockOf(ct->getName(), names::kMethodClone);
+    // (An instance has no block of its own: the block is its generic
+    // class's.)
+    const size_t lt = ct->getName().find('<');
+    S.error(
+        node->getLocation(),
+        !unmet.empty()
+            ? "no method 'clone' on type '" + ct->getName() + "'" + unmet
+            : "class '" + ct->getName() + "' is not Cloneable: " +
+                  (lt == std::string::npos
+                       ? "write 'impl Cloneable for " + ct->getName() +
+                             " {}' to derive its 'clone', or write one"
+                       : "its generic class '" +
+                             Sema::displayName(ct->getName().substr(0, lt)) +
+                             "' has no 'impl Cloneable for' block (an "
+                             "empty one derives 'clone')"));
     return nullptr;
   }
   if (!method) {
@@ -3903,8 +3919,9 @@ ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
     S.error(node->getLocation(),
             "no method '" + node->getMethodName() + "' on type '" + ownerName +
                 "'" +
-                (ct == S.Ctx.getStrTy() ? parseAliasHint(node->getMethodName())
-                                        : std::string()));
+                (ct == S.Ctx.getStrTy()
+                     ? parseAliasHint(node->getMethodName())
+                     : S.unmetBlockOf(ownerName, node->getMethodName())));
     return nullptr;
   }
 
@@ -4809,7 +4826,8 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
               (have.isUnique() ? std::string("a destructuring makes no cell or "
                                              "frozen object")
                                : std::string("a '") + have.spelling() +
-                                     "' reference converts only as it is"));
+                                     "' reference is stored only as '" +
+                                     have.spelling() + "'"));
     return false;
   };
   StringSet seen;
@@ -5694,7 +5712,8 @@ bool Sema::visitExprStmt(ast::ExprStmt *node) {
     return false;
   if (ast::isa<ast::TaskType>(ty)) {
     error(node->getLocation(), "this task is never awaited: 'await' the call, "
-                               "or hold its task in a variable that is");
+                               "or hold the task in a variable and 'await' "
+                               "that");
     return false;
   }
   return true;
@@ -6700,9 +6719,10 @@ bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
   const std::string &symbol = node->getNativeSymbol();
   // The frontends reject such a symbol; an AST made another way may not.
   if (std::string_view why = names::cSymbolProblem(symbol); !why.empty()) {
-    error(node->getLocation(),
-          "the C symbol '" + symbol + "' of native function '" +
-              displayName(node->getName()) + "' " + std::string(why));
+    error(node->getLocation(), "the C symbol '" + DiagEngine::verbatim(symbol) +
+                                   "' of native function '" +
+                                   displayName(node->getName()) + "' " +
+                                   std::string(why));
     return false;
   }
   const pir::Signature sig = nativeSignature(Ctx, *node);
@@ -7167,6 +7187,19 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         CurrentScope->set(node->getName(), declTy);
       else
         declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    // A task handle is spent by `await` or `move`, and a borrow does
+    // neither: a borrow of a variable's handle could do nothing, and one of
+    // a call's own task would be its only name, never awaited.
+    if (node->getMode() != ast::ParamMode::Value &&
+        ast::isa<ast::TaskType>(initTy)) {
+      error(node->getLocation(),
+            std::string("'") + ast::paramModeName(node->getMode()) +
+                "' local '" + node->getName() +
+                "' cannot name a task: a task handle is spent by 'await' or "
+                "'move', and a borrow does neither");
+      declarePoisoned(CurrentScope, node->getName());
       return false;
     }
     if (inferred) {

@@ -37,7 +37,8 @@ channels; data parallelism is a verified `parallel for`.  Programs that
 compile have no data races, and objects of user classes keep plain counts
 unless their type says `atomic shared`.  Two settled rules are reversed:
 `move` returns, and a copy of an unmarked container is no longer the same
-container.  `paykan migrate` carries programs across.
+container.  `paykan migrate` was to carry programs across; it is not built
+(see [Migration](#migration)).
 
 ## Summary of the decisions
 
@@ -54,7 +55,7 @@ container.  `paykan migrate` carries programs across.
 | Communication | bounded `sync::Channel<T>`, `lock` blocks on `locked` cells, `atomic` operations |
 | Data parallelism | verified `parallel for`, reductions reproducible on every machine |
 | Runtime | thread-safe C11, atomic counts only on `atomic shared` objects, handles and task records, kqueue and epoll loops, timers, files on helper threads, TSan |
-| Migration | `paykan migrate <paths>` writes `shared` and `move`; one breaking release |
+| Migration | one breaking release; `paykan migrate <paths>`, to write `shared` and `move`, is designed and not built |
 
 Decisions 33-35 replaced the first draft's `thread_shared` qualifier,
 `sync::Locked<T>` and `sync::Atomic<T>` types, `@par` attribute and v0.4
@@ -384,11 +385,10 @@ change):
   const T` or `atomic shared T` without a copy.  A changed version is a new
   object.  (The mut model, owner 2026-11-03: `mut T` flows into `T`
   freely; `T` gains `mut` only by `move` or straight from a temporary,
-  `cannot store a 'Node' in variable 'v', a 'mut Node': a reference gains
-  'mut' only by 'move'`; `shared T` and `shared mut T` never convert into
-  each other, `cannot store a 'shared mut Node' in variable 'v', a 'shared
-  Node': a 'shared' reference, a frozen object and a cell convert only as
-  they are`.)
+  `cannot store a 'Node' in variable 'v', a 'mut' reference: a reference
+  gains 'mut' only by 'move'`; `shared T` and `shared mut T` never convert into
+  each other, `cannot store a 'shared mut Node' in variable 'v', a 'shared'
+  reference: a 'shared mut' reference is stored only as 'shared mut'`.)
 * **Values.**  `const` on a plain value is an error.  On a struct, tuple or
   fixed array holding references it makes them `const`, and the value is
   read only, though a variable not declared `let` may still be assigned
@@ -437,7 +437,7 @@ let a = Node("a", None);
 a.name = "b";                        // error: 'a' is immutable (a 'Node'; write 'mut Node' to change it); cannot assign to its field 'name'
 let s: shared Node = move a;         // no copy
 let t: shared mut Node = Node("t", None);
-let u: shared Node = t;              // error: cannot store a 'shared mut Node' in variable 'u', a 'shared Node': a 'shared' reference, a frozen object and a cell convert only as they are
+let u: shared Node = t;              // error: cannot store a 'shared mut Node' in variable 'u', a 'shared' reference: a 'shared mut' reference is stored only as 'shared mut'
 ```
 
 **Reads through `const`.**  Nothing in a `const` object can be replaced, so
@@ -547,9 +547,9 @@ let w: Config = cfg;           // error: no conversion from 'atomic shared Confi
 let o: Obj = cfg;              // error: no conversion from 'atomic shared Config' to 'Obj': write 'atomic shared Obj'
 ```
 
-(The mut model, owner 2026-11-03: the prototype words these `cannot store
-a 'shared Node' in variable 'n', a 'Node': a 'shared' reference, a frozen
-object and a cell convert only as they are`.)
+(The mut model, owner 2026-11-03: the compiler words these `cannot store
+a 'shared Node' in variable 'n', a unique reference: a 'shared' reference
+is stored only as 'shared'`.)
 
 A Copyable value converts by copy.  Upcasts keep the qualifier: an `atomic shared
 const Config` becomes an `atomic shared Obj`, never a plain `Obj`, which
@@ -613,8 +613,8 @@ pool, so it runs the check at every async call's arguments, at every
 conversion to `atomic shared` or `locked`, and at the declaration of an
 `async fn`'s result, where a result that cannot cross is reported once,
 at the function: `the result of 'async fn' 'give' (a 'shared Job') cannot
-cross to the task's awaiter: is 'shared Job': a 'shared' reference is
-aliased on its own thread` (prototype, 2026-11-03).
+cross to the task's awaiter: a 'shared' reference is aliased on its own
+thread` (prototype, 2026-11-03).
 
 The check has a name, the built-in trait `Sendable` (#378): `T: Sendable`
 exactly when the check finds nothing against `T`
@@ -634,7 +634,7 @@ makes.
 | `Buffer<T>`, `task::Task<T>` | when `T` is |
 | structs, tuples, fixed arrays, optionals, payloads | when their parts are |
 | handles: `atomic shared` references (`atomic shared Obj` too), `atomic` and `locked` handles, `sync::Channel<T>`, `task::Loop` | yes: the contents were checked when the object, cell or channel was made |
-| `shared T`, `shared T`, and weak references | no: they count plainly, and a weak load is a plain retain |
+| `shared T`, `shared T`, and weak references | no: they count plainly, and a 'weak' reference watches an object of its own thread |
 | function values | no: a function type does not show its captures |
 | `Obj` | no: it may be any class |
 
@@ -769,7 +769,7 @@ impl List<T: Copyable> {
   fn get(i: unsigned) -> T { ... }
   view fn copy() -> List<T> { ... }
 }
-nodes.get(0);   // nodes: List<Node> -- error: 'get' needs 'T: Copyable', and 'Node' in 'List<Node>' is not Copyable
+nodes.get(0);   // nodes: List<Node> -- error: 'get' is in 'impl List<T: Copyable>', and 'Node' is not 'Copyable'
 ```
 
 ### Weak references
@@ -1910,6 +1910,17 @@ wait](#borrows-across-a-wait).
 
 ## Migration
 
+**Not built (owner, 2026-11-17).**  `paykan migrate` is not part of v0.4.
+The repository was migrated by hand as each check landed: the stdlib, the
+samples, the documents' examples and the tests' programs are in the new
+language, and nothing in the compiler rewrites a program.  The legacy mode
+of step 2 below was never built either: the compiler has one meaning for an
+unqualified reference, the new one.  A v0.3 program is carried across by its
+errors, each of which names its fix (`cannot copy 'a' (a unique 'Node');
+write 'move a' to transfer it, or declare it 'shared Node'`;
+[Diagnostics](#diagnostics)).  What follows is the design as it was
+proposed, kept for a later tool.
+
 v0.4 is one breaking release (decision 26).  `paykan migrate <paths>` is the
 automatic fixer: it writes the fixes; `--check` and `--diff` report without
 writing (proposed; owner may change).  It uses the compiler as its oracle,
@@ -1976,7 +1987,7 @@ never changes (the mut model: to `mut` for an object that changes); and the thre
 `parallel for`; async/await with timers, files, channels and joins; the
 qualifiers, `const` among them (`mut`, in the mut model), with cells and `atomic shared` objects for
 decision 14 (c)'s sync types and shared objects; the send check and
-`paykan migrate`.
+`paykan migrate` (not built: see [Migration](#migration)).
 
 A chunk is about 6-7 hours of multi-agent work plus a CI round; S is a
 quarter chunk, M a half, L one, XL two to three.
@@ -2375,116 +2386,199 @@ themselves.
 
 ## Diagnostics
 
-Errors unless marked.  `12:9` stands for a source position.
+Errors unless marked `warning:`.  The first tables are what the compiler
+prints today for the situations of this design: each message is quoted from
+a program of `tests/Sema/DiagnosticsTableTests.cpp`, which fails when the
+compiler's message, its own row or a table here says something else.  Names
+and positions (`5:8`) are those programs' own.  The article before a quoted
+name is chosen where a message is printed (`an 'Obj'`, `an 'int'`, `a
+'Node'`), so a message is written with "a".
+
+The tables are this design's, not a list of every message: the checks added
+since (borrowed results, `__deinit__`, `weak` references, an `atomic`'s
+operations, captures, the built-in traits) are in the tables of semantic
+checks of the language chapters, docs/language/, with tests of their own.
+
+### In the language now
+
+**Copies and moves**
 
 | Situation | Message |
 |---|---|
-| copy of a unique place | `cannot copy 'a' (a unique 'Node'): write 'move a' to transfer it, or declare it 'shared Node'` |
-| copy of a non-Copyable value | `cannot copy 't': 'task::Task<err::Error>' is not Copyable` |
-| copy of a holder | `cannot copy 'p': 'Person' holds unique field 'name' ('Str')` |
-| copy of a borrow | `cannot copy 'n': it is a 'view' parameter, a borrow` (`an 'inout' parameter`, `a 'view' local`) |
-| `[v; n]` of a place | `'[v; n]' evaluates its value for each of its 3 elements, and 'n' (a 'Node') is not Copyable: write a value made for each` |
-| read after `move` | `'a' was moved at 12:9; it cannot be read after the move` |
-| after a branch | `'a' may have been moved (by the 'if' at 10:3)` |
-| move in a loop | `'job' is moved in the loop at 4:3 and not assigned again before the next iteration` |
-| moved into a lambda | `'job' was moved into a lambda at 2:39; it cannot be read after the move` |
-| capture moved out | `'job' is captured by the lambda: each call borrows it, so it cannot be moved out` |
-| `move` of a field | `cannot move 'h.node': 'move' takes a local variable, a by-value parameter or a 'match' binding; write 'mem::replace(h.node, v)'` |
+| copy of a unique place | `cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare it 'shared Node'` |
+| copy of a task handle | `cannot copy 't' (a 'Task<int>'); write 'move t' to transfer it` |
+| copy of a value that holds a unique part (a struct, a tuple, an array) | `cannot copy 'p': 'Person' holds unique field 'name' ('Str'); write 'move p' to transfer it, or 'p.clone()' to copy it`; `cannot copy 't': '(int, Node)' holds unique element '.1' ('Node'); write 'move t' to transfer it`; `cannot copy 't': 'Node[2]' holds unique elements ('Node'); write 'move t' to transfer it` |
+| copy of a borrow (a `view` parameter, a `view` local, an `inout` parameter, an `inout` local) | `'n' is a 'view' parameter; it cannot be stored, only read or passed to a 'view' parameter`; `'v' is a 'view' local; it cannot be stored, only read or passed to a 'view' parameter`; `cannot copy 'n' (a unique 'mut Node'); it is an 'inout' borrow, and what it names stays with its owner`; `cannot copy 'x' (a unique 'mut Node'); it is an 'inout' borrow, and what it names stays with its owner` |
+| `[v; n]` of a place | `'[v; n]' evaluates its value for each of its 3 elements, and 'node' (a 'Node') is not Copyable: write a value made for each` |
+| use after `move` | `'a' was moved at 5:8; it cannot be used after the move` |
+| use after a `move` on some paths | `'a' may have been moved (by the 'if' at 5:3, at 5:23); it cannot be used after a move` |
+| `move` in a loop | `'job' is moved in the loop at 5:3 and not assigned again before the next iteration` |
+| capture of a unique variable | `cannot capture 'job' (a unique 'Job'): a function captures by copy; declare it 'shared Job' (and then, to keep no owner, capture a 'weak' local of it)` |
+| `move` of a captured variable | `cannot move 'job': the function captures it by copy` |
+| copy of a part (an array's element, an optional one, a tuple's element, a field of an owned variable, of an `inout` borrow) | `cannot copy 'xs[0]' (a unique 'mut Node'); an element leaves its array by 'mem::replace'`; `cannot copy 'xs[0]' (a unique 'mut Node?'); an element leaves its array by 'mem::replace' or 'mem::take'`; `cannot copy 't.0' (a unique 'mut Node'): an element leaves its tuple only with the others; destructure it ('a, b = move t;'), or declare the element 'shared mut Node'`; `cannot copy 'h.node' (a unique 'Node'); write 'move h.node' to take it (which ends 'h'), or declare the field 'shared Node'`; `cannot copy 'h.node' (a unique 'mut Node'); write 'mem::replace(h.node, v)' to take it in exchange, or declare the field 'shared mut Node'` |
+| `move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element) | `cannot move 'self.node': 'move' takes a variable, or a field of one it owns; write 'mem::replace(self.node, v)'`; `cannot move 'h.node': 'h' is a 'view' borrow, which changes nothing`; `cannot move 'h.node': 'h' is an 'inout' borrow, and what it names stays whole; write 'mem::replace(h.node, v)'`; `cannot move 'h.sh.n': 'h' is an 'inout' borrow, and what it names stays whole`; `cannot move 'w.node': 'w' is a 'weak' reference, which owns nothing`; `cannot move 'h.node': 'h' is a 'shared Holder', which other references reach`; `cannot move 'h.node': 'h' is a 'shared mut Holder', which other references reach; write 'mem::replace(h.node, v)'`; `cannot move 'h.node': it is 'shared Node', not a unique part of 'h'`; `cannot move 'make().node': 'move' takes a variable, or a field of one it owns`; `cannot move 'xs[0]': an element leaves by 'mem::replace' (or 'mem::take', where it is optional)`; `cannot move 't.0': an element leaves its tuple only with the others; destructure it ('a, b = move t;')` |
 | `move self` | `cannot move 'self': a method borrows its receiver` |
-| `move` of a borrow | `cannot move 'n': it is a 'view' parameter, a borrow` (`an 'inout' parameter`, `a 'view' local`) |
-| `move` of a weak | `cannot move 'w': a 'weak' variable holds no strong reference` |
-| move while borrowed | `'l' is borrowed by 'view' local 'x' until 'x' is last used; it cannot be moved` |
-| qualified value | `'shared' qualifies a reference; 'int' is a value` |
-| qualified struct, tuple or array (prototype, 2026-11-03) | `'const' applies to objects; 'Pair' is a value: box it ('mem::Box<Pair>') to share what it holds` (also `'atomic shared' qualifies a reference; 'Node[3]' is a value: box it ('mem::Box<Node[3]>') to share what it holds`; since #368 `shared Node[3]` is three shared references, and `shared int[3]` is `'shared' qualifies a reference; 'int[3]' is a value`) (the mut model, owner 2026-11-03: `'mut' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
-| two qualifiers | `a type takes one qualifier: 'locked atomic shared Config'`; `write 'shared', not 'const shared'` (the mut model: `a type takes one qualifier: 'shared mut shared' is two`; `'mut shared' is spelled 'shared mut': the form first, then the writes`) |
-| `locked view` | `there is no 'locked view': read 'x' in 'lock x as v: view { }'` |
-| `locked const` | `there is no 'locked const': a value that never changes needs no lock; share it as 'atomic shared'` (the mut model, owner 2026-11-03: the language has no `const`; `locked T` alone is the warning `'locked T' locks an object nothing writes; 'atomic shared T' is read from every thread with no lock`, and `lock x as v: inout` on it `'x' is 'locked T', whose contents are never written; declare it 'locked mut T' for a 'lock ... as v: inout' block`) |
-| `atomic shared` | `there is no 'atomic shared': across threads, share a value read only as 'atomic shared', or one that changes as 'locked'` (the parser, owner, 2026-11-03: `'atomic shared T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked T' to change it under a lock`) (the mut model, owner 2026-11-03: `atomic shared T` is the frozen form; `atomic shared mut T` is `'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock`, and `atomic mut T` `an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'`) |
-| `atomic const` (owner, 2026-11-03) | `'atomic const' is 'atomic shared': an object read from several threads has several owners; write 'atomic shared T'` (the mut model: the language has no `const`) |
-| `const` on a value | `'const' applies to objects; 'int' is a value, which 'let' fixes` (also `'Point' holds no reference`) (the mut model: `'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
-| `const` declaration | `'const' is a qualifier: write 'let x: const = e;'` (the mut model: the language has no `const`, and `n: mut = e;` declares a mutable one) |
-| `const` function type | `'const' takes no function type: a call may change what its captures own` (the mut model, the prototype: `'mut' applies to objects; '() -> int' is a value: its storage is rewritten by assignment, which 'let' fixes`) |
-| qualified handle class | `'sync::Channel' is a handle: it takes no qualifier` (also `'task::Loop'`) |
-| handle class to `Obj` | `'sync::Channel<int>' is a handle: it cannot become an 'Obj'` (also `'task::Loop'`) |
-| conversions | `no conversion from 'shared Node' to 'Node'`; `no conversion from 'shared Node' to 'atomic shared Node': a shared object stays on its thread`; `no conversion from 'shared Node' to 'shared Node': other references may still change it`; `no conversion from 'const Node' to 'Node': a 'const' object never changes; make a new one`; `no conversion from 'atomic shared Config' to 'Config'`; `no conversion from 'atomic shared Config' to 'Obj': write 'atomic shared Obj'` (the mut model, owner 2026-11-03: `cannot store a 'T' in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`; `cannot store a 'shared mut T' in variable 'v', a 'shared T': a 'shared' reference, a frozen object and a cell convert only as they are`, also from a `shared T` into a `T` or an `atomic shared T`, and from an `atomic shared T` into a `T`) |
-| borrow qualifier | `parameter 'n' is 'inout const': a borrow carries no qualifier; ... write 'inout T'` (the mut model: `'inout mut'` the same) |
-| read, later `inout` | `'s' is read by the left operand of '+'; a later operand cannot pass it to 'inout' parameter 'x' of 'shout'` |
-| read, later `move` | `'j' is read by the left operand of '+'; a later operand cannot move it` |
-| binding a unique place | `'n' is a 'match' binding, a borrow of 'x' ('match move x' binds what it owns); it cannot be stored, only read or passed to a 'view' parameter` |
+| `move` of a borrow (a `view`, an `inout` parameter, an `inout` local, a `lock` block's binding) | `cannot move 'n': it is a 'view' borrow, and what it names stays with its owner`; `cannot move 'n': it is an 'inout' borrow, and what it names stays with its owner`; `cannot move 'x': it is an 'inout' borrow, and what it names stays with its owner`; `cannot move 'c': it is an 'inout' borrow, and what it names stays with its owner` |
+| `move` of a `weak` variable | `cannot move 'w': a 'weak' variable holds no strong reference` |
+| `move`, or any use, of what a local borrows | `'l' is viewed by 'view' local 'x' until 'x' is last used; it cannot be moved`; `'l' is borrowed by 'inout' local 'x' until 'x' is last used; it cannot be used before then` |
+| an argument borrowed, and passed `inout` or moved by a later argument of the call | `'s' is passed to 'view' parameter 'a' of 'both'; a later argument of 'both' cannot pass it to 'inout' parameter 'x' of 'shout'`; `'j' is passed to 'view' parameter 'j'; it cannot also be moved in argument 2`; `'j' is passed to 'view' parameter 'j'; it cannot also be moved into parameter 'k'`; `'j' is the receiver of 'view fn plus'; it cannot also be moved in argument 1` |
+
+**Qualifiers**
+
+| Situation | Message |
+|---|---|
+| qualifier on a value | `'shared' qualifies a reference; 'int' is a value`; `'shared' qualifies a reference; 'int[3]' is a value`; `'atomic shared' qualifies a reference; 'int' is a value` |
+| qualifier on a struct, tuple or array that holds references | `'atomic shared' qualifies a reference; 'Pair' is a value: box it ('mem::Box<Pair>') to share what it holds`; `'atomic shared' qualifies a reference; 'Node[3]' is a value: hold it in a class to share what it holds` |
+| `mut` on a value | `'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes`; `'mut' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes` |
+| qualifier on a function value | `a function value takes no qualifier ('mut () -> int'): it is Copyable, and its copies share its closure` |
+| two qualifiers, or `mut` first (the parser) | `a type takes one qualifier: 'locked atomic' is two`; `a type takes one qualifier: 'shared mut shared' is two`; `'mut shared' is spelled 'shared mut': the form first, then the writes` |
+| `mut` on a frozen object or a cell (the parser) | `'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock`; `an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'` |
+| `locked T` without `mut`: a warning where it is declared, an error at an `inout` block | warning: `'locked Node' locks an object nothing writes; 'atomic shared Node' is read from every thread with no lock`; `'x' is 'locked Node', whose contents are never written; declare it 'locked mut Node' for a 'lock ... as v: inout' block` |
+| what a cell holds | `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked mut Node'`; `'locked mut' holds an object for now, not 'int': wrap the value in a class`; `field 'c' in struct 'P' has type 'atomic int': a struct cannot hold an 'atomic' field yet (hold the cell in a class)` |
+| qualifier on a borrow | `parameter 'n' is 'inout mut': a borrow carries no qualifier; a 'view' takes every form of the object (read-only through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'mut'`; `parameter 'n' is 'view mut': a borrow carries no qualifier; a 'view' takes every form of the object (read-only through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'mut'` |
+| qualifier on a type argument that has a form already | `'locked mut' cannot qualify the type argument 'shared Job': a type takes one qualifier, and 'locked mut' and 'shared' are two`; `'mut' cannot qualify the type argument 'shared Job': a 'shared' reference is never written through`; `'locked mut' cannot qualify a type argument yet: a cell's contents are reached in a 'lock' block, which a template's code does not write` |
+| conversion between forms | `cannot store a 'shared Node' in variable 'u', a unique reference: a 'shared' reference is stored only as 'shared'`; `cannot store a 'shared Node' in variable 'u', an 'atomic shared' reference: a 'shared' reference is stored only as 'shared'`; `cannot store a 'shared Node' in variable 'u', a 'shared mut' reference: a 'shared' reference is stored only as 'shared'`; `cannot store a 'shared mut Node' in variable 'u', a 'shared' reference: a 'shared mut' reference is stored only as 'shared mut'`; `cannot store an 'atomic shared Node' in variable 'u', a unique reference: an 'atomic shared' reference is stored only as 'atomic shared'` |
+| gaining `mut` | `cannot store a 'Node' in variable 'm', a 'mut' reference: a reference gains 'mut' only by 'move'` |
+| a `weak` reference to a unique object | `cannot store 'a' (a 'Node') in variable 'w', a 'weak Node?': a 'weak' reference names a 'shared' object; declare 'a' 'shared Node'` |
+
+**Immutable and frozen objects, `self`**
+
+| Situation | Message |
+|---|---|
+| write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference) | `'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its field 'path'`; `'cfg' is immutable (a 'Config'; write 'mut Config' to change it); 'rename' is not a 'view fn'`; `'cfg' is immutable (a 'Config'; write 'mut Config' to change it); it cannot be passed to 'inout' parameter 'p'`; `'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its elements`; `'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to 'cfg.limits.hi'`; `field 'lim' is immutable (a 'shared Limits'; write 'shared mut Limits' to change it); cannot assign to 'cfg.lim.lo'`; `'cfg' is immutable (a 'shared Config'; write 'shared mut Config' to change it); cannot assign to its field 'path'` |
+| write through a frozen object | `'cfg' is frozen (an 'atomic shared Config'); cannot assign to its field 'path'`; `'cfg' is frozen (an 'atomic shared Config'); 'rename' is not a 'view fn'`; `'cfg' is frozen (an 'atomic shared Config'); it cannot be passed to 'inout' parameter 'p'`; `cannot move 'cfg.path': 'cfg' is an 'atomic shared Config', which other references reach` |
+| call of a `shared fn` through another form | `'add' is a 'shared fn', which takes its receiver as a 'shared mut Node'; 'root' is a 'Node': declare it 'shared mut Node'`; `'add' is a 'shared fn', which takes its receiver as a 'shared mut Node'; 'self' is borrowed in 'reset': make it a 'shared fn' too`; `'peek' is a 'shared view fn', which takes its receiver as a 'shared Config'; 'cfg' is an 'atomic shared Config': declare it 'shared Config'` |
+| override of a `shared fn`, or by one | `override of 'add' must be a 'shared fn', like the method it overrides (a call of either takes its receiver as the overridden method says)`; `override of 'add' cannot be a 'shared fn': the method it overrides is not (a call of either takes its receiver as the overridden method says)` |
+| storing `self` (in a method, in a `view fn`, in a struct's method) | `cannot copy 'self' (a unique 'mut Node'); a method borrows its receiver (a 'shared fn' hands on a shared one)`; `'self' is read-only in 'view fn me'; it cannot be stored, only read or passed to a 'view' parameter`; `cannot copy 'self': 'P' holds unique field 'name' ('Str'); a method borrows its receiver: write 'self.clone()' to copy it` |
+| capturing `self` | `cannot capture 'self': a method borrows its receiver, and a function captures by copy; a 'shared fn' may capture it, or a 'weak' local of it ('me: weak mut = self;')` |
+
+**`match` bindings**
+
+| Situation | Message |
+|---|---|
+| binding of a unique place stored | `'n' is a 'match' binding, a borrow of 'x' ('match move x' binds what it owns); it cannot be stored, only read or passed to a 'view' parameter` |
 | binding qualifier | `'p' binds part of a 'shared Obj': its type is 'shared Node', not 'atomic shared Node'` |
 | binding a conditional of two forms | `'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one` |
-| shared contents | `cannot make 'Settings' 'atomic shared': field 'cache' is shared` (also `'locked'`; paths dotted); `'Obj' cannot be 'atomic shared': it may be any class`; `a 'const' value cannot hold 'task::Task<err::Error>' (field 'worker'): it could never be decided; use 'locked'` (the mut model: an immutable value; the prototype's `cannot make 'Node(...)' (a 'Node') 'atomic shared': field 'next' is 'shared mut Node': a 'shared' reference is aliased on its own thread`, also `'locked mut'`) |
-| cell type | `'atomic' holds a number, 'bool', 'char' or a fixed array of them; 'Node' is a reference: use 'locked Node' or 'atomic shared Node'`; `'atomic shared' shares an object; 'int' is a value: copy it` (the prototype: `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked Node'`, 2026-11-03; the mut model: `'locked mut Node'`) |
-| atomic operations | `'hits' is 'atomic': 'hits = hits + 1' reads and writes it separately; write 'hits += 1'` (otherwise `use 'compareExchange' in a loop`); `'*=' is not an atomic operation on 'hits': use '+=', '-=', 'exchange' or 'compareExchange'`; `'seen' is an 'atomic bool[64]': it is read by element`; bitwise operators on an `atomic int` get today's `the bitwise operators take unsigned operands` |
-| lending an atomic | `'seen[3]' is an element of an 'atomic bool[64]': it has no handle and cannot be lent`; `'hits' is 'atomic': its value cannot be lent 'inout' or bound by address` |
-| through a `const` form | `cannot assign 'cfg.path': 'cfg' is 'atomic shared', which never changes; a field that changes is 'atomic' or 'locked'` (also `'const'`, `'shared'`); `cannot pass 'cfg.path' to 'inout' parameter 'p': 'cfg' is 'atomic shared', which never changes`; `cannot move 'c.name' out: 'c' is 'const', which never changes`; `'rename' is not a 'view fn'; through 'atomic shared' reference 'cfg' only 'view fn's can be called`; `'keep' is a 'shared view fn', whose 'self' could be stored and changed; through 'shared' reference 's' only 'view fn's can be called`; `cannot call 'w.onClick': it is reached through 'const' 'w', and a call may change what its captures own; hold it 'shared'` (the mut model, owner 2026-11-03: `'x' is immutable (a 'T'; write 'mut T' to change it); cannot assign to its field 'f'`, also `; 'm' is not a 'view fn'`, `; it cannot be passed to 'inout' parameter 'p'` and `; cannot assign to its elements`; `field 'f' is immutable (a 'shared T'; write 'shared mut T' to change it); cannot assign to its field 'g'`; `'x' is frozen (an 'atomic shared T'); cannot assign to its field 'f'`, also `; 'm' is not a 'view fn'`; a `let` variable keeps `'x' is declared with 'let' and cannot be passed to 'inout' parameter 'p'`) |
-| `locked` outside a lock block | `'st.counts' is 'locked': reach its contents in 'lock st.counts as c: view { }'` |
-| channel element | `'sync::Channel<shared Node>': a channel's values cross threads, and 'shared Node' cannot` |
-| send check | `cannot send 'Job': field 'cache' is shared` (`field 'a.b.cache'`; `field 'cache' of 'Job'`) |
-| sending a function value | `cannot send '() -> int': a function value's captures are not part of its type` |
-| sending `Obj` | `cannot send 'Obj': it may be any class` |
-| subclass flag | `class 'Button' cannot hold 'shared' field 'onClick': it extends 'Widget', which can be sent to another thread` |
-| weak to unique | `a weak reference refers to a 'shared' or 'shared' object; 'a' is a unique 'Node' (unique objects form trees, with no cycle to break)` |
+
+**Cells and `lock` blocks**
+
+| Situation | Message |
+|---|---|
+| an `atomic` read and written separately | `'hits' is 'atomic': 'hits = ...' reads and writes it separately; write 'hits += e', or use 'exchange' or 'compareExchange'`; `'hits' is 'atomic': this operator reads and writes it separately; its atomic operations are '+=', '-=', 'exchange' and 'compareExchange'` |
+| an `atomic` array used whole | `'seen' is an 'atomic bool[64]': it is read by element` |
+| lending an `atomic` | `'seen[3]' is an element of an 'atomic bool[64]': it has no handle and cannot be passed to 'inout' parameter 'b'`; `'hits' is 'atomic': it has no address and cannot be passed to 'inout' parameter 'n'`; `'hits' is 'atomic': it has no address and cannot be named by 'inout' local 'x'`; `'seen[3]' is an element of an 'atomic bool[64]': it has no handle to share; declare 'h' with its type to read it` |
+| `locked` contents outside a `lock` block | `'st.counts' is 'locked': reach its contents in 'lock st.counts as c: view { }' (or 'inout')` |
+| `lock` operand | `'o' is not 'locked': a 'lock' block takes a 'locked' variable, field or parameter` |
+| nested `lock` | `a 'lock' block cannot hold another 'lock'` |
+| `parallel for` or `await` in a `lock` block | `a 'parallel for' cannot run in a 'lock' block`; `'await' cannot be used in a 'lock' block: the task would wait while it holds the lock` |
+
+**Freezing and sending**
+
+| Situation | Message |
+|---|---|
+| making a value `atomic shared` or `locked` (a `shared` field, a nested one, an `Obj`, through a type argument) | `cannot make 'Settings(...)' (a 'Settings') 'atomic shared': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot make 'Settings(...)' (a 'Settings') 'locked mut': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot make 'Outer(...)' (an 'Outer') 'atomic shared': field 's.cache' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot make 'o' (an 'Obj') 'atomic shared': it is an 'Obj', which may be any class`; `cannot make 'x' (a 'Job') 'locked mut': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread` |
+| send check: an argument of an `async fn` (a `shared` field, a nested one, a `shared` reference, a function value, an `Obj`, an array's elements, an element of a tuple's element, a part of each element of an array, a `weak` field) | `cannot send 'j' (a 'Job'): field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot send 'a' (an 'A'): field 'b.job.cache' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `'c' is 'shared Cache': it never crosses to a task (a 'shared' reference is aliased on its own thread)`; `cannot send 'f' (a '() -> int'): it is a function value, whose captures are not known`; `cannot send 'o' (an 'Obj'): it is an 'Obj', which may be any class`; `cannot send 'a' (a 'shared Cache[2]'): it holds 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot send this value (a '((int, shared Cache), int)'): element '.0.1' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot send 'a' (a '(int, shared Cache)[2]'): element '[].1' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `cannot send 'x' (a 'Watch'): field 'w' is 'weak': a 'weak' reference watches an object of its own thread` |
+| a class derived from one that is sent | `cannot send 'w' (a 'Widget'): field 'onClick' is 'shared Handler': a 'shared' reference is aliased on its own thread (of class 'Button', derived from 'Widget')`; `class 'Button<shared Handler>' extends 'Widget', which is sent to another thread: field 'onClick' is 'shared Handler': a 'shared' reference is aliased on its own thread` |
+
+**Generics**
+
+| Situation | Message |
+|---|---|
 | copy of `T` | `'T' is not 'Copyable': declare 'T: Copyable' to copy it` |
-| conditional method | `'get' needs 'T: Copyable', and 'Node' in 'List<Node>' is not Copyable` |
+| method or `static fn` of an `impl` block whose bound the instance does not meet (a method, a `static fn`, a method of two blocks, of a trait's block, a derived `clone`) | `no method 'get' on type 'List<Node>': 'get' is in 'impl List<T: Copyable>', and 'Node' is not 'Copyable'`; `'List<Node>' has no static function 'pair': 'pair' is in 'impl List<T: Copyable>', and 'Node' is not 'Copyable'`; `no method 'get' on type 'List<Job>': 'get' is in 'impl List<T: Copyable>', and 'Job' is not 'Copyable'; and in 'impl List<T: Sendable>', and 'Job' is not 'Sendable'`; `no method 'name' on type 'Box<Node>': 'name' is in 'impl Named for Box<T: Copyable>', and 'Node' is not 'Copyable'`; `no method 'clone' on type 'List<Node>': 'clone' is in 'impl Cloneable for List<T: Cloneable>', and 'Node' is not 'Cloneable'` |
+| `clone` of an instance of a generic class with no `impl Cloneable for` block | `class 'List<Node>' is not Cloneable: its generic class 'List' has no 'impl Cloneable for' block (an empty one derives 'clone')` |
+| `Copyable` bound not met | `'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a unique reference, a 'Str' or a task is move-only` |
 | `impl Copyable` | `'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented` |
-| qualified `T` | `'shared T' with 'T' = 'int': 'shared' qualifies a reference; 'int' is a value`; `'locked T' with 'T' = 'atomic int': a type takes one qualifier`; `'const T' with 'T' = 'locked Job': there is no 'locked const'` (the mut model: the language has no `const`, and a `mut T` join is the owner's); `'locked T' with 'T' = 'Job': field 'cache' is shared` |
-| storing `self` | `cannot copy 'self': a method borrows its receiver; declare the method 'shared fn' to keep a reference to it` |
-| capturing `self` | `cannot capture 'self': a method borrows its receiver; declare the method 'shared fn' to keep a reference to it` |
-| `shared fn` call | `'add' is a 'shared fn': call it through a 'shared' reference ('root' is a unique 'Node')` |
-| override prefix | `'add' overrides a 'shared fn'; it must be 'shared fn'` |
+
+**Tasks**
+
+| Situation | Message |
+|---|---|
+| task handle not awaited (never, before a `return`, on some paths, replaced) | `task 't' is never awaited: a task handle is spent by 'await' (or 'move') on every path before its scope ends`; `task 't' is not awaited before this 'return': a task handle is spent by 'await' (or 'move') on every path before its scope ends`; `task 't' is not awaited on every path before this 'return': it is spent on some paths only (by the 'if' at 6:3, at 6:14); every path awaits it, or moves it`; `task 't' is replaced before it is awaited: await it (or move it) first` |
+| task handle awaited twice | `'t' was awaited at 4:11; a task handle is spent by its 'await'` |
+| task handle borrowed by a local (a variable's, a call's) | `'view' local 'v' cannot name a task: a task handle is spent by 'await' or 'move', and a borrow does neither`; `'inout' local 'x' cannot name a task: a task handle is spent by 'await' or 'move', and a borrow does neither` |
+| task handle qualified, or given to a template | `'shared' qualifies a reference; 'Task<int>' is a value`; `type argument 1 of 'peek' cannot be a task yet: a task is held by a variable` |
+| async call whose task is dropped | `this task is never awaited: 'await' the call, or hold the task in a variable and 'await' that` |
+| `await` operand | `'await' takes a task (the result of calling an 'async fn'), not an 'int'` |
+| `await` in a `parallel for` | `'await' cannot be used in a 'parallel for' body` |
+| async function as a value | `async function 'f' is not a value: call it` |
+| override of an `async fn`, or by one | `override of 'run' must be an 'async fn', like the method it overrides`; `override of 'run' cannot be an 'async fn': the method it overrides is not` |
+| async `__init__` | `'__init__' cannot be 'async': constructing gives the object at once` |
+| async borrowed result | `an 'async fn' returns a value: its result cannot be 'view' or 'inout'` |
+| async result that cannot cross | `the result of 'async fn' 'give' (a 'shared Job') cannot cross to the task's awaiter: a 'shared' reference is aliased on its own thread`; `the result of 'async fn' 'give' (a 'Job') cannot cross to the task's awaiter: field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread`; `the result of 'async fn' 'give' (an 'Obj') cannot cross to the task's awaiter: it is an 'Obj', which may be any class` |
+| borrowed parameter of an `async fn` | `parameter 'xs' of 'async fn' 'f' cannot be 'view': a task outlives the call that starts it` |
+| receiver of an async method (borrowed by the task, or of a form that cannot cross) | `'w.run()' lends 'w' to the task it starts: 'await' it where it is called`; `the receiver of 'async fn' 'run' ('w', a 'shared Worker') cannot cross to its task: a 'shared' reference is aliased on its own thread` |
+| `inout` across a wait | `'self.n' is reached through 'self'; it cannot be borrowed 'inout' across an 'await': another task may change it there`; `'s.n' is reached through 'shared mut' reference 's'; it cannot be borrowed 'inout' across an 'await': another task may change it there` |
+| `view` across a wait | `'s.meta' is reached through 'shared mut' reference 's' and is not Copyable; it cannot be lent to an awaited call: another task may change it there`; `'self.meta' is reached through 'self' and is not Copyable; it cannot be lent to an awaited call: another task may change it there`; `'h.meta' is reached through 'view' parameter 'h' and is not Copyable; it cannot be lent to an awaited call: another task may change it there` |
+
+**`parallel for`**
+
+| Situation | Message |
+|---|---|
+| `parallel` before another statement (the parser) | `unexpected 'while'; expected 'for' after 'parallel'` |
+| outer reference in the body | `'nodes' (a 'List<Node>') cannot be used in a 'parallel for' body: an iteration uses only values, arrays of values and 'atomic' variables of the enclosing function` |
+| outer variable assigned (an object, a number), moved, bound `inout` or passed `inout` | `cannot assign to 'cfg' in a 'parallel for' body: a variable of the enclosing function is not changed by an iteration (a number changes by a reduction, an 'atomic' variable by its operations)`; `cannot assign to 'total' in a 'parallel for' body: a variable of the enclosing function changes only by a reduction ('total += e', 'total -= e', 'total *= e') or, if 'atomic', by its operations`; `'cfg' is moved in a 'parallel for' body: what the enclosing function holds changes only by a reduction of a variable, or at the loop's variable in an array`; `'cfg' is bound 'inout' in a 'parallel for' body: what the enclosing function holds changes only by a reduction of a variable, or at the loop's variable in an array`; `'ys' is passed 'inout' in a 'parallel for' body: what the enclosing function holds changes only by a reduction of a variable, or at the loop's variable in an array` |
+| `atomic` changed on every iteration | warning: `'hits' changes on every iteration of the 'parallel for': each atomic operation moves its cache line between cores, at many times a reduction's cost; count in a reduction (a plain variable of the enclosing function, '+='), or change it less often` |
+| write at another index | `'ys' is written in a 'parallel for' body at an index other than the loop's variable 'i': two iterations could write one element` |
+| read of a written array | `'ys' is written in a 'parallel for' body and cannot be read there except at the place written: another iteration could be writing what it reads` |
+| reduction read | `'s' is a reduction of this 'parallel for' and cannot be read in its body: an iteration sees only part of it` |
+| `break`, `return` | `'break' cannot be used in a 'parallel for' body`; `'return' cannot leave a 'parallel for' body` |
+| call that is not par-safe | `a 'parallel for' body cannot call 'log', which calls 'g', which calls '::io::println<Str>', which calls '::io::_println', which is not par-safe` |
+| virtual call another module may override | `a 'parallel for' body cannot call 'Shape.area', which a class derived from 'Shape' may override` |
+
+Run-time panics, printed after `paykan: `: `a value moved out of 'q.jobs'
+is still borrowed`, `a value made 'atomic shared' is still borrowed`.
+
+### With the async runtime (v0.5)
+
+These are the design's messages for what waits for the runtime of #362:
+channels, `task::spawn` and `task::spawnOn`, `join`, `cancel` and `detach`
+on a task handle, and cancellation.  None is printed today.  Until a handle
+has `join`, a task is spent by `await` alone (the rows of "Tasks" above
+stand in for the first four here), and `await` is allowed in an ordinary
+function, where it blocks the thread, and so in a lambda.
+
+| Situation | Message |
+|---|---|
 | undecided task handle | `task 't' is never joined, cancelled or detached` |
 | spent task handle | `task 't' was joined at 12:5; it cannot be used again` |
 | qualified or borrowed task handle | `'task::Task' is unique: a task handle has one owner`; `a task handle is passed by value: 't' cannot be a 'view' or 'inout' parameter` |
 | unawaited call | `'fetch' is an async function: 'await' its call or pass it to 'task::spawn'` |
-| `await` operand | `'await' takes a call of an async function or a 'task::Task'` |
 | `await` in ordinary code | `'await' is only allowed in an 'async fn'; ordinary code waits with 't.join()'` |
-| `await` misplaced | `'await' cannot appear in a lambda`; `'await' cannot appear in a 'parallel' loop body`; `'await' cannot appear in a 'lock' block: a lock is never held across a suspension` |
-| async as a value | `async function 'f' is not a value: call it with 'await' or pass a call to 'task::spawn'` |
-| override colour | `'run' overrides an async method; it must be 'async fn'`; `'run' overrides an ordinary method; it cannot be 'async fn'` |
-| async `__init__` | `'__init__' cannot be async` |
-| async borrowed result | `an 'async fn' returns a value: its result cannot be 'view' or 'inout'` |
+| `await` in a lambda | `'await' cannot appear in a lambda` |
 | `join` in async code | `'join' blocks its thread; inside an 'async fn' write 'await t'` |
 | `join` through calls | `'helper' may wait in 'join()' (through 'g'); async code cannot block its thread: await the task instead` |
+| `join` in a lock block | `'join' cannot be called in a 'lock' block` |
 | spawn argument | `'task::spawn' takes a call of an async function, written in place` |
 | spawned result | `a spawned function returns 'res::Result<T, err::Error>' or 'err::Error'; 'f' returns 'int'` |
-| async result that cannot cross (prototype, 2026-11-03) | `the result of 'async fn' 'give' (a 'shared Job') cannot cross to the task's awaiter: is 'shared Job': a 'shared' reference is aliased on its own thread` (also `field 'cache' is 'shared Cache': ...`; `is an 'Obj', which may be any class`) |
 | spawning a borrower | `cannot spawn 'f': parameter 'xs' is 'view'; a task owns its inputs (a 'parallel' loop may borrow)` |
-| spawned receiver | `cannot spawn 'w.run': the receiver of a spawned method is 'shared', 'shared' or 'atomic shared'` |
+| spawned receiver | `cannot spawn 'w.run': the receiver of a spawned method is 'shared mut', 'shared' or 'atomic shared'` |
 | `spawnOn` receiver | `'task::spawnOn' runs 'w.run' on another thread: its receiver must be 'atomic shared', and 'w' is a 'shared Worker'` |
-| `inout` across a wait | `'self.n' is reached through 'self'; it cannot be borrowed 'inout' across an 'await': another task may change it there` (`through 'shared' reference 's'`, `through 'view' parameter 'h'`; `across a call that may 'join'`) |
-| `view` across a wait | `'s.meta' is reached through 'shared' reference 's' and is not Copyable; it cannot be lent to an awaited call: another task may change it there` |
+| qualified handle class | `'sync::Channel' is a handle: it takes no qualifier` (also `'task::Loop'`) |
+| handle class to `Obj` | `'sync::Channel<int>' is a handle: it cannot become an 'Obj'` (also `'task::Loop'`) |
+| channel element | `'sync::Channel<shared Node>': a channel's values cross threads, and 'shared Node' cannot` |
+| capacity 0 | `a channel holds at least one value: its capacity cannot be 0` |
 | warning: detached in ordinary `main` | `'t' is detached in an ordinary 'main': it runs only while 'main' waits in 'join()', and is cancelled when 'main' returns` |
 | warning: blocking I/O in async code | `'readln' blocks its thread; in an 'async fn' it is not a cancellation point and can delay exit` |
-| capacity 0 | `a channel holds at least one value: its capacity cannot be 0` |
-| `lock` operand | `'lock' takes a 'locked' variable, field or parameter` |
-| nested `lock` | `a 'lock' block cannot contain another 'lock' block: put state used together in one 'locked (A, B)'` |
-| `join`, `parallel` in a lock block | `'join' cannot be called in a 'lock' block`; `a 'parallel' loop cannot run inside a 'lock' block` |
-| waiting call in a lock block | `'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it` (also `it blocks on input`) |
-| unresolvable call in a lock block | `'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve` |
-| `parallel` misplaced | `'parallel' applies only to 'for' statements` |
-| outer reference in `parallel` | `'nodes' (a 'List<Node>') cannot be used in a 'parallel' loop body: an iteration uses only values, arrays of values, and 'atomic', 'atomic shared' and 'locked' handles` (for a `const` form, an immutable one in the mut model, `; make it 'atomic shared'`) |
-| outer handle in `parallel` | `'cfg' is a handle owned outside this 'parallel' loop: the body cannot assign, move or lend it 'inout'` |
-| warning: atomic changed every iteration (prototype, 2026-11-03) | `'hits' changes on every iteration of the 'parallel for': each atomic operation moves its cache line between cores, a thousand times a reduction's cost on 16 threads (benchmarks/README.md); count in a reduction (a plain variable of the enclosing function, '+='), or change it less often` |
-| write elsewhere | `'ys[i + 1]' is written at an index other than the loop's 'i': each iteration writes only its own elements` |
-| read of a written array | `'ys' is written at 'ys[i]' and cannot be read at 'ys[i - 1]' in the same 'parallel' loop` |
-| whole array `inout` | `'ys' cannot be passed whole to 'inout' parameter 'p' in a 'parallel' loop body` |
-| outer scalar | `'count' is assigned in a 'parallel' loop body; an outer variable changes only by a reduction ('count += e')` |
-| reduction read | `'s' is a reduction of this 'parallel for' and cannot be read in its body: an iteration sees only part of it` |
-| `break`, `return` | `'break' cannot leave a 'parallel' loop: every iteration runs` (also `'return'`) |
-| unsafe call | `'log' cannot be called in a 'parallel' loop body: it prints (through 'g')` |
-| unresolved virtual call | `'shape.area' may run an override from another module; a 'parallel' loop body calls only methods it can resolve` |
-| immutable reference (the mut model, owner 2026-11-03) | `'x' is immutable (a 'T'; write 'mut T' to change it); cannot assign to its field 'f'` (also `; 'm' is not a 'view fn'`, `; it cannot be passed to 'inout' parameter 'p'`, `; cannot assign to its elements`); `field 'f' is immutable (a 'shared T'; write 'shared mut T' to change it); cannot assign to its field 'g'`; `'x' is frozen (an 'atomic shared T'); cannot assign to its field 'f'` (also `; 'm' is not a 'view fn'`) |
-| gaining `mut` (the mut model) | `cannot store a 'T' in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`; `cannot store a 'shared mut T' in variable 'v', a 'shared T': a 'shared' reference, a frozen object and a cell convert only as they are` |
-| `mut` on a value (the mut model) | `'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes` |
-| `mut` on a frozen object or a cell (the mut model) | `'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock`; `an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'` |
-| `mut` misplaced (the mut model) | `'mut shared' is spelled 'shared mut': the form first, then the writes`; `a type takes one qualifier: 'shared mut shared' is two` |
-| warning: `locked T` (the mut model) | `'locked T' locks an object nothing writes; 'atomic shared T' is read from every thread with no lock`; and `lock c as v: inout` on it, an error: `'c' is 'locked T', whose contents are never written; declare it 'locked mut T' for a 'lock ... as v: inout' block` |
-| `atomic` of an object (the mut model) | `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'N': an object crosses threads as 'atomic shared N' (frozen) or 'locked mut N'` |
 
-Run-time panics, printed after `paykan: `: `a value moved out of 'q.jobs'
-is still borrowed`, `a value made 'atomic shared' is still borrowed`, `task
-handle dropped without join, cancel or detach`, `'join' called inside a
-task: use 'await'`, `a task cannot wait for itself`, `channel capacity 0`,
-`nested lock`, `'join' while holding a lock`.  At exit, on stderr: `paykan:
-2 task handles were never joined, cancelled or detached`.
+Run-time panics: `task handle dropped without join, cancel or detach`,
+`'join' called inside a task: use 'await'`, `a task cannot wait for itself`,
+`channel capacity 0`, `nested lock`, `'join' while holding a lock`.  At
+exit, on stderr: `paykan: 2 task handles were never joined, cancelled or
+detached`.
+
+### Designed, and not checked yet
+
+Three rules of this design have no check in the compiler, so their messages
+are not printed, and the program is accepted:
+
+| Situation | Message | Today |
+|---|---|---|
+| waiting call in a lock block | `'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it` (also `it blocks on input`) | the calls of a `lock` block are not followed: one that takes the same cell's lock again never returns |
+| unresolvable call in a lock block | `'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve` | accepted |
+| call of a function value through an immutable reference | `cannot call 'w.onClick': it is reached through an immutable 'w', and a call may change what its captures own; hold it 'shared'` | accepted |
+
+One rule changed after this design.  An operand read before a later operand
+changes it (`s + shout(s)`, `j.n + keep(move j)`) is no error: the operand
+read first keeps the value it read.  What is refused is within one call's
+arguments, the rows of "an argument borrowed" above.

@@ -565,7 +565,7 @@ Error:
 cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare it 'shared Node'
 cannot copy 'p': 'Person' holds unique field 'name' ('Str'); write 'move p' to transfer it, or 'p.clone()' to copy it
 cannot copy 's' (a unique 'Str'); write 'move s' to transfer it, 's.clone()' to copy it, or declare it 'shared Str'
-cannot copy 'h.node' (a unique 'Node'); a field leaves by 'mem::replace' or 'mem::take', or is declared 'shared Node'
+cannot copy 'h.node' (a unique 'Node'); write 'move h.node' to take it (which ends 'h'), or declare the field 'shared Node'
 'c' was moved at 26:16; it cannot be used after the move
 ```
 
@@ -636,8 +636,8 @@ left, move right);`.
 
 A literal's element takes its slot's form, or with none its own `shared` one: `(1, s)` with
 `s` a `shared Node` is an `(int, shared Node)` and `[s; 3]` a `shared Node[3]`, while into
-a `Node` element it is `cannot store a 'shared Node' in an element of the tuple, a 'Node': a
-'shared' reference, a frozen object and a cell convert only as they are`. A frozen object or
+a `Node` element it is `cannot store a 'shared Node' in an element of the tuple, a unique
+reference: a 'shared' reference is stored only as 'shared'`. A frozen object or
 a cell goes in a struct's field, not an element ([Qualifiers in a
 type](19-concurrency.md#qualifiers-in-a-type)).
 
