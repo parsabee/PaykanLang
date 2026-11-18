@@ -2939,7 +2939,6 @@ fn main() -> int {
   lock c as v: inout {
     for i in 0..3 { if i == 1 { break; } else { continue; } }
     let f = fn() -> int { return 2; };
-    v.v = f();
   }
   parallel for i in 0..4 { let g = fn() -> int { return 1; }; }
   return 0;
@@ -2999,4 +2998,392 @@ async fn main() -> int {
                    (":8:25: error: 'view' local 'z" + why).c_str()});
   // The handles themselves are awaited: nothing more is said of them.
   EXPECT_EQ(r.Diagnostics.find("awaited"), std::string::npos) << r.Diagnostics;
+}
+
+// A `lock` block calls nothing that may wait (docs/design/concurrency.md,
+// "`locked` and `lock` blocks"): a function that takes a lock, runs a
+// `parallel for`, awaits a task or blocks on input, itself or through the
+// functions it calls.  The first of these is the one that never returned:
+// `bump` takes the lock its caller holds.
+TEST(Concurrency, ALockBlockCallsNothingThatWaits) {
+  auto r = semaCheck(R"(import ::io;
+class Counts { total: int; }
+fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn outer(c: locked mut Counts) { bump(c); }
+fn outer2(c: locked mut Counts) { outer(c); }
+fn deep4(c: locked mut Counts) { outer2(c); }
+fn deep5(c: locked mut Counts) { deep4(c); }
+fn deep6(c: locked mut Counts) { deep5(c); }
+fn sum(n: int) -> int { t = 0; parallel for i in 0..n { t += i; } return t; }
+async fn work(n: int) -> int { return n + 1; }
+fn waitFor(n: int) -> int { return await work(n); }
+fn ask() -> int { input = io::stdin(); let s = input.readln(); return 1; }
+fn plain(n: int) -> int { return n * 2; }
+fn again(c: locked mut Counts, n: int) -> int {
+  lock c as v: inout { if n > 0 { v.total += again(c, n - 1); } }
+  return n;
+}
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  r = 0;
+  lock counts as c: inout {
+    c.total += plain(1);
+    io::println(c.total);
+    bump(counts);
+    outer(counts);
+    outer2(counts);
+    deep6(counts);
+    r = sum(4);
+    r = waitFor(1);
+    r = ask();
+    r = again(counts, 1);
+  }
+  lock counts as c: view { r = plain(c.total); }
+  return r;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  const std::string cannot = "; a 'lock' block cannot call it\n";
+  expectErrors(
+      r,
+      {// A function's own `lock` block is a `lock` block too.
+       (":15:46: error: 'again' may wait (it takes a lock)" + cannot).c_str(),
+       (":24:5: error: 'bump' may wait (it takes a lock)" + cannot).c_str(),
+       (":25:5: error: 'outer' may wait (it takes a lock, through 'bump')" +
+        cannot)
+           .c_str(),
+       (":26:5: error: 'outer2' may wait (it takes a lock, through 'outer' "
+        "and 'bump')" +
+        cannot)
+           .c_str(),
+       (":27:5: error: 'deep6' may wait (it takes a lock, through 'deep5', "
+        "'deep4', 'outer2' and 2 more)" +
+        cannot)
+           .c_str(),
+       (":28:9: error: 'sum' may wait (it runs a 'parallel for')" + cannot)
+           .c_str(),
+       (":29:9: error: 'waitFor' may wait (it awaits a task)" + cannot).c_str(),
+       // Another module's function: its interface says that it may.
+       (":30:9: error: 'ask' may wait (it calls 'File.readln', which may "
+        "wait)" +
+        cannot)
+           .c_str(),
+       (":31:9: error: 'again' may wait (it takes a lock)" + cannot).c_str()});
+  // Printing, and a function that waits for nothing, are a block's to call.
+  expectCleanLines(r, {":22:", ":23:", ":33:"});
+}
+
+// A `lock` block calls only what the compiler can resolve: a function value
+// may run anything, and so may a method that a class the compiler does not
+// know may override.  A program's main module knows every class derived
+// from its own, and follows each override.
+TEST(Concurrency, ALockBlockCallsOnlyWhatItCanResolve) {
+  auto r = semaCheck(R"(class Counts { total: int; }
+class Tool { step: (int) -> int; }
+class Base { n: int; view fn size() -> int { return self.n; } }
+class Wide : Base { c: locked mut Counts; view fn size() -> int { k = 0; lock self.c as v: view { k = v.total; } return k; } }
+final class Leaf { n: int; view fn size() -> int { return self.n; } }
+fn pick() -> (int) -> int { return fn(x: int) -> int { return x; }; }
+fn callIt(f: (int) -> int) -> int { return f(2); }
+fn viaTool(t: view Tool) -> int { return t.step(3); }
+fn twice(f: (int) -> int) -> int { return callIt(f); }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let f = fn(x: int) -> int { return x + 1; };
+  let t = Tool(f);
+  let b: Base = Base(1);
+  let leaf = Leaf(2);
+  r = 0;
+  lock counts as c: inout {
+    r = f(1);
+    r = t.step(1);
+    r = pick()(1);
+    r = callIt(f);
+    r = viaTool(t);
+    r = twice(f);
+    r = b.size();
+    r = leaf.size();
+    let g = fn(x: int) -> int { return f(x); };
+  }
+  return r;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
+  const std::string may = " may run code that takes a lock";
+  const std::string only =
+      "; a 'lock' block calls only functions it can resolve\n";
+  expectErrors(
+      r, {(":18:9: error: 'f'" + may + only).c_str(),
+          (":19:9: error: 't.step'" + may + only).c_str(),
+          (":20:9: error: a function value" + may + only).c_str(),
+          (":21:9: error: 'callIt'" + may +
+           " (it calls 'f', a function value)" + only)
+              .c_str(),
+          (":22:9: error: 'viaTool'" + may +
+           " (it calls 't.step', a function value)" + only)
+              .c_str(),
+          (":23:9: error: 'twice'" + may +
+           " (it calls 'f', a function value, through 'callIt')" + only)
+              .c_str(),
+          // `b` may be a `Wide`, whose `size` takes a lock.
+          (std::string(":24:9: error: 'Wide.size' may wait (it takes a lock)") +
+           "; a 'lock' block cannot call it\n")
+              .c_str()});
+  // A `final` class's method is the one called; a lambda made in the block
+  // runs when it is called.
+  expectCleanLines(r, {":25:", ":26:"});
+
+  // A module that others import does not know the classes they derive.
+  auto open = semaCheck(R"(class Counts { total: int; }
+class Base { n: int; view fn size() -> int { return self.n; } }
+final class Leaf { n: int; view fn size() -> int { return self.n; } }
+class Box<T> { v: T; view fn get() -> int { return 1; } }
+fn measure(c: locked mut Counts, b: view Base, l: view Leaf, x: view Box<int>) -> int {
+  r = 0;
+  lock c as v: inout {
+    r = b.size();
+    r = l.size();
+    r = x.get();
+    v.total = r;
+  }
+  return r;
+}
+fn relay(b: view Base) -> int { return b.size(); }
+fn held(c: locked mut Counts, b: view Base) -> int {
+  r = 0;
+  lock c as v: inout { r = relay(b); }
+  return r;
+}
+)");
+  EXPECT_EQ(open.ErrorCount, 2u) << open.Diagnostics;
+  expectErrors(
+      open, {(":8:9: error: 'Base.size'" + may +
+              " (a class derived from 'Base' may override it; a 'final class "
+              "Base' has none)" +
+              only)
+                 .c_str(),
+             (":18:28: error: 'relay'" + may +
+              " (it calls 'Base.size', which a class derived from 'Base' may "
+              "override; a 'final class Base' has none)" +
+              only)
+                 .c_str()});
+}
+
+// What a `lock` block runs without writing a call is its to answer for too:
+// a constructor, `==` (an `equals`), a text (a `toString`) and a `clone`.
+// A generic function's block is checked by instance.  What a block lets go
+// of is not followed: an object it makes is no call of its `__deinit__`
+// (it may as well keep the object), which the runtime answers for.
+TEST(Concurrency, ALockBlocksHiddenCallsAreItsCalls) {
+  auto r = semaCheck(R"(import ::io;
+class Counts { total: int; }
+class Gate {
+  c: locked mut Counts; n: int;
+  view fn equals(other: Obj) -> bool { return self.pass() == 1; }
+  view fn toString() -> Str { return Str(self.pass()); }
+}
+impl Gate {
+  fn __init__(n: int) { self.c = Counts(n); self.n = n; lock self.c as v: inout { v.total = n; } }
+  view fn pass() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
+  view fn peek() -> int { return self.n; }
+}
+impl Cloneable for Gate { view fn clone() -> Self { let g = Gate(self.pass()); return g; } }
+class Loud { n: int; c: locked mut Counts; }
+impl Loud {
+  fn __init__(n: int) { self.n = n; self.c = Counts(n); }
+  fn __deinit__() { lock self.c as v: inout { v.total = 0; } }
+}
+struct Meter { c: locked mut Counts; }
+impl Meter {
+  view fn tick() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
+  view fn read() -> int { return 3; }
+}
+class Box<T> { v: T; view fn get() -> int { return 1; } }
+fn fresh<T>(c: locked mut Counts, x: view T) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn work(n: int) -> int { return n; }
+fn quiet(n: int) -> int { let k = fn() -> int { return await work(1); }; return n; }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let g = Gate(1);
+  let h = Gate(2);
+  let m = Meter(Counts(3));
+  let b = Box<int>(5);
+  r = 0;
+  lock counts as c: inout {
+    r = g.pass();
+    r = g.peek();
+    let made = Gate(3);
+    if g == h { r = 1; }
+    io::println(g);
+    let s = Str(g);
+    let copy = g.clone();
+    let loud = Loud(1);
+    r = m.tick();
+    r = m.read();
+    r = b.get();
+    r = fresh(counts, 1);
+    r = quiet(1);
+  }
+  return r;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  const std::string cannot = "; a 'lock' block cannot call it\n";
+  expectErrors(
+      r, {(":36:9: error: 'Gate.pass' may wait (it takes a lock)" + cannot)
+              .c_str(),
+          (":38:16: error: 'Gate' may wait (it takes a lock)" + cannot).c_str(),
+          (":39:8: error: 'Gate.equals' may wait (it takes a lock, through "
+           "'Gate.pass')" +
+           cannot)
+              .c_str(),
+          (":40:5: error: '::io::println<Gate>' may wait (it takes a lock, "
+           "through 'Gate.toString' and 'Gate.pass')" +
+           cannot)
+              .c_str(),
+          (":41:13: error: 'Gate.toString' may wait (it takes a lock, through "
+           "'Gate.pass')" +
+           cannot)
+              .c_str(),
+          (":42:16: error: 'Gate.clone' may wait (it takes a lock, through "
+           "'Gate')" +
+           cannot)
+              .c_str(),
+
+          (":44:9: error: 'Meter.tick' may wait (it takes a lock)" + cannot)
+              .c_str(),
+          (":47:9: error: 'fresh<int>' may wait (it takes a lock)" + cannot)
+              .c_str()});
+  // A method that takes no lock; an object whose `__deinit__` takes one,
+  // made in the block; a function whose lambda awaits, which runs when the
+  // lambda is called.
+  expectCleanLines(r, {":37:", ":43:", ":45:", ":46:", ":48:"});
+}
+
+// A `lock` block starts no task whose body waits: a task may run where it
+// is started (the C backend runs it so), and its body is then the block's,
+// taking the lock the block holds.  A function, a method and an override
+// are followed as a call is; a task that waits for nothing is started.
+TEST(Concurrency, ALockBlockStartsNoTaskThatWaits) {
+  auto r = semaCheck(R"(import ::io;
+class Counts { total: int; }
+class Job { c: locked mut Counts; n: int; }
+impl Job {
+  async view fn go() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
+  async view fn idle() -> int { return self.n; }
+}
+class Base { n: int; async view fn step() -> int { return self.n; } }
+class Slow : Base { c: locked mut Counts; async view fn step() -> int { lock self.c as v: view { } return 2; } }
+async fn bump(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn quiet(n: int) -> int { return n + 1; }
+async fn relay(n: int) -> int { return await quiet(n); }
+async fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let j: atomic shared = Job(counts, 1);
+  let b: atomic shared Base = Base(1);
+  t = quiet(0);
+  n = await t;
+  lock counts as c: inout {
+    t = bump(counts);
+    c.total += 10;
+  }
+  n += await t;
+  lock counts as c: inout { t = quiet(1); }
+  n += await t;
+  lock counts as c: inout { t = j.go(); }
+  n += await t;
+  lock counts as c: inout { t = j.idle(); }
+  n += await t;
+  lock counts as c: inout { t = b.step(); }
+  n += await t;
+  lock counts as c: inout { t = relay(1); }
+  n += await t;
+  io::println(n);
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  const std::string start =
+      "; a 'lock' block cannot start it (a task may run where it is started)\n";
+  expectErrors(
+      r,
+      {(":20:9: error: 'bump' may wait (it takes a lock)" + start).c_str(),
+       (":26:33: error: 'Job.go' may wait (it takes a lock)" + start).c_str(),
+       // `b` may be a `Slow`.
+       (":30:33: error: 'Slow.step' may wait (it takes a lock)" + start)
+           .c_str(),
+       (":32:33: error: 'relay' may wait (it awaits a task)" + start).c_str()});
+  expectCleanLines(r, {":24:", ":28:"});
+}
+
+// The note under a `lock` block's error names the instance the block is in:
+// a generic method's own, of a generic class too (not the class's).  And
+// the advice to close a class comes after the calls the error goes
+// through, and is not given for a class the module itself derives from.
+TEST(Concurrency, ALockBlocksErrorNamesItsInstanceAndAdvisesWhatCanBeDone) {
+  auto note = semaCheck(R"(class Counts { total: int; }
+final class Gate { c: locked mut Counts; }
+impl Hashable for Gate {
+  view fn hash() -> int { r = 0; lock self.c as v: inout { r = v.total; } return r; }
+}
+class GBox<T> { v: T; c: locked mut Counts; }
+impl GBox<T> {
+  view fn via<U: Hashable>(x: view U) -> int {
+    r = 0;
+    lock self.c as k: inout { r = x.hash(); }
+    return r;
+  }
+}
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let a = GBox<int>(1, counts);
+  let g = Gate(counts);
+  r = a.via(2);
+  r += a.via(g);
+  return r;
+}
+)");
+  EXPECT_EQ(note.ErrorCount, 1u) << note.Diagnostics;
+  expectErrors(note,
+               {":10:35: error: 'Gate.hash' may wait (it takes a lock); a "
+                "'lock' block cannot call it\n",
+                ":19:8: note: in instantiation of 'GBox<int>.via<Gate>' "
+                "requested here\n"});
+  EXPECT_EQ(note.Diagnostics.find("in instantiation of 'GBox<int>' "),
+            std::string::npos)
+      << note.Diagnostics;
+
+  // A module that others import.
+  auto advice = semaCheck(R"(class Counts { total: int; }
+class Node { n: int;
+  view fn size() -> int { return self.n; }
+}
+class Shape { n: int;
+  view fn area() -> int { return self.n; }
+}
+final class Square : Shape {
+  view fn area() -> int { return self.n * self.n; }
+}
+fn sizeOf(x: view Node) -> int { return x.size(); }
+fn twice(x: view Node) -> int { return sizeOf(x) * 2; }
+fn tally(c: locked mut Counts, x: view Node, s: view Shape) {
+  lock c as v: inout { v.total += twice(x); }
+  lock c as v: inout { v.total += s.area(); }
+}
+)");
+  EXPECT_EQ(advice.ErrorCount, 2u) << advice.Diagnostics;
+  expectErrors(
+      advice,
+      {":14:35: error: 'twice' may run code that takes a lock (it calls "
+       "'Node.size', which a class derived from 'Node' may override, through "
+       "'sizeOf'; a 'final class Node' has none); a 'lock' block calls only "
+       "functions it can resolve\n",
+       // `Shape` cannot be closed: the module derives `Square` from it.
+       ":15:35: error: 'Shape.area' may run code that takes a lock (a class "
+       "derived from 'Shape' may override it); a 'lock' block calls only "
+       "functions it can resolve\n"});
 }

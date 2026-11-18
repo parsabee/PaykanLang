@@ -1,0 +1,57 @@
+// What a `lock` block cannot call: a function that may wait, one that takes
+// a lock, runs a `parallel for`, awaits a task or reads input, down any
+// chain of calls; a task whose body may wait, which may run where it is
+// started; and what the compiler cannot resolve, a function value.
+// The first is the one that would never return: `bump` waits for the lock
+// that the block calling it holds.
+import ::io;
+
+class Counts {
+  total: int;
+}
+
+async fn work(n: int) -> int { return n + 1; }
+async fn poke(c: locked mut Counts) -> int {
+  lock c as v: inout { v.total += 1; }
+  return 1;
+}
+
+fn bump(c: locked mut Counts) {
+  lock c as v: inout { v.total += 1; }
+}
+fn record(c: locked mut Counts) {
+  bump(c);
+}
+fn sum(n: int) -> int {
+  t = 0;
+  parallel for i in 0..n { t += i; }
+  return t;
+}
+fn waitFor(n: int) -> int {
+  return await work(n);
+}
+fn double(n: int) -> int {
+  return n * 2;
+}
+
+fn main() -> int {
+  let counts: locked mut Counts = Counts(0);
+  let f = fn(n: int) -> int { return n + 1; };
+  input = io::stdin();
+  t = work(0);
+  n = await t;
+  lock counts as c: inout {
+    bump(counts);                 // error: it takes a lock
+    record(counts);               // error: it takes a lock, through 'bump'
+    c.total = sum(4);             // error: it runs a 'parallel for'
+    c.total = waitFor(1);         // error: it awaits a task
+    let line = input.readln();    // error: another module's, which may wait
+    c.total = f(c.total);         // error: a function value
+    t = poke(counts);             // error: a task may run where it is started
+    c.total = double(c.total);    // fine: it waits for nothing
+    io::println(c.total);         // fine: printing waits for no other thread
+  }
+  n += await t;
+  io::println(n);
+  return 0;
+}

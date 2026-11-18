@@ -1564,6 +1564,9 @@ public:
     ParSafe = 1 << 5,
     // `async fn`: a call starts a task; its return type is the task's.
     Async = 1 << 6,
+    // A `lock` block cannot call it: it may wait, or runs what the compiler
+    // cannot resolve (Sema::checkParSafety), as its module's importers read.
+    Waits = 1 << 7,
   };
 
 private:
@@ -1625,8 +1628,12 @@ public:
   bool isPure() const { return MethodFlags & Pure; }
   bool isParSafe() const { return MethodFlags & ParSafe; }
   bool isAsync() const { return MethodFlags & Async; }
+  bool waits() const { return MethodFlags & Waits; }
   void setParSafe(bool v) {
     MethodFlags = v ? MethodFlags | ParSafe : MethodFlags & ~ParSafe;
+  }
+  void setWaits(bool v) {
+    MethodFlags = v ? MethodFlags | Waits : MethodFlags & ~Waits;
   }
   /// The type's `___init__`: constructed, and extended, by its module only
   /// (Sema::checkConstructible).

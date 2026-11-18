@@ -1144,6 +1144,131 @@ async fn main() -> int {
   return 0;
 }
 )pkn"},
+    {"a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function)",
+     By::Sema, "error",
+     "'bump' may wait (it takes a lock); a 'lock' block cannot call it",
+     R"pkn(class Counts { total: int; }
+fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  lock counts as c: inout {
+    bump(counts);
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function)",
+     By::Sema, "error",
+     "'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it",
+     R"pkn(class Counts { total: int; }
+fn g(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn update(c: locked mut Counts) { g(c); }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  lock counts as c: inout {
+    update(counts);
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function)",
+     By::Sema, "error",
+     "'sum' may wait (it runs a 'parallel for'); a 'lock' block cannot call it",
+     R"pkn(class Counts { total: int; }
+fn sum(n: int) -> int { t = 0; parallel for i in 0..n { t += i; } return t; }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  lock counts as c: inout {
+    c.total = sum(4);
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function)",
+     By::Sema, "error",
+     "'waitFor' may wait (it awaits a task); a 'lock' block cannot call it",
+     R"pkn(class Counts { total: int; }
+async fn work(n: int) -> int { return n + 1; }
+fn waitFor(n: int) -> int { return await work(n); }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  lock counts as c: inout {
+    c.total = waitFor(1);
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function)",
+     By::Sema, "error",
+     "'File.readln' may wait; a 'lock' block cannot call it",
+     R"pkn(import ::io;
+class Counts { total: int; }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  input = io::stdin();
+  lock counts as c: inout {
+    let line = input.readln();
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block that cannot be resolved (a function value, through a function, a method another module may override)",
+     By::Sema, "error",
+     "'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve",
+     R"pkn(class Counts { total: int; }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let f = fn(n: int) -> int { return n + 1; };
+  lock counts as c: inout {
+    c.total = f(c.total);
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block that cannot be resolved (a function value, through a function, a method another module may override)",
+     By::Sema, "error",
+     "'callIt' may run code that takes a lock (it calls 'f', a function value); a 'lock' block calls only functions it can resolve",
+     R"pkn(class Counts { total: int; }
+fn callIt(f: (int) -> int) -> int { return f(2); }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let f = fn(n: int) -> int { return n + 1; };
+  lock counts as c: inout {
+    c.total = callIt(f);
+  }
+  return 0;
+}
+)pkn"},
+    {"a call in a `lock` block that cannot be resolved (a function value, through a function, a method another module may override)",
+     By::Sema, "error",
+     "'Base.size' may run code that takes a lock (a class derived from 'Base' may override it; a 'final class Base' has none); a 'lock' block calls only functions it can resolve",
+     R"pkn(class Counts { total: int; }
+class Base { n: int; view fn size() -> int { return self.n; } }
+fn measure(c: locked mut Counts, b: view Base) -> int {
+  r = 0;
+  lock c as v: inout {
+    r = b.size();
+  }
+  return r;
+}
+)pkn"},
+    {"a task started in a `lock` block whose body may wait",
+     By::Sema, "error",
+     "'bump' may wait (it takes a lock); a 'lock' block cannot start it (a task may run where it is started)",
+     R"pkn(class Counts { total: int; }
+async fn bump(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn quiet(n: int) -> int { return n + 1; }
+async fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  t = quiet(0);
+  n = await t;
+  lock counts as c: inout {
+    t = bump(counts);
+  }
+  n += await t;
+  return n;
+}
+)pkn"},
     {"making a value `atomic shared` or `locked` (a `shared` field, a nested one, an `Obj`, through a type argument)",
      By::Sema, "error",
      "cannot make 'Settings(...)' (a 'Settings') 'atomic shared': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread",

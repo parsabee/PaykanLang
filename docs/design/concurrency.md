@@ -1367,6 +1367,34 @@ decision 29 left to be specified (proposed; owner may change):
   `equals`) meets a per-thread held-lock depth, a run-time backstop: a nested
   acquire or a `join` panics, and `parallel_for` runs inline.
 
+(The compiler, 2026-11-18: the first two rules are checked.  The Waits
+verdict is taken with the par-safe one, a fixed point over the module's
+call graph once every body and instance is checked
+(src/Sema/SemaParSafe.cpp), and an importer reads it from the module's
+interface (`kFuncWaits`, `kMethodWaits`, docs/design/pkm.md §3.5).  It
+counts an `await` too, which an ordinary function may write until the
+runtime of #362.  Of the natives it counts the reads of `::io`, of a file or
+of the standard input (`it blocks on input`), and not the writes: printing
+in a `lock` block waits for no other thread, and the samples do it (owner
+may change).  What a block runs without a call it writes counts: a
+constructor, an `equals`, a `toString`, a `clone`.  A task started in a
+block answers for its body, a call of an `async fn` or of an async method:
+a task may run where it is started (the C backend runs it so), and its body
+is then the block's (`'bump' may wait (it takes a lock); a 'lock' block
+cannot start it (a task may run where it is started)`).  What a block lets go
+of is not followed: a value moved into it or last used in it, a field it
+assigns over, each of which may run a `__deinit__`.  A `__deinit__` may
+take the lock of another cell while a block holds one; of the block's own
+cell it would wait for itself for ever, and that is caught as it happens,
+the run-time backstop's nested acquire narrowed to the one certain wait:
+`lock taken twice: code that a 'lock' block ran (...) locks the cell the
+block holds, and would wait for ever` (src/Runtime/Locked.c).  Still open:
+a `__deinit__` that waits through another thread while a block holds a
+cell, by a `parallel for` whose iteration takes the lock or a task it
+awaits through a function, waits for ever; whether a `__deinit__` should
+be held to a `lock` block's rule, which would close it, is the owner's to
+say.  `join` and an inline `parallel_for` wait for the runtime of #362.)
+
 No thread waits, while holding a cell's mutex, for anything that may wait
 for one, so `lock`, `join` and `parallel` cannot deadlock.  Other waits
 still can: two tasks awaiting each other's task handles or channels, or a
@@ -2471,6 +2499,9 @@ checks of the language chapters, docs/language/, with tests of their own.
 | `lock` operand | `'o' is not 'locked': a 'lock' block takes a 'locked' variable, field or parameter` |
 | nested `lock` | `a 'lock' block cannot hold another 'lock'` |
 | `parallel for` or `await` in a `lock` block | `a 'parallel for' cannot run in a 'lock' block`; `'await' cannot be used in a 'lock' block: the task would wait while it holds the lock` |
+| a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function) | `'bump' may wait (it takes a lock); a 'lock' block cannot call it`; `'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it`; `'sum' may wait (it runs a 'parallel for'); a 'lock' block cannot call it`; `'waitFor' may wait (it awaits a task); a 'lock' block cannot call it`; `'File.readln' may wait; a 'lock' block cannot call it` |
+| a call in a `lock` block that cannot be resolved (a function value, through a function, a method another module may override) | `'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve`; `'callIt' may run code that takes a lock (it calls 'f', a function value); a 'lock' block calls only functions it can resolve`; `'Base.size' may run code that takes a lock (a class derived from 'Base' may override it; a 'final class Base' has none); a 'lock' block calls only functions it can resolve` |
+| a task started in a `lock` block whose body may wait | `'bump' may wait (it takes a lock); a 'lock' block cannot start it (a task may run where it is started)` |
 
 **Freezing and sending**
 
@@ -2527,7 +2558,9 @@ checks of the language chapters, docs/language/, with tests of their own.
 | virtual call another module may override | `a 'parallel for' body cannot call 'Shape.area', which a class derived from 'Shape' may override` |
 
 Run-time panics, printed after `paykan: `: `a value moved out of 'q.jobs'
-is still borrowed`, `a value made 'atomic shared' is still borrowed`.
+is still borrowed`, `a value made 'atomic shared' is still borrowed`, and `lock taken twice: code that a 'lock' block ran (a '__deinit__' of what
+the block let go of) locks the cell the block holds, and would wait for
+ever`.
 
 ### With the async runtime (v0.5)
 
@@ -2569,13 +2602,11 @@ detached`.
 
 ### Designed, and not checked yet
 
-Three rules of this design have no check in the compiler, so their messages
-are not printed, and the program is accepted:
+One rule of this design has no check in the compiler, so its message is
+not printed, and the program is accepted:
 
 | Situation | Message | Today |
 |---|---|---|
-| waiting call in a lock block | `'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it` (also `it blocks on input`) | the calls of a `lock` block are not followed: one that takes the same cell's lock again never returns |
-| unresolvable call in a lock block | `'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve` | accepted |
 | call of a function value through an immutable reference | `cannot call 'w.onClick': it is reached through an immutable 'w', and a call may change what its captures own; hold it 'shared'` | accepted |
 
 One rule changed after this design.  An operand read before a later operand

@@ -13,6 +13,33 @@ samples/concurrency/README.md.
 
 ### Added
 
+- A `lock` block's calls are checked (#368; docs/language/19-concurrency.md, "What a
+  `lock` block calls"). A block calls no function that may wait: one that takes a lock,
+  runs a `parallel for`, awaits a task or reads input, itself or through the functions it
+  calls (`'record' may wait (it takes a lock, through 'bump'); a 'lock' block cannot call
+  it`). And it calls only what the compiler can resolve: no function value (`'f' may run
+  code that takes a lock; a 'lock' block calls only functions it can resolve`), and no
+  method that a class the compiler does not know may override (`'Base.size' may run code
+  that takes a lock (a class derived from 'Base' may override it)`; a `final` class, an
+  instance of a generic class and the classes of a program's main module are resolved).
+  What a block runs without writing a call counts: a constructor, an `equals`, a
+  `toString`, a `clone`. A task started in a block answers for its body, since a task may
+  run where it is started (`'bump' may wait (it takes a lock); a 'lock' block cannot start
+  it (a task may run where it is started)`); one whose body waits for nothing is started
+  in a block and awaited after it. Printing and writing a file are allowed. **Breaking**: a program whose `lock` block called such a function
+  compiled, and one that took the same cell's lock again never returned. The verdict on
+  each function and method is in its module's interface (a FUNC record's flag bit 3, a
+  method's bit 7, shown as `waits` by `paykan pkm dump`), so a call into another module
+  is checked too (`'g::bump' may wait; a 'lock' block cannot call it`). The design's two
+  rows for these calls move from "Designed, and not checked yet" to the table of what the
+  language has. What a block lets go of is not followed (a value moved into it or last used
+  in it, a field assigned over): a `__deinit__` may take the lock of another cell there,
+  and one that takes the lock of the block's own cell stops the program with `paykan:
+  lock taken twice: code that a 'lock' block ran (a '__deinit__' of what the block let
+  go of) locks the cell the block holds, and would wait for ever`, where it waited for
+  ever. An error in a `lock` block of a generic method's instance, and in a `parallel
+  for` body there, now carries the note of that instance (`in instantiation of
+  'GBox<int>.via<Gate>' requested here`).
 - Generic methods (#353; docs/language/13-generics.md, "Generic Methods"): a method of an
   `impl` block and a `static fn`, of a class or a struct, generic or not, can have type
   parameters of its own next to its type's: `view fn map<U>(f: (view T) -> U) -> Box<U>`,
@@ -228,7 +255,8 @@ samples/concurrency/README.md.
   raster of the new wordmark.
 - The wording of the ownership and concurrency diagnostics is settled (#368). The table of
   docs/design/concurrency.md, "Diagnostics", is rewritten from what the compiler prints:
-  each situation of the design that the language has, with its messages, 176 of them.
+  each situation of the design that the language has, with its messages, 176 of them
+  (184 with the checks of a `lock` block's calls).
   tests/Sema/DiagnosticsTableTests.cpp has a program for each, checked against the
   compiler, and the table is checked against those rows (situation, error or warning, and
   text), so neither changes without the other. The messages that wait for the async

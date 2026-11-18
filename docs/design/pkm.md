@@ -377,7 +377,11 @@ for a par-safe one (Sema::checkParSafety: a `parallel for` body may call
 it), bit 2 for an `async fn`, whose result type is its task, spelled `async
 Task<T>` (its modes and its result mode are then written too; a task is
 spelled so wherever it is in a type, `(int) -> async Task<int>`, as a class
-may be named `Task`); a reader rejects any other bit,
+may be named `Task`), bit 3 for one that waits (a `lock` block cannot call
+it: it takes a lock, runs a `parallel for`, awaits a task or blocks on
+input, itself or through its calls, or it calls what its module could not
+resolve; docs/design/concurrency.md, "`locked` and `lock` blocks"); a reader
+rejects any other bit,
 and a record without it is none of these.  It tells an importer
 what a call of the function does though another module compiles it: it
 keeps nothing it is lent and changes only what its `inout` arguments name,
@@ -394,7 +398,8 @@ docs/design/visibility.md), bit 1 a `view fn`, bit 2 an `impl` block's
 method, bit 3 a `shared fn` (its `self` is shared, so only a receiver held
 `shared` calls it, docs/language/05-classes.md), bit 4 a pure virtual
 method, docs/language/05-classes.md, the value §3.5 gives `PURE`, bit 5
-par-safe, bit 6 an `async fn`); a reader rejects any other bit, the pure bit on a struct's method, an `impl` block's,
+par-safe, bit 6 an `async fn`, bit 7 one that waits, as a `FUNC` record's
+bit 3); every bit has a meaning, and a reader rejects the pure bit on a struct's method, an `impl` block's,
 an initializer (`__init__`, `___init__`) or `destroy`, and the shared bit on
 a struct's method, an initializer or `destroy`.  A `CLASS` record lists the complete vtable, so
 an importer works out from the pure bits which classes are abstract; that

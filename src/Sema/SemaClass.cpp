@@ -2594,6 +2594,7 @@ Sema::instantiateMember(const FoundMethodTemplate &found,
                                     std::vector<ast::VarDecl *>{});
       pending.Struct->addMethod(clone);
     }
+    pending.Member = clone;
     InstantiatedMethods.push_back({owner, clone, md, ownerTy});
   }
   if (origin)
@@ -4222,6 +4223,8 @@ bool Sema::checkPendingInstantiationBodies(
                              : p.Struct ? static_cast<ast::Decl *>(p.Struct)
                                         : static_cast<ast::Decl *>(p.Func))
       InstanceFrames[d] = InstantiationStack;
+    if (p.Member)
+      InstanceFrames[p.Member] = InstantiationStack;
     const StringSet *savedParams = CurrentTypeParams;
     CurrentTypeParams = &p.TypeParams;
     const size_t savedDepth = CurrentInstantiationDepth;

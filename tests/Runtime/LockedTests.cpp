@@ -272,3 +272,93 @@ TEST(LockedCell, IncrementsUnderTheLockFromThreadsAreAllKept) {
   PaykanLocked_unlock(cell(c));
   discard(c);
 }
+
+// -- A cell is locked once by a thread
+
+// A thread that takes the lock of a cell it holds already would wait for
+// itself for ever: a panic.  It is what a `lock` block does when code it
+// ran without calling it, a `__deinit__` of what it let go of, locks the
+// block's own cell.  The lock of another cell is taken as any is.
+TEST(LockedCellDeathTest, ACellLockedAgainByItsHolderIsAPanic) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  PaykanShared *a = PaykanLocked_new(counter(1));
+  PaykanShared *b = PaykanLocked_new(counter(2));
+  EXPECT_DEATH(
+      {
+        PaykanLocked_lock(cell(a));
+        PaykanLocked_lock(cell(a));
+      },
+      "lock taken twice: code that a 'lock' block ran");
+  // Under another cell's lock too, and after one was released.
+  EXPECT_DEATH(
+      {
+        PaykanLocked_lock(cell(a));
+        PaykanLocked_lock(cell(b));
+        PaykanLocked_lock(cell(a));
+      },
+      "lock taken twice");
+  EXPECT_DEATH(
+      {
+        PaykanLocked_lock(cell(a));
+        PaykanLocked_lock(cell(b));
+        PaykanLocked_unlock(cell(b));
+        PaykanLocked_lock(cell(b));
+        PaykanLocked_lock(cell(b));
+      },
+      "lock taken twice");
+  discard(a);
+  discard(b);
+}
+
+// One cell's lock inside another's is taken and released, innermost first,
+// and the cells are free for the next block; so are a block after another,
+// on one thread and on several: what a thread holds is its own.
+TEST(LockedCell, AnotherCellsLockIsTakenInsideOne) {
+  PaykanShared *a = PaykanLocked_new(counter(0));
+  PaykanShared *b = PaykanLocked_new(counter(0));
+  for (int i = 0; i < 3; ++i) {
+    PaykanShared **p = slot(PaykanLocked_lock(cell(a)));
+    PaykanShared **q = slot(PaykanLocked_lock(cell(b)));
+    count(*p) += 1;
+    count(*q) += 1;
+    PaykanLocked_unlock(cell(b));
+    PaykanLocked_unlock(cell(a));
+    // Each alone, in the other order.
+    q = slot(PaykanLocked_lock(cell(b)));
+    count(*q) += 1;
+    PaykanLocked_unlock(cell(b));
+    p = slot(PaykanLocked_lock(cell(a)));
+    count(*p) += 1;
+    PaykanLocked_unlock(cell(a));
+  }
+  // More cells deep than the runtime remembers: taken and released all the
+  // same.
+  std::vector<PaykanShared *> many;
+  many.reserve(12);
+  for (int i = 0; i < 12; ++i)
+    many.push_back(PaykanLocked_new(counter(i)));
+  for (PaykanShared *c : many)
+    PaykanLocked_lock(cell(c));
+  for (auto it = many.rbegin(); it != many.rend(); ++it)
+    PaykanLocked_unlock(cell(*it));
+  for (PaykanShared *c : many) {
+    PaykanLocked_lock(cell(c));
+    PaykanLocked_unlock(cell(c));
+    discard(c);
+  }
+  // Another thread takes a lock while this one holds one: each holds one.
+  PaykanShared **p = slot(PaykanLocked_lock(cell(a)));
+  std::thread other([&] {
+    PaykanShared **q = slot(PaykanLocked_lock(cell(b)));
+    count(*q) += 1;
+    PaykanLocked_unlock(cell(b));
+  });
+  other.join();
+  EXPECT_EQ(count(*p), 6);
+  PaykanLocked_unlock(cell(a));
+  PaykanShared **q = slot(PaykanLocked_lock(cell(b)));
+  EXPECT_EQ(count(*q), 7);
+  PaykanLocked_unlock(cell(b));
+  discard(a);
+  discard(b);
+}

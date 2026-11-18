@@ -456,7 +456,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
                              (m->isShared() ? ast::MethodDecl::Shared : 0) |
                              (m->isPure() ? ast::MethodDecl::Pure : 0) |
                              (m->isParSafe() ? ast::MethodDecl::ParSafe : 0) |
-                             (m->isAsync() ? ast::MethodDecl::Async : 0));
+                             (m->isAsync() ? ast::MethodDecl::Async : 0) |
+                             (m->waits() ? ast::MethodDecl::Waits : 0));
     mi.Modes = m->getParamModes();
     return mi;
   };
@@ -601,6 +602,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     fi.Native = sig.Native;
     fi.ParSafe = sig.ParSafe;
     fi.Async = sig.Async;
+    fi.Waits = sig.Waits;
     info.ExportedFunctions.push_back(std::move(fi));
   }
   sortModuleInfo(info);
@@ -614,7 +616,8 @@ static_assert(ast::MethodDecl::Private == pkm::kMethodPrivate &&
                   ast::MethodDecl::Shared == pkm::kMethodShared &&
                   ast::MethodDecl::Pure == pkm::kMethodPure &&
                   ast::MethodDecl::ParSafe == pkm::kMethodParSafe &&
-                  ast::MethodDecl::Async == pkm::kMethodAsync,
+                  ast::MethodDecl::Async == pkm::kMethodAsync &&
+                  ast::MethodDecl::Waits == pkm::kMethodWaits,
               "the IFACE method flag bits are ast::MethodDecl's");
 
 // The IFACE records' parameter modes (pkm::kMode*, a byte per parameter,
@@ -649,7 +652,7 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
   for (auto &fi : info.ExportedFunctions)
     iface.Functions.push_back({fi.Name, fi.ReturnTypeName, fi.ParamTypeNames,
                                toModeRecs(fi.Modes), fi.Native, fi.ParSafe,
-                               fi.Async});
+                               fi.Async, fi.Waits});
   for (auto &ci : info.ExportedClasses) {
     pkm::ClassRec cr;
     cr.Name = ci.Name;
@@ -687,9 +690,9 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
 Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   ModuleInfo info;
   for (auto &fr : iface.Functions)
-    info.ExportedFunctions.push_back({fr.Name, fr.ReturnTypeName,
-                                      fr.ParamTypeNames, fromModeRecs(fr.Modes),
-                                      fr.Native, fr.ParSafe, fr.Async});
+    info.ExportedFunctions.push_back(
+        {fr.Name, fr.ReturnTypeName, fr.ParamTypeNames, fromModeRecs(fr.Modes),
+         fr.Native, fr.ParSafe, fr.Async, fr.Waits});
   for (auto &cr : iface.Classes) {
     ModuleInfo::ClassInfo ci;
     ci.Name = cr.Name;
@@ -1585,6 +1588,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     sig.Native = fi.Native;
     sig.ParSafe = fi.ParSafe;
     sig.Async = fi.Async;
+    sig.Waits = fi.Waits;
     sig.Imported = true;
     if (fi.Native)
       ImportedNatives.insert(name);
