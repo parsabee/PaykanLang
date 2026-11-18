@@ -355,8 +355,7 @@ is followed by a `typeAnnotation` (§5), a qualified one included: `n: view
 mut N`, `-> view shared N` and `x: inout shared mut N = e;` parse, and Sema
 rejects the qualifier on every borrow (`parameter 'n' is 'view mut': a
 borrow carries no qualifier; a 'view' takes every form of the object
-(read-only through it) and an 'inout' a 'mut' or 'shared mut' one, with no
-retain or release; write 'view T'`; `the result of 'f' is 'view shared':
+(read-only through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'mut'`; `the result of 'f' is 'view shared':
 ...`, `local 'x' is 'inout shared mut': ...`).
 
 ## 5. Types
@@ -436,8 +435,7 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   references, `shared N?[2]` two optional ones), while `atomic shared` and
   `locked` cover the whole type.  Sema rejects a qualifier on a value type,
   an array of values and an `atomic shared` array included (`'atomic
-  shared' qualifies a reference; 'N[3]' is a value: box it
-  ('mem::Box<N[3]>') to share what it holds`, `'shared' qualifies a
+  shared' qualifies a reference; 'N[3]' is a value: hold it in a class to share what it holds`, `'shared' qualifies a
   reference; 'int[2]' is a value`, `'shared mut' qualifies a reference;
   'int' is a value`, `'mut' applies to objects; 'int' is a value: its
   storage is rewritten by assignment, which 'let' fixes`).  A reference is
@@ -468,8 +466,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   an `AtomicType` node over `T`, which at parse time is any annotation
   that does not start with `shared`, `mut` or `const` (`atomic int?` and
   `atomic atomic int` parse); Sema holds `T` to a number type, `bool` or
-  `char` (`'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'int?' (the
-  prototype has no atomic arrays)`, and for a class `'atomic' holds a
+  `char` (`'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not
+  'int?'`, and for a class `'atomic' holds a
   number, a 'bool' or a 'char', not 'N': an object crosses threads as
   'atomic shared N' (frozen) or 'locked mut N'`).  `atomic` followed by
   `shared` is the qualifier `atomic shared`, never a cell: each of its

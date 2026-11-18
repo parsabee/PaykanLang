@@ -209,7 +209,7 @@ error: 'p' is immutable (a 'Point'; write 'mut Point' to change it); cannot assi
 mut Point = Point(1, 2);`), or alone when the type is inferred (`q: mut = Point(1, 2);`).
 A `mut T` can be stored wherever a `T` is wanted; a `T` becomes a `mut T` only by `move`
 ([`move`](#move)) or straight from a temporary such as a constructor call (`cannot store a
-'Point' in variable 'q', a 'mut Point': a reference gains 'mut' only by 'move'`). It goes
+'Point' in variable 'q', a 'mut' reference: a reference gains 'mut' only by 'move'`). It goes
 on objects, strings included (`s: mut Str` for a `concat`); a value, a number, `bool`,
 `char`, struct, tuple or fixed-size array, is rewritten by assignment, which `let` decides,
 so `mut` on one is an error (`'mut' applies to objects; 'int' is a value: its storage is
@@ -312,7 +312,7 @@ field of a `mut` object, also one a `let` local holds (`a` above), of exactly th
 type (`'inout' local 'f' has type 'float', but what it names has type 'int'`). A variable
 holding an object or a string is `mut` too. An expression, an array element (not yet), a
 string's character, `self`, a `let` local, a field of an object that is not `mut` (`'a' is
-immutable (a 'Account'; write 'mut Account' to change it); it cannot be named by 'inout'
+immutable (an 'Account'; write 'mut Account' to change it); it cannot be named by 'inout'
 local 'b'`) and anything reached through a `view` are errors. An object whose field it
 names stays alive while the local can be used,
 and so does one holding a struct whose field it names (`o.h` for `x: inout = o.h.p.s;`).
@@ -322,7 +322,7 @@ it is live, from its declaration to the last statement of its block that uses it
 that uses it keeps it live for the whole loop:
 
 - while an `inout` local is live, the variable it names cannot be used except through it:
-  `'k' is borrowed by 'inout' local 'x' until 'x' is last used`;
+  `'k' is borrowed by 'inout' local 'x' until 'x' is last used; it cannot be used before then`;
 - while a `view` local of a variable is live, the variable cannot change, as if it were a
   `view` itself: `'c' is viewed by 'view' local 'v' until 'v' is last used; 'tick' is
   not a 'view fn'`. A variable of a value type can still be read and passed on as a copy.

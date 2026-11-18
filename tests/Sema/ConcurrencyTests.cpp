@@ -107,9 +107,9 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
   const std::string outlives = "': a task outlives the call that starts it";
   expectErrors(
-      r, {":5:1: error: the result of 'async fn' 'giveShared' (a 'shared "
-          "Job') cannot cross to the task's awaiter: is 'shared Job': a "
-          "'shared' reference is aliased on its own thread",
+      r, {":5:1: error: the result of 'async fn' 'giveShared' (a 'shared Job') "
+          "cannot cross to the task's awaiter: a 'shared' reference is aliased "
+          "on its own thread",
           (":8:18: error: parameter 'n' of 'async fn' 'byInout' cannot be "
            "'inout" +
            outlives)
@@ -121,7 +121,7 @@ fn main() -> int {
           ":13:3: error: initializer of type 'Task<int>' does not match "
           "declared type 'Str' for variable 's'",
           ":14:11: error: 'await' takes a task (the result of calling an "
-          "'async fn'), not a 'int'",
+          "'async fn'), not an 'int'",
           ":15:3: error: variable 'v' cannot have type 'void' (the expression "
           "produces no value)"});
 }
@@ -177,7 +177,7 @@ fn main() -> int {
        "object at once",
        ":23:11: error: 'c.get()' lends 'c' to the task it starts: 'await' it "
        "where it is called",
-       ":26:17: error: the receiver of 'async fn' 'get' ('f', a 'F') cannot "
+       ":26:17: error: the receiver of 'async fn' 'get' ('f', an 'F') cannot "
        "cross to its task: field 's' is 'shared C': a 'shared' reference is "
        "aliased on its own thread",
        ":32:36: error: a task cannot be started in a 'parallel for' body"});
@@ -276,7 +276,7 @@ fn main() -> int {
 )");
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   expectErrors(r, {":6:17: error: cannot move 'xs[0]': an element leaves by "
-                   "'mem::replace' or 'mem::take'",
+                   "'mem::replace' (or 'mem::take', where it is optional)",
                    ":8:31: error: 'a' was moved at 8:18"});
 }
 
@@ -354,7 +354,7 @@ fn main() -> int {
           ":10:21: error: task 'v' would be moved on some paths only: move it "
           "before the condition",
           ":12:21: error: 'await' takes a task (the result of calling an "
-          "'async fn'), not a 'int'"});
+          "'async fn'), not an 'int'"});
   expectCleanLines(r, {":13:", ":14:"});
 }
 
@@ -1029,10 +1029,10 @@ fn main() -> int {
            .c_str(),
        ":30:16: error: cannot send 'f' (a 'Fun'): field 'f' is a function "
        "value, whose captures are not known",
-       ":32:16: error: cannot send 'an' (a 'Any'): field 'o' is an 'Obj', "
+       ":32:16: error: cannot send 'an' (an 'Any'): field 'o' is an 'Obj', "
        "which may be any class",
        ":35:15: error: cannot send 'w' (a 'Weak'): field 'w' is 'weak': a "
-       "weak load is a plain retain",
+       "'weak' reference watches an object of its own thread",
        ":37:17: error: cannot copy 'o' (a unique 'Node') into a task: write "
        "'move o' to transfer it",
        ":38:36: error: a task cannot be started in a 'parallel for' body"});
@@ -1121,8 +1121,8 @@ fn main() -> int {
            .c_str(),
        ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked mut': field "
        "'f' is a function value, whose captures are not known",
-       ":11:3: error: cannot make 'Any(...)' (a 'Any') 'atomic shared': "
-       "field 'o' is an 'Obj', which may be any class"});
+       ":11:3: error: cannot make 'Any(...)' (an 'Any') 'atomic shared': field "
+       "'o' is an 'Obj', which may be any class"});
   expectCleanLines(r, {":12:", ":13:", ":14:", ":15:", ":16:", ":17:"});
 }
 
@@ -1172,7 +1172,8 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
   const std::string needs =
       "' does not implement trait 'Copyable', which 'twice' requires of 'T': ";
-  const std::string moveOnly = "a reference, a 'Str' or a task is move-only";
+  const std::string moveOnly =
+      "a unique reference, a 'Str' or a task is move-only";
   // NOLINTBEGIN(bugprone-suspicious-missing-comma)
   expectErrors(r, {":5:1: error: 'Copyable' is built in: a type is Copyable by "
                    "what it "
@@ -1888,10 +1889,9 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
   const std::string warns =
       "' changes on every iteration of the 'parallel for': each atomic "
-      "operation moves its cache line between cores, a thousand times a "
-      "reduction's cost on 16 threads (benchmarks/README.md); count in a "
-      "reduction (a plain variable of the enclosing function, '+='), or "
-      "change it less often";
+      "operation moves its cache line between cores, at many times a "
+      "reduction's cost; count in a reduction (a plain variable of the "
+      "enclosing function, '+='), or change it less often";
   for (const std::string &diag :
        {":6:5: warning: 'hits" + warns, ":7:5: warning: 'st.served" + warns,
         ":8:5: warning: 'hits" + warns})
@@ -2063,9 +2063,8 @@ fn main() -> int {
   expectErrors(r,
                {":2:12: error: field 'c' in struct 'P' has type 'atomic int': "
                 "a "
-                "struct cannot hold an 'atomic' field in the prototype (hold "
-                "the "
-                "cell in a class)",
+                "struct cannot hold an 'atomic' field yet (hold the cell in a "
+                "class)",
                 (":6:3" + hitsReads).c_str(),
                 (":7:3: error: 'hits" + separately).c_str(),
                 (":8:3: error: 'hits" + separately).c_str(),
@@ -2217,21 +2216,21 @@ fn main() -> int {
           (":12:8" + borrowed + "view' parameter 'c' of 'look'").c_str(),
           (":13:10" + borrowed + "inout' parameter 'c' of 'change'").c_str(),
           ":14:8: error: cannot store a 'locked mut Counts' in parameter 1 of "
-          "'take', a 'Counts': a 'shared' reference, a frozen object and a "
-          "cell convert only as they are",
+          "'take', a unique reference: a 'locked mut' cell is stored only "
+          "as 'locked mut'",
           ":16:5: error: 'c' is a 'view' local; cannot assign to its field "
           "'total'",
           ":17:5: error: 'c' is a 'view' local; cannot assign to its elements",
-          ":19:13: error: 'await' cannot be used in a 'lock' block: a wait "
-          "holding a lock",
+          ":19:13: error: 'await' cannot be used in a 'lock' block: the task "
+          "would wait while it holds the lock",
           ":20:5: error: a 'lock' block cannot hold another 'lock'",
           ":21:14: error: a 'parallel for' cannot run in a 'lock' block",
           ":22:5: error: 'return' cannot leave a 'lock' block",
           ":24:45: error: 'break' cannot leave a 'lock' block",
           ":25:45: error: 'continue' cannot leave a 'lock' block",
           (":27:8: error: 'n" + notLocked).c_str(),
-          ":28:3: error: 'locked mut' holds an object in the prototype, not a "
-          "'int' (wrap the value in a class)",
+          ":28:3: error: 'locked mut' holds an object for now, not 'int': "
+          "wrap the value in a class",
           (":30:8: error: 'o" + notLocked).c_str()});
 }
 
@@ -2273,9 +2272,6 @@ fn main() -> int {
   const std::string never =
       "' is 'locked Counts', whose contents are never written; declare it "
       "'locked mut Counts' ";
-  const std::string asTheyAre =
-      "': a 'shared' reference, a frozen object and a cell convert only as "
-      "they are";
   expectErrors(
       r, {(":7:18: error: 'counts" + never +
            "for a 'lock ... as c: inout' "
@@ -2292,14 +2288,11 @@ fn main() -> int {
            "for a 'lock ... as c: inout' "
            "block")
               .c_str(),
-          (":14:3: error: cannot store a 'locked mut Counts' in variable 'k', "
-           "a 'locked Counts" +
-           asTheyAre)
-              .c_str(),
-          (":15:3: error: cannot store a 'locked Counts' in variable 'j', a "
-           "'locked mut Counts" +
-           asTheyAre)
-              .c_str()});
+          ":14:3: error: cannot store a 'locked mut Counts' in variable 'k', "
+          "a 'locked' cell: a 'locked mut' cell is stored only as 'locked "
+          "mut'",
+          ":15:3: error: cannot store a 'locked Counts' in variable 'j', a "
+          "'locked mut' cell: a 'locked' cell is stored only as 'locked'"});
   expectCleanLines(r, {":16:"});
 }
 
@@ -2794,8 +2787,8 @@ fn main() -> int {
 }
 )");
   expectErrors(r, {":8:13: error: 'r' is 'locked'",
-                   "a 'shared' reference, a frozen object and a cell convert "
-                   "only as they are"});
+                   "an 'atomic shared' reference is stored only as 'atomic "
+                   "shared'"});
   expectCleanLines(r, {":12:"});
 }
 
@@ -2931,7 +2924,12 @@ fn main() -> int {
   return 0;
 }
 )");
-  expectErrors(r, {"extends 'Base', which is sent to another thread"});
+  // At the instance's template, with where the instance was asked for.
+  expectErrors(
+      r, {":3:1: error: class 'D<shared In>' extends 'Base', which is sent to "
+          "another thread: field 'c' is 'shared In': a 'shared' reference is "
+          "aliased on its own thread",
+          ":7:17: note: in instantiation of 'D<shared In>' requested here"});
 }
 
 TEST(Concurrency, ALoopOrALambdaInsideALockBlockIsTheBlocksOwn) {
@@ -2974,4 +2972,31 @@ fn main() -> int {
 )");
   expectErrors(r, {"'clone' of an optional 'atomic' handle",
                    "a 'match' on an optional 'atomic' handle"});
+}
+
+// A task handle is spent by `await` or `move`, and a borrow does neither: a
+// `view` or `inout` local cannot name one.  A borrow of a call's own task
+// would be the task's only name, and nothing could await it.
+TEST(Concurrency, ABorrowCannotNameATask) {
+  auto r = semaCheck(R"(async fn f(n: int) -> int { return n + 1; }
+async fn main() -> int {
+  let t = f(1);
+  v: view = t;
+  u = f(2);
+  x: inout = u;
+  w: view = f(3);
+  let k = fn() -> int { z: view = f(4); return 0; };
+  return (await t) + (await u) + k();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  const std::string why = "' cannot name a task: a task handle is spent by "
+                          "'await' or 'move', and a borrow does neither\n";
+  expectErrors(r, {(":4:3: error: 'view' local 'v" + why).c_str(),
+                   (":6:3: error: 'inout' local 'x" + why).c_str(),
+                   (":7:3: error: 'view' local 'w" + why).c_str(),
+                   (":8:25: error: 'view' local 'z" + why).c_str()});
+  // The handles themselves are awaited: nothing more is said of them.
+  EXPECT_EQ(r.Diagnostics.find("awaited"), std::string::npos) << r.Diagnostics;
 }

@@ -4074,7 +4074,10 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
             ownerClass, ownerStruct, member, found, /*statics=*/true))
       return resolveGenericStatic(node, found, std::move(typeArgs), argTypes,
                                   expected);
-    if (!typeArgs.empty()) {
+    // (A generic one in a block whose bound the instance does not meet is
+    // no function of the instance: the last error below says so.)
+    if (!typeArgs.empty() &&
+        unmetBlockOf(instName, member, /*statics=*/true).empty()) {
       error(loc, "'" + displayName(instName) + names::kQualSep + member +
                      "' is not generic and takes no type arguments");
       return false;
@@ -4091,8 +4094,9 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
         if (ErroneousNames.count(fn))
           ++SuppressedFollowOns; // rejected with its declaration
         else
-          error(loc,
-                "'" + instName + "' has no static function '" + member + "'");
+          error(loc, "'" + instName + "' has no static function '" + member +
+                         "'" +
+                         unmetBlockOf(instName, member, /*statics=*/true));
         return false;
       }
       fn = imported;

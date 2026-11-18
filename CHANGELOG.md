@@ -130,8 +130,8 @@ samples/concurrency/README.md.
   object held in a struct, a tuple or an array follows the variable's `let` (`'p' is
   declared with 'let', and so are the objects it holds; drop 'let' to change them`); a
   `match` binding that owns what it binds is in the subject's form. `mut T` flows
-  into `T`; `T` gains `mut` only by `move` or straight from a temporary (`cannot store a 'T'
-  in variable 'v', a 'mut T': a reference gains 'mut' only by 'move'`); `shared T` and
+  into `T`; `T` gains `mut` only by `move` or straight from a temporary (`cannot store a 'T' in variable 'v', a 'mut' reference: a reference gains 'mut' only by
+  'move'`); `shared T` and
   `shared mut T`, a frozen object and a cell convert only as they are. The rejected
   spellings: `mut` on a value (`'mut' applies to
   objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes`),
@@ -219,6 +219,93 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- The wording of the ownership and concurrency diagnostics is settled (#368). The table of
+  docs/design/concurrency.md, "Diagnostics", is rewritten from what the compiler prints:
+  each situation of the design that the language has, with its messages, 176 of them.
+  tests/Sema/DiagnosticsTableTests.cpp has a program for each, checked against the
+  compiler, and the table is checked against those rows (situation, error or warning, and
+  text), so neither changes without the other. The messages that wait for the async
+  runtime (v0.5, #362) and the three rules of the design that have no check yet are in
+  tables of their own. The table is the design's: the checks added since (borrowed
+  results, `__deinit__`, `weak`, `atomic` operations and others, over 300 more messages)
+  are in the language chapters' tables of semantic checks and pinned by their own tests.
+  What changed in the text a program sees:
+  - The article before a quoted name is chosen where a message is printed, by the name's
+    first sound, in every diagnostic: `a 'int'`, `a 'Obj'`, `a 'inout' parameter` and
+    `a 'atomic shared Node'` now read `an 'int'`, `an 'Obj'`, `an 'inout' parameter`, `an
+    'atomic shared Node'` (and `an 'f32'`, `an 'XMLNode'`, `a 'u8'`, `a 'unique'`, `a
+    'UnaryExpr'`). What a message quotes of a program's string or of a path is printed
+    as it is (`DiagEngine::verbatim`).
+  - A refused store names the slot by its form and the reason by the value's: `cannot
+    store a 'shared Node' in variable 'u', a unique reference: a 'shared' reference is
+    stored only as 'shared'`; `..., a 'mut' reference: a reference gains 'mut' only by
+    'move'`; `..., a 'locked' cell: a 'locked mut' cell is stored only as 'locked mut'`.
+    It read `in variable 'u', a 'Node': a 'shared' reference, a frozen object and a cell
+    convert only as they are`, naming the slot by the value's type, which is wrong for a
+    slot declared wider (an `Obj`, a superclass).
+  - A send check's reason says what the value is or holds: `cannot send 'a' (a 'shared
+    Cache[2]'): it holds 'shared Cache': ...` for an array's, a buffer's or a task's
+    contents; nothing before `a 'shared' reference is aliased on its own thread` where the
+    value itself is the reference, since its type is named already (it read `: is 'shared
+    Worker': ...`); a tuple's element is `element '.1'`, `element '.0.1'`, not `field`,
+    and a part of each element of an array or a buffer is `element '[].1'`, `field
+    'items[].cache'`; a value with no name is `this value`, not `'...'`; a `weak` field:
+    `a 'weak' reference watches an object of its own thread`.
+  - A borrow that is moved or copied is called one thing, whatever made it (a parameter,
+    a local, a `match` arm's binding, a `lock` block's): `cannot move 'x': it is an
+    'inout' borrow, and what it names stays with its owner`; the same for `'view'`. An
+    `inout` local and a `lock` block's binding were called `an 'inout' parameter, the
+    caller's storage`.
+  - Advice that did not compile is gone or made exact. `move h.f` through a borrow says
+    which borrow: `'h' is a 'view' borrow, which changes nothing`; `'h' is an 'inout'
+    borrow, and what it names stays whole; write 'mem::replace(h.f, v)'`; a `weak`
+    reference `owns nothing`. `mem::replace` is offered only for a field of the borrow
+    or of a `shared mut` handle itself, not along a longer path, and not of a `view
+    fn`'s `self`. A copied field says what works for its owner: `write 'move h.node' to
+    take it (which ends 'h'), or declare the field 'shared Node'` for a variable that
+    owns its object, `write 'mem::replace(h.node, v)' to take it in exchange` through an
+    `inout` borrow, and only the declaration through what nothing writes. A tuple's
+    element `leaves its tuple only with the others; destructure it ('a, b = move t;')`:
+    it was told to use `mem::replace`, which takes no tuple element. `'mem::take'` is
+    offered only for an optional. No box is offered for a fixed-size array (`hold it in
+    a class to share what it holds`) or a task. An object assigned in a `parallel for`
+    body is not told to use a reduction (`is not changed by an iteration (a number
+    changes by a reduction, an 'atomic' variable by its operations)`). A qualifier on a
+    borrow: `write it without 'shared'`, where it said `write 'inout T'`. `clone()` on
+    an instance of a generic class with no `impl Cloneable for` block says `its generic
+    class 'List' has no 'impl Cloneable for' block (an empty one derives 'clone')`: it
+    advised `impl Cloneable for List<Node> {}`, which is no block.
+  - A `view` or `inout` local of a task handle is refused where it is declared: `'view'
+    local 'v' cannot name a task: a task handle is spent by 'await' or 'move', and a
+    borrow does neither`. It was reported as a task of its own that is never awaited
+    (`task 'v' is not awaited before this 'return'`).
+  - A method or a `static fn` an instance lacks because its conditional `impl` block's
+    bound is not met says so, naming each block that has it as it is written: `no method
+    'get' on type 'List<Node>': 'get' is in 'impl List<T: Copyable>', and 'Node' is not
+    'Copyable'`; `'List<Node>' has no static function 'pair': 'pair' is in ...`; for a
+    block of a trait, `'name' is in 'impl Named for Box<T: Copyable>', ...`, and for a
+    derived `clone`, where it advised an `impl Cloneable for` block that cannot be
+    written. A generic `static fn` of such a block called with type arguments was `not
+    generic`. Only the methods a block writes count, and nothing is instantiated or
+    reported to find the reason.
+  - Three messages said "the prototype": a task that is not awaited (`task 't' is never
+    awaited: a task handle is spent by 'await' (or 'move') on every path before its scope
+    ends`), a `locked` cell of a value (`'locked mut' holds an object for now, not 'int':
+    wrap the value in a class`) and an `atomic` field in a struct (`... yet (hold the
+    cell in a class)`).
+  - Smaller ones: `task 't' is not awaited on every path before this 'return'` (it read
+    `may not be awaited`, a prohibition); `the loop at 5:3` (it quoted `'loop'`, no
+    keyword); `override of 'add' cannot be a 'shared fn': the method it overrides is not`
+    (it said `like the method it overrides`); `'await' cannot be used in a 'lock' block:
+    the task would wait while it holds the lock`; `this task is never awaited: 'await'
+    the call, or hold the task in a variable and 'await' that`; `'l' is borrowed by
+    'inout' local 'x' until 'x' is last used; it cannot be used before then`; a `Copyable`
+    bound says `a unique reference, a 'Str' or a task is move-only`; the warning about an
+    `atomic` changed on every iteration no longer cites one machine's measurement, and
+    `'Sendable' is built in` no issue number.
+- `paykan migrate`, the design's rewriter of v0.3 programs, is not built and is not part of
+  v0.4 (docs/design/concurrency.md, "Migration"): a program is carried across by its
+  errors, each of which names its fix.
 - `None` is no longer an `Obj` (#394; docs/language/12-optionals.md, "`None` and its
   context"). It is the absent value of the optional its context expects and has no type of
   its own, so an `Obj` is always an object of a class and `Obj?` is an optional like any
@@ -334,8 +421,8 @@ samples/concurrency/README.md.
   or `move x.f`, by `x.clone()`, to a borrow (a `view` or `inout` parameter), or when it is
   `shared`: `cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare it
   'shared Node'`, `cannot copy 'p': 'Person' holds unique field 'name' ('Str'); write 'move
-  p' to transfer it, or 'p.clone()' to copy it`, and for a field `a field leaves by
-  'mem::replace' or 'mem::take'`. Copyable values copy as before, function values among
+  p' to transfer it, or 'p.clone()' to copy it`, and for a field of a variable that owns its object `write 'move h.node' to take it (which
+  ends 'h'), or declare the field 'shared Node'`. Copyable values copy as before, function values among
   them. A store into a `weak` field or
   variable, and the generated `__init__`'s parameter of a `weak` field, take nothing from the
   owner. The compiler still turns a last use into a transfer, as an optimisation the rule
@@ -398,8 +485,8 @@ samples/concurrency/README.md.
   local first (docs/language/14-function-types.md, "Captures").
 - **Breaking:** an array or a tuple literal's element is an owning slot (`[move a, b.clone()]`),
   and it converts into its element's form: a `shared` reference into an element held `shared`
-  (`cannot store a 'shared Node' in an element of the tuple, a 'Node': a 'shared' reference, a
-  frozen object and a cell convert only as they are`).
+  (`cannot store a 'shared Node' in an element of the tuple, a unique reference: a 'shared'
+  reference is stored only as 'shared'`).
 - Qualifiers on the parts of a type (#368; docs/language/19-concurrency.md, "Qualifiers in a
   type"): a type argument (`List<shared Node>`), a tuple's element (`(Str, shared Node)`), an
   array's elements (`shared Node[4]`, four shared references: `shared` and `shared mut` bind
@@ -536,6 +623,11 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- The error for an instance of a generic class that extends a class sent to another thread
+  had no file, line or source text (`error: class 'Button<shared Handler>' extends
+  'Widget', which is sent to another thread: ...`). It is reported at the class's template,
+  in its module's file, with a note of where the instance was asked for
+  (`main.pkn:8:11: note: in instantiation of 'Button<shared Handler>' requested here`).
 - `move` before a string temporary (`x: mut Str = move "lit";`, `move (a + b)`) failed in
   the compiler with `PIR verification failed: stored value ... has type obj, expected box`.
 - An `atomic` parameter of a generic function called with its type arguments inferred took

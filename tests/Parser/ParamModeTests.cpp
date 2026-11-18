@@ -147,7 +147,7 @@ TEST(LocalBorrow, Declarations) {
 TEST(LocalBorrow, Errors) {
   const char *const cases[][2] = {
       {"x: view;", "(a 'view' local needs an initial value)"},
-      {"x: inout int;", "(a 'inout' local needs an initial value)"},
+      {"x: inout int;", "(an 'inout' local needs an initial value)"},
       {"a: view int, b = (1, 2);", "a destructuring target cannot be 'view'"},
       {"let x: view = 1;", "a local borrow cannot be 'let': a 'view' local "
                            "always names what it was given"},

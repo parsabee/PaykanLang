@@ -8,6 +8,7 @@
 
 #include <iosfwd>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -58,7 +59,7 @@ class DiagEngine {
   ErrorLimitState *Limit = &OwnLimit;
 
   void emit(Diagnostic::Severity level, ast::SourceLocation loc,
-            const std::string &msg);
+            const std::string &written);
 
   // Double-report guard (#112), active in debug builds only (the members
   // exist in every build so the class layout does not depend on NDEBUG).  A
@@ -114,9 +115,23 @@ public:
   // (an imported module's file reports through an engine of its own).
   void shareErrorLimit(DiagEngine &other) { Limit = other.Limit; }
 
+  // A message's article before a quoted name is the engine's to choose: one
+  // written "a '" + name + "'" is printed "an 'Obj'", "an 'int'", "a 'Node'"
+  // (the name's first sound decides, as for 'unsigned' and 'u8').  Text a
+  // message quotes from outside the compiler, a program's string or a path,
+  // goes in through verbatim(): it is printed as it is.
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);
   void note(ast::SourceLocation loc, const std::string &msg);
+
+  /// @p text marked to be printed as it is, whatever it says: what a
+  /// message quotes of a program's string or of the file system, which may
+  /// read like a message's own words ("a 'int'").
+  static std::string verbatim(std::string_view text);
+  /// @p written as error(), warning() and note() print it: its articles
+  /// chosen, its verbatim stretches as they are.  For a message printed by
+  /// other means (a parser with no engine).
+  static std::string printed(const std::string &written);
 
   unsigned getErrorCount() const { return ErrorCount; }
   bool hasErrors() const { return ErrorCount > 0; }

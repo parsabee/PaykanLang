@@ -2094,17 +2094,17 @@ TEST(Pkm, AnOptOutOfSendableIsInTheModuleFile) {
   const std::string pinned = "which its module keeps on the thread that made "
                              "it ('impl !Sendable')";
   for (const std::string &want :
-       {":9:21: error: cannot send 'pinned::open(...)' (a 'Handle'): is "
+       {":9:21: error: cannot send 'pinned::open(...)' (a 'Handle'): it is "
         "'Handle', " +
             pinned,
         ":10:22: error: cannot send 'Wrap(...)' (a 'Wrap'): field 'h' is "
         "'Handle', " +
             pinned,
-        ":11:21: error: cannot send 'pinned::Loop(...)' (a 'Loop'): is "
+        ":11:21: error: cannot send 'pinned::Loop(...)' (a 'Loop'): it is "
         "'Loop', " +
             pinned,
         ":13:11: error: 'Handle' does not implement trait 'Sendable', which "
-        "'need' requires of 'T': is 'Handle', " +
+        "'need' requires of 'T': it is 'Handle', " +
             pinned})
     EXPECT_TRUE(contains(r.out, want)) << want << "\n" << r.out;
   EXPECT_FALSE(contains(r.out, ":12:")) << r.out;
@@ -2113,7 +2113,7 @@ TEST(Pkm, AnOptOutOfSendableIsInTheModuleFile) {
   EXPECT_NE(hands.exitCode, 0);
   EXPECT_TRUE(
       contains(hands.out, ":3:3: error: the result of 'async fn' 'mk' (a "
-                          "'Handle') cannot cross to the task's awaiter: is "
+                          "'Handle') cannot cross to the task's awaiter: it is "
                           "'Handle', " +
                               pinned))
       << hands.out;
@@ -2121,10 +2121,10 @@ TEST(Pkm, AnOptOutOfSendableIsInTheModuleFile) {
   EXPECT_NE(par.exitCode, 0);
   for (const std::string &want :
        {":10:10: error: 'h' (a 'Handle') cannot be used in a 'parallel for' "
-        "body: is 'Handle', " +
+        "body: it is 'Handle', " +
             pinned,
         ":10:17: error: 'hs' (a 'Handle[2]') cannot be used in a 'parallel "
-        "for' body: is 'Handle', " +
+        "for' body: it is 'Handle', " +
             pinned,
         ":10:28: error: 'w' (a 'Wrap') cannot be used in a 'parallel for' "
         "body: field 'h' is 'Handle', " +
@@ -5565,6 +5565,62 @@ fn main() -> int {
                   "'Hashable' (through 'CK')\n"}};
   p.Ok = "ok.pkn";
   p.OkOutput = "gbox gbox\nTrue 2 True\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
+}
+
+// A generic class of another module that extends a class sent to another
+// thread: an instance that cannot cross is reported at its template, in the
+// module's file, with where the importer asked for it, whether the module
+// comes from its source, the cache, or a prebuilt file; an instance that can
+// cross runs on each.
+TEST(Pkm, ASentClassesGenericSubclassIsReportedOnEveryPath) {
+  REQUIRE_BACKEND();
+  EveryPathProject p;
+  p.Dir = fs::temp_directory_path() /
+          ("pkm_sent_subclass_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "widgets.pkn",
+            R"(class Widget { id: int; }
+class Button<T> : Widget { onClick: T; }
+fn label(w: view Widget) -> int { return w.id; }
+)");
+  writeFile(p.Dir / "main.pkn",
+            R"(import lib::widgets as w;
+class Handler { n: int; }
+async fn show(x: w::Widget) -> int { return x.id; }
+async fn main() -> int {
+  let a = w::Widget(1);
+  let t = show(move a);
+  let h: shared = Handler(1);
+  let b = w::Button<shared Handler>(2, h);
+  return await t;
+}
+)");
+  writeFile(p.Dir / "ok.pkn",
+            R"(import ::io;
+import lib::widgets as w;
+class Handler { n: int; }
+async fn show(x: w::Widget) -> int { return x.id; }
+async fn main() -> int {
+  let a = w::Widget(1);
+  let t = show(move a);
+  let b = w::Button<Handler>(2, Handler(1));
+  io::println(await t + w::label(b));
+  return 0;
+}
+)");
+  p.Libs = {"widgets"};
+  p.Mixed = "widgets";
+  p.Rejected = {
+      {"main.pkn",
+       "lib/widgets.pkn:2:1: error: class 'Button<shared Handler>' extends "
+       "'Widget', which is sent to another thread: field 'onClick' is 'shared "
+       "Handler': a 'shared' reference is aliased on its own thread\n"
+       "main.pkn:8:11: note: in instantiation of 'Button<shared Handler>' "
+       "requested here\n"}};
+  p.Ok = "ok.pkn";
+  p.OkOutput = "3\n";
   expectOnEveryPath(p);
   fs::remove_all(p.Dir);
 }

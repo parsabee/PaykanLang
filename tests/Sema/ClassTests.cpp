@@ -2016,16 +2016,16 @@ fn swapped(c: mut Own) -> Str { return mem::replace(c.name, ""); }
 fn main() -> int { return 0; }
 )");
   for (const char *want :
-       {":10:32: error: cannot move 'c.name' out of 'c': a 'Own' has a "
+       {":10:32: error: cannot move 'c.name' out of 'c': an 'Own' has a "
         "'__deinit__', which runs on the whole object; write "
         "'mem::replace(c.name, v)'",
         ":11:34: error: cannot move 'c.name' out of 'c': a 'Base' may be a "
         "'Leaf', which runs the '__deinit__' of 'Leaf'",
         ":12:32: error: cannot move 'c.name' out of 'c': a 'Mid' may be a "
         "'Leaf', which runs the '__deinit__' of 'Leaf'",
-        ":13:36: error: cannot move 'c.name' out of 'c': a 'Under' runs the "
+        ":13:36: error: cannot move 'c.name' out of 'c': an 'Under' runs the "
         "'__deinit__' of 'Top'",
-        ":15:36: error: cannot move 'h.o.name' out of 'h.o': a 'Own' has a "
+        ":15:36: error: cannot move 'h.o.name' out of 'h.o': an 'Own' has a "
         "'__deinit__'"})
     EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
                                                            << r.Diagnostics;
@@ -2208,16 +2208,17 @@ fn main() -> int { return 0; }
         "('Guard'); write 'move p' to transfer it",
         ":20:3: error: cannot copy 't': '(Guard, int)' holds unique element "
         "'.0' ('Guard'); write 'move t' to transfer it",
+        // ('mem::take' is an optional element's.)
         ":22:3: error: cannot copy 'xs[0]' (a 'Guard'); an element leaves "
-        "its array by 'mem::replace' or 'mem::take'",
+        "its array by 'mem::replace'\n",
         ":24:3: error: cannot copy 's': 'Slot' holds unique field 'g' "
         "('Guard'); write 'move s' to transfer it",
         ":26:3: error: cannot copy 'o' (a 'Guard?'); write 'move o' to "
         "transfer it",
         ":27:32: error: cannot capture 'a' (a unique 'Guard'): a function "
         "captures by copy",
-        ":28:24: error: cannot copy 't.0' (a 'Guard'); a field leaves by "
-        "'mem::replace' or 'mem::take'",
+        ":28:24: error: cannot copy 't.0' (a 'Guard'): an element leaves its "
+        "tuple only with the others; destructure it ('a, b = move t;')\n",
         ":33:3: error: cannot copy 'b' (a 'Guard'); write 'move b' to "
         "transfer it",
         ":36:29: error: 'a' was moved at 32:11; it cannot be used after the "

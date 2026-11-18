@@ -101,6 +101,7 @@
     ["scripts/check_links.py", ["docs"]],
     ["scripts/doc_examples.py", ["docs"]],
     ["scripts/let_check.py", ["docs"]],
+    ["docs/design/concurrency.md", ["sema", "docs"]],
     ["docs/*", ["docs"]],
     ["*.md", ["docs"]],
     ["cmake/PaykanTestSupport.cmake", ["frontend", "out-of-tree"]],

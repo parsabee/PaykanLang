@@ -762,7 +762,7 @@ bool Sema::checkImplForm(const ast::ImplDecl *im, const std::string &trait,
     error(im->getLocation(),
           "'Sendable' is built in: a type is Sendable by what it holds, and "
           "cannot be implemented (a class whose 'shared' links stay inside "
-          "it waits for #377)");
+          "it cannot say so yet)");
     return false;
   }
   return true;
@@ -784,6 +784,97 @@ bool Sema::implBoundsHold(const ast::ImplDecl *im,
         return false;
     }
   return true;
+}
+
+std::string Sema::unmetBlockOf(const std::string &instName,
+                               const std::string &member, bool statics) {
+  auto site = InstantiationSites.find(instName);
+  if (site == InstantiationSites.end() || !site->second.Template)
+    return "";
+  auto blocks = TemplateImpls.find(site->second.Template);
+  std::string base;
+  std::vector<ast::Type *> args;
+  if (blocks == TemplateImpls.end() ||
+      !parseInstantiationName(instName, base, args))
+    return "";
+  // A bound that does not resolve was reported with its block: looking it
+  // up again here reports nothing (and nothing twice).
+  const bool muted = Diags.isMuted();
+  const DiagEngine::Mark mark = muted ? DiagEngine::Mark{} : Diags.mute();
+  // One reason per block that has the member; none, where a block that has
+  // it is the instance's (the member is missing for another reason) or
+  // cannot be judged.
+  std::string reasons;
+  const std::string first = ": '" + member + "' is in 'impl ";
+  bool known = true;
+  for (const ast::ImplDecl *im : blocks->second) {
+    if (!known)
+      break;
+    const auto &params = im->getTypeParams();
+    const auto &bounds = im->getTypeParamBounds();
+    Subst subst;
+    for (size_t i = 0; i < params.size() && i < args.size(); ++i)
+      subst[*params[i]] = args[i];
+    // The methods the block writes, and the `clone` an `impl Cloneable for`
+    // block derives when it writes none.  (A trait's other requirements are
+    // the block's to write: one it does not write is not in it.  The
+    // block's trait is not resolved: its type arguments, under the
+    // instance's, may name instances nobody asked for, and a trait of
+    // another module's template is not this module's of that name.)
+    const auto &methods = im->getMethods();
+    const bool cloneable =
+        im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
+        traitAnnotationName(im->getTrait()) == names::kTraitCloneable;
+    const bool has =
+        std::any_of(methods.begin(), methods.end(),
+                    [&](const ast::FuncDecl *f) {
+                      return f->getName() == member && f->isStatic() == statics;
+                    }) ||
+        (cloneable && !statics && member == names::kMethodClone);
+    if (!has)
+      continue;
+    // A block of a trait this module does not know is an error of its own.
+    if (im->getTrait() && !foreignOrigin(site->second.Template) &&
+        !Traits.count(traitAnnotationName(im->getTrait()))) {
+      known = false;
+      break;
+    }
+    // The first bound an argument does not meet, as implBoundsHold tests
+    // them, and the block as it is written.
+    std::string unmet, header;
+    for (size_t i = 0; i < params.size(); ++i) {
+      header.append(i ? ", " : "").append(*params[i]);
+      if (i >= bounds.size() || i >= args.size())
+        continue;
+      for (size_t j = 0; j < bounds[i].size(); ++j) {
+        ast::Type *b = bounds[i][j];
+        header.append(j ? " + " : ": ").append(typeName(b));
+        // (A built-in trait a bound may name takes no type arguments.)
+        auto tr = namesBuiltinTrait(b) && !ast::isa<ast::GenericType>(b)
+                      ? resolveTraitRef(b, subst, im->getLocation())
+                      : std::nullopt;
+        if (!tr)
+          known = false; // an error of the block
+        else if (unmet.empty() && !traitImplOwner(args[i], *tr) &&
+                 !archetypeMeets(args[i], *tr))
+          unmet =
+              "'" + typeName(args[i]) + "' is not '" + traitRefName(*tr) + "'";
+      }
+    }
+    if (unmet.empty())
+      known = false;
+    reasons.append(reasons.empty() ? first : "; and in 'impl ");
+    if (im->getTrait())
+      reasons.append(typeName(im->getTrait())).append(" for ");
+    reasons.append(displayName(base))
+        .append("<")
+        .append(header)
+        .append(">', and ")
+        .append(unmet);
+  }
+  if (!muted)
+    Diags.unmute(mark);
+  return known ? reasons : "";
 }
 
 bool Sema::archetypeMeets(const ast::Type *arg, const TraitRef &tr) const {
@@ -864,7 +955,8 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
           else if (part.empty() && ast::holdsDeinit(args[i]))
             why = "it holds a struct with a '__deinit__', which is move-only";
           else
-            why = part.empty() ? "a reference, a 'Str' or a task is move-only"
+            why = part.empty() ? "a unique reference, a 'Str' or a task is "
+                                 "move-only"
                                : "it holds move-only " + part;
         } else if (tr->Trait->IsBuiltin &&
                    tr->Trait->Decl->getName() == names::kTraitSendable) {

@@ -70,7 +70,8 @@ fn main() -> int {
                {":4:3: error: initializer of type 'List<shared Node>' does not "
                 "match declared type 'List<Node>' for variable 'a'",
                 ":8:24: error: cannot store a 'shared Node' in an element of "
-                "the tuple, a 'Node'",
+                "the tuple, a unique reference: a 'shared' reference is "
+                "stored only as 'shared'",
                 ":10:3: error: initializer of type '(int, shared Node)' does "
                 "not match declared type '(int, Node)' for variable 'e'"});
   EXPECT_EQ(distinct.ErrorCount, 3u) << distinct.Diagnostics;
@@ -250,12 +251,11 @@ fn main() -> int {
   return 0;
 }
 )");
-  expectErrors(bad,
-               {":5:12: error: array literal has elements of two forms: "
-                "'shared Node' and 'shared mut Node'",
-                ":7:6: error: cannot store element 1 of the tuple (a 'shared "
-                "Node') in variable 'b', a 'Node': a 'shared' reference "
-                "converts only as it is"});
+  expectErrors(bad, {":5:12: error: array literal has elements of two forms: "
+                     "'shared Node' and 'shared mut Node'",
+                     ":7:6: error: cannot store element 1 of the tuple (a "
+                     "'shared Node') in variable 'b', a 'Node': a 'shared' "
+                     "reference is stored only as 'shared'"});
 }
 
 // A function type's parts are part of it: a function value matches only
@@ -290,7 +290,8 @@ fn main() -> int {
                {":5:3: error: initializer of type '(shared Node) -> int' does "
                 "not match declared type '(Node) -> int' for variable 'f'",
                 ":8:12: error: cannot store a 'shared Node' in parameter 1 of "
-                "'g', a 'Node'"});
+                "'g', a unique reference: a 'shared' reference is stored only "
+                "as 'shared'"});
 }
 
 // A template's `T` with T = `shared Node` is Copyable, and so Cloneable: its
@@ -339,8 +340,9 @@ fn main() -> int {
 )");
   expectErrors(r, {"field 't.1' is 'shared Node': a 'shared' reference is "
                    "aliased on its own thread",
-                   "field 'xs' is 'shared Node': a 'shared' reference",
-                   "field 'b' is 'shared Node': a 'shared' reference"});
+                   // An array's elements, not the field itself.
+                   "field 'xs' holds 'shared Node': a 'shared' reference",
+                   "field 'b' holds 'shared Node': a 'shared' reference"});
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
@@ -379,7 +381,8 @@ fn main() -> int {
        ":13:31: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
        "'dup<atomic shared Node>', a 'view atomic shared Node'",
        ":15:3: error: cannot store a 'shared mut Node' in variable 'back', a "
-       "'mut Node'"});
+       "'mut' reference: a 'shared mut' reference is stored only as 'shared "
+       "mut'"});
   auto fine = semaCheck(R"(import ::memory as mem;
 class Node { id: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
@@ -489,7 +492,7 @@ fn main() -> int {
           "'dup<shared Node>'",
           ":6:58: error: element 'xs[0]' is a 'shared Node', which nothing "
           "changes, so it cannot be returned 'inout'",
-          ":16:7: error: 'fixed' is immutable (a 'H'; write 'mut H' to change "
+          ":16:7: error: 'fixed' is immutable (an 'H'; write 'mut H' to change "
           "it); its field 'm' cannot be passed to 'inout' parameter 's'"});
   auto fine = semaCheck(R"(class Node { id: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
@@ -608,7 +611,7 @@ fn main() -> int {
        ":11:3: error: cannot copy 'h.slot()' (a unique 'Node')",
        "has a branch of that form and a new value: make the new value 'locked "
        "mut' first",
-       ":17:11: error: 'e' (a 'E<shared mut Node>') cannot be used in a "
+       ":17:11: error: 'e' (an 'E<shared mut Node>') cannot be used in a "
        "'parallel for' body"});
 }
 

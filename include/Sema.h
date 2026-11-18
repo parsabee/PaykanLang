@@ -437,9 +437,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Why a value of @p ty, held with qualifier @p q, cannot cross to
   /// another thread (the design's send check): a `shared` or `weak` part, a
   /// function value, an `Obj`; "" when it can.  @p path names the part
-  /// looked at ("" for the value itself).
+  /// looked at ("" for the value itself), and @p held says that what is
+  /// looked at is held by it: an array's or a buffer's elements, a task's
+  /// result.
   std::string uncrossable(ast::Type *ty, ast::Qualifier q,
-                          const std::string &path);
+                          const std::string &path, bool held = false);
   /// uncrossable of a value that is sent at @p loc: in the archetype check,
   /// one that does not cross because of a type parameter that is not
   /// bounded `Sendable` is recorded as the missing bound, "... " + @p what
@@ -2731,6 +2733,14 @@ private:
   /// false when it is not one or an argument does not resolve.
   bool parseInstantiationName(const std::string &name, std::string &base,
                               std::vector<ast::Type *> &args);
+  /// Why the instance @p instName has no method @p member (no `static fn`,
+  /// with @p statics) although its template declares one: each `impl` block
+  /// that has it, a trait's too, has a bound the instance's arguments do not
+  /// meet (`get` of `impl List<T: Copyable>` on a `List<Node>`).  The text
+  /// after "no method ... on type ...": "" when no block has the member, or
+  /// one that has it is the instance's.  Reports nothing.
+  std::string unmetBlockOf(const std::string &instName,
+                           const std::string &member, bool statics = false);
   /// The method @p name of @p ty, a class (its own or inherited, vtable or
   /// `impl`) or a struct (`impl`); nullptr for any other type.
   static ast::MethodDecl *methodOf(ast::Type *ty, const std::string &name);

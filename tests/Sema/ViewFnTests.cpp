@@ -478,7 +478,8 @@ fn main() -> int {
              "as a 'shared mut Counter'; 'self' is borrowed in 'reset': make "
              "it a 'shared fn' too",
              ":7:34: error: cannot store a 'shared mut Counter' in the result, "
-             "a 'Counter'",
+             "a unique reference: a 'shared mut' reference is stored only as "
+             "'shared mut'",
              ":8:52: error: cannot capture 'self': a method borrows its "
              "receiver",
              ":12:3: error: 'add' is a 'shared fn', which takes its receiver "
@@ -506,9 +507,11 @@ fn main() -> int { return 0; })");
              "'__init__' cannot be a 'shared fn': the new object is the "
              "constructor's result",
              "override of 'give' must be a 'shared fn', like the method it "
-             "overrides",
-             "override of 'plain' cannot be a 'shared fn', like the method it "
-             "overrides"});
+             "overrides (a call of either takes its receiver as the "
+             "overridden method says)",
+             "override of 'plain' cannot be a 'shared fn': the method it "
+             "overrides is not (a call of either takes its receiver as the "
+             "overridden method says)"});
   auto strct = semaCheck("struct P { x: int; }\nimpl P { shared fn s() {} }\n"
                          "fn main() -> int { return 0; }");
   EXPECT_FALSE(strct.Ok);

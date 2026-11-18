@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <initializer_list>
 #include <iostream>
 #include <ostream>
 #include <string>
@@ -171,10 +172,143 @@ void printWindow(std::ostream &os, std::string_view line, const Window &w) {
     os << kEllipsis;
 }
 
+// Whether the name @p word is said with a vowel first, so that it takes
+// "an": 'Obj', 'int', 'atomic', 'unsigned', 'F', 'f32', 'XMLNode', 'Hour';
+// not 'unique', 'UnaryExpr', 'u8', 'Once', 'ULong'.  Underscores before it
+// are not said ('__init__').  A rule of thumb for names, not a dictionary:
+// 'Umask' and 'MAX' come out wrong.
+bool takesAn(std::string_view word) {
+  word.remove_prefix(std::min(word.find_first_not_of('_'), word.size()));
+  if (word.empty())
+    return false;
+  auto upper = [](char c) { return c >= 'A' && c <= 'Z'; };
+  auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  auto lower = [&](char c) { return upper(c) ? static_cast<char>(c + 32) : c; };
+  const char first = lower(word[0]);
+  // Read by the letter's name: a letter alone, one before a number ("f32",
+  // "S3Bucket") and one before another capital, the start of initials
+  // ("HTTPClient", "XMLNode") or a letter of its own ("LValue", "IFoo").
+  if (word.size() == 1 || digit(word[1]) || (upper(word[0]) && upper(word[1])))
+    return std::string_view("aefhilmnorsx").find(first) !=
+           std::string_view::npos;
+  std::string start;
+  for (char c : word.substr(0, 6))
+    start += lower(c);
+  auto starts = [&](std::initializer_list<std::string_view> prefixes) {
+    return std::any_of(
+        prefixes.begin(), prefixes.end(),
+        [&](std::string_view p) { return start.starts_with(p); });
+  };
+  // A silent "h"; "one" and "once" start like "won"; "eu" like "you",
+  // but for "Euler".
+  if (first == 'h')
+    return starts({"hour", "honest", "honor", "honour", "heir"});
+  // (In one word: "OnEvent" is "on", and so is "Ones".)
+  auto oneWord = [&](size_t n) {
+    return word.size() >= n &&
+           std::all_of(word.begin() + 1, word.begin() + n,
+                       [&](char c) { return !upper(c); }) &&
+           (word.size() == n || !(word[n] >= 'a' && word[n] <= 'z'));
+  };
+  if ((start.starts_with("once") && oneWord(4)) ||
+      (start.starts_with("one") && oneWord(3)))
+    return false;
+  if (start.starts_with("eu"))
+    return start.starts_with("euler");
+  if (first == 'a' || first == 'e' || first == 'i' || first == 'o')
+    return true;
+  if (first != 'u')
+    return false;
+  // "u" is "you" ("unit", "unary", "user", "usize", "utf", "uuid") unless a
+  // consonant closes its syllable ("unsigned", "upper", "ultra", "umbrella",
+  // "ugly", "urgent").
+  if (starts({"unary", "unanim"}))
+    return false;
+  // "uninit", "unimplemented", but "unimodal".
+  if (start.starts_with("uni"))
+    return start.starts_with("unin") || start.starts_with("unimp");
+  const char second = start.size() > 1 ? start[1] : '\0';
+  // "urgent", "urn", but "url", "uri", "uranium".
+  if (second == 'r')
+    return start.size() > 2 && !starts({"url", "uri"}) &&
+           std::string_view("aeiou").find(start[2]) == std::string_view::npos;
+  return second == 'n' || second == 'm' || second == 'p' || second == 'l' ||
+         second == 'g';
+}
+
+// The ends of a stretch of a message that is printed as it is
+// (DiagEngine::verbatim): no source text holds them.
+constexpr char kVerbatimOpen = '\x01', kVerbatimClose = '\x02';
+
+// @p msg with the article before each quoted name chosen by the name: a
+// message is written "a '" + name + "'", and reads "an 'Obj'", "an 'int'",
+// "a 'Node'".  A quotation that starts with no name ("a '(int, Str)'") keeps
+// the article written, and so does a verbatim stretch, whose marks go.
+std::string withArticles(const std::string &msg) {
+  std::string out;
+  out.reserve(msg.size() + 8);
+  auto word = [](char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') || c == '_';
+  };
+  size_t i = 0;
+  while (i < msg.size()) {
+    const char c = msg[i];
+    if (c == kVerbatimOpen) {
+      const size_t close = std::min(msg.find(kVerbatimClose, i), msg.size());
+      out.append(msg, i + 1, close - i - 1);
+      i = close + (close < msg.size());
+      continue;
+    }
+    // An article is a word of the message: at its start, or after a space
+    // or "(".  One right after a quote starts what the message quotes.
+    const bool boundary = i == 0 || msg[i - 1] == ' ' || msg[i - 1] == '(';
+    size_t len = 0; // of "a" or "an"
+    if (boundary && (c == 'a' || c == 'A')) {
+      if (msg.compare(i + 1, 2, " '") == 0)
+        len = 1;
+      else if (msg.compare(i + 1, 3, "n '") == 0)
+        len = 2;
+    }
+    if (len == 0) {
+      out += c;
+      ++i;
+      continue;
+    }
+    const size_t name = i + len + 2; // past the space and the quote
+    size_t end = name;
+    while (end < msg.size() && word(msg[end]))
+      ++end;
+    if (end == name) { // no name: as written
+      out.append(msg, i, len);
+    } else {
+      out += c;
+      if (takesAn(std::string_view(msg).substr(name, end - name)))
+        out += 'n';
+    }
+    i += len;
+  }
+  return out;
+}
+
 } // namespace
 
+std::string DiagEngine::verbatim(std::string_view text) {
+  std::string marked(1, kVerbatimOpen);
+  for (char c : text)
+    if (c != kVerbatimOpen && c != kVerbatimClose)
+      marked += c;
+  return marked + kVerbatimClose;
+}
+
+std::string DiagEngine::printed(const std::string &written) {
+  return withArticles(written);
+}
+
 void DiagEngine::emit(Diagnostic::Severity level, ast::SourceLocation loc,
-                      const std::string &msg) {
+                      const std::string &written) {
+  // One rule for every message's articles, whoever wrote it.
+  const std::string msg = printed(written);
   if (Muted) {
     Diagnostics.push_back({level, loc, msg});
     if (level == Diagnostic::Error)
