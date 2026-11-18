@@ -45,6 +45,7 @@ namespace {
 // a stable load.
 const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
+strobj @.so = "an object" len 9
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
 bytes @.b = []
 bytes @.k = [0, 127, 128, 255]

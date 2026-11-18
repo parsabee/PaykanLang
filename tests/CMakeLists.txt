@@ -154,6 +154,7 @@ add_executable(codegen_tests
     CodeGen/OptionalPrimitiveTests.cpp
     CodeGen/BufferTests.cpp
     CodeGen/MemSlotTests.cpp
+    CodeGen/StringLiteralTests.cpp
     CodeGen/FixedArrayTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/StructTests.cpp

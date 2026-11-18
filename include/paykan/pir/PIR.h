@@ -617,6 +617,11 @@ struct Class {
 struct CStrGlobal {
   std::string Name;
   std::string Data; // without the trailing NUL; Data.size() is the length
+  /// A string object over the bytes (`strobj`): a static `Str` whose counts
+  /// say it is immortal, so no retain or release writes it and nothing
+  /// frees it.  Its address is an `obj`, where a `cstr`'s is a `ptr`.  A
+  /// shared string literal (#363).
+  bool Object = false;
 };
 
 struct DataGlobal {

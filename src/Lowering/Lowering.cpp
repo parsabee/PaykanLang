@@ -536,6 +536,17 @@ Val ModuleLowering::internString(const std::string &content) {
   return Val::symbol(name, Type::Ptr);
 }
 
+Val ModuleLowering::internStringObject(const std::string &content) {
+  auto it = InternedStringObjects.find(content);
+  if (it != InternedStringObjects.end())
+    return Val::symbol(it->second, Type::Obj);
+  std::string name =
+      std::string(kStrGlobalName) + std::to_string(Mod.CStrs.size());
+  Mod.CStrs.push_back({name, content, /*Object=*/true});
+  InternedStringObjects[content] = name;
+  return Val::symbol(name, Type::Obj);
+}
+
 Val ModuleLowering::wrapStringLiteral(const Val &rawStr, size_t len) {
   Val str = callRuntime(kPaykanStringNew,
                         {rawStr, Val::i64(static_cast<int64_t>(len))}, "str");
@@ -2080,7 +2091,7 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
       size_t at = 0;
       for (const ast::Param &p : node->getParams())
         at += declareParam(p.getName(), fn->Params, at,
-                           canonicalizeDeclType(p.ParamType), p.Mode);
+                           canonicalizeDeclType(p.ParamType), p.Mode, p.Qual);
       if (node->isNative())
         emitNativeBody(node, *fn);
       else
@@ -2677,6 +2688,7 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
         CurrentScope->inoutType(id->getName()) == Type::Void) {
       box = loadVarBox(id->getName());
       B.store(CurrentScope->lookup(id->getName()), Val::null(Type::Box));
+      box = ownIfUnshared(expr, box);
     } else {
       box = emitAsSharedRaw(expr, /*lend=*/false);
     }
@@ -2725,6 +2737,12 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
   return box;
 }
 
+Val ModuleLowering::ownIfUnshared(const ast::Expr *expr, const Val &box) {
+  return box && box.Ty == Type::Box && expr->isUnshared()
+             ? callRuntime(names::kPaykanStringOwned, {box}, "own")
+             : box;
+}
+
 Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
   // An `atomic` place's handle: its cell, one more reference to it.
   if (isAtomicHandleExpr(expr)) {
@@ -2742,9 +2760,12 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
     if (declared && holdsBox(id->getName())) {
       Val sharedPtr = loadVarBox(id->getName());
       const bool inout = CurrentScope->inoutType(id->getName()) == Type::Box;
-      emitRetain(sharedPtr, lend && (inout ? isLentRead(id) : !isHeldRead(id)),
+      // A string made its own takes a reference of its own to exchange.
+      emitRetain(sharedPtr,
+                 lend && !expr->isUnshared() &&
+                     (inout ? isLentRead(id) : !isHeldRead(id)),
                  id->getResolvedType());
-      return sharedPtr;
+      return ownIfUnshared(expr, sharedPtr);
     }
   }
 

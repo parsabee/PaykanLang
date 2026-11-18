@@ -9,6 +9,7 @@
 
 #include "Dialect/PIRDialect.h"
 #include "Lowering/PIRToStandard.h"
+#include "Names.h"
 
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
@@ -20,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace paykan::mlir_backend {
@@ -61,6 +63,8 @@ private:
   OpBuilder B;
   Location Loc;
   std::string Error;
+  /// The module's string objects (`strobj`), whose address is an `obj`.
+  std::unordered_set<std::string> StringObjects;
   /// The module's functions by name, for the callee of a call.
   std::unordered_map<std::string, const P::Function *> Functions;
 
@@ -127,8 +131,20 @@ private:
   // -- Module-level items
 
   void importGlobals() {
-    for (const P::CStrGlobal &g : M.CStrs)
-      CStrOp::create(B, Loc, g.Name, g.Data);
+    for (const P::CStrGlobal &g : M.CStrs) {
+      CStrOp::create(B, Loc, g.Name, g.Data, g.Object);
+      if (g.Object)
+        StringObjects.insert(g.Name);
+    }
+    const bool objects = !StringObjects.empty();
+    // A string object names the runtime's `Str` vtable, which the module
+    // may not name itself.
+    const std::string strVTable = P::runtimeName(names::kPaykanStringVtable);
+    if (objects && std::none_of(M.Externs.begin(), M.Externs.end(),
+                                [&](const P::ExternGlobal &g) {
+                                  return g.Name == strVTable;
+                                }))
+      ExternVTableOp::create(B, Loc, strVTable);
     for (const P::DataGlobal &g : M.Datas)
       DataOp::create(B, Loc, g.Name, g.Words);
     for (const P::BytesGlobal &g : M.Bytes) {
@@ -350,6 +366,8 @@ private:
     for (const P::ExternGlobal &g : M.Externs)
       if (g.Name == sym.Name && g.K == P::ExternGlobal::Object)
         t = ObjType::get(&Ctx);
+    if (StringObjects.count(sym.Name))
+      t = ObjType::get(&Ctx);
     return AddressOfOp::create(B, Loc, t, sym.Name);
   }
 

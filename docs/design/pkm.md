@@ -1040,7 +1040,7 @@ ClassRec
   uleb nFields ; nFields × (str name ; slot type)           layout order, ancestors first
   uleb nSlots  ; nSlots  × (str slot ; str target ("" = null) ; sig)
 ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
-CStrRec          str name ; bytes                            no NUL stored
+CStrRec          str name ; bytes ; u8 object (0, 1)          no NUL stored; 1: a `strobj`, a static string object over the bytes (docs/pir.md §4)
 DataRec          str name ; uleb n ; n × sleb
 BytesRec         str name ; bytes                            raw constant bytes, any values
 SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance, obsolete: #168 is not planned) ; type ; [bit2] Operand init

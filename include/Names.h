@@ -249,6 +249,7 @@ inline constexpr const char *kPaykanObjectNone = "PaykanObject_None";
 inline constexpr const char *kPaykanStringFromChar = "PaykanString_from_char";
 inline constexpr const char *kPaykanStringCharAt = "PaykanString_char_at";
 inline constexpr const char *kPaykanStringNew = "PaykanString_new";
+inline constexpr const char *kPaykanStringOwned = "PaykanString_owned";
 inline constexpr const char *kPaykanStringDestroy = "PaykanString_destroy";
 inline constexpr const char *kPaykanStringFromInt = "PaykanString_from_int";
 inline constexpr const char *kPaykanStringFromUint = "PaykanString_from_uint";
@@ -439,6 +440,10 @@ inline constexpr const char *kPaykanRetainNonNullInline =
     "Paykan_retain_nonnull_inline";
 inline constexpr const char *kPaykanReleaseNonNullInline =
     "Paykan_release_nonnull_inline";
+/// PaykanString_owned's test of its argument, in place (#363): Runtime.h's
+/// static inline function for the C path; the LLVM path emits the same.
+inline constexpr const char *kPaykanStringOwnedInline =
+    "PaykanString_owned_inline";
 
 // Tracking heap allocator.  Generated code allocates object structs through
 // kPaykanMalloc too, so its allocations are counted with the runtime's own
@@ -596,6 +601,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicPureVirtual,
     // String
     kPaykanStringNew,
+    kPaykanStringOwned,
     kPaykanStringDestroy,
     kPaykanStringConcat,
     kPaykanStringCharAt,

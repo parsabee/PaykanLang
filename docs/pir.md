@@ -296,6 +296,7 @@ would.
 module "<name>"                     ; the canonical module name (`geometry::shapes`; the main module: its file stem)
 
 cstr  @.str0  = "hello\n"  len 6   ; NUL-terminated literal data (`ptr`)
+strobj @.str1 = "hello"    len 5   ; a static `Str` object over such data (`obj`)
 data  @.type0 = [8, 8, 0, 0, 0]    ; constant i64 words: a `PaykanType` descriptor (`ptr`)
 data  @.tuple0 = [2, 0, 0, 4, 8]   ; constant i64 words: a tuple layout (`ptr`)
 bytes @.b0    = [0, 4]             ; constant bytes (`ptr`)
@@ -319,6 +320,49 @@ extern class Adder module "helper" { field n: i64 }   ; layout only
 
 fn / extern fn                      ; §3
 ```
+
+A `strobj` is a string literal's value: one `PaykanString` in the module's
+data, `{ vtable, strong, weak, data, len }`, whose strong count is the
+immortal one (`PAYKAN_REF_MAX`).  A `retain` or `release` of it writes
+nothing and nothing frees it, so every evaluation of the literal names the
+same object and allocates nothing.
+
+That is sound because the object is only ever where no string is changed in
+place: in a bare `Str` variable or parameter (which Sema lets no one lend
+`inout`, append to or assign through), or on its way through an expression
+(a comparison's operand, a `view` argument, a `+` operand, a method's
+receiver).  Everywhere else a unique `Str` is stored, Sema marks the value
+(`Expr::isUnshared`, set in `checkQualifiedFlow` and for `concat`'s
+receiver) and the lowering makes it a string of its own there: a literal is
+lowered as a new string (`PaykanString_new` over a `cstr`, as every literal
+was before), and any other value passes through the runtime's
+`PaykanString_owned` (the reference given, or one to a new string of the
+same text when the given one is the static object).  A `Str` held as an
+`Obj` is one still (a `match` gives it back), so an `Obj` is marked as a
+`Str` is, and `PaykanString_owned` leaves any object that is no static
+string as it is.  Those stores are:
+
+- a `mut` slot (a variable, a result), where the string may be appended to;
+- a `mut` parameter, which the function makes its own as it starts
+  (`declareParam`: `%s.str = call @$rt.PaykanString_owned(%s)`), whatever
+  its caller passed: a function value's type and an overridden method's
+  signature do not say `mut`, and a method named `equals` is lent its
+  argument, so the callers cannot all know;
+- a field, an element or a payload, which is written as what holds it is: a
+  holder gains `mut` by `move` with no flow of the string itself;
+- what an `inout` binding names, and a native function's by-value parameter,
+  which is stored wherever the native stores it;
+- a slot of any other form (`shared`, `shared mut`, `atomic shared`, `locked
+  mut`): several names hold the string, a change shows through all of them,
+  and a `weak` reference sees it go;
+- a temporary that is the receiver of `concat` (a result, `move s`, a
+  literal).
+
+So a read of a place that can be changed always names the string a later
+change is made to, and no program can tell a literal's string from another.
+`PaykanString_concat_inplace` panics on the static object (`internal error:
+'concat' on a string literal's shared object`): a route the compiler missed
+stops there instead of writing the program's data.
 
 The lowering emits a `.typeN` `data` global for each type argument of a
 generic native function (`Runtime.h`, "Generic native functions": the size,

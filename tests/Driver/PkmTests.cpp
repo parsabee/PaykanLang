@@ -3592,7 +3592,7 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
   auto pir = in(paykanCmd() + " --emit-pir main.pkn");
   ASSERT_EQ(pir.exitCode, 0) << pir.out;
   for (const char *call :
-       {"call @\"lib::Node\"(lent %s.", "call @\"lib::stash\"(%h.8, lent %n.",
+       {"call @\"lib::Node\"(lent %s.", "call @\"lib::stash\"(%h.6, lent %n.",
         "call @\"lib::width\"(lent %s."})
     EXPECT_TRUE(contains(pir.out, call)) << call << "\n" << pir.out;
   // n's last use hands it over.

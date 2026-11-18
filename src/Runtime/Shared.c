@@ -253,7 +253,9 @@ void Paykan_dispose(PaykanObject *obj) {
 // -- Weak references
 
 PaykanWeak *Paykan_weak_new(PaykanShared *shared) {
-  if (shared) {
+  // An immortal object (a literal's static string) is never written: it
+  // is always alive, so a weak reference to it counts nothing.
+  if (shared && shared->strong != PAYKAN_REF_MAX) {
     if (PAYKAN_UNLIKELY(shared->weak == PAYKAN_REF_MAX))
       count_overflow("weak", PAYKAN_REF_MAX);
     ++shared->weak;
@@ -270,6 +272,8 @@ PaykanShared *Paykan_weak_load(PaykanWeak *weak) {
 }
 
 void Paykan_weak_release(PaykanWeak *weak) {
-  if (weak && --weak->weak == 0 && weak->strong == 0)
+  if (!weak || weak->strong == PAYKAN_REF_MAX)
+    return;
+  if (--weak->weak == 0 && weak->strong == 0)
     Paykan_free(weak);
 }

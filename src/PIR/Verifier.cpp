@@ -151,7 +151,7 @@ struct ModuleIndex {
     for (const Class &c : m.Classes)
       Classes.emplace(c.Name, &c);
     for (const CStrGlobal &g : m.CStrs)
-      Globals.emplace(g.Name, Type::Ptr);
+      Globals.emplace(g.Name, g.Object ? Type::Obj : Type::Ptr);
     for (const DataGlobal &g : m.Datas)
       Globals.emplace(g.Name, Type::Ptr);
     for (const BytesGlobal &g : m.Bytes)

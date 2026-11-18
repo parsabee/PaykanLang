@@ -200,9 +200,10 @@ TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  // Each literal: PaykanString_new, boxed into the variable's slot.
-  EXPECT_EQ(count(m, "call @$rt.PaykanString_new("), 2u) << m;
-  EXPECT_EQ(count(m, " = box "), 2u) << m;
+  // Each literal: its static string object, boxed into the variable's
+  // slot (#363: no string is made).
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_new("), 0u) << m;
+  EXPECT_EQ(count(m, " = box @.str"), 2u) << m;
   // Two releases before `ret`: b (declared last) first, then a.
   size_t relA = m.rfind("release");
   size_t relB = m.rfind("release", relA - 1);
@@ -611,12 +612,12 @@ fn main() -> int {
 
 TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
   auto l = lower(R"(
-    fn main() -> int { n = "hi".len(); return n; }
+    fn main() -> int { n = Str<int>(12).len(); return n; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  size_t newStr = m.find("call @$rt.PaykanString_new(");
-  size_t println = m.find(" = vcall %str.");
+  size_t newStr = m.find("call @$rt.PaykanString_from_int(");
+  size_t println = m.find(" = vcall %call.");
   size_t destroy = m.find("call @$rt.Paykan_dispose(");
   ASSERT_NE(newStr, std::string::npos) << m;
   ASSERT_NE(println, std::string::npos) << m;
@@ -636,9 +637,13 @@ TEST(Lowering, ConcatReleasesOwnedOperandsAndTracksTheResult) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  // Literal and Str<int> temporaries are destroyed after the concat; the
-  // concat result is boxed into `s` and released at scope exit.
-  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose("), 2u) << m;
+  // The Str<int> temporary is destroyed after the concat (the literal is
+  // its static object, which nothing destroys); the concat result is boxed
+  // into `s` and released at scope exit.
+  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose("), 1u) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanString_concat(@.str0, %call."),
+            std::string::npos)
+      << m;
   size_t concat = m.find("call @$rt.PaykanString_concat(");
   size_t box = m.find(" = box ");
   ASSERT_NE(concat, std::string::npos) << m;
@@ -2870,22 +2875,25 @@ TEST(Lowering, AStrOrFloatMatchIsAsDeepForAnyNumberOfArms) {
   }
 }
 
-TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
+TEST(Lowering, StringMatchSubjectIsAStrReleasedOnEveryExit) {
   auto l = lower(R"(import ::io;
     fn f() -> int {
+      match Str<int>(5) { "t" { return 1; } _ { return 2; } }
+    }
+    fn g() -> int {
       match "s" { "t" { return 1; } _ { return 2; } }
     }
     fn main() -> int {
-      match "s" { "t" { io::println("t"); } _ { io::println("other"); } }
-      return f();
+      match Str<int>(5) { "t" { io::println("t"); } _ { io::println("other"); } }
+      return f() + g();
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
   std::string m = function(l.Text, "main");
-  // The subject: a Str built from the literal, boxed for the match.
-  size_t subj = m.find("%str.1 = call @$rt.PaykanString_new(@.str");
-  size_t box = m.find("%subj.box.2 = box %str.1");
-  size_t eq = m.find("call @$rt.PaykanString_equals(%str.1, ");
+  // The subject: a Str temporary, boxed for the match.
+  size_t subj = m.find("%call.1 = call @$rt.PaykanString_from_int(5)");
+  size_t box = m.find("%subj.box.2 = box %call.1");
+  size_t eq = m.find("call @$rt.PaykanString_equals(%call.1, ");
   ASSERT_NE(subj, std::string::npos) << m;
   ASSERT_NE(box, std::string::npos) << m;
   ASSERT_NE(eq, std::string::npos) << m;
@@ -2894,6 +2902,13 @@ TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
   EXPECT_EQ(count(m, "release %subj.box."), 1u) << m;
   std::string fn = function(l.Text, "f");
   EXPECT_EQ(count(fn, "release %subj.box."), 2u) << fn; // both returns
+  // A literal subject is its static string object (#363): compared where
+  // it is, with nothing to make, box or release.
+  fn = function(l.Text, "g");
+  EXPECT_NE(fn.find("call @$rt.PaykanString_equals(@.str"), std::string::npos)
+      << fn;
+  EXPECT_EQ(count(fn, "subj.box"), 0u) << fn;
+  EXPECT_EQ(count(fn, "release"), 0u) << fn;
 }
 
 TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
@@ -3926,10 +3941,10 @@ TEST(Lowering, MethodSymbolsCannotClashWithUserFunctions) {
   ASSERT_NE(pm.findFunction("K_w"), nullptr);
 }
 
-// #116: every value use of a string literal is a Str object built by
-// PaykanString_new (a tracked temporary), never the raw `@.strN` C string:
-// as a subscript or method receiver it is destroyed after the borrowing
-// call, and bound to a variable it is boxed like any other temporary.
+// #116, #363: every value use of a string literal is a Str object, never a
+// raw C string: the module's static object of its text (`strobj @.strN`, an
+// `obj`), used where it is as a subscript or method receiver and boxed
+// when bound to a variable.  Nothing makes or destroys a string.
 TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
   auto l = lower(R"(
     fn main() -> int {
@@ -3941,16 +3956,16 @@ TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "call @$rt.PaykanString_new(@.str"), 3u) << m;
-  // No runtime call takes the raw C string other than PaykanString_new.
-  EXPECT_EQ(count(m, "(@.str"), 3u) << m;
-  size_t at = m.find("call @$rt.PaykanString_char_at(%str.");
+  EXPECT_EQ(count(l.Text, "strobj @.str"), 3u) << l.Text;
+  EXPECT_EQ(count(l.Text, "cstr @.str"), 0u) << l.Text;
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_new("), 0u) << m;
+  size_t at = m.find("call @$rt.PaykanString_char_at(@.str0, 1)");
   ASSERT_NE(at, std::string::npos) << m;
-  EXPECT_NE(m.find("vcall %str."), std::string::npos) << m; // .len()
-  // The subscript's and the receiver's Strs are destroyed after their use;
-  // the bound one is boxed into `v` (released at scope exit).
-  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose(%str."), 2u) << m;
-  EXPECT_NE(m.find("= box %str."), std::string::npos) << m;
+  EXPECT_NE(m.find("vcall @.str1 "), std::string::npos) << m; // .len()
+  // Nothing is destroyed; the bound one is boxed into `v` (released at
+  // scope exit, which an immortal object ignores).
+  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose("), 0u) << m;
+  EXPECT_NE(m.find("= box @.str2"), std::string::npos) << m;
 }
 
 // #117: runtime externs are `$rt.<C symbol>` in PIR, a name no Paykan
@@ -3968,6 +3983,7 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
     fn main() -> int {
       Paykan_println("x");
       Paykan_panic_div_by_zero();
+      fresh: mut Str = "new"; // a literal in a `mut` slot is a new string
       a: Str? = None;
       s = a.toString();
       return PaykanString_new(1) + PaykanObject_None() + 5 / z();
@@ -5073,21 +5089,21 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   auto mv = moved(lower(source), stats);
   ASSERT_TRUE(mv.Ok) << mv.Error;
   m = function(mv.Text, "main");
+  EXPECT_NE(m.find("  retain lend nonnull %a.3\n"
+                   "  call @show(%a.3)\n"),
+            std::string::npos)
+      << m;
   EXPECT_NE(m.find("  retain lend nonnull %a.4\n"
-                   "  call @show(%a.4)\n"),
+                   "  call @pass(%a.4)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  retain lend nonnull %a.5\n"
-                   "  call @pass(%a.5)\n"),
+  EXPECT_NE(m.find("  retain lend nonnull %a.7\n"
+                   "  call @keep(%h.6, %a.7)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  retain lend nonnull %a.8\n"
-                   "  call @keep(%h.7, %a.8)\n"),
-            std::string::npos)
-      << m;
-  EXPECT_NE(m.find("  call @show(%call.11)\n"
-                   "  %a.12 = load %a.0\n"
-                   "  call @show(%a.12)\n"),
+  EXPECT_NE(m.find("  call @show(%call.9)\n"
+                   "  %a.10 = load %a.0\n"
+                   "  call @show(%a.10)\n"),
             std::string::npos)
       << m;
   pir::PassManager lending(/*verifyEach=*/true);
@@ -5099,13 +5115,13 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   const std::string text = pir::toString(mv.Program);
   EXPECT_EQ(text.find("retain lend "), std::string::npos) << text;
   m = function(text, "main");
-  EXPECT_NE(m.find("  %a.4 = load %a.0\n"
-                   "  call @show(lent %a.4)\n"
-                   "  %a.5 = load %a.0\n"
-                   "  call @pass(lent %a.5)\n"),
+  EXPECT_NE(m.find("  %a.3 = load %a.0\n"
+                   "  call @show(lent %a.3)\n"
+                   "  %a.4 = load %a.0\n"
+                   "  call @pass(lent %a.4)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  call @keep(%h.7, lent %a.8)\n"), std::string::npos) << m;
+  EXPECT_NE(m.find("  call @keep(%h.6, lent %a.7)\n"), std::string::npos) << m;
   EXPECT_EQ(count(m, "retain "), 0u) << m;
   EXPECT_NE(function(text, "show").find("(lent %name."), std::string::npos)
       << text;

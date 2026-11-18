@@ -2468,7 +2468,8 @@ Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
     if (!S.checkQualifiedFlow(
             payload->findFieldQualifier(payload->getFieldName(i)), args[i],
             "field '" + payload->getFieldName(i) + "' of '" + callee + "'",
-            args[i]->getLocation()))
+            args[i]->getLocation(), /*implicitMove=*/false,
+            /*materialize=*/true, /*stored=*/true))
       ok = false;
   if (!ok)
     return nullptr;
@@ -3429,7 +3430,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                 node->getArguments()[i],
                                 "parameter " + std::to_string(i + 1) + " of '" +
                                     callee + "'",
-                                node->getArguments()[i]->getLocation()))
+                                node->getArguments()[i]->getLocation(),
+                                /*implicitMove=*/false, /*materialize=*/true,
+                                /*stored=*/sig->Native))
         return nullptr;
   // A borrow takes the qualifier its parameter says (the prototype).
   if (owns && !S.checkBorrowQualifiers(sig->Modes, sig->ParamQuals,
@@ -3788,6 +3791,12 @@ ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
   // on a `view`.
   if (S.checkSharedReceiver(node, method))
     S.checkMethodReceiver(node, method);
+  // `concat` changes its string in place, also a temporary's (a result, a
+  // literal, `move s`), which may be a literal's shared object: that one
+  // is made a string of its own first (#363).  A place's is its own
+  // already.
+  if (ct == S.Ctx.getStrTy() && !method->isView())
+    S.unshareTemporary(node->getReceiver());
   // Another module's instantiation: what the method does is read from its
   // template.
   S.copyImportedInstance(recvTy, node->getLocation());
@@ -3832,10 +3841,13 @@ ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
   // the send check a free function's call makes first too.
   if (method->isAsync() && !S.checkSendArgs(node, method))
     return nullptr;
-  // `equals` is lent its argument, as `==` lends it: comparing keeps nothing.
-  const bool lends = node->getMethodName() == names::kMethodEquals;
+  // `equals` is lent its argument, as `==` lends it: comparing keeps
+  // nothing.  Not one whose parameter is of another form, a handle its
+  // method may keep: that argument converts as any other does.
+  const bool equals = node->getMethodName() == names::kMethodEquals;
   for (size_t i = 0; i < node->getNumArguments(); ++i)
-    if (!lends && node->getArguments()[i]->getResolvedType() &&
+    if (!(equals && method->getParamQual(i).Form == ast::QualForm::Unique) &&
+        node->getArguments()[i]->getResolvedType() &&
         method->getParamModes().mode(i) == ast::ParamMode::Value &&
         !S.checkQualifiedFlow(method->getParamQual(i), node->getArguments()[i],
                               "parameter " + std::to_string(i + 1) + " of '" +
@@ -4065,7 +4077,9 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     if (!S.repeatsAPlace(node, elemTy))
       S.checkQualifiedFlow(elemQual, node->getElements()[i],
                            "an element of the array",
-                           node->getElements()[i]->getLocation());
+                           node->getElements()[i]->getLocation(),
+                           /*implicitMove=*/false, /*materialize=*/true,
+                           /*stored=*/true);
   }
   if (!S.checkRepeatValue(node, elemTy, movedBefore))
     return nullptr;
@@ -4111,7 +4125,8 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
     // that is not Copyable is checkRepeatValue's.
     if (!S.repeatsAPlace(node, elemTy) &&
         !S.checkQualifiedFlow(elemQual, elem, "an element of the array",
-                              elem->getLocation()))
+                              elem->getLocation(), /*implicitMove=*/false,
+                              /*materialize=*/true, /*stored=*/true))
       ok = false;
     if (hasInferredLength(elemTy)) {
       ast::Type *filled = S.fillLengths(elemTy, ty);
@@ -4426,7 +4441,8 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
              own.Form == ast::QualForm::Shared && ast::isRefType(ty))
       q = own;
     if (!S.checkQualifiedFlow(q, elem, "an element of the tuple",
-                              elem->getLocation()))
+                              elem->getLocation(), /*implicitMove=*/false,
+                              /*materialize=*/true, /*stored=*/true))
       ok = false;
     if (holdsFixedArray(ty)) {
       S.errorFixedArrayHere(elem->getLocation(), ty,
@@ -5695,9 +5711,13 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
                       CurrentScope->lookup(varName),
                       "variable '" + varName + "'", node->getLocation()))
     return false;
+  // (An `inout` binding names storage of its lender's, which is a place a
+  // string may be changed through: #363.)
   if (kind != VarKind::Weak && kind != VarKind::WeakView &&
       !checkQualifiedFlow(qualifierOfVar(varName), node->getValue(),
-                          "variable '" + varName + "'", node->getLocation()))
+                          "variable '" + varName + "'", node->getLocation(),
+                          /*implicitMove=*/false, /*materialize=*/true,
+                          /*stored=*/kind == VarKind::Inout))
     return false;
 
   return viewOk;
@@ -7345,7 +7365,8 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                           node->getLocation());
   if (!checkQualifiedFlow(fieldQual, node->getValue(),
                           "field '" + node->getFieldName() + "'",
-                          node->getLocation()))
+                          node->getLocation(), /*implicitMove=*/false,
+                          /*materialize=*/true, /*stored=*/true))
     return false;
 
   return checkViewNotStored(node->getValue(), valTy);
@@ -7425,7 +7446,8 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
       fixed ? fixed->getElemQual() : slice->getElemQual();
   if (!checkQualifiedFlow(elemQual, node->getValue(),
                           "an element of '" + placeText(node->getArray()) + "'",
-                          node->getLocation()))
+                          node->getLocation(), /*implicitMove=*/false,
+                          /*materialize=*/true, /*stored=*/true))
     return false;
   return checkViewNotStored(node->getValue(), valTy);
 }
