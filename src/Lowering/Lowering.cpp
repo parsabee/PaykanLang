@@ -2223,8 +2223,10 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
                                    const std::vector<Val> &args,
                                    const Val &memResult,
                                    std::vector<Val> *keep) {
-  if (std::optional<Val> inPlace =
-          emitBufferNative(node, args, memResult, keep)) {
+  std::optional<Val> inPlace = emitBufferNative(node, args, memResult, keep);
+  if (!inPlace)
+    inPlace = emitMoveNative(node, args, memResult);
+  if (inPlace) {
     // The module binds the symbol all the same: a C symbol has one
     // signature in a program, whichever of its bindings call it
     // (checkNativeSymbols).

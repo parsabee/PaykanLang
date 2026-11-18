@@ -1005,6 +1005,19 @@ private:
   Val emitNativeCall(const ast::FuncDecl &node, const std::vector<Val> &args,
                      const Val &memResult = Val(),
                      std::vector<Val> *keep = nullptr);
+  /// emitNativeCall of `mem::swap`'s and the containers' move-out's runtime
+  /// functions (Paykan_mem_swap, Paykan_mem_move_out), emitted in place
+  /// (#365): two values of a known type trade their bytes, or one leaves
+  /// its place for the result and zeros stay, where the runtime copied
+  /// byte by byte to the size its PaykanType gives.  No value for any other
+  /// function, or one bound with another signature than ::memory's.
+  std::optional<Val> emitMoveNative(const ast::FuncDecl &node,
+                                    const std::vector<Val> &args,
+                                    const Val &memResult);
+  /// The bytes of a value of type @p ty (its qualifier aside) in storage a
+  /// generic native function reads: the `size` of emitTypeDescriptor's
+  /// PaykanType for it.
+  int64_t nativeValueSize(ast::Type *ty);
   /// emitNativeCall's call of the C symbol itself, whatever the function.
   Val emitNativeSymbolCall(const ast::FuncDecl &node,
                            const std::vector<Val> &args, const Val &memResult);

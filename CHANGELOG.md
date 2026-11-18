@@ -219,6 +219,15 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- `mem::swap`, `mem::replace`, `mem::take` and the containers' move of a value out of a
+  node exchange their values in place (#365): each called a runtime function that copied
+  byte by byte to the size a type descriptor gave. The check of a value moved out of
+  borrowed storage keeps its state in one thread variable where it reached for five. The
+  Towers benchmark's shape with unique disks (each move takes a disk out of a pile and
+  puts it on another) runs 16 million moves in 0.45 s where it took 0.92 s, and 100
+  million objects moved between two buffers that are `inout` parameters take 0.43 s where
+  they took 0.96 s (`-O2`, Release runtime). What is left of both is that check, which
+  walks what the moved value holds.
 - A `mem::Buffer<T>` reads, stores, exchanges and pops its values in place (#364). Every
   access went through a generic runtime function that found the value's size and
   references in a type descriptor at run time; the compiler knows `T`, and now emits the

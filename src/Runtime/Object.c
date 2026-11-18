@@ -32,68 +32,79 @@ void PaykanObject_walk(PaykanObject *self) { (void)self; }
 // heap (never Paykan_malloc, so --track-heap counts are unaffected), so a long
 // chain of unique objects cannot overflow the C stack.
 enum { kWalkNone, kWalkCheck, kWalkFreeze };
-static _Thread_local int g_walk_mode;
-static _Thread_local int g_walk_failed; // something else holds a part of it
 #define PAYKAN_WALK_INLINE 32
-static _Thread_local PaykanObject *g_walk_inline[PAYKAN_WALK_INLINE];
-static _Thread_local PaykanObject **g_walk_heap; // past g_walk_inline's room
-static _Thread_local size_t g_walk_len;
-static _Thread_local size_t g_walk_cap;
+/// A walk's state, the thread's own.  Reaching a thread's variable may be
+/// a call (macOS), so it is one variable, whose address each function here
+/// takes once.
+typedef struct PaykanWalk {
+  int mode;
+  int failed;          // something else holds a part of it
+  size_t len;          // the objects still to visit
+  size_t cap;          // of `heap`
+  PaykanObject **heap; // past `first`'s room
+  PaykanObject *first[PAYKAN_WALK_INLINE];
+} PaykanWalk;
+static _Thread_local PaykanWalk g_walk;
 
-static void walk_push(PaykanObject *obj) {
-  if (g_walk_len < PAYKAN_WALK_INLINE) {
-    g_walk_inline[g_walk_len++] = obj;
+static void walk_push(PaykanWalk *w, PaykanObject *obj) {
+  if (w->len < PAYKAN_WALK_INLINE) {
+    w->first[w->len++] = obj;
     return;
   }
-  const size_t past = g_walk_len - PAYKAN_WALK_INLINE;
-  if (past == g_walk_cap) {
-    size_t cap = g_walk_cap ? g_walk_cap * 2 : 64;
+  const size_t past = w->len - PAYKAN_WALK_INLINE;
+  if (past == w->cap) {
+    size_t cap = w->cap ? w->cap * 2 : 64;
     PaykanObject **grown =
-        (PaykanObject **)realloc(g_walk_heap, cap * sizeof(PaykanObject *));
+        (PaykanObject **)realloc(w->heap, cap * sizeof(PaykanObject *));
     if (!grown)
       Paykan_runtime_panic("out of memory walking a value");
-    g_walk_heap = grown;
-    g_walk_cap = cap;
+    w->heap = grown;
+    w->cap = cap;
   }
-  g_walk_heap[past] = obj;
-  ++g_walk_len;
+  w->heap[past] = obj;
+  ++w->len;
 }
 
-static void walk_visit(PaykanObject *obj) {
+static void walk_visit(PaykanWalk *w, PaykanObject *obj) {
   if (!obj)
     return;
   const int32_t s = obj->strong;
   if (s >= PAYKAN_REF_ATOMIC)
     return; // a handle, another frozen value, or immortal
-  if (s > 1 || (g_walk_mode == kWalkFreeze && obj->weak != 0)) {
-    g_walk_failed = 1;
+  if (s > 1 || (w->mode == kWalkFreeze && obj->weak != 0)) {
+    w->failed = 1;
     return;
   }
-  if (g_walk_mode == kWalkFreeze)
+  if (w->mode == kWalkFreeze)
     obj->strong = PAYKAN_REF_ATOMIC + 1;
-  walk_push(obj);
+  walk_push(w, obj);
 }
 
 /// Walks the stack empty, or until something else is found holding a part
 /// of the value.  Whether nothing was.
-static int64_t walk_drain(void) {
-  while (g_walk_len && !g_walk_failed) {
-    --g_walk_len;
-    Paykan_vcall_walk(g_walk_len < PAYKAN_WALK_INLINE
-                          ? g_walk_inline[g_walk_len]
-                          : g_walk_heap[g_walk_len - PAYKAN_WALK_INLINE]);
+static int64_t walk_drain(PaykanWalk *w) {
+  while (w->len && !w->failed) {
+    --w->len;
+    Paykan_vcall_walk(w->len < PAYKAN_WALK_INLINE
+                          ? w->first[w->len]
+                          : w->heap[w->len - PAYKAN_WALK_INLINE]);
   }
-  g_walk_len = 0;
-  g_walk_mode = kWalkNone;
-  free(g_walk_heap); // a long chain's peak is not kept for the thread's life
-  g_walk_heap = NULL;
-  g_walk_cap = 0;
-  return !g_walk_failed;
+  w->len = 0;
+  w->mode = kWalkNone;
+  if (w->heap) {
+    free(w->heap); // a long chain's peak is not kept for the thread's life
+    w->heap = NULL;
+    w->cap = 0;
+  }
+  return !w->failed;
 }
 
 void Paykan_walk_child(PaykanObject *obj, int64_t unique) {
-  if (unique && g_walk_mode != kWalkNone)
-    walk_visit(obj);
+  if (!unique || !obj)
+    return;
+  PaykanWalk *w = &g_walk;
+  if (w->mode != kWalkNone)
+    walk_visit(w, obj);
 }
 
 void Paykan_freeze(PaykanObject *obj) {
@@ -101,39 +112,43 @@ void Paykan_freeze(PaykanObject *obj) {
     return;
   if (obj->strong != 1 || obj->weak != 0)
     Paykan_runtime_panic("a value made 'atomic shared' is still borrowed");
-  g_walk_mode = kWalkFreeze;
-  g_walk_failed = 0;
+  PaykanWalk *w = &g_walk;
+  w->mode = kWalkFreeze;
+  w->failed = 0;
   Paykan_vcall_walk(obj);
-  if (!walk_drain())
+  if (!walk_drain(w))
     Paykan_runtime_panic("a value made 'atomic shared' is still borrowed");
   obj->strong = PAYKAN_REF_ATOMIC + 1;
 }
 
 void Paykan_freeze_mem(const void *type, void *value) {
   const PaykanType *t = (const PaykanType *)type;
+  PaykanWalk *w = &g_walk;
   for (int64_t k = 0; k < t->nrefs; ++k) {
     const int64_t word = PaykanType_ref(t, k);
     PaykanShared *ref =
         *(PaykanShared **)((unsigned char *)value + PaykanType_refOffset(word));
-    if (g_walk_mode == kWalkNone)
+    if (w->mode == kWalkNone)
       Paykan_freeze(ref);
     else if (!(word & 2))
-      walk_visit(ref);
+      walk_visit(w, ref);
   }
 }
 
 int64_t Paykan_moved_unique(PaykanShared *box) {
-  g_walk_mode = kWalkCheck;
-  g_walk_failed = 0;
-  walk_visit((PaykanObject *)box);
-  return walk_drain();
+  PaykanWalk *w = &g_walk;
+  w->mode = kWalkCheck;
+  w->failed = 0;
+  walk_visit(w, (PaykanObject *)box);
+  return walk_drain(w);
 }
 
 int64_t Paykan_moved_unique_mem(const void *type, void *value) {
-  g_walk_mode = kWalkCheck;
-  g_walk_failed = 0;
+  PaykanWalk *w = &g_walk;
+  w->mode = kWalkCheck;
+  w->failed = 0;
   Paykan_freeze_mem(type, value);
-  return walk_drain();
+  return walk_drain(w);
 }
 
 // -- Constructor / Destructor

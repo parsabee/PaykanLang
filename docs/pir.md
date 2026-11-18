@@ -419,11 +419,18 @@ reads, stores, exchanges, pops or adds a value is emitted in place
   function when the allocation is to change (no room; a quarter or less of
   it in use), and the pop for an empty buffer's panic.
 
+`::memory`'s `swap` (and so `replace` and `take`) and the containers' move
+of a value out of a node are bound to `Paykan_mem_swap` and
+`Paykan_mem_move_out`, which copy byte by byte to the size the descriptor
+gives.  They are emitted in place the same way (`emitMoveNative`, #365): the
+two places are loaded and stored each to the other, or one is loaded for the
+result and zeroed.
+
 So a loop over a buffer of objects calls nothing but a panic, and moving a
-value from one buffer to another counts nothing.  A function bound with
+value from one buffer to another, or out of a field into another, counts
+nothing.  A function bound with
 another signature than `::memory`'s (its parameters or its result), a count
-that is no constant 1, and a type the lowering does not read in place (an
-`atomic` cell's handle, a struct with a `__deinit__`, which the runtime's
+that is no constant 1, and a struct with a `__deinit__` (which the runtime's
 drop does not run) call the runtime as before.
 
 Every symbol a function body references must be declared in its module: a call
