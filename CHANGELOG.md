@@ -713,6 +713,13 @@ samples/concurrency/README.md.
   the instance lost a block it should have (`no method 'h' on type 'Box<Key>'`) or got one it
   should not, and an enum that held a `cl::List` of itself did not compile. The block now
   joins the instance once the argument is known.
+- A bound of an `impl` block that names a built-in trait with type arguments (`impl Box<T:
+  Copyable<int>>`) was looked up each time an instance asked whether it met it. A template
+  without instances was accepted, and one with two reported `trait 'Copyable' expects 0 type
+  argument(s), got 1` twice at the block, which a debug build of the compiler aborts on; for
+  another module's template the errors were in the importer's file. The bound is an error of
+  its block, reported once, where it is written, whatever instances there are (src/Sema:
+  `checkImplBounds`; tests/Sema/GenericsTests.cpp, `ABadBoundOfABlockIsReportedOnceAtTheBlock`).
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is

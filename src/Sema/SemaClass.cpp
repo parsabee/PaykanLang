@@ -2150,21 +2150,9 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
         continue;
       }
     }
-    // A block's bounds (`impl List<T: Cloneable>`) name built-in traits: an
-    // instance is made before the module's own traits' blocks are known.
-    bool bounded = true;
-    for (const auto &bs : im->getTypeParamBounds())
-      for (ast::Type *b : bs)
-        if (!namesBuiltinTrait(b)) {
-          error(b->getLocation().isValid() ? b->getLocation()
-                                           : im->getLocation(),
-                "the bounds of an 'impl' block name built-in traits ('" +
-                    std::string(names::kTraitCloneable) + "', '" +
-                    names::kTraitCopyable + "', ...), not '" +
-                    traitAnnotationName(b) + "'");
-          bounded = false;
-        }
-    if (!bounded) {
+    // So is what its bounds name (`impl List<T: Cloneable>`): here, and not
+    // each time an instance asks whether it meets them (implBoundsHold).
+    if (!checkImplBounds(im)) {
       ok = false;
       continue;
     }

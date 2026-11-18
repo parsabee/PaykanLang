@@ -768,17 +768,70 @@ bool Sema::checkImplForm(const ast::ImplDecl *im, const std::string &trait,
   return true;
 }
 
+bool Sema::checkImplBounds(const ast::ImplDecl *im) {
+  // What a bound names is the same for every instance: the block's
+  // parameters stand for any type while it is looked up.
+  Subst placeholders;
+  for (auto *p : im->getTypeParams())
+    placeholders[*p] = Ctx.getObjTy();
+  bool ok = true;
+  // The bounds reported at the block for want of a place of their own.
+  std::vector<std::string> unplaced;
+  for (const auto &bs : im->getTypeParamBounds())
+    for (ast::Type *b : bs) {
+      const bool placed = b->getLocation().isValid();
+      const ast::SourceLocation loc =
+          placed ? b->getLocation() : im->getLocation();
+      // Built-in traits: an instance is made before the module's own
+      // traits' blocks are known.
+      if (!namesBuiltinTrait(b)) {
+        ok = false;
+        // By the name a trait would have, or the type as it is written
+        // where the bound is no name (`T: int`, `T: Copyable?`).
+        std::string name = traitAnnotationName(b);
+        if (name.empty())
+          name = typeName(b);
+        // A built-in type's name has no place in the source, so it is
+        // reported at its block: once, where two bounds read the same.
+        if (!placed) {
+          if (std::find(unplaced.begin(), unplaced.end(), name) !=
+              unplaced.end())
+            continue;
+          unplaced.push_back(name);
+        }
+        error(loc, "the bounds of an 'impl' block name built-in traits ('" +
+                       std::string(names::kTraitCloneable) + "', '" +
+                       names::kTraitCopyable + "', ...), not '" + name + "'");
+        continue;
+      }
+      // And as the trait is written: `Copyable<int>` names none.
+      if (!resolveTraitRef(b, placeholders, loc))
+        ok = false;
+    }
+  return ok;
+}
+
+std::optional<Sema::TraitRef> Sema::implBound(const ast::Type *b) const {
+  // No built-in trait takes type arguments, so the bounds checkImplBounds
+  // lets through are a trait's name alone: nothing of the instance is in
+  // one, and nothing is left to resolve (or to report).
+  const auto *generic = ast::dyn_cast<ast::GenericType>(b);
+  auto it = Traits.find(traitAnnotationName(b));
+  if (it == Traits.end() || !it->second.IsBuiltin ||
+      !it->second.Decl->getTypeParams().empty() ||
+      (generic && !generic->getArgs().empty()))
+    return std::nullopt;
+  return TraitRef{&it->second, {}};
+}
+
 bool Sema::implBoundsHold(const ast::ImplDecl *im,
                           const std::vector<ast::Type *> &args) {
   const auto &bounds = im->getTypeParamBounds();
-  Subst subst;
-  for (size_t i = 0; i < im->getTypeParams().size() && i < args.size(); ++i)
-    subst[*im->getTypeParams()[i]] = args[i];
   for (size_t i = 0; i < bounds.size() && i < args.size(); ++i)
     for (ast::Type *b : bounds[i]) {
-      if (!namesBuiltinTrait(b))
-        return false; // reported with the block
-      auto tr = resolveTraitRef(b, subst, im->getLocation());
+      // A bound that names no trait was reported with its block
+      // (checkImplBounds), which joins no instance.
+      auto tr = implBound(b);
       if (!tr ||
           (!traitImplOwner(args[i], *tr) && !archetypeMeets(args[i], *tr)))
         return false;
