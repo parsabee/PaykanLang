@@ -187,7 +187,15 @@ private:
   /// its argument's copy, which the callee is not lent if the call may let go
   /// of it.  When it is given what reaches an object (@p reaches), it may also
   /// store into what a pending read reads (writesThroughObjects).
-  void call(const Effect &effect, const ast::Expr *by, bool reaches = true) {
+  void call(const Effect &does, const ast::Expr *by, bool reaches = true) {
+    // And what the `__deinit__`s do of the values that may die in it
+    // (handedOver): they are given what those values reach.
+    Effect effect = does;
+    if (const Effect dying = L.handedOver(by);
+        dying.Unknown || dying.Releases || dying.Stores) {
+      effect.add(dying);
+      reaches = true;
+    }
     if (reaches)
       writesThroughObjects(effect, by);
     for (const ast::Expr *read : Live)
@@ -1434,6 +1442,7 @@ void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
   const std::vector<ast::Expr *> &args = ce->getArguments();
   exprs(args);
   changes(args);
+  Out.add(L.handedOver(ce)); // the `__deinit__`s it may run
   // `Str(s)`, a variant made in place or a conversion: the runtime's, given
   // numbers and strings.
   ast::Type *target = nullptr;
@@ -1511,6 +1520,7 @@ void ModuleLowering::EffectScan::methodCall(ast::MethodCallExpr *mc) {
   expr(recv);
   exprs(mc->getArguments());
   changes(mc->getArguments());
+  Out.add(L.handedOver(mc)); // the `__deinit__`s it may run
   // A struct's method that may change `self` changes the receiver.
   if (recv->isChangedByCall() && !ownPlace(recv)) {
     Out.Stores = true;
@@ -1655,7 +1665,7 @@ ModuleLowering::constructorEffect(const std::string &name) {
 
 bool ModuleLowering::isExactClass(const ast::ClassType *ct) {
   return (ct->isBuiltin() && ct->getName() == names::kString) ||
-         ct->getName().find('<') != std::string::npos;
+         ct->getName().find('<') != std::string::npos || ct->isFinal();
 }
 
 // The main module of a program is imported by no module (an import of it
@@ -1690,7 +1700,15 @@ ast::Type *ModuleLowering::slotType(ast::Type *ty) {
 const ModuleLowering::Effect &ModuleLowering::dropEffect(ast::Type *ty) {
   if (auto it = DropEffects.find(ty); it != DropEffects.end())
     return it->second;
+  // While it is worked out, anything: a `__deinit__` it runs may let go of
+  // a value of the type again.
+  DropEffects[ty] = Effect::unknown();
   Effect e;
+  // What a dying object's `__deinit__` does is the drop's to do (#378): the
+  // program's code, which may store and let go as any call may.
+  auto runs = [&](const std::string &owner) {
+    e.add(effectOf(bodyOf(owner + names::kNameSep + names::kMethodDeinit)));
+  };
   std::unordered_set<const ast::Type *> seen;
   std::vector<ast::Type *> work = {ty};
   while (!work.empty() && !e.Unknown) {
@@ -1722,27 +1740,135 @@ const ModuleLowering::Effect &ModuleLowering::dropEffect(ast::Type *ty) {
       work.push_back(ft->getElementType());
     } else if (auto *ct = ast::dyn_cast<ast::ClassType>(t);
                ct && (isExactClass(ct) || isClosedClass(ct))) {
-      // An object that dies lets go of what its fields hold (the object a
-      // weak one names stays), its destructor runs no other code; one of a
-      // closed class may be of a class derived from it.
+      // An object that dies runs the `__deinit__`s its class and its
+      // superclasses declare, then lets go of what its fields hold (the
+      // object a weak one names stays); its destructor runs no other code.
+      // One of a closed class may be of a class derived from it.
       e.Types.insert(ct);
       std::vector<ast::ClassType *> classes = {ct};
       if (auto sub = Subclasses.find(ct); sub != Subclasses.end())
         classes.insert(classes.end(), sub->second.begin(), sub->second.end());
       for (ast::ClassType *k : classes)
         for (ast::ClassType *c = k; c && !c->isBuiltin();
-             c = c->getSuperClass())
+             c = c->getSuperClass()) {
+          if (c->getDeinitMethod())
+            runs(c->getName());
           for (const auto &[name, fieldTy] : c->getFields())
             if (!c->isWeakField(name))
               work.push_back(fieldTy);
+        }
     } else {
       // An object of a class a subclass of which may hold anything, a
       // function value's closure, or a type not known here.
       e = Effect::unknown();
     }
   }
-  e.Releases = e.Unknown || !e.Types.empty();
+  e.Releases = e.Releases || e.Unknown || !e.Types.empty();
   return DropEffects[ty] = std::move(e);
+}
+
+// The values that may die in a call, or where its result is let go of, are
+// the ones it is handed for good (a `move` among its arguments) and the one
+// it hands back.  Their `__deinit__`s are the program's code, given what the
+// values reach: nothing of the caller's when the call was given nothing that
+// reaches an object.  (A value a call is only lent stays its caller's, and
+// one the callee makes and lets go of is in the callee's own effect.)
+ModuleLowering::Effect ModuleLowering::handedOver(const ast::Expr *by) {
+  Effect e;
+  const std::vector<ast::Expr *> *args = nullptr;
+  bool makes = false;
+  bool given = false;
+  if (const auto *ce = by ? ast::dyn_cast<ast::CallExpr>(by) : nullptr) {
+    args = &ce->getArguments();
+    makes = ASTCtx.lookupClassType(ce->getCalleeName()) != nullptr;
+  } else if (const auto *mc =
+                 by ? ast::dyn_cast<ast::MethodCallExpr>(by) : nullptr) {
+    args = &mc->getArguments();
+    // (A receiver that reaches an object is the call's to reach it through.)
+    given = reachesObject(mc->getReceiver()->getResolvedType());
+  } else {
+    return e;
+  }
+  for (const ast::Expr *a : *args) {
+    given = given || reachesObject(a->getResolvedType());
+    if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(a);
+        u && u->getOpcode() == ast::UnaryOpcode::Move)
+      e.add(deinitEffect(u->getOperand()->getResolvedType(), /*exact=*/false));
+  }
+  ast::Type *result = const_cast<ast::Expr *>(by)->getResolvedType();
+  if (given && result && !by->isInoutResult())
+    e.add(deinitEffect(result, makes));
+  return e;
+}
+
+const ModuleLowering::Effect &ModuleLowering::deinitEffect(ast::Type *ty,
+                                                           bool exact) {
+  const std::pair<const ast::Type *, bool> key{ty, exact};
+  if (auto it = DeinitEffects.find(key); it != DeinitEffects.end())
+    return it->second;
+  // While it is worked out, anything: a `__deinit__` it runs may let go of
+  // a value of the type again.
+  DeinitEffects[key] = Effect::unknown();
+  Effect e;
+  auto runs = [&](const std::string &owner) {
+    e.add(effectOf(bodyOf(owner + names::kNameSep + names::kMethodDeinit)));
+  };
+  std::set<std::pair<const ast::Type *, bool>> seen;
+  std::vector<std::pair<ast::Type *, bool>> work = {{ty, exact}};
+  while (!work.empty() && !e.Unknown) {
+    auto [part, known] = work.back();
+    work.pop_back();
+    ast::Type *t = slotType(part);
+    if (!t) {
+      e = Effect::unknown();
+      break;
+    }
+    if (!seen.insert({t, known}).second || ast::isa<ast::BuiltinType>(t))
+      continue;
+    if (auto *et = ast::dyn_cast<ast::EnumType>(t)) {
+      for (size_t i = 0; i < et->getNumVariants(); ++i)
+        if (ast::StructType *p = et->getPayload(i))
+          work.push_back({p, false});
+    } else if (auto *st = ast::dyn_cast<ast::StructType>(t)) {
+      for (size_t i = 0; i < st->getNumFields(); ++i) {
+        ast::Type *elem = bufferElementOf(st, st->getFieldName(i));
+        work.push_back({elem ? elem : st->getElementType(i), false});
+      }
+    } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {
+      for (ast::Type *elem : tt->getElementTypes())
+        work.push_back({elem, false});
+    } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(t)) {
+      work.push_back({ft->getElementType(), false});
+    } else if (auto *ct = ast::dyn_cast<ast::ClassType>(t)) {
+      if (ct->isBuiltin() && ct->getName() == names::kString)
+        continue;
+      known = known || isExactClass(ct);
+      if (!known && !isClosedClass(ct)) {
+        // A class derived from it elsewhere may declare one.
+        e = Effect::unknown();
+        break;
+      }
+      std::vector<ast::ClassType *> classes = {ct};
+      if (!known)
+        if (auto sub = Subclasses.find(ct); sub != Subclasses.end())
+          classes.insert(classes.end(), sub->second.begin(), sub->second.end());
+      for (ast::ClassType *k : classes)
+        for (ast::ClassType *c = k; c && !c->isBuiltin();
+             c = c->getSuperClass()) {
+          if (c->getDeinitMethod())
+            runs(c->getName());
+          // What it holds may die with it (the object a weak field names
+          // stays).
+          for (const auto &[name, fieldTy] : c->getFields())
+            if (!c->isWeakField(name))
+              work.push_back({fieldTy, false});
+        }
+    } else {
+      // A function value's closure, or a type not known here.
+      e = Effect::unknown();
+    }
+  }
+  return DeinitEffects[key] = std::move(e);
 }
 
 ModuleLowering::Effect ModuleLowering::methodEffect(ast::ClassType *ct,

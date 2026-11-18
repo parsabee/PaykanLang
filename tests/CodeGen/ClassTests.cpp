@@ -1375,3 +1375,46 @@ fn main() -> int {
                       "guard 3 released\nafter scoped\nend True\n");
   g.expectNoLeaks("DeinitRunsAsAnyCodeDoes");
 }
+
+// A `__deinit__` that stores through a `weak` reference replaces a slot its
+// object does not hold: a value read from that slot and still in use when
+// the object dies (handed to a call for good, a temporary of the
+// expression, a call's result) keeps a reference of its own.  (It was read
+// after it was freed.)
+TEST(Class, DeinitMayReplaceWhatACallerReads) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+class Label { text: Str; }
+class Board { top: Label; }
+class Bomb {
+  w: weak mut Board?;
+  n: int;
+  fn __deinit__() {
+    match self.w {
+      b: Board { b.top = Label("new" + Str(b.top.text.len())); }
+      None { }
+    }
+  }
+}
+fn show(l: view Label, n: int) -> int {
+  io::println(l.text + " " + Str(n));
+  return n;
+}
+fn boom(x: Bomb) -> int { return x.n; }
+fn mk(b: shared mut Board) -> Bomb { return Bomb(b, 7); }
+fn main() -> int {
+  let board: shared mut Board = Board(Label("a label long enough for the heap"));
+  let bomb = Bomb(board, 1);
+  show(board.top, boom(move bomb));
+  show(board.top, mk(board).n);
+  show(board.top, Bomb(board, 3).n);
+  io::println(board.top.text);
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "a label long enough for the heap 1\nnew32 7\nnew5 3\n"
+                      "new4\n");
+  g.expectNoLeaks("DeinitMayReplaceWhatACallerReads");
+}
