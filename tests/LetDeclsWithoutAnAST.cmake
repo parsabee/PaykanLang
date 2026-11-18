@@ -16,7 +16,7 @@ endforeach()
 execute_process(
     COMMAND "${PYTHON}" "${SOURCE_DIR}/scripts/let_check.py"
             --paykan "${PYTHON}"
-            "${SOURCE_DIR}/samples/codegen/01_literals.pkn"
+            "${SOURCE_DIR}/samples/valid/basics/literals.pkn"
     RESULT_VARIABLE status
     OUTPUT_VARIABLE output
     ERROR_VARIABLE output)

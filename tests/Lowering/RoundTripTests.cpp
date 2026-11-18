@@ -60,7 +60,7 @@ std::vector<std::string> corpus() { return programsIn(PAYKAN_SAMPLES_DIR); }
 /// Lower @p path the way the driver does (project root = its directory).
 /// Returns false (and leaves @p program empty) when the file is not a
 /// program: it has no `main` (an imported module) or does not get through
-/// the frontend and Sema (an `err_` sample).
+/// the frontend and Sema (a samples/invalid one).
 bool lowerFile(const std::string &path, pir::Program &program,
                std::string &error) {
   // Each file is its own program, as in a separate driver run: Sema's
@@ -300,7 +300,7 @@ TEST(PIRMoves, EveryCorpusProgramCountsNoMoreReferencesAndFewerWhereOneMoves) {
     }
     // The samples written to hand variables on at their last use: fewer
     // of both, whatever the pass counted.
-    if (path.find("_moves_") != std::string::npos) {
+    if (path.find("/moves_") != std::string::npos) {
       EXPECT_LT(after.Retains, before.Retains) << path;
       EXPECT_LT(after.Releases, before.Releases) << path;
     }

@@ -18,7 +18,7 @@ form below reads differently now.  The rules recorded under those decisions come
 discussion, so every rule cited as decision 33, 36 or 37 beyond that is
 proposed; owner may change.  A prototype of the qualifier, `move`, send,
 `atomic`, `locked` and `parallel for` sections is on branch
-prototype/concurrency (#361; samples/concurrency/README.md lists what it
+prototype/concurrency (#361; samples/valid/concurrency/README.md lists what it
 cuts), and a sentence marked "(prototype, 2026-11-03)" records what it
 decided where that differs from, or settles, what is written here
 (proposed; owner may change).  Snippets are independent: each declares or
@@ -1918,7 +1918,7 @@ as LET-1 did (scripts/let_check.py:1-40):
 1. Parse with the new grammar, renaming identifiers spelled like the new
    keywords, `parallel` (decision 34) and `const` (decision 36; the mut
    model, owner 2026-11-03: `mut` in its place) included,
-   such as `shared` in samples/codegen/32_c_identifiers.pkn:47-56; no `.pkn`
+   such as `shared` in samples/valid/basics/c_identifiers.pkn:47-56; no `.pkn`
    file in the repository spells `const` (by grep).
 2. Run Sema in a legacy mode where every unqualified reference is `shared`:
    v0.3's meaning.

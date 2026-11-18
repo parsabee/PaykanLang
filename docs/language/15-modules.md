@@ -127,7 +127,7 @@ may take its own alias (`add as plus` binds `ops/add.pkn` as `plus`);
 an entry without one is qualified by its own name. The entries name modules, not the
 declarations inside them, so the module's functions, classes and enums are still reached
 through the qualifier (`plus::add`). Every listed module must exist; a missing one is reported
-as `module 'lib::bar' not found`. See `samples/imports/04_selective` and
+as `module 'lib::bar' not found`. See `samples/valid/modules/selective_import` and
 `05_selective_alias`.
 
 ### Deeply Nested Module
@@ -616,7 +616,7 @@ the source would be (`a/b/c.pkm` for `a/b/c.pkn`), then under each `--module-pat
 directory and each `:`-separated directory of `$PAYKAN_MODULE_PATH`. A source file is always
 authoritative when it exists. A prebuilt module is type-checked against from its interface
 and linked from its code, so the program builds and runs identically without the source
-(see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)); its compiled code
+(see [`samples/valid/modules/prebuilt_pkm`](../../samples/valid/modules/prebuilt_pkm/README.md)); its compiled code
 needs the backend that compiled it.
 
 Whichever way a module file reaches a program, it is checked when it is loaded, before

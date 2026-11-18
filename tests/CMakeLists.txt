@@ -634,9 +634,9 @@ if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     paykan_add_python_test(SamplesParityBuildO0 samples_parity.py --build -O 0
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
-    # They compile the same import samples through the same per-project
-    # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
-    # time.
+    # They compile the same modules samples through the same per-project
+    # object / bitcode caches (samples/valid/modules/*/.paykan_cache): one at
+    # a time.
     if(TEST SamplesParity)
         set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
             SamplesParityBuildO0 PROPERTIES RESOURCE_LOCK paykan_samples_cache)

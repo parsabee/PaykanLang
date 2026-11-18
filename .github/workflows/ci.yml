@@ -441,7 +441,7 @@ jobs:
           mkdir -p "$ex"
           cp -R src/Backends/PrintPIR "$ex/print-pir"
           cp -R src/Frontends/ASTText "$ex/ast-text-frontend"
-          cp samples/codegen/01_literals.pkn "$ex/hello.pkn"
+          cp samples/valid/basics/literals.pkn "$ex/hello.pkn"
           for p in print-pir ast-text-frontend; do
             cmake -S "$ex/$p" -B "$ex/build-$p" -G Ninja -DCMAKE_PREFIX_PATH="$prefix"
             cmake --build "$ex/build-$p"

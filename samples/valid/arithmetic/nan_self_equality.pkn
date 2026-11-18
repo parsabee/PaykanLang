@@ -1,0 +1,55 @@
+// NaN and self-comparison (#111): `==` on a value that holds a NaN is
+// False even when both sides are the same variable, because the comparison is
+// IEEE 754 all the way down -- tuples compare element by element, a `float?`
+// compares its present values, and neither checks identity first.
+// Exercises: tuple `==` / `!=` of a variable with itself, a NaN element
+//            (direct, nested, inside a `float?` element), a copy compared
+//            through a function, `float?` self-comparison, and the non-NaN
+//            cases that stay equal to themselves.
+
+import ::io;
+
+// expect-stdout: nan == nan:      False
+// expect-stdout: t == t:          False
+// expect-stdout: t != t:          True
+// expect-stdout: t == u:          False
+// expect-stdout: alias == t:      False
+// expect-stdout: nested n == n:   False
+// expect-stdout: (int, float?):   False
+// expect-stdout: x == x (float?): False
+// expect-stdout: x != x (float?): True
+// expect-stdout: ok == ok:        True
+// expect-stdout: ok != ok:        False
+// expect-stdout: (-0.0) == (0.0): True
+// expect-stdout: y == y (float?): True
+
+fn same(p: (int, float), q: (int, float)) -> bool {
+  return p == q;
+}
+
+fn main() -> int {
+  let nan = 0.0 / 0.0;
+  let t = (1, nan);
+  let u = (1, nan);
+  let alias = t;                               // a copy of t
+  io::println("nan == nan:      " + Str(nan == nan));
+  io::println("t == t:          " + Str(t == t));
+  io::println("t != t:          " + Str(t != t));
+  io::println("t == u:          " + Str(t == u));
+  io::println("alias == t:      " + Str(same(alias, t)));
+  let n = ((1, nan), "x");
+  io::println("nested n == n:   " + Str(n == n));
+  let o: (int, float?) = (1, nan);
+  io::println("(int, float?):   " + Str(o == o));
+  let x: float? = nan;
+  io::println("x == x (float?): " + Str(x == x));
+  io::println("x != x (float?): " + Str(x != x));
+  let ok = (1, 2.5, "s");
+  io::println("ok == ok:        " + Str(ok == ok));
+  io::println("ok != ok:        " + Str(ok != ok));
+  let z = (-0.0, 1);
+  io::println("(-0.0) == (0.0): " + Str(z == (0.0, 1)));
+  let y: float? = 2.5;
+  io::println("y == y (float?): " + Str(y == y));
+  return 0;
+}

@@ -44,7 +44,7 @@ struct TrackingHeap {
 PaykanObject *cell(PaykanShared *handle) { return PaykanShared_get(handle); }
 
 /// Frees a cell at the end of a test.  The runtime never does (the
-/// prototype leaks every cell, samples/concurrency/README.md "What is
+/// prototype leaks every cell, samples/valid/concurrency/README.md "What is
 /// not"): the count put at 1 is the thaw the design describes, and the
 /// release then frees the block as it frees any object's.
 void discard(PaykanShared *handle) { Paykan_release(handle); }

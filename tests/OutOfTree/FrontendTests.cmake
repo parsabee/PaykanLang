@@ -33,7 +33,7 @@ file(REMOVE_RECURSE ${WORK_DIR})
 
 run_step("install" ${CMAKE_COMMAND} --install ${PAYKAN_BUILD_DIR} --prefix ${prefix})
 foreach(f share/paykan/frontend-tests/TestUtils.h
-          share/paykan/samples/codegen/01_literals.pkn)
+          share/paykan/samples/valid/basics/literals.pkn)
     if(NOT EXISTS ${prefix}/${f})
         message(FATAL_ERROR "the installation has no ${f}")
     endif()

@@ -238,7 +238,7 @@ io::println(5);                   // 5
 
 `print` and `println` write to standard output, `printerr` and `printerrln` to standard
 error; stdout is flushed before a runtime panic, so output printed before one is never lost.
-See `samples/codegen/46_printerr.pkn`.
+See `samples/valid/io/print_family.pkn`.
 
 ---
 

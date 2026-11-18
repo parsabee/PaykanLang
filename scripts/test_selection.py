@@ -11,7 +11,7 @@ suites are known:
   programs import the copy the build stages: sema, lowering, pir-mlir and
   every suite of the end-to-end group;
 * each file of a sample a driver test reads (DriverTests.cpp's
-  RunLoadsAnArchiveOfNativeObjects builds samples/imports/14_native and
+  RunLoadsAnArchiveOfNativeObjects builds samples/valid/modules/native_c_code and
   checks what it prints) picks the driver suite;
 * what LetDecls depends on besides the docs, samples and standard library
   picks the docs suite: scripts/let_check.py, the programs of tests/Stdlib
@@ -45,7 +45,7 @@ PICK_ALL = ["stdlib/CMakeLists.txt", "scripts/affected_tests.py",
             "tests/suites.json", "no-rule-names-this/file.txt"]
 
 # The samples the driver tests read (tests/Driver/DriverTests.cpp).
-DRIVER_SAMPLES = ["samples/imports/14_native"]
+DRIVER_SAMPLES = ["samples/valid/modules/native_c_code"]
 
 # What scripts/let_check.py (LetDecls, the docs suite) reads or runs.
 LET_CHECK_INPUTS = ["scripts/let_check.py", "tests/Stdlib/list_test.pkn",

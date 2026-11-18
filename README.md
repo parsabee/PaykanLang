@@ -271,11 +271,14 @@ To learn PaykanLang:
 - **[`docs/stdlib/`](docs/stdlib/index.md)** — the standard library: `::io`, `::error`,
   `::result`, `::collections`, `::memory` and `::math`, every function and type with its
   signature.
-- **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
-  (`samples/codegen/` has the feature demos; see also `imports/`, `sema/`, `leak-check/`).
-  [`samples/imports/12_calc/`](samples/imports/12_calc/) is a larger multi-module program:
-  an arithmetic calculator with variables, a hash map and a REPL.
-  [`samples/concurrency/`](samples/concurrency/README.md) is the concurrency prototype:
+- **[`samples/`](samples/README.md)** — `.pkn` programs exercising every feature, in two
+  trees: `samples/valid/` (programs that compile and run) and `samples/invalid/` (programs
+  the compiler rejects), each split by category: `basics/`, `arithmetic/`, `control-flow/`,
+  `functions/`, `classes/`, `data-structures/`, `generics/`, `memory/`, `concurrency/`,
+  `modules/` and more.
+  [`samples/valid/modules/calculator/`](samples/valid/modules/calculator/) is a larger
+  multi-module program: an arithmetic calculator with variables, a hash map and a REPL.
+  [`samples/valid/concurrency/`](samples/valid/concurrency/README.md) is the concurrency prototype:
   `async`/`await`, `parallel for` and the ownership qualifiers (`mut`, `shared`, `atomic`,
   `locked`) with explicit `move`, described in
   [`docs/language/19-concurrency.md`](docs/language/19-concurrency.md).

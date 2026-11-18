@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // The concurrency prototype through the mlir backend (docs/design/
-// concurrency.md, samples/concurrency/README.md), on hand-written PIR as
+// concurrency.md, samples/valid/concurrency/README.md), on hand-written PIR as
 // PIRMLIRTests.cpp and PIRLLVMTests.cpp test it.  A `parallel` while
 // lowers to an scf.parallel over at most 256 chunks, each with partial
 // slots of its own, folded in chunk order after the loop; a light body

@@ -1,0 +1,107 @@
+// while loops, break, continue
+// Exercises: visitWhileStmt, visitBreakStmt, visitContinueStmt,
+//            nested loops, loop with Str vars (scope cleanup per iteration),
+//            break/continue leaving unreachable blocks correct
+
+import ::io;
+
+fn main() -> int {
+  io::println("=== basic while ===");
+  i = 0;
+  while i < 5 {
+    io::println(Str(i));
+    i = i + 1;
+  }
+
+  io::println("=== while sum ===");
+  sum = 0;
+  n = 1;
+  while n <= 100 {
+    sum = sum + n;
+    n = n + 1;
+  }
+  io::println("sum 1..100=" + Str(sum));   // 5050
+
+  io::println("=== while never executes ===");
+  while False {
+    io::println("unreachable");
+  }
+  io::println("after never");
+
+  io::println("=== while True + break ===");
+  count = 0;
+  while True {
+    if count == 5 { break; }
+    count = count + 1;
+  }
+  io::println("count=" + Str(count));  // 5
+
+  io::println("=== continue skips odd ===");
+  evens = 0;
+  j = 0;
+  while j < 10 {
+    j = j + 1;
+    if j % 2 != 0 { continue; }
+    evens = evens + j;
+  }
+  io::println("sum evens 2..10=" + Str(evens));  // 30
+
+  io::println("=== nested loops ===");
+  total = 0;
+  r = 0;
+  while r < 4 {
+    c = 0;
+    while c < 4 {
+      total = total + 1;
+      c = c + 1;
+    }
+    r = r + 1;
+  }
+  io::println("4x4 iterations=" + Str(total));  // 16
+
+  io::println("=== break inner loop only ===");
+  outer = 0;
+  inner_total = 0;
+  while outer < 3 {
+    inner = 0;
+    while True {
+      if inner == 3 { break; }
+      inner_total = inner_total + 1;
+      inner = inner + 1;
+    }
+    outer = outer + 1;
+  }
+  io::println("3 * 3 inner=" + Str(inner_total));  // 9
+
+  io::println("=== Str var per iteration (scope cleanup) ===");
+  k = 0;
+  while k < 3 {
+    let label = "iter-" + Str(k);
+    io::println(label);
+    k = k + 1;
+  }
+
+  io::println("=== loop with complex condition ===");
+  a = 0;
+  b = 100;
+  while a < 10 && b > 90 {
+    a = a + 1;
+    b = b - 1;
+  }
+  io::println("a=" + Str(a) + " b=" + Str(b));  // a=10 b=90
+
+  io::println("=== countdown with multiple continues ===");
+  x = 10;
+  out_count = 0;
+  while x > 0 {
+    x = x - 1;
+    if x % 3 == 0 { continue; }
+    if x % 4 == 0 { continue; }
+    out_count = out_count + 1;
+  }
+  // x=0..9: skip multiples of 3 (0,3,6,9) and multiples of 4 (0,4,8)
+  // skipped: 0,3,4,6,8,9 => 4 remaining: 1,2,5,7
+  io::println("non-3/4 count=" + Str(out_count));  // 4
+
+  return 0;
+}

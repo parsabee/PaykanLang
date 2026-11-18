@@ -633,7 +633,7 @@ Output (with nothing on standard input):
 0 lines
 ```
 
-See `samples/codegen/23_stdin.pkn`.
+See `samples/valid/io/stdin.pkn`.
 
 ### Enum Types (distinct nominal value types)
 

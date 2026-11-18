@@ -1931,8 +1931,8 @@ Reserved now so no later major bump is needed:
 
 Measured sizes (`--emit-pir` over 94 corpus programs with a per-record
 model of §5): `CODE` ≈ 12–13 bytes per instruction ≈ 30% of PIR text
-(3.3× smaller; 12_calc: 106 KB text → ~30 KB); string table ≈ 11% of that;
-`SYMIDX` ≈ 50 B/symbol; `DEBUG` ≈ 20% of `CODE`; a C object payload 4–8×
+(3.3× smaller; the calculator sample: 106 KB text → ~30 KB); string
+table ≈ 11% of that; `SYMIDX` ≈ 50 B/symbol; `DEBUG` ≈ 20% of `CODE`; a C object payload 4–8×
 `CODE` at `-O2`; LLVM bitcode 2–3×. A 300-function stdlib module: ~50 KB
 `CODE`, ~15 KB `SYMIDX`, ~10 KB `DEBUG`, 200–400 KB per native payload.
 

@@ -1,0 +1,67 @@
+// native_generic — a generic `native fn`: one C function for any type.
+//
+// An instance (`describe<float>`) passes C a PaykanType describing each type
+// argument: its size, alignment, kind and references.  A `T` crosses by
+// address, so the C code in values.c handles a value of any size: it borrows
+// a `view` one and changes an `inout` one in place (a tuple is its elements
+// in place, at the offsets C struct layout gives them).  Build the object
+// yourself and link it with --object (the sample harnesses do this):
+//
+//   cc -std=c11 -fPIC -I<paykan include dir> -c values.c -o values.o
+//   paykan --object=values.o main.pkn
+
+import ::io;
+
+native fn describe<T>(x: view T) -> Str = "sample_describe";
+native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
+native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
+
+class Point {
+  x: int;
+}
+
+impl Point {
+  fn __init__(x: int) { self.x = x; }
+}
+
+fn main() -> int {
+  io::println(describe<int>(42));
+  io::println(describe<float>(2.5));
+  io::println(describe<bool>(True));
+  io::println(describe<char>('k'));
+  io::println(describe<Point>(Point(1)));
+  let nothing: Point? = None;
+  io::println(describe<Point?>(nothing));
+  io::println(describe<(int, Str)>((1, "a")));
+  io::println(Str(pick<int>(True, 1, 2)));
+  io::println(pick<Str>(False, "left", "right"));
+  io::println(Str(pick<Point>(True, Point(3), Point(4)).x));
+  io::println(pick<(int, Str)>(False, (5, "five"), (6, "six")));
+  left: mut = "left";
+  right: mut = "right";
+  swap<Str>(left, right);
+  io::println(left + " " + right);
+  yes = True;
+  no = False;
+  swap<bool>(yes, no);
+  io::println(Str(yes));
+  lt = (1, "one");
+  rt = (2, "two");
+  swap<(int, Str)>(lt, rt);
+  io::println(lt);
+  return 0;
+}
+// expect-stdout: int 42 (size 8)
+// expect-stdout: float 2.5 (size 8)
+// expect-stdout: bool True (size 1)
+// expect-stdout: char k (size 1)
+// expect-stdout: an object (size 8)
+// expect-stdout: None (size 8)
+// expect-stdout: a tuple holding 1 reference(s) (size 16)
+// expect-stdout: 1
+// expect-stdout: right
+// expect-stdout: 3
+// expect-stdout: (6, six)
+// expect-stdout: right left
+// expect-stdout: False
+// expect-stdout: (2, two)

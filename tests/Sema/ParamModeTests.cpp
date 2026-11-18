@@ -744,8 +744,9 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
-// The samples/sema programs of the shapes samples/codegen/78 no longer runs,
-// each rejected with exactly the error its ERROR line names.
+// The samples/invalid programs of the shapes
+// samples/valid/memory/held_value_evaluation_order no longer runs, each
+// rejected with exactly the error its ERROR line names.
 TEST(ParamMode, TheSamplesOfABorrowALaterArgumentWrites) {
   struct Sample {
     const char *Source;

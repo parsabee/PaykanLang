@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The concurrency and ownership prototype (#361): the design is docs/design/concurrency.md,
 the chapter docs/language/19-concurrency.md, and what it has and has not
-samples/concurrency/README.md.
+samples/valid/concurrency/README.md.
 
 ### Added
 
@@ -219,6 +219,15 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- The samples are reorganized into two trees (samples/README.md): `samples/valid/` holds the
+  programs that compile and run, `samples/invalid/` the ones the compiler rejects. Each tree
+  is split by category (`basics/`, `arithmetic/`, `conversions/`, `control-flow/`,
+  `functions/`, `classes/`, `data-structures/`, `generics/`, `memory/`, `io/`,
+  `concurrency/`, `modules/`), with one file per topic, named after it. The old
+  `codegen/`, `leak-check/`, `sema/`, `imports/` and `concurrency/` directories are gone,
+  along with their numeric and `ok_` / `err_` prefixes. The samples parity check now runs
+  every valid program, including the type-check samples that only `--check-only` read
+  before.
 - `None` is no longer an `Obj` (#394; docs/language/12-optionals.md, "`None` and its
   context"). It is the absent value of the optional its context expects and has no type of
   its own, so an `Obj` is always an object of a class and `Obj?` is an optional like any

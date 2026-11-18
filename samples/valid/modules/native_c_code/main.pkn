@@ -1,0 +1,39 @@
+// native_c_code — calling C from a module with `native fn` (#198).
+//
+// text.pkn declares functions whose bodies are in text.c.  Build the object
+// yourself and link it with --object (the sample harnesses do this):
+//
+//   cc -std=c11 -fPIC -I<paykan include dir> -c text.c -o text.o
+//   paykan --object=text.o main.pkn
+//
+// Callers see ordinary functions.
+
+import ::io;
+import text;
+
+fn show(r: Str?) {
+  match r {
+    s: Str {
+      io::println("found: " + s);
+    }
+    None { io::println("not found"); }
+  }
+}
+
+fn main() -> int {
+  io::println(text::upper("hello, native"));
+  io::println(text::shout("loud"));
+  io::println(Str(text::count("banana", 'a')));
+  show(text::find("needle in a haystack", "in a"));
+  show(text::find("haystack", "needle"));
+  padded: mut = "   spaced out  ";
+  text::trim(padded);
+  io::println("[" + padded + "]");
+  return 0;
+}
+// expect-stdout: HELLO, NATIVE
+// expect-stdout: LOUD!
+// expect-stdout: 3
+// expect-stdout: found: in a haystack
+// expect-stdout: not found
+// expect-stdout: [spaced out]

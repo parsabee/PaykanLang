@@ -1,0 +1,42 @@
+// Stdin
+//
+// io::stdin() is an io::File wrapping C's stdin.
+// Its reads are those of any File, each a res::Result<Str, err::Error>:
+//   readln()        (`Ok` with the next line, `Err` with EndOfFile at EOF)
+//   readbytes(n)    (`Ok` with up to n bytes, `Err` with EndOfFile at EOF)
+//   read()          (`Ok` with all remaining input, `Err` with EndOfFile at EOF)
+//
+// Run this sample with piped input, e.g.:
+//   printf "hello\nworld\n42\n" | ./build/bin/paykan samples/valid/io/stdin.pkn
+
+import ::io;
+
+fn main() -> int {
+  // --- readln: read lines until EOF ---
+  io::println("=== readln ===");
+  i = 0;
+  while True {
+    match io::stdin().readln() {
+      read: Ok {
+        let line = move read.value;
+        // strip trailing newline for display
+        let n = line.len();
+        display = "";
+        j = 0;
+        while j < n {
+          let c = line[j];
+          if c != '\n' {
+            display = display + Str(c);
+          }
+          j = j + 1;
+        }
+        io::println("  [" + Str(i) + "] " + display);
+        i = i + 1;
+      }
+      _ { break; }
+    }
+  }
+  io::println("read " + Str(i) + " lines");
+
+  return 0;
+}

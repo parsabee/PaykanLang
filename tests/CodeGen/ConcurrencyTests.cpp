@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // Codegen / E2E tests for the concurrency prototype
-// (docs/design/concurrency.md, samples/concurrency/README.md): tasks
+// (docs/design/concurrency.md, samples/valid/concurrency/README.md): tasks
 // (`async fn`, `await`), `parallel for`, `atomic` and `locked` cells,
 // `atomic shared` objects, `move` and the qualifiers at run time.  Each
 // test compiles and runs a small program through the mlir backend's JIT, which

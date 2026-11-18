@@ -3,9 +3,9 @@
 //
 // The AST interchange format (paykan/ast/Interchange.h) for the nodes of
 // the concurrency prototype (docs/design/concurrency.md,
-// samples/concurrency/README.md): an `async fn`, a `parallel for`, a `lock`
-// block, the qualifiers on a place's type (`mut`, `shared`, `shared mut`,
-// `atomic shared`, `locked`, `locked mut`, and `x: shared = e` with the
+// samples/valid/concurrency/README.md): an `async fn`, a `parallel for`, a
+// `lock` block, the qualifiers on a place's type (`mut`, `shared`, `shared
+// mut`, `atomic shared`, `locked`, `locked mut`, and `x: shared = e` with the
 // type inferred), `atomic T`, and the `move` and `await` operators.  As
 // InterchangeTests.cpp does for the rest of the language:
 //   - each round-trips: the recursive-descent frontend's AST, written and

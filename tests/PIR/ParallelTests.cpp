@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // The concurrency prototype's PIR (docs/design/concurrency.md; the "PIR"
-// item of samples/concurrency/README.md): an `async fn`, `async_call` and
-// `await`, and the `parallel` annotation on a `while`, through the text
+// item of samples/valid/concurrency/README.md): an `async fn`, `async_call`
+// and `await`, and the `parallel` annotation on a `while`, through the text
 // round trip, the binary round trip and the verifier.  The programs are
-// what the lowering prints for samples/concurrency/01_parallel_for.pkn and
-// 02_async_await.pkn (`paykan --emit-pir`), cut down to what the tests look
+// what the lowering prints for samples/valid/concurrency/parallel_for.pkn
+// and async_await.pkn (`paykan --emit-pir`), cut down to what the tests look
 // at.
 
 #include "paykan/pir/Binary.h"
@@ -103,7 +103,7 @@ size_t recordOf(const std::vector<uint8_t> &b, const std::string &name) {
   return 0;
 }
 
-// The lowering of samples/concurrency/02_async_await.pkn, cut down.  An
+// The lowering of samples/valid/concurrency/async_await.pkn, cut down.  An
 // `async fn` is called with `async_call`, which yields a task (a `ptr`)
 // whatever the function returns, and `await <type>, <task>` is the
 // function's result; an async fn of another module is declared `extern
@@ -151,7 +151,7 @@ async fn @slow(%n.1: i64) -> i64 {
 }
 )";
 
-// The lowering of samples/concurrency/01_parallel_for.pkn, cut down: a
+// The lowering of samples/valid/concurrency/parallel_for.pkn, cut down: a
 // `parallel for` is a `while` counting a local from 0 up to a count, with
 // the annotation after its body (docs/design/concurrency.md "Data
 // parallelism").  @sum reduces into a partial with a private loop

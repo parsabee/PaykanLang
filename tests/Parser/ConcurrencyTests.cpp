@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // Parser tests: the syntax of the concurrency prototype
-// (docs/design/concurrency.md, samples/concurrency/README.md): `async fn`,
-// `await` and `move`, `parallel for`, the `lock` block, and the qualifiers
+// (docs/design/concurrency.md, samples/valid/concurrency/README.md): `async
+// fn`, `await` and `move`, `parallel for`, the `lock` block, and the qualifiers
 // in a type annotation (`mut`, `shared`, `shared mut`, `atomic shared`,
 // `locked`, `locked mut`).  What the forms mean is
 // Sema's (tests/Sema); here is what the parser takes, the AST it builds

@@ -29,13 +29,14 @@ The compiler is the oracle:
 
 Each declaration left is reported.  The program is compiled with
 `--emit-pir` when it has `fn main`, with `--check-only` otherwise; a
-program that Sema rejects (an `err_` sample, a docs example with `Error:`)
+program that Sema rejects (a samples/invalid one, a docs example with
+`Error:`)
 is checked as well, and a declaration in it counts only where Sema reaches
 it (a call of an undeclared function put before it is reported) and when
 `let` keeps every line of a docs example's `Error:` block in the
 diagnostics.
 
-A sample of samples/imports is the directory of its main.pkn, compiled
+A sample of samples/*/modules is the directory of its main.pkn, compiled
 with its modules; a docs example is compiled with the modules (`// file:`
 blocks) before it, as scripts/doc_examples.py runs it.  The standard
 library is compiled from the changed sources ($PAYKAN_STDLIB) for each
@@ -52,14 +53,14 @@ Not covered:
 - a module of a sample that its program does not import, and a docs
   block that is not a whole program (statements alone, with no `fn main`)
   that does not parse or that `--check-only` rejects;
-- an `err_` sample that does not parse, and a docs example whose `Error:`
-  is the parser's;
+- a samples/invalid one that does not parse, and a docs example whose
+  `Error:` is the parser's;
 - a docs example whose opening fence follows the line
   `<!-- let_check: plain -->`: one that shows the plain declaration itself.
 
 A program that must compile and does not is an error too, so that a
 compiler that cannot print the AST checks nothing and fails: a sample that
-is not an `err_` one, a docs example that shows its output, and the
+is not a samples/invalid one, a docs example that shows its output, and the
 standard library with the programs of tests/Stdlib.
 
 Usage:
@@ -387,9 +388,9 @@ class Program:
     """What one compiler run checks: @p sources, written in a directory of
     their own, and the @p entries compiled there.  For the standard library
     the sources are $PAYKAN_STDLIB and the entries the programs of
-    tests/Stdlib.  A program that @p compiles (a sample that is not an
-    `err_` one, a docs example of a whole program that shows no `Error:`,
-    the standard library) is an error when it does not."""
+    tests/Stdlib.  A program that @p compiles (a sample that is not a
+    samples/invalid one, a docs example of a whole program that shows no
+    `Error:`, the standard library) is an error when it does not."""
 
     def __init__(self, name, sources, entries, stdlib=False,
                  error_lines=None, compiles=False):
@@ -408,14 +409,15 @@ class Program:
 
 def sample_programs(paths):
     """The samples: one program per file, and one per directory of
-    samples/imports (its main.pkn and its modules)."""
+    samples/valid/modules and samples/invalid/modules (its main.pkn and its
+    modules)."""
     programs, done = [], set()
     for f in sorted((ROOT / "samples").rglob("*.pkn")):
         if ".paykan_cache" in f.parts or not wanted(f, paths) or f in done:
             continue
         rel = f.relative_to(ROOT / "samples")
-        if rel.parts[0] == "imports" and len(rel.parts) > 2:
-            top = ROOT / "samples" / rel.parts[0] / rel.parts[1]
+        if rel.parts[1] == "modules" and len(rel.parts) > 3:
+            top = ROOT / "samples" / Path(*rel.parts[:3])
             files = [g for g in sorted(top.rglob("*.pkn"))
                      if ".paykan_cache" not in g.parts]
             done.update(files)
@@ -434,8 +436,8 @@ def sample_programs(paths):
 
 
 def is_error_sample(path):
-    """@p path is a sample that shows an error: `err_...`."""
-    return path.name.startswith("err_")
+    """@p path is a sample that shows an error: one under samples/invalid."""
+    return (ROOT / "samples" / "invalid") in path.parents
 
 
 def docs_programs(md):

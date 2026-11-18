@@ -1,0 +1,186 @@
+// optional primitives: `int?`, `float?`, `bool?` and `char?` (#66)
+// Exercises: a primitive widening to its optional (`int` -> `int?`, and
+//            `int` -> `float?` after promotion), `None`, `match` with a
+//            primitive arm (the binding is a plain value), `== None` and
+//            equality of two optionals, optional primitive parameters,
+//            returns, fields (implicitly None), array elements and tuple
+//            elements, a ternary producing an `int?`, a generic `T?` with
+//            T = int, and printing an optional through `Obj`.
+//
+// An optional primitive is a value, the primitive and a presence flag (#96),
+// held inline even in an array or a tuple: it is boxed only in an `Obj`
+// (run with --track-heap to see zero live blocks).
+//
+// expect-stdout: parse 12 -> 12
+// expect-stdout: parse 4x -> None
+// expect-stdout: parse  -> None
+// expect-stdout: mean -> 2.5
+// expect-stdout: mean of nothing -> None
+// expect-stdout: first vowel of 'rhythm' -> None
+// expect-stdout: first vowel of 'paykan' -> a
+// expect-stdout: answered: True
+// expect-stdout: unanswered: None
+// expect-stdout: equal: True
+// expect-stdout: equal to None: False
+// expect-stdout: sparse: 1 None 3
+// expect-stdout: lookup: 1 found
+// expect-stdout: cache: None then 49
+// expect-stdout: even? 4
+// expect-stdout: even? None
+
+import ::io;
+
+// ---- int? as a fallible result ---------------------------------------------
+
+fn digit(c: char) -> int? {
+  if c < '0' || c > '9' { return None; }
+  return digitValue(c);
+}
+
+fn digitValue(c: char) -> int {
+  let digits = "0123456789";
+  i = 0;
+  while i < 10 {
+    if digits[i] == c { return i; }
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn parse(s: Str) -> int? {
+  if s.len() == 0 { return None; }
+  value = 0;
+  i = 0;
+  while i < s.len() {
+    match digit(s[i]) {
+      d: int { value = value * 10 + d; }
+      None { return None; }
+    }
+    i = i + 1;
+  }
+  return value;
+}
+
+fn show(o: int?) -> Str {
+  match o {
+    n: int { return Str<int>(n); }
+    None { return "None"; }
+  }
+}
+
+// ---- float?, char?, bool? --------------------------------------------------
+
+// The mean of the first `count` elements of `xs`; None for none of them.
+fn mean(xs: view int[], count: int) -> float? {
+  if count == 0 { return None; }
+  sum = 0;
+  i = 0;
+  while i < count {
+    sum = sum + xs[i];
+    i = i + 1;
+  }
+  return sum / (count * 1.0);
+}
+
+fn firstVowel(s: Str) -> char? {
+  i = 0;
+  while i < s.len() {
+    let c = s[i];
+    if c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' {
+      return c;
+    }
+    i = i + 1;
+  }
+  return None;
+}
+
+class Question {
+  text: Str;
+  answer: bool?;               // implicitly None
+}
+
+impl Question {
+  fn __init__(t: Str) { self.text = move t; }
+}
+
+// ---- generics: T? with T = int ---------------------------------------------
+
+class Cache<T: Copyable> {
+  slot: T?;
+  view fn get() -> T? { return self.slot; }
+  fn put(v: T)        { self.slot = v; }
+}
+
+impl Cache<T> {
+  fn __init__() { }
+}
+
+fn square(n: int) -> int {
+  return n * n;
+}
+
+fn main() -> int {
+  io::println("parse 12 -> " + show(parse("12")));
+  io::println("parse 4x -> " + show(parse("4x")));
+  io::println("parse  -> " + show(parse("")));
+
+  let readings = [1, 2, 3, 4];
+  let m = mean(readings, readings.len());
+  match m {
+    f: float {
+      io::println("mean -> " + Str(f));
+    }
+    None { }
+  }
+  io::print("mean of nothing -> ");
+  io::println(mean(readings, 0));
+
+  io::print("first vowel of 'rhythm' -> ");
+  io::println(firstVowel("rhythm"));
+  io::print("first vowel of 'paykan' -> ");
+  io::println(firstVowel("paykan"));
+
+  let q: mut = Question("ready?");
+  q.answer = True;
+  io::print("answered: ");
+  io::println(q.answer);
+  let q2 = Question("later?");
+  io::print("unanswered: ");
+  io::println(q2.answer);
+
+  let a: int? = 7;
+  let b: int? = parse("7");
+  io::println("equal: " + Str<bool>(a == b));
+  io::println("equal to None: " + Str(a == None));
+
+  sparse: int?[3] = [1, 2, 3];
+  sparse[1] = None;
+  io::print("sparse: ");
+  io::print(sparse[0]);
+  io::print(" ");
+  io::print(sparse[1]);
+  io::print(" ");
+  io::println(sparse[2]);
+
+  let p: (int?, Str) = (1, "found");
+  match p.0 {
+    i: int {
+      io::println("lookup: " + Str<int>(i) + " " + p.1);
+    }
+    None { }
+  }
+
+  let c: mut = Cache<int>();
+  let before = show(c.get());
+  c.put(square(7));
+  io::println("cache: " + before + " then " + show(c.get()));
+
+  n = 4;
+  while n < 6 {
+    let e = if n % 2 == 0 then n else None;
+    io::print("even? ");
+    io::println(e);
+    n = n + 1;
+  }
+  return 0;
+}

@@ -173,7 +173,7 @@ program that keeps the function keeps them (§12); a compiled class keeps
 its layout and its vtable's description, which the compiled code defines.
 
 **Async functions.**  An `async fn` (the concurrency prototype,
-docs/design/concurrency.md; samples/concurrency/README.md) lowers to two
+docs/design/concurrency.md; samples/valid/concurrency/README.md) lowers to two
 functions.  `async fn @f$task` is the body of the task: the signature an
 ordinary `fn f` would have (`-> void` for one returning nothing) and a body
 lowered as any other, except that a result held in memory or an optional
@@ -607,7 +607,7 @@ run and every machine (the design's reproducible reduction).  Sema rejects
 a `break` or a `continue` in a parallel body (the prototype), so the
 verifier does not ask.  `parallel for
 i in 0..xs.len() { s += xs[i] * ys[i]; }`
-(`samples/concurrency/01_parallel_for.pkn`) lowers to:
+(`samples/valid/concurrency/parallel_for.pkn`) lowers to:
 
 ```
 store %s.part.5, 0.0                      ; the partial: add's identity
@@ -755,7 +755,7 @@ result's type, the callee's result type (any but `void`, `mem` and `weak`,
 memory or is an optional value gives a `ptr` to a block of the heap, which
 the awaiter copies out of and frees.  The lowering starts a task in the
 function a program calls for an `async fn` (§3) and awaits it at its `await`
-(`samples/concurrency/02_async_await.pkn`):
+(`samples/valid/concurrency/async_await.pkn`):
 
 ```
 fn @fib(%n.1: i64) -> ptr {
@@ -1291,7 +1291,7 @@ CodeGen enforced, now in one place.
   `self`, which the caller keeps for the call, or what such a field of it
   holds, at any depth: `self.origin.sum()` in a program whose code sets
   `Box.origin` only in `Box`'s `__init__` needs no hold, though `sum` is
-  another module's (`samples/imports/07_qualified_type`), and one whose
+  another module's (`samples/valid/modules/qualified_types`), and one whose
   code stores into `b.origin` anywhere else keeps it, as `sum` may run
   that code through an `equals` override.  A read in an `__init__`, a
   read rooted in a variable or a value parameter (kept as above) and a

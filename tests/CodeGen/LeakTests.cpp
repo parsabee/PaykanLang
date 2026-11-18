@@ -13,7 +13,7 @@ extern "C" {
 
 using namespace paykan::test;
 
-// -- String literal (samples/leak-check/01)
+// -- String literal (samples/valid/memory/heap_string_literal)
 
 TEST(Leak, StringLiteral) {
   LeakGuard g;
@@ -27,7 +27,7 @@ TEST(Leak, StringLiteral) {
   g.expectNoLeaks("StringLiteral");
 }
 
-// -- String concatenation (samples/leak-check/02)
+// -- String concatenation (samples/valid/memory/heap_string_concat)
 
 TEST(Leak, StringConcat) {
   LeakGuard g;
@@ -43,7 +43,7 @@ TEST(Leak, StringConcat) {
   g.expectNoLeaks("StringConcat");
 }
 
-// -- Str<int> conversion (samples/leak-check/03)
+// -- Str<int> conversion (samples/valid/memory/heap_str_of_int)
 
 TEST(Leak, StrOfInt) {
   LeakGuard g;
@@ -58,7 +58,7 @@ TEST(Leak, StrOfInt) {
   g.expectNoLeaks("StrOfInt");
 }
 
-// -- int[n] array literal (samples/leak-check/04)
+// -- int[n] array literal (samples/valid/memory/heap_array_literal)
 
 TEST(Leak, IntArrayLiteral) {
   LeakGuard g;
@@ -72,7 +72,7 @@ TEST(Leak, IntArrayLiteral) {
   g.expectNoLeaks("IntArrayLiteral");
 }
 
-// -- Object array (samples/leak-check/06)
+// -- Object array (samples/valid/memory/heap_object_array)
 
 TEST(Leak, ObjArray) {
   LeakGuard g;
@@ -86,7 +86,7 @@ TEST(Leak, ObjArray) {
   g.expectNoLeaks("ObjArray");
 }
 
-// -- Fieldless class instance (samples/leak-check/07)
+// -- Fieldless class instance (samples/valid/memory/heap_empty_class)
 
 TEST(Leak, ClassEmpty) {
   LeakGuard g;
@@ -105,7 +105,7 @@ TEST(Leak, ClassEmpty) {
   g.expectNoLeaks("ClassEmpty");
 }
 
-// -- Class with Str field (samples/leak-check/08)
+// -- Class with Str field (samples/valid/memory/heap_class_str_field)
 
 TEST(Leak, ClassStrField) {
   LeakGuard g;
@@ -126,7 +126,7 @@ TEST(Leak, ClassStrField) {
   g.expectNoLeaks("ClassStrField");
 }
 
-// -- Class inheritance (samples/leak-check/09)
+// -- Class inheritance (samples/valid/memory/heap_class_inheritance)
 
 TEST(Leak, ClassInherit) {
   LeakGuard g;
@@ -382,10 +382,11 @@ TEST(Leak, TwoCallTemporariesInEquality) {
   g.expectNoLeaks("TwoCallTemporariesInEquality");
 }
 
-// Member chains rooted in a call (samples/leak-check/16): the member access
-// owns the fresh receiver box (`makeH()` below) and must tear it down after
-// reading the field — retaining a ref-typed field value first so it survives
-// the receiver teardown.
+// Member chains rooted in a call
+// (samples/valid/memory/heap_call_rooted_member_chain): the member access owns
+// the fresh receiver box (`makeH()` below) and must tear it down after reading
+// the field — retaining a ref-typed field value first so it survives the
+// receiver teardown.
 
 TEST(Leak, CallRootedMemberChainAsValue) {
   LeakGuard g;

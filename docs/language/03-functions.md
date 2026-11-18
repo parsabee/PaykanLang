@@ -1228,7 +1228,7 @@ each reference it holds, nested tuples' included, at its offset).
 `PaykanType_copy` copies a value, retaining its references, and
 `PaykanType_drop` releases them.  A parameter typed by a type parameter is a
 `view` or an `inout` (`x: T` is rejected whatever `T` will be).  See
-`samples/imports/15_native_generic`.
+`samples/valid/modules/native_generic`.
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects
@@ -1250,7 +1250,7 @@ can call any runtime function.  `Runtime.h`'s `static inline`
 do what `Paykan_retain`, `Paykan_release` and `PaykanShared_get` do, and call
 them only at the count's limit or to destroy the object.  A
 `PaykanString`'s `data` and `len` may be read directly.  See
-`samples/imports/14_native`.
+`samples/valid/modules/native_c_code`.
 
 A native function can also bind a C library function directly, with the C
 types the table above gives its signature: `native fn llabs(x: int) -> int =

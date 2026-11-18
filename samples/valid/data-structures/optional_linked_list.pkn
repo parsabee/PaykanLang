@@ -1,0 +1,116 @@
+// optional types: a singly linked list built from `Node?`
+// Exercises: `T?` declarations, `None` as the absent value, implicit None for
+//            an unassigned optional field (`next: Node?`), `T` -> `T?` widening,
+//            `x == None` / `x != None` null checks, `match` as the unwrap (a
+//            `Node` arm binds every present value, `None` covers the absent
+//            case), optional parameters and returns, `T?[n]` with None
+//            slots, and printing an optional.
+//
+// A `T?` is the same reference-counted box as a `T` with NULL meaning None, so
+// the whole list is released through the ordinary destructors (run this with
+// --track-heap to see zero live blocks).  The list's nodes are `shared`: `find`
+// returns a node the list holds too, and a cursor walks the list by copying
+// the `next` references.
+
+import ::io;
+
+class Node {
+  v: int;
+  next: shared Node?;          // implicitly None — no assignment in __init__
+}
+
+impl Node {
+  fn __init__(x: int) { self.v = x; }
+}
+
+// ---- List operations -------------------------------------------------------
+
+fn push_front(head: shared Node?, v: int) -> shared Node {
+  let n: mut = Node(v);
+  n.next = head;               // Node? field accepts a Node? value
+  return n;
+}
+
+fn find(head: shared Node?, key: int) -> shared Node? {
+  cur: shared Node? = head;
+  while cur != None {
+    match cur {
+      n: Node {
+        if n.v == key { return n; }   // Node widens to Node?
+        cur = n.next;
+      }
+      None { }
+    }
+  }
+  return None;
+}
+
+fn render(head: shared Node?) -> Str {
+  out = "[";
+  cur: shared Node? = head;
+  first = True;
+  while cur != None {
+    match cur {
+      n: Node {
+        if !first { out = out + ", "; }
+        out = out + Str(n.v);
+        first = False;
+        cur = n.next;
+      }
+      None { }
+    }
+  }
+  return out + "]";
+}
+
+fn describe(found: view Node?) -> Str {
+  match found {
+    n: Node {
+      return "found " + Str(n.v);
+    }
+    None { return "not found"; }
+  }
+}
+
+// ---- main ------------------------------------------------------------------
+
+fn main() -> int {
+  io::println("=== build a list ===");
+  head: shared Node? = None;
+  head = push_front(head, 3);
+  head = push_front(head, 2);
+  head = push_front(head, 1);
+  io::println(render(head));                     // [1, 2, 3]
+
+  io::println("=== search ===");
+  io::println(describe(find(head, 2)));          // found 2
+  io::println(describe(find(head, 9)));          // not found
+  io::println(describe(find(None, 1)));          // not found
+
+  io::println("=== None checks ===");
+  io::println(Str(head == None));           // False
+  io::println(Str(find(head, 9) == None));  // True
+  io::println(Str(find(head, 3) != None));  // True
+
+  io::println("=== printing an optional ===");
+  let maybe: Node? = None;
+  io::println(maybe);                            // None
+  let s: Str? = "text";
+  io::println(s);                                // text
+
+  io::println("=== array of optionals ===");
+  slots: Node?[2] = [None, Node(42)];
+  slots[0] = Node(7);
+  slots[1] = None;
+  io::println(describe(slots[0]));               // found 7
+  io::println(describe(slots[1]));               // not found
+
+  io::println("=== two optionals ===");
+  let a: Str? = "same";
+  let b: Str? = "same";
+  let c: Str? = None;
+  io::println(Str(a == b));                  // True  (content equality)
+  io::println(Str(a == c));                  // False (one is None)
+  io::println(Str(c == None));               // True
+  return 0;
+}

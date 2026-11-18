@@ -1,0 +1,241 @@
+// identifiers that are special in C: every backend must accept any
+// valid Paykan name.  The C backend (replaced by the mlir backend's --emit-c)
+// once emitted user names unchanged, so these collided with its own generated
+// names (`x_1`, `a_<n>`), with C type names (`int64_t`) and with C library
+// macros and functions (`errno`, `stdout`, `EOF`, `fmod`, `malloc`).
+// Exercises: locals, parameters, fields, methods, functions and classes named
+//            like C / libc identifiers or like generated, mangled C names.
+
+import ::io;
+
+// Library function names as Paykan functions.
+fn fmod(a: float, b: float) -> float {
+  return 42.0;
+}
+fn malloc(n: int) -> int {
+  return n + 1;
+}
+
+// Names that look like mangled / generated ones.
+fn f_5F(x: int) -> int {
+  return x + 100;
+}
+fn f_(x: int) -> int {
+  return x + 1;
+}
+
+class Box<T: Copyable> {
+  v: T;
+  view fn get() -> T { return self.v; }
+}
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+class Box_3Cint_3E {
+  w: Str;
+  view fn get() -> view Str { return self.w; }
+}
+impl Box_3Cint_3E {
+  fn __init__() { self.w = "plain"; }
+}
+
+// Fields named like C macros and like the object header's members.
+class P {
+  errno: int;
+  stdout: Str;
+  vtable: int;
+  strong: int;
+  view fn EOF() -> int { return self.errno + self.vtable + self.strong; }
+}
+
+impl P {
+  fn __init__(e: int) {
+    self.errno = e;
+    self.stdout = "s";
+    self.vtable = 1;
+    self.strong = 2;
+  }
+}
+fn P_vtable() -> int {
+  return 9;
+}
+
+// User locals named like the backend's suffixed names.
+fn suffixes() -> int {
+  let x = 1;
+  let x_0 = 2;
+  let x_1 = 3;
+  let x_2 = 4;
+  return x + x_0 + x_1 + x_2;
+}
+
+// Many locals `a_<n>` and many values derived from `a`.
+fn manyValues() -> int {
+  a = 1;
+  let a_0 = 0;
+  let a_1 = 1;
+  let a_2 = 2;
+  let a_3 = 3;
+  let a_4 = 4;
+  let a_5 = 5;
+  let a_6 = 6;
+  let a_7 = 7;
+  let a_8 = 8;
+  let a_9 = 9;
+  let a_10 = 10;
+  let a_11 = 11;
+  let a_12 = 12;
+  let a_13 = 13;
+  let a_14 = 14;
+  let a_15 = 15;
+  let a_16 = 16;
+  let a_17 = 17;
+  let a_18 = 18;
+  let a_19 = 19;
+  let a_20 = 20;
+  let a_21 = 21;
+  let a_22 = 22;
+  let a_23 = 23;
+  let a_24 = 24;
+  let a_25 = 25;
+  let a_26 = 26;
+  let a_27 = 27;
+  let a_28 = 28;
+  let a_29 = 29;
+  let a_30 = 30;
+  let a_31 = 31;
+  let a_32 = 32;
+  let a_33 = 33;
+  let a_34 = 34;
+  let a_35 = 35;
+  let a_36 = 36;
+  let a_37 = 37;
+  let a_38 = 38;
+  let a_39 = 39;
+  let a_40 = 40;
+  let a_41 = 41;
+  let a_42 = 42;
+  let a_43 = 43;
+  let a_44 = 44;
+  let a_45 = 45;
+  let a_46 = 46;
+  let a_47 = 47;
+  let a_48 = 48;
+  let a_49 = 49;
+  let a_50 = 50;
+  let a_51 = 51;
+  let a_52 = 52;
+  let a_53 = 53;
+  let a_54 = 54;
+  let a_55 = 55;
+  let a_56 = 56;
+  let a_57 = 57;
+  let a_58 = 58;
+  let a_59 = 59;
+  let a_60 = 60;
+  let a_61 = 61;
+  let a_62 = 62;
+  let a_63 = 63;
+  let a_64 = 64;
+  let a_65 = 65;
+  let a_66 = 66;
+  let a_67 = 67;
+  let a_68 = 68;
+  let a_69 = 69;
+  let a_70 = 70;
+  let a_71 = 71;
+  let a_72 = 72;
+  let a_73 = 73;
+  let a_74 = 74;
+  let a_75 = 75;
+  let a_76 = 76;
+  let a_77 = 77;
+  let a_78 = 78;
+  let a_79 = 79;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  return a + a_3 + a_79;
+}
+
+fn params(int64_t: int, errno: int, l_x: int, v1: int) -> int {
+  return int64_t * 1000 + errno * 100 + l_x * 10 + v1;
+}
+
+fn main() -> int {
+  // C library macros as locals.
+  let errno = 3;
+  let stdout = 4;
+  let EOF = 5;
+  io::println(Str(errno + stdout + EOF));
+
+  // A local hiding a libc function used by float `%`.
+  let x = 7.5;
+  let fmod_ = 2.0;
+  let y = x % fmod_;
+  io::println(Str(y));
+  io::println(Str(fmod(x, fmod_)));
+  io::println(Str(malloc(1)));
+
+  // A C type name as a variable.
+  let int64_t = 3;
+  let b = int64_t + 1;
+  io::println(Str(b));
+
+  io::println(Str(suffixes()));
+  io::println(Str(manyValues()));
+  io::println(Str(params(1, 2, 3, 4)));
+
+  // Shadowing in a nested scope.
+  let n = 1;
+  if n == 1 {
+    let n = 5;
+    io::println(Str(n));
+  }
+  io::println(Str(n));
+
+  let bx = Box(5);
+  let plain = Box_3Cint_3E();
+  io::println(Str(bx.get()) + plain.get() + Str(f_5F(1)) + Str(f_(1)));
+
+  let p = P(3);
+  io::println(Str(p.EOF()) + p.stdout + Str(P_vtable()));
+  return 0;
+}

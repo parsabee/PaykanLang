@@ -7,8 +7,9 @@
 // moved" set runs over each body: `move x` ends x, a branch that moves on
 // one path leaves x "may have been moved", a loop checks every iteration's
 // end, an assignment revives, and `move x.f` moves a unique field out of an
-// owned variable and ends it.  The programs are samples/concurrency/
-// 08_moves.pkn and errors/err_moves.pkn taken apart.
+// owned variable and ends it.  The programs are samples/valid/concurrency/
+// precise_moves.pkn and samples/invalid/concurrency/precise_moves.pkn taken
+// apart.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>

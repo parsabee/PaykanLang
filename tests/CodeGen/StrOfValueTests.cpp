@@ -6,8 +6,9 @@
 // and the same holds — an object whose `toString()` lets go of the only
 // field that holds it stays alive until it returns, as it does for
 // `h.c.toString()`.  The scalars' `Str<int>` & co. are in ConversionTests.cpp.
-// Every test checks zero live heap blocks; samples/codegen/77_str_of_value
-// and samples/leak-check/32_str_of_value run the same shapes on every path
+// Every test checks zero live heap blocks;
+// samples/valid/conversions/str_of_value and
+// samples/valid/memory/heap_str_of_value run the same shapes on every path
 // (SamplesParity, CStrictC11).
 
 #include "CodeGenTestUtils.h"

@@ -1,0 +1,138 @@
+// function types: functions as values, lambdas and their captures
+// Exercises: the `(T1, T2) -> R` type with `view` and `inout` parameter
+//            modes and a tuple or function result; named functions (free,
+//            `static fn`) as values; lambdas `fn(x: int) -> int { ... }`
+//            that capture Copyable variables by copy (a number is copied, a
+//            `shared` object or a closure is shared);
+//            function values held in variables, fields of classes and
+//            structs, array and tuple elements, optionals and generics;
+//            calls through each of them (`f(x)`, `obj.cb(x)`, `fs[0](x)`,
+//            `make()(x)`); closures returned from functions and methods (a
+//            `shared fn`'s lambda shares `self`); equality of function
+//            values.
+// A function value is held in place, its code and its closure, and is
+// Copyable: copying one shares the closure, which is released when the last
+// copy goes, together with the captures it owns.
+
+import ::io;
+
+fn square(x: int) -> int {
+  return x * x;
+}
+fn plus(a: int, b: int) -> int {
+  return a + b;
+}
+
+fn apply(f: (int) -> int, x: int) -> int {
+  return f(x);
+}
+
+fn compose(f: (int) -> int, g: (int) -> int) -> (int) -> int {
+  return fn(x: int) -> int {
+    return g(f(x));
+  };
+}
+
+fn sumWith(xs: view int[], f: (view int) -> int) -> int {
+  total = 0;
+  i = 0;
+  while i < xs.len() {
+    total = total + f(xs[i]);
+    i = i + 1;
+  }
+  return total;
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+  return (a / b, a % b);
+}
+
+fn bump(n: inout int, by: int) {
+  n = n + by;
+}
+
+fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U {
+  return f(xs[0]);
+}
+
+class Button {
+  label: Str;
+  onClick: (view Str) -> Str;
+  view fn click() -> Str { return self.onClick(self.label); }
+}
+
+class Counter {
+  n: int;
+  // In a `shared fn`, `self` is a `shared mut Counter`, which a lambda can
+  // capture: each closure shares the object.
+  shared fn make() -> () -> int      { return fn() -> int { return self.n; }; }
+  shared fn adder() -> (int) -> void { return fn(d: int) { self.n += d; }; }
+}
+
+struct Op {
+  name: Str;
+  run: (int, int) -> int;
+}
+
+impl Op {
+  static fn twice(x: int) -> int { return x + x; }
+}
+
+fn main() -> int {
+  // Named functions and lambdas as values, called through a variable.
+  let sq = square;
+  n = 10;
+  let addN = fn(x: int) -> int {
+    return x + n;
+  };  // copies n now
+  n = 20;                                              // ...so this is not seen
+  io::println(Str(apply(sq, 3)) + " " + Str(addN(1)) + " "
+      + Str(apply(Op::twice, 4)));
+
+  // Modes and tuple results in a function type.
+  let dm: (int, int) -> (int, int) = divmod;
+  let b: (inout int, int) -> void = bump;
+  k = 5;
+  b(k, 2);
+  io::println(Str(dm(17, 5).0) + " " + Str(dm(17, 5).1) + " " + Str(k));
+
+  // Composition: a closure that captures two function values.
+  let h = compose(sq, addN);                           // addN(sq(x))
+  io::println(Str(h(3)) + " " + Str(sumWith([1, 2, 3], fn(x: view int) -> int {
+    return x * 2;
+  })));
+
+  // Fields of a class and of a struct; elements of an array and a tuple.
+  let btn = Button("ok", fn(l: view Str) -> Str { return l + "!"; });
+  let op = Op("plus", plus);
+  let fs: ((int) -> int)[2] = [sq, h];
+  let t: ((int, int) -> int, Str) = (plus, "t");
+  io::println(btn.click() + " " + Str(op.run(2, 3)) + " " + Str(fs[1](1)) + " "
+      + Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
+
+  // A `shared fn`'s lambda shares its object, so the receiver is shared too.
+  let c: shared mut = Counter(1);
+  let get = c.make();
+  let add = c.adder();
+  add(41);
+  io::println(Str(get()) + " " + Str(c.n));
+
+  // Generics infer type parameters through a function type; optionals hold
+  // closures and `match` unwraps them.
+  let s = mapFirst(["a", "bb"], fn(x: view Str) -> Str { return x + x; });
+  opt: ((int) -> int)? = None;
+  if s == "aa" { opt = sq; }
+  match opt {
+    f: (int) -> int {
+      io::println(s + " " + Str(f(6)));
+    }
+    None { io::println("none"); }
+  }
+
+  // Function values are values: equal when they run the same code with the
+  // same closure (a copy, a named function), not otherwise.
+  let g = h;
+  io::println(Str(g == h) + " " + Str(h == sq) + " " + Str(fs[1] == h) + " "
+      + Str(sq == square));
+  return apply(addN, 2);
+}

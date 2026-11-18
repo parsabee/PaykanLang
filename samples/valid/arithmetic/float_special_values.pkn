@@ -1,0 +1,57 @@
+// special float values: Str<float> (and a tuple's string form) spells NaN
+// and the infinities the same way on every backend and platform -- `nan`
+// whatever the NaN's sign bit, `inf` and `-inf`.  (inf - inf is a NaN with the
+// sign bit set when the hardware computes it, but a positive one when a
+// compiler folds it, so printf's own "-nan" made the output backend-dependent.)
+// Exercises: overflow to infinity, inf - inf, 0 * inf, negated NaN, Str<float>,
+//            float comparisons with NaN (IEEE 754: `!=` is true when either
+//            side is NaN, every other comparison is false), tuple formatting
+//            of special values.
+
+import ::io;
+
+// expect-stdout: inf:  inf
+// expect-stdout: -inf: -inf
+// expect-stdout: nan:  nan
+// expect-stdout: nan:  nan
+// expect-stdout: -nan: nan
+// expect-stdout: nan == nan: False
+// expect-stdout: nan != nan: True
+// expect-stdout: nan != 1:   True
+// expect-stdout: 1 != nan:   True
+// expect-stdout: nan != inf: True
+// expect-stdout: nan < 1:    False
+// expect-stdout: nan <= nan: False
+// expect-stdout: nan > 1:    False
+// expect-stdout: nan >= nan: False
+// expect-stdout: inf > big:  True
+// expect-stdout: (nan, inf, -inf)
+// expect-stdout: nan -inf
+
+fn main() -> int {
+  let big = 1.0e308;
+  let inf = big * 10.0;
+  let ninf = 0.0 - inf;
+  let nan1 = inf - inf;
+  let nan2 = 0.0 * inf;
+  let nan3 = 0.0 - nan1;
+  io::println("inf:  " + Str<float>(inf));
+  io::println("-inf: " + Str(ninf));
+  io::println("nan:  " + Str<float>(nan1));
+  io::println("nan:  " + Str(nan2));
+  io::println("-nan: " + Str<float>(nan3));
+  io::println("nan == nan: " + Str(nan1 == nan1));
+  io::println("nan != nan: " + Str<bool>(nan1 != nan1));
+  io::println("nan != 1:   " + Str(nan1 != 1.0));
+  io::println("1 != nan:   " + Str<bool>(1.0 != nan1));
+  io::println("nan != inf: " + Str(nan1 != inf));
+  io::println("nan < 1:    " + Str<bool>(nan1 < 1.0));
+  io::println("nan <= nan: " + Str(nan1 <= nan1));
+  io::println("nan > 1:    " + Str<bool>(nan1 > 1.0));
+  io::println("nan >= nan: " + Str(nan1 >= nan1));
+  io::println("inf > big:  " + Str<bool>(inf > big));
+  let t = (nan1, inf, ninf);
+  io::println(t);                                  // (nan, inf, -inf)
+  io::println(Str(t.0) + " " + Str<float>(t.2));
+  return 0;
+}

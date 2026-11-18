@@ -4,7 +4,7 @@
 // bare type, `mut`, `shared`, `shared mut`, `atomic shared`, `locked mut`),
 // the writes each one buys, the conversions between them, and the copy rule
 // (docs/design/concurrency.md, "Ownership";
-// samples/concurrency/README.md).  The bare type is immutable and costs
+// samples/valid/concurrency/README.md).  The bare type is immutable and costs
 // nothing; every word added buys one thing: `mut` the writes through the
 // owner, `shared` several owners, `atomic shared` an object frozen for
 // every thread, `locked mut` an object written under a lock.

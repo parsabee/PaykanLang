@@ -1,7 +1,7 @@
 # Appendix: a calculator
 
 This appendix walks through a complete program from the repository,
-[`samples/imports/12_calc`](../../samples/imports/12_calc/main.pkn): an arithmetic calculator
+[`samples/valid/modules/calculator`](../../samples/valid/modules/calculator/main.pkn): an arithmetic calculator
 with variables, a command history and an interactive mode. At about 890 lines in four
 modules it uses most of what this reference covers: classes, an enum, `match` in three of its
 four modes (all but matching classes), arrays, tuples, optionals, a generic class, modules,
@@ -15,7 +15,7 @@ arguments are evaluated in order, sharing their variables. The sample normally s
 replaying a scripted demonstration session; `--no-demo` skips it:
 
 ```text
-$ cd samples/imports/12_calc
+$ cd samples/valid/modules/calculator
 $ paykan main.pkn --no-demo "3 + 4 * (2 - 1)" "10 / 4"
 3 + 4 * (2 - 1) = 7
 10 / 4 = 2.5
@@ -42,7 +42,7 @@ error: undefined variable 'foo'
 ## The modules
 
 ```text
-12_calc/
+calculator/
 ├── main.pkn          command line, REPL, history
 └── calc/
     ├── parser.pkn    a recursive-descent expression parser
@@ -54,7 +54,7 @@ error: undefined variable 'foo'
 because the parser looks variables up while it evaluates:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
 import calc::parser;
 import calc::hashmap;
 import calc::utils;
@@ -71,7 +71,7 @@ the table owns its chains, and a chain is changed in place through its head, by 
 entry on until it reaches the entry that has no `next`:
 
 ```pkn
-// from: samples/imports/12_calc/calc/hashmap.pkn
+// from: samples/valid/modules/calculator/calc/hashmap.pkn
 final class Entry {
   key: Str;
   value: float;
@@ -122,7 +122,7 @@ than a special value. `find` walks the chain by recursion through plain bindings
 borrow of the entry it names: it only reads, so it and `lookup` are `view fn`s:
 
 ```pkn
-// from: samples/imports/12_calc/calc/hashmap.pkn
+// from: samples/valid/modules/calculator/calc/hashmap.pkn
   view fn find(key: view Str) -> float? {
     match self.next {
       n: Entry {
@@ -146,7 +146,7 @@ was given, `key.clone()`, since `key` is a `view` and the entry keeps its key. A
 at the end of its bucket's chain, so a bucket keeps its keys in the order they were added:
 
 ```pkn
-// from: samples/imports/12_calc/calc/hashmap.pkn
+// from: samples/valid/modules/calculator/calc/hashmap.pkn
   fn update(key: view Str, value: float) -> bool {
     match self.next {
       n: inout Entry {
@@ -183,7 +183,7 @@ the binding of a temporary, and `move n.next` hands the rest of the chain back t
 ([Final classes](05-classes.md#final-classes)):
 
 ```pkn
-// from: samples/imports/12_calc/calc/hashmap.pkn
+// from: samples/valid/modules/calculator/calc/hashmap.pkn
   fn unlink(key: view Str) -> bool {
     match self.next {
       n: inout Entry {
@@ -215,7 +215,7 @@ entry of each, `bucket(b)`. `listVars` in `main.pkn` takes the map as a `view`, 
 nothing is copied out of the table, and nothing in it changes.
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
 // List the variables of the chain of entries that starts at `e`.
 fn listChain(e: view hashmap::Entry) {
   io::println("  " + e.key + " = " + show(e.value));
@@ -248,7 +248,7 @@ The four operators and modulo form an enum, and `applyOp` is an exhaustive varia
 `match`:
 
 ```pkn
-// from: samples/imports/12_calc/calc/parser.pkn
+// from: samples/valid/modules/calculator/calc/parser.pkn
 enum Op { Add, Sub, Mul, Div, Mod }
 
 fn applyOp(op: Op, a: float, b: float) -> float {
@@ -269,7 +269,7 @@ change it ([Concurrency](19-concurrency.md#who-holds-an-object-the-qualifiers)).
 and `fail` keeps only the first error, which it takes by `move`:
 
 ```pkn
-// from: samples/imports/12_calc/calc/parser.pkn
+// from: samples/valid/modules/calculator/calc/parser.pkn
 
 class Parser {
   input: Str;
@@ -295,7 +295,7 @@ The grammar has one method per precedence level, and each level calls the next o
 chained conditional expression:
 
 ```pkn
-// from: samples/imports/12_calc/calc/parser.pkn
+// from: samples/valid/modules/calculator/calc/parser.pkn
 
   fn parseTerm() -> float {
     result = self.parseFactor();
@@ -316,7 +316,7 @@ A factor that is a name is looked up in the variable store, and the `float?` tha
 returns is unwrapped by an optional-mode `match`:
 
 ```pkn
-// from: samples/imports/12_calc/calc/parser.pkn
+// from: samples/valid/modules/calculator/calc/parser.pkn
     if self.atIsIdentStart() {
       let name = self.parseIdent();
       match self.env.lookup(name) {
@@ -338,7 +338,7 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
 `Obj`; `target` takes the name by `move`, and the tuple each variable by `move` in turn:
 
 ```pkn
-// from: samples/imports/12_calc/calc/parser.pkn
+// from: samples/valid/modules/calculator/calc/parser.pkn
   fn parseStatement() -> (Str?, float) {
     self.skipWs();
     let start = self.pos;
@@ -373,7 +373,7 @@ them are. Until the buffer is full, `add` fills the
 next free slot; after that it overwrites the oldest item and moves `start` on:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
 class Ring<T> {
   items: T[16];
   count: int; // how many slots are in use: all of them once the buffer is full
@@ -416,7 +416,7 @@ its blank is an empty statement. It is a variable that is not `let`, since the f
 that add to it take it as an `inout` parameter:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
   history: mut = Ring(("", 0.0));
 ```
 
@@ -431,7 +431,7 @@ moves it along its input, and is given a copy of the statement, `src.clone()`, a
 history, since `evalStatement` prints `src` too:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
 fn evalStatement(src: Str, env: shared mut hashmap::HashMap,
                  history: inout Ring<(Str, float)>, quiet: bool) {
   let p: mut = parser::Parser(src.clone(), env);
@@ -478,7 +478,7 @@ The interactive loop is the standard-input idiom from [Files and I/O](../stdlib/
 which the `_` arm catches; `handle` returns `False` for `:quit`:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
   while True {
     match io::stdin().readln() {
       line: Ok {
@@ -498,7 +498,7 @@ that `-e` can consume the argument after it. Exit status `2` signals a usage err
 convention:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
 
 fn main(args: view Str[]) -> int {
   quiet = False;
@@ -533,7 +533,7 @@ one is passed as its `toString()`, a string of the program's own that the parser
 history can keep:
 
 ```pkn
-// from: samples/imports/12_calc/main.pkn
+// from: samples/valid/modules/calculator/main.pkn
   if nexprs > 0 {
     j = 1;
     while j < args.len() {

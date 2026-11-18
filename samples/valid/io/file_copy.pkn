@@ -1,0 +1,104 @@
+// file_copy.pkn — Copy every line from a source file to a destination file.
+// Demonstrates: io::open() and File.readln() returning a res::Result, matched
+//               on its variants (`Ok` with the value on success, `Err` with
+//               the error on failure), and File.write().
+//
+// open()   -> Result<File, Error> : the File, or the Error saying why not
+// readln() -> Result<Str, Error>  : a line, or EndOfFile at the end
+//
+// args: {tmpdir}
+
+import ::io;
+
+// The path of the scratch file `name`: in the first argument's directory
+// (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
+// parallel runs never share a file), else in /tmp.
+fn scratchPath(args: view Str[], name: Str) -> Str {
+  if args.len() > 1 {
+    return args[1] + "/" + name;
+  }
+  return "/tmp/" + name;
+}
+
+fn writeSource(path: view Str) -> int {
+  match io::open(path, "w") {
+    e: Err {
+      io::printerrln("writeSource: " + e.error.message());
+      return 1;
+    }
+    w: Ok {
+      f = move w.value;
+      f.write("first line\n");
+      f.write("second line\n");
+      f.write("third line\n");
+    }
+  }
+  return 0;
+  // the File destroyed when the match ends -> fclose -> data flushed
+}
+
+// Reading and writing change a file, so each is taken `inout`.
+fn copy(inFile: inout io::File, outFile: inout io::File) {
+  while True {
+    match inFile.readln() {
+      line: Ok {
+        outFile.write(line.value);
+      }
+      _ { break; }
+    }
+  }
+}
+
+fn copyFile(src: view Str, dst: view Str) -> int {
+  match io::open(src, "r") {
+    e: Err {
+      io::printerrln("copyFile: cannot open src: " + e.error.message());
+      return 1;
+    }
+    input: Ok {
+      match io::open(dst, "w") {
+        e: Err {
+          io::printerrln("copyFile: cannot open dst: " + e.error.message());
+          return 1;
+        }
+        output: Ok {
+          from = move input.value;
+          to = move output.value;
+          copy(from, to);
+        }
+      }
+    }
+  }
+  return 0;
+  // both Files destroyed when their scope ends -> fclose
+}
+
+fn printFile(path: view Str) -> int {
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("printFile: " + e.error.message());
+      return 1;
+    }
+    r: Ok {
+      while True {
+        match r.value.readln() {
+          line: Ok { io::print(line.value); }
+          _ { break; }
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+fn main(args: view Str[]) -> int {
+  let src = scratchPath(args, "paykan_copy_src.txt");
+  let dst = scratchPath(args, "paykan_copy_dst.txt");
+
+  writeSource(src);    // write & close src
+  printFile(src);
+  copyFile(src, dst);  // copy src -> dst, close both
+  printFile(dst);      // read & print dst
+
+  return 0;
+}

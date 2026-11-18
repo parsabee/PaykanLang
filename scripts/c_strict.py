@@ -10,8 +10,8 @@ modules it imports (`paykan pkm extract --object` of each module file
 `paykan --list-modules` names, as docs/c-backend.md builds it: the standard
 library's, the program's cache entries and prebuilt modules', as archives),
 and run.  One more program imports a module only as a prebuilt module file,
-from a --module-path directory: the 13_pkm sample's.  Every executable must
-exit like `paykan run --track-heap` does, print the same stdout and stderr
+from a --module-path directory: the prebuilt_pkm sample's.  Every executable
+must exit like `paykan run --track-heap` does, print the same stdout and stderr
 (apart from the heap statistics, and from the warnings `paykan run` prints
 while it compiles the program, before running it: the executable, compiled
 already, prints none) and end with 0 live heap blocks; a program with a
@@ -149,10 +149,10 @@ def stdlib_archive(paykan, outdir):
 
 
 def prebuilt_import(paykan, outdir):
-    """The 13_pkm sample with geometry::shapes only as a prebuilt module file
-    in a --module-path directory, which the C build must find as well as the
-    cache entries: its main.pkn and the flags it is compiled with."""
-    sample = ROOT / "samples" / "imports" / "13_pkm"
+    """The prebuilt_pkm sample with geometry::shapes only as a prebuilt module
+    file in a --module-path directory, which the C build must find as well as
+    the cache entries: its main.pkn and the flags it is compiled with."""
+    sample = sp.MODULES / "prebuilt_pkm"
     root = Path(outdir) / "prebuilt"
     (root / "lib" / "geometry").mkdir(parents=True)
     (root / "prog").mkdir()
@@ -199,7 +199,7 @@ def check_sample(args, sample, idx, runtimes, outdir, flags):
     # A sample's native C (#198) is held to the same flags, compiled with the
     # generated C.
     natives = [str(c) for c in sorted(sample.parent.glob("*.c"))
-               if sample.parent.parent.name == "imports"]
+               if sample.parent.parent == sp.MODULES]
     for ri, ((cc, opt), objs) in enumerate(runtimes.items()):
         label = f"emit-c {cc} {opt}"
         exe = Path(outdir) / f"s{idx}-rt{ri}"
@@ -243,8 +243,9 @@ def main():
         # (name, main file, paykan flags)
         cases = [(str(rel(f)), f, []) for f in corpus()]
         prebuilt, flags = prebuilt_import(args.paykan, outdir)
-        cases.append(("samples/imports/13_pkm/main.pkn (geometry::shapes "
-                      "prebuilt, --module-path)", prebuilt, flags))
+        cases.append(("samples/valid/modules/prebuilt_pkm/main.pkn "
+                      "(geometry::shapes prebuilt, --module-path)",
+                      prebuilt, flags))
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             all_results = list(pool.map(
                 lambda t: check_sample(args, t[1][1], t[0], runtimes, outdir,

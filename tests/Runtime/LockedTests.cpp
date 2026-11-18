@@ -44,8 +44,8 @@ PaykanObject *cell(PaykanShared *handle) { return PaykanShared_get(handle); }
 PaykanShared **slot(void *p) { return static_cast<PaykanShared **>(p); }
 
 /// An object with a number in it, standing in for the class a `locked`
-/// holds (`Counts` in samples/concurrency/05_locked.pkn).  Counted as any
-/// object, so a test sees the cell take its box and keep it.
+/// holds (`Counts` in samples/valid/concurrency/locked_cells.pkn).  Counted as
+/// any object, so a test sees the cell take its box and keep it.
 struct Counter {
   PaykanMethod *vtable;
   int32_t strong;
@@ -91,9 +91,9 @@ PaykanWalkFn vtWalk(const void *obj) {
 
 /// Releases a cell's payload and frees the cell at the end of a test.  The
 /// runtime never does either (the prototype leaks every cell with what it
-/// holds, samples/concurrency/README.md "What is not", and has no teardown
-/// of the mutex): the payload is taken out under the lock, and the count
-/// put at 1 is the thaw the design describes, after which the release
+/// holds, samples/valid/concurrency/README.md "What is not", and has no
+/// teardown of the mutex): the payload is taken out under the lock, and the
+/// count put at 1 is the thaw the design describes, after which the release
 /// frees the block as it frees any object's.
 void discard(PaykanShared *handle) { Paykan_release(handle); }
 

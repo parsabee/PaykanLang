@@ -1,0 +1,53 @@
+// Literals: integer, float, bool, string, None
+// Exercises: visitIntegerLiteral, visitFloatLiteral, visitBoolLiteral,
+//            visitStringLiteral, visitNoneLiteral, wrapStringLiteral
+
+import ::io;
+
+fn main() -> int {
+  // ---- Integer literals ----------------------------------------------------
+  let a = 0;
+  let b = 1;
+  let c = 42;
+  let d = 9223372036854775807;   // INT64_MAX
+  let neg = 0 - 2147483648; // large negative via unary-minus at runtime
+  io::println("int 0:    " + Str(a));
+  io::println("int 1:    " + Str(b));
+  io::println("int 42:   " + Str(c));
+  io::println("INT64_MAX:" + Str(d));
+  io::println("neg large:" + Str(neg));
+
+  // ---- Float literals -------------------------------------------------------
+  let f0 = 0.0;
+  let f1 = 1.0;
+  let pi = 3.14159;
+  let neg_f = 0.0 - 2.718;
+  io::println("float 0:  " + Str(f0));
+  io::println("float 1:  " + Str(f1));
+  io::println("pi:       " + Str(pi));
+  io::println("neg float:" + Str(neg_f));
+
+  // ---- Bool literals --------------------------------------------------------
+  let t = True;
+  let f = False;
+  io::println("True:     " + Str(t));
+  io::println("False:    " + Str(f));
+
+  // ---- String literals -------------------------------------------------------
+  // Direct literal passed to println()
+  io::println("raw literal");
+  // Assigned to a Str variable (exercises VarDecl shared-box path)
+  let s = "hello world";
+  io::println(s);
+  // Empty string
+  let empty = "";
+  io::println("empty='" + empty + "'");
+
+  // ---- None literal ---------------------------------------------------------
+  // None is the absent value of an optional; just declaring one must not
+  // crash.
+  let n: Obj? = None;
+  io::println("none decl ok");
+
+  return 0;
+}

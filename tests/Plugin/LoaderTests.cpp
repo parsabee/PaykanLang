@@ -54,7 +54,7 @@ const std::string kPaykan = PAYKAN_BIN;
 const std::string kPluginDir = PAYKAN_TEST_PLUGIN_DIR;
 const std::string kSuffix = PAYKAN_TEST_PLUGIN_SUFFIX;
 const std::string kSample =
-    std::string(PAYKAN_SAMPLES_DIR) + "/codegen/01_literals.pkn";
+    std::string(PAYKAN_SAMPLES_DIR) + "/valid/basics/literals.pkn";
 
 /// The test module lib<name><suffix> in <plugins>/<subdir>.
 std::string plugin(const std::string &subdir, const std::string &name) {
@@ -730,9 +730,11 @@ TEST_F(FrontendPlugin, ModuleFilesNameThePluginsFrontend) {
 // gives the same AST and the same PIR as the source itself.
 TEST_F(FrontendPlugin, CarriesEverySampleProgram) {
   unsigned checked = 0;
-  for (const char *dir : {"codegen", "leak-check"}) {
-    for (const auto &e :
-         fs::directory_iterator(std::string(PAYKAN_SAMPLES_DIR) + "/" + dir)) {
+  const fs::path valid = fs::path(PAYKAN_SAMPLES_DIR) / "valid";
+  for (const auto &cat : fs::directory_iterator(valid)) {
+    if (!cat.is_directory() || cat.path().filename() == "modules")
+      continue;
+    for (const auto &e : fs::directory_iterator(cat.path())) {
       if (e.path().extension() != ".pkn")
         continue;
       std::string src = e.path().string();
@@ -753,8 +755,9 @@ TEST_F(FrontendPlugin, CarriesEverySampleProgram) {
 
 // Imported modules are parsed with the importing program's frontend.
 TEST_F(FrontendPlugin, ImportsGoThroughThePlugin) {
-  fs::path src = fs::path(PAYKAN_SAMPLES_DIR) / "imports" / "01_bare";
-  fs::path dst = Scratch / "01_bare";
+  fs::path src =
+      fs::path(PAYKAN_SAMPLES_DIR) / "valid" / "modules" / "bare_import";
+  fs::path dst = Scratch / "bare_import";
   fs::create_directories(dst);
   for (const auto &e : fs::directory_iterator(src))
     if (e.path().extension() == ".pkn")

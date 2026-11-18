@@ -1538,14 +1538,14 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
 }
 
 // The instantiations another module's interface gives (`Cell<Str>` and
-// `Slot<Str>` of samples/imports/23_shared_instances' cells, as
+// `Slot<Str>` of samples/valid/modules/shared_instances' cells, as
 // ::collections' gives `List<Str>`) are that module's copies, which the
 // program links, and their methods are read from the copies Sema checked of
 // their templates (docs/design/pkm.md §4.8): a read in use across `size`,
 // which lets go of nothing, needs no reference of its own; across `put` and
 // `set`, which store over what was read, it is held.
 TEST(Lowering, ImportedInstantiationsAreReadFromTheirTemplates) {
-  const std::string dir = PAYKAN_SAMPLES_DIR "/imports/23_shared_instances";
+  const std::string dir = PAYKAN_SAMPLES_DIR "/valid/modules/shared_instances";
   std::ifstream in(dir + "/main.pkn");
   std::stringstream source;
   source << in.rdbuf();

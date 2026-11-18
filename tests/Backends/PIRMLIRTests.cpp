@@ -1001,13 +1001,21 @@ std::string emitPIR(const std::filesystem::path &src, std::string &err) {
   return out;
 }
 
+// Every single-file program of samples/valid: each .pkn file of a category
+// directory.  The programs of valid/modules import modules of their own, and
+// those of valid/concurrency lower to tasks, cells and parallel loops beyond
+// the standard ops (ParallelLoweringTests.cpp tests those).
 TEST(PIRMLIR, EverySample) {
+  const std::filesystem::path valid =
+      std::filesystem::path(PAYKAN_SAMPLES_DIR) / "valid";
   std::vector<std::filesystem::path> sources;
-  for (const char *dir : {"codegen", "leak-check"})
-    for (const auto &e : std::filesystem::directory_iterator(
-             std::filesystem::path(PAYKAN_SAMPLES_DIR) / dir))
-      if (e.path().extension() == ".pkn")
-        sources.push_back(e.path());
+  for (const auto &cat : std::filesystem::directory_iterator(valid))
+    if (cat.is_directory() && cat.path().filename() != "modules" &&
+        cat.path().filename() != "concurrency")
+      for (const auto &e : std::filesystem::directory_iterator(cat.path()))
+        if (e.path().extension() == ".pkn")
+          sources.push_back(e.path());
+  std::sort(sources.begin(), sources.end());
   ASSERT_FALSE(sources.empty());
   mlir::MLIRContext ctx;
   for (const auto &src : sources) {

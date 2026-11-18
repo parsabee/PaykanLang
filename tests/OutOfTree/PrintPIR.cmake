@@ -62,7 +62,7 @@ foreach(var LLVM_DIR CMAKE_C_COMPILER CMAKE_CXX_COMPILER)
     endif()
 endforeach()
 
-set(sample ${PAYKAN_SOURCE_DIR}/samples/codegen/01_literals.pkn)
+set(sample ${PAYKAN_SOURCE_DIR}/samples/valid/basics/literals.pkn)
 run_step("paykan --emit-pir" COMMAND ${paykan} --emit-pir ${sample})
 set(expected_pir "${STEP_OUTPUT}")
 
@@ -157,7 +157,7 @@ if(NOT STEP_OUTPUT STREQUAL expected_run)
 endif()
 # A class's pure virtual methods have `_` for their bodies in the AST
 # (docs/plugins/ast-format.md): the program runs through ast-text too.
-set(pure ${PAYKAN_SOURCE_DIR}/samples/codegen/63_pure_virtual.pkn)
+set(pure ${PAYKAN_SOURCE_DIR}/samples/valid/classes/pure_virtual.pkn)
 run_step("paykan --emit-ast (pure virtual)" COMMAND ${paykan} --emit-ast ${pure})
 file(WRITE ${WORK_DIR}/63_pure_virtual.pkn "${STEP_OUTPUT}")
 run_step("paykan run (pure virtual)" COMMAND ${paykan} run ${pure})
@@ -170,7 +170,7 @@ endif()
 # A negative number as a match pattern is one literal in the AST, `(int -1)`
 # (docs/plugins/ast-format.md): ast-text reads back the AST the source has,
 # and the program runs through it as from the source.
-set(negative ${PAYKAN_SOURCE_DIR}/samples/codegen/72_negative_patterns.pkn)
+set(negative ${PAYKAN_SOURCE_DIR}/samples/valid/control-flow/match_negative_patterns.pkn)
 run_step("paykan --emit-ast (negative patterns)" COMMAND ${paykan} --emit-ast ${negative})
 set(expected_ast "${STEP_OUTPUT}")
 file(WRITE ${WORK_DIR}/72_negative_patterns.ast "${STEP_OUTPUT}")

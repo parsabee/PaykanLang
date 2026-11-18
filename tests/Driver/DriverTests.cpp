@@ -4595,7 +4595,7 @@ TEST(Driver, MalformedCommandLinesAreReportedAsWritten) {
 // -- The toolchain, and the programs the driver links and runs
 
 // `run --object=<archive>` loads the archive's members the program needs
-// into the JIT, as `build` links them (finding 19): the 14_native sample
+// into the JIT, as `build` links them (finding 19): the native_c_code sample
 // prints the same with its object as an archive.  A file that is neither
 // is named in the error.  The JIT used to take object files only ("The file
 // was not recognized as a valid object file").
@@ -4604,7 +4604,7 @@ TEST(Driver, RunLoadsAnArchiveOfNativeObjects) {
   auto dir = freshDir("run_archive");
   for (const char *name : {"main.pkn", "text.pkn", "text.c"})
     std::filesystem::copy_file(std::filesystem::path(PAYKAN_SAMPLES_DIR) /
-                                   "imports" / "14_native" / name,
+                                   "valid" / "modules" / "native_c_code" / name,
                                dir / name);
   auto cc = run("cd " + dir.string() + " && cc -std=c11 -fPIC -I " +
                 shellWord(PAYKAN_RUNTIME_SOURCE_DIR) +

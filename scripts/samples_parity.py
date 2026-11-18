@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Run the samples corpus on every enabled backend and compare the results.
 
-Every runnable sample (samples/codegen, samples/leak-check, the numbered
-programs of samples/concurrency, and each samples/imports/<dir>/main.pkn)
-is run with `--track-heap` on each backend named on the command line.  The
-backends must agree on stdout, on the exit code and on the number of live
-heap blocks (which must be zero), and must produce the same stderr apart
-from the heap statistics.  A sample with `// expect-stdout: <line>`
+Every runnable sample (each .pkn file of a samples/valid/<category>/
+directory, and each samples/valid/modules/<dir>/main.pkn) is run with
+`--track-heap` on each backend named on the command line.  The backends
+must agree on stdout, on the exit code and on the number of live heap
+blocks (which must be zero), and must produce the same stderr apart from
+the heap statistics.  A sample with `// expect-stdout: <line>`
 comments must print exactly those lines.  A sample with a
 `// expect-leaks: <why>` comment may end with live blocks (the concurrency
 prototype's atomic and locked cells and frozen objects are immortal,
-samples/concurrency/README.md); it must still print a heap report, and at
-least one block must be live, or the line is stale.  Printed object
+samples/valid/concurrency/README.md); it must still print a heap report, and
+at least one block must be live, or the line is stale.  Printed object
 addresses (`Foo@0x...`) are normalised before comparing.
 
 Every sample runs with the arguments `a b`, or with the words of its
@@ -48,16 +48,22 @@ LIVE_RE = re.compile(r"^  live blocks\s*:\s*(-?\d+)$", re.M)
 STATS_RE = re.compile(r"^paykan heap stats:\n(?:  .*\n?)*", re.M)
 
 
+VALID = ROOT / "samples" / "valid"
+MODULES = VALID / "modules"
+
+
 def samples():
-    files = sorted((ROOT / "samples" / "codegen").glob("*.pkn"))
-    files += sorted((ROOT / "samples" / "leak-check").glob("*.pkn"))
-    # The concurrency prototype's programs that run; the ones Sema rejects
-    # (err_*.pkn and errors/) are not here.
-    files += sorted(f for f in (ROOT / "samples" / "concurrency").glob("*.pkn")
-                    if not f.name.startswith("err_"))
-    for d in sorted((ROOT / "samples" / "imports").iterdir()):
+    """The runnable samples: every program of samples/valid.  A category's
+    .pkn files are a program each; a directory of samples/valid/modules is
+    one program, its main.pkn.  The samples Sema rejects live in
+    samples/invalid and are not here."""
+    files = []
+    for cat in sorted(d for d in VALID.iterdir() if d.is_dir()):
+        if cat != MODULES:
+            files += sorted(cat.glob("*.pkn"))
+    for d in sorted(MODULES.iterdir()):
         main = d / "main.pkn"
-        if main.is_file() and not d.name.startswith("err_"):
+        if main.is_file():
             files.append(main)
     return files
 
@@ -106,9 +112,9 @@ _OBJECTS = {}
 
 
 def object_flags(sample, scratch):
-    """`--object=...` for an imports sample with C files (#198): paykan does
+    """`--object=...` for a modules sample with C files (#198): paykan does
     not build native code, so the harness compiles them, as a user would."""
-    if sample.parent.parent.name != "imports":
+    if sample.parent.parent != MODULES:
         return []
     sources = sorted(sample.parent.glob("*.c"))
     if not sources:

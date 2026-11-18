@@ -1,0 +1,126 @@
+// tuples: fixed-arity, heterogeneous, immutable values
+// Exercises: tuple types `(T1, T2)` and literals `(e1, e2)`, element access
+//            `t.0` / `t.1` (compile-time index, `t.0.1` for nesting), tuples
+//            as parameters / return values / fields / array elements
+//            (`[(0, "k"); 3]` included) / generic type arguments,
+//            multiple return with destructuring `q, r = divmod(7, 2);`
+//            (`_` skips an element), element-wise `==` / `!=`, `toString`
+//            rendering `(1, a)`, a tuple meeting a `T: Showable` bound, and
+//            covariant elements (`(int, Str)` where `(int, Obj)` is expected).
+// A tuple is a value held in place, like `T[n]`: its elements sit side by side
+// in the variable, field or array slot that holds it.  A tuple with a
+// move-only element (a `Str`, a unique reference) is itself moved, not copied;
+// `t.clone()` copies its elements (a `shared` reference in it is retained once
+// per copy), so a clone is independent of its source.
+
+import ::io;
+
+class Point {
+  x: int;
+  y: int;
+  view fn toString() -> Str {
+    return "P(" + Str(self.x) + "," + Str(self.y) + ")";
+  }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+}
+
+class Range {
+  bounds: (int, int);                     // a tuple-typed field
+  view fn width() -> int           { return self.bounds.1 - self.bounds.0; }
+  view fn get() -> view (int, int) { return self.bounds; }
+}
+
+impl Range {
+  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {
+  // multiple return
+  return (a / b, a % b);
+}
+
+fn label(p: Point) -> (Str, Point) {
+  return ("point", move p);
+}
+
+class Box<T> {
+  v: T;
+  view fn get() -> view T { return self.v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = move v; }
+}
+
+fn bracket<T: Showable>(x: view T) -> Str {
+  return "[" + x.toString() + "]";
+}
+
+fn tag(t: (int, Obj)) -> Str {
+  return t.1.toString();
+}
+
+fn main() -> int {
+  // Literals and element access.
+  let t = (1, "a", 2.5, True);
+  io::println(t);                             // (1, a, 2.5, True)
+  io::println(Str(t.0));                      // 1
+  io::println(t.1);                           // a
+  io::println(Str(t.2));                 // 2.5
+
+  // Multiple return + destructuring.
+  q, r = divmod(7, 2);
+  io::println(Str(q) + " " + Str(r));     // 3 1
+  _, rem = divmod(9, 4);                  // `_` skips an element
+  io::println(Str(rem));                  // 1
+  q, r = divmod(20, 6);                   // re-assigns the existing q and r
+  io::println(Str(q) + " " + Str(r));     // 3 2
+
+  // Nesting and chained access.
+  let nested = ((1, 2), ("x", (3, "y")));
+  io::println(nested);                        // ((1, 2), (x, (3, y)))
+  io::println(nested.1.1.1);                  // y
+
+  // Arrays of tuples.
+  pairs: (int, Str)[3] = [(1, "one"), (2, "two"), (0, "")];
+  pairs[2] = (3, "three");                // an element replaced by a new tuple
+  io::println(pairs[2].1);                    // three
+  io::println(Str(pairs.len() + pairs[1].0));  // 5
+
+  // Tuples holding objects, as fields, and returned from methods.
+  name, pt = label(Point(1, 2));
+  io::println(name + " " + pt.toString());  // point P(1,2)
+  let rg = Range(10, 25);
+  io::println(Str(rg.width()));            // 15
+  lo, hi = rg.get();
+  io::println(Str(lo) + ".." + Str(hi));  // 10..25
+
+  // Equality is element-wise (Str by content, objects by their `equals`).
+  a = (1, "s");
+  let b = (1, "s");
+  io::println(Str(a == b));               // True
+  io::println(Str(a != (2, "s")));           // True
+  let lp = label(move pt);
+  io::println(Str(lp == lp));                // True  (the same Point object)
+
+  // A clone is its own value; re-assigning the source leaves the clone intact.
+  let m = a.clone();
+  a = (0, "reset");
+  io::println(m.1 + a.1);                     // sreset
+
+  // Filled arrays, generic type arguments and `Showable`.
+  let keys: (int, Str)[3] = [(0, "k"); 3];
+  io::println(keys[2]);                       // (0, k)
+  let bx = Box<(Str, int)>(("seven", 7));
+  io::println(bx.get());                      // (seven, 7)
+  io::println(bracket((q, r)));               // [(3, 2)]
+  let s = (q, r).toString();
+  io::println(s + "!");                       // (3, 2)!
+
+  // Covariant elements: a `(int, Str)` passed where `(int, Obj)` is expected.
+  io::println(tag((1, "obj")));               // obj
+  return 0;
+}

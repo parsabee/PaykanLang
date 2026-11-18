@@ -1,0 +1,72 @@
+// Ternary expressions: if <cond> then <expr> else <expr>
+// Exercises: visitTernaryExpr for int/float/bool results,
+//            nested ternaries, class-type ternary (Str branches via emitAsShared),
+//            ternary used in assignment and function return
+
+import ::io;
+
+fn classify(n: int) -> Str {
+  return if n > 0 then "positive" else if n < 0 then "negative" else "zero";
+}
+
+fn pickStr(flag: bool, a: Str, b: Str) -> Str {
+  return if flag then a else b;
+}
+
+fn main() -> int {
+  io::println("=== int ternary ===");
+  let x = if True then 10 else 20;
+  let y = if False then 10 else 20;
+  io::println("True  ->" + Str(x));    // 10
+  io::println("False ->" + Str(y));    // 20
+
+  io::println("=== float ternary ===");
+  let f = if 1 < 2 then 1.5 else 2.5;
+  io::println("1<2 ->" + Str(f));    // 1.5
+
+  io::println("=== bool ternary ===");
+  let b = if True then False else True;
+  io::println("bool ->" + Str(b));    // False
+
+  io::println("=== nested ternary ===");
+  let grade = 85;
+  let label: int = if grade >= 90 then 1 else if grade >= 80 then 2
+      else if grade >= 70 then 3 else 4;
+  io::println("grade 85 -> band" + Str(label));  // 2
+
+  io::println("=== ternary with relational condition ===");
+  let a = 7;
+  io::println("max(7,3)=" + Str(if a > 3 then a else 3));  // 7
+  io::println("min(7,3)=" + Str(if a < 3 then a else 3));  // 3
+
+  io::println("=== Str ternary (class branches) ===");
+  // Both branches produce Str — exercises the isClassResult path which
+  // calls emitAsShared on each branch.
+  let cond = True;
+  s = if cond then "yes" else "no";
+  io::println(s);           // yes
+  s = if !cond then "yes" else "no";
+  io::println(s);           // no
+
+  io::println("=== Str ternary rebind (double-box regression) ===");
+  // Assigning a ternary-Str to an existing variable must not double-box.
+  t = "initial";
+  t = if True then "replaced" else "original";
+  io::println(t);           // replaced
+
+  io::println("=== ternary in function return ===");
+  io::println(classify(5));    // positive
+  io::println(classify(0 - 3)); // negative
+  io::println(classify(0));    // zero
+
+  io::println("=== ternary with owned Str variables as branches ===");
+  let p = "alpha";
+  let q = "beta";
+  // The first call takes copies; the second, the last use, moves both.
+  r = pickStr(True, p.clone(), q.clone());
+  io::println(r);           // alpha
+  r = pickStr(False, move p, move q);
+  io::println(r);           // beta
+
+  return 0;
+}

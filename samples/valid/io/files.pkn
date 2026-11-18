@@ -1,0 +1,105 @@
+// files.pkn — io::File: open, write, readln, ==
+// Exercises: io::open() returning a res::Result<io::File, err::Error> (`Ok`
+//            with the file on success, `Err` with the error on failure),
+//            File.write(), File.readln() returning a Result too (`Err` at
+//            the end), `==` on two Files, the file closed where its File
+//            is destroyed (a File is a struct with a `__deinit__`: it
+//            moves, and a variable that writes or reads it is not `let`).
+//
+// args: {tmpdir}
+
+import ::error as err;
+import ::io;
+
+// The path of the scratch file `name`: in the first argument's directory
+// (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
+// parallel runs never share a file), else in /tmp.
+fn scratchPath(args: view Str[], name: Str) -> Str {
+  if args.len() > 1 {
+    return args[1] + "/" + name;
+  }
+  return "/tmp/" + name;
+}
+
+fn writelines(path: view Str) -> int {
+  match io::open(path, "w") {
+    w: Ok {
+      f = move w.value;
+      f.write("line one\n");
+      f.write("line two\n");
+      f.write("line three\n");
+    }
+    e: Err {
+      io::printerrln("writelines: " + e.error.message());
+      return 1;
+    }
+  }
+  return 0;
+}
+
+fn readlines(path: view Str) -> int {
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("readlines: " + e.error.message());
+      return 1;
+    }
+    r: Ok {
+      while True {
+        match r.value.readln() {
+          line: Ok { io::print(line.value); }
+          _ { break; }
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+fn showEquals(path: view Str) {
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("showEquals: " + e.error.message());
+    }
+    r: Ok {
+      match io::open(path, "r") {
+        e2: Err {
+          io::printerrln("showEquals inner: " + e2.error.message());
+        }
+        r2: Ok {
+          let eq = r.value == r2.value;
+          io::println(Str(eq));  // False: two opens, two files
+        }
+      }
+    }
+  }
+}
+
+fn main(args: view Str[]) -> int {
+  let path = scratchPath(args, "paykan_sample_17.txt");
+
+  // --- 1. open for writing, write lines ------------------------------------
+  io::println("=== write lines ===");
+  writelines(path);
+
+  // --- 2. open for reading, read lines back --------------------------------
+  io::println("=== read lines ===");
+  readlines(path);
+
+  // --- 3. ==: two opens of one path are two files -------------------------
+  io::println("=== equals ===");
+  showEquals(path);
+
+  // --- 4. open nonexistent file — the result's error says why --------------
+  io::println("=== open failure ===");
+  match io::open("/no/such/file_sample_17.txt", "r") {
+    e: Err {
+      io::println("error: " + err::name(e.error.code) + ": "
+          + e.error.message());
+    }
+    _ {
+      io::println("unexpected success");
+    }
+  }
+
+  return 0;
+}

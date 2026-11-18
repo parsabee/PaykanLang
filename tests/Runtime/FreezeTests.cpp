@@ -343,7 +343,7 @@ TEST(Freeze, ABufferOfWideValuesFreezesEachReference) {
 }
 
 // An object holding a buffer (a `mem::Box<mem::Buffer<Str>>`, what
-// samples/concurrency/README.md freezes for a parallel body) is walked in
+// samples/valid/concurrency/README.md freezes for a parallel body) is walked in
 // turn, through each object's own slot.
 TEST(Freeze, AnObjectHoldingABufferFreezesItsValuesToo) {
   TrackingHeap heap;

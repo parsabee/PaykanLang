@@ -303,8 +303,8 @@ programs), and some run past 63, such as a drop function's for a long
 type.  GCC and Clang take every character of a name as significant.
 
 The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the runnable
-programs of the samples corpus (`samples/codegen`, `samples/leak-check` and
-`samples/imports/*/main.pkn`): with every C compiler it finds (GCC and Clang),
+programs of the samples corpus (every `samples/valid/<category>/*.pkn` and
+`samples/valid/modules/*/main.pkn`): with every C compiler it finds (GCC and Clang),
 each program's `--emit-c` output and the runtime (`src/Runtime/*.c`) are
 compiled with `-std=c11 -pedantic-errors -Wall -Wextra -Werror` at `-O0` and
 `-O2`, linked and run, and every executable must print the same stdout and
