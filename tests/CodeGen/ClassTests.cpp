@@ -1022,13 +1022,13 @@ TEST(Class, DefaultEqualsIsIdentity) {
   EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nFalse\n");
 }
 
-// `==` on reference types lowers to the virtual `equals` method.  A ref-typed
-// call temporary compared against None must dispatch correctly (and not leak):
-// `process() == None` returns None.equals(None) == True.  Regression: this used
-// to compare a box pointer against the None singleton and was always false.
+// A call temporary of an optional reference compared against None is a test
+// of absence, of the temporary itself (and it does not leak).  Regression:
+// this used to compare a box pointer against an object standing for None and
+// was always false.
 TEST(Class, CallTemporaryEqualsNone) {
   auto r = compileAndRun(R"(import ::io;
-    fn process() -> Obj { return None; }
+    fn process() -> Obj? { return None; }
     fn main() -> int {
       if process() == None { io::println("none"); } else { io::println("something"); }
       return 0;
@@ -1042,7 +1042,7 @@ TEST(Class, CallTemporaryNotEqualsNone) {
   auto r = compileAndRun(R"(import ::io;
     class Thing { n: int; }
     impl Thing { fn __init__(x: int) { self.n = x; } }
-    fn process() -> Obj { return Thing(5); }
+    fn process() -> Obj? { return Thing(5); }
     fn main() -> int {
       if process() != None { io::println("something"); } else { io::println("none"); }
       return 0;

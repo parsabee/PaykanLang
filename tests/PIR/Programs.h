@@ -11,7 +11,7 @@ inline const char *const kProgram = R"(module "main"
 cstr @.str0 = "Hello\n" len 6
 data @.d0 = [1, -2, 3]
 bytes @.b0 = [0, 4]
-extern obj @$rt.PaykanObject_None
+extern obj @$rt.Paykan_an_object
 extern vtable @$rt.PaykanString_vtable
 
 class Point {

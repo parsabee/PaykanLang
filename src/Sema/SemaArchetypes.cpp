@@ -425,6 +425,9 @@ bool Sema::checkArchetypes() {
   const unsigned suppressed = SuppressedFollowOns;
   const unsigned poisoned = PoisonedBindings;
   const unsigned repeated = RepeatedImportFailures;
+  // A `None` its instances leave untyped is among what the check drops (an
+  // error of theirs, muted, may have kept a slot from typing it).
+  const size_t nones = NoneLiterals.size();
   const size_t structs = InstantiatedStructDecls.size(),
                enums = InstantiatedEnumDecls.size(),
                classes = InstantiatedClassDecls.size(),
@@ -627,6 +630,8 @@ bool Sema::checkArchetypes() {
   SuppressedFollowOns = suppressed;
   PoisonedBindings = poisoned;
   RepeatedImportFailures = repeated;
+  NoneLiterals.erase(NoneLiterals.begin() + static_cast<std::ptrdiff_t>(nones),
+                     NoneLiterals.end());
   auto forget = [&](auto &decls, size_t keep) {
     for (size_t i = keep; i < decls.size(); ++i)
       ForeignInstantiationSources.erase(decls[i]);

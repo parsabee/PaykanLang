@@ -85,7 +85,7 @@ fn main() -> int {
   io::println(Str(outer));     // 30 (modified by inner scope)
 
   io::println("=== None initialised var ===");
-  let n: Obj = None;   // None has type Obj, not Str
+  let n: Str? = None;   // the absent value of an optional
   io::println("none ok");  // just checking it doesn't crash
 
   return 0;

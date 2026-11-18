@@ -684,7 +684,7 @@ result, see [Function types and lambdas](14-function-types.md)) and instantiatio
 (`Box<T>`, or a generic struct's `Pair<A, B>`). A by-value or `inout` `T` or `T?` parameter
 takes a `shared` argument's form (`twice(s)` with `s: shared Node` is `twice<shared Node>`),
 and a `view` one the plain type; a slice's, a tuple's or a function type's part takes the
-part's form ([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)). A bare `None` argument is typed `Obj` and
+part's form ([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)). A `None` argument has no type of its own and
 carries no information about `T`: `unwrapOr(None, Node(3))` infers `T = Node` from the
 second argument, but `wrap(None)` alone cannot be inferred and needs
 `wrap<Node>(None)`. It is exact: a parameter that appears twice must be

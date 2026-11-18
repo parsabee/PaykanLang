@@ -525,8 +525,10 @@ Things to know about `__deinit__`:
 
 ## `Obj`, `toString` and `equals`
 
-Every class extends `Obj`, the root of the class hierarchy, directly or indirectly. `Obj`
-provides two methods that your classes can override:
+Every class extends `Obj`, the root of the class hierarchy, directly or indirectly. An
+`Obj` variable holds an object of any class; `Obj` has no objects of its own, and `None` is
+not one (a variable that may hold nothing is an `Obj?`, see [Optionals](12-optionals.md)).
+`Obj` provides two methods that your classes can override:
 
 - `view fn toString() -> Str`, used by `io::print` and `io::println` to print an object. The
   default prints `Object@` and an address.
@@ -1401,7 +1403,10 @@ exactly that class.
 
 ## The `Obj` Root
 
-Every class transitively extends `Obj`. `Obj` defines:
+Every class transitively extends `Obj`. It is the root of the hierarchy and nothing else:
+every `Obj` value is an object of a class (or a `Str`), `Obj()` is an error (`cannot make an
+'Obj': it is the root of the class hierarchy, and every object is one of a class`), and
+`None` is not an `Obj` but the absent value of an optional, `Obj?` included. `Obj` defines:
 
 | Slot       | Signature                            | Default                      |
 |------------|--------------------------------------|------------------------------|

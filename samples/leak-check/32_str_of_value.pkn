@@ -2,7 +2,7 @@
 // `toString()` gives:
 //   * an optional (`int?`, `Str?`, a class's), present and None; a tuple
 //     holding a `Str` and an object; a struct holding a `Str`; an enum
-//     variant holding a `Str`; an object, an `Obj` and `None`;
+//     variant holding a `Str`; an object, an `Obj` and an absent `Obj?`;
 //   * of a call's result, a field, a list's element and a generic value,
 //     kept in a variable, a field and a tuple, joined with `+` and dropped;
 //   * an object whose `toString()` replaces the only field that holds it
@@ -101,9 +101,10 @@ fn main() -> int {
   io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t) + " " + Str(q)
       + " " + Str(r));
   let ob: Obj = make(0);
+  let absent: Obj? = None;
   io::println(Str(("t" + Str(3), make(4))) + " " + Str(Tag("g" + Str(5))) + " "
       + Str(Maybe::Some("v" + Str(6))) + " " + Str(make(7)) + " " + Str(ob)
-      + " " + Str(None));
+      + " " + Str(absent));
 
   // Of a call, a field, a list's element and a generic value.
   let bx: mut = Box(make(9), "x");

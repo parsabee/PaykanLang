@@ -183,8 +183,8 @@ TEST(Tuple, DestructureReassignsRefVariables) {
       s, w = ("new", "abc");          // both old boxes released
       io::println(s);
       io::println(Str<int>(w.len()));
-      o: Obj = None;
-      o, s = ("boxed", "again");      // None-initialised var promoted to owned
+      o: Obj? = None;
+      o, s = ("boxed", "again");      // a None variable takes a reference
       io::println(o);
       io::println(s);
       return 0;

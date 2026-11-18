@@ -193,7 +193,7 @@ TEST(FixedArray, OnlyALocalAParameterAResultOrAClassFieldForNow) {
   expectBodyError("  o: int[2]? = None;", "variable 'o': " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",
                   "tuple element 0: " + notYet);
-  expectBodyError("  o: Obj = None;\n  match o { xs: int[2] { } _ { } }",
+  expectBodyError("  o: Obj = \"o\";\n  match o { xs: int[2] { } _ { } }",
                   "match arm: " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  c = if True then xs else xs;",
                   "a conditional expression: " + notYet);
@@ -581,7 +581,8 @@ TEST(FixedArray, RepeatLiterals) {
                   "element type 'int' of 'int[2]'");
   expectError("class Node { v: int; }\n"
               "fn main() -> int { n: Node[2] = [None; 2]; return 0; }",
-              "does not match the element type 'Node' of 'Node[2]'");
+              "None is not a value of type 'Node': it is the absent value of "
+              "an optional ('Node?')");
   expectError("fn f(xs: view Str[]) {}\n"
               "fn main() -> int { f([1; 3]); return 0; }",
               "array literal element of type 'int' does not match the element "

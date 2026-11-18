@@ -1052,11 +1052,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Expression-level assignability: isAssignable(dst, srcTy) plus the two
   // optional-type rules that depend on the expression itself, both of which
   // are RECORDED on the AST for the lowering:
-  //   * the `None` literal (statically `Obj`) is assignable to every `T?`;
-  //     its resolved type is rewritten to that `T?` so the lowering emits a
-  //     null box instead of the boxed `None` singleton;
-  //   * a `T?` value flowing into an `Obj` slot is marked (Expr::CoercedType)
-  //     so the lowering materialises the `None` singleton for a null box;
+  //   * `None` is the absent value of every `T?` and of nothing else
+  //     (#394): its resolved type becomes that `T?` (giveNoneType), which
+  //     is how the lowering knows the absent value to emit;
   //   * a primitive flowing into an optional primitive slot (`int` ->
   //     `int?`) is marked with the optional so the lowering boxes it.
   // A class that lost its superclass (or a subclass of one) against a class
@@ -1090,10 +1088,51 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // If `srcTy` is an optional and `dst` is not (the `T?` -> `T` narrowing
   // that needs a `match`), emit the "cannot use optional ... without
-  // unwrapping" error at @p loc and return true; otherwise return false so the
-  // caller emits its own generic mismatch diagnostic.
+  // unwrapping" error at @p loc and return true; a `None` where no optional
+  // is due likewise ("None is not a 'Node'").  Otherwise return false so
+  // the caller emits its own generic mismatch diagnostic.
   bool diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
                                  ast::Type *srcTy);
+
+  // -- `None` (#394; ast::NoneType)
+  //
+  // `None` has no type of its own: it is the absent value of the optional
+  // its context expects.  The expression checker types it with the
+  // placeholder ast::NoneType, and the optional slot it reaches gives the
+  // literal its type.
+
+  // (The literals visited are NoneLiterals, below with the instantiation
+  // frames it records.)
+  /// Whether @p e is `None`, or a conditional each of whose branches is:
+  /// the expressions typed with the placeholder.
+  static bool isNoneValue(const ast::Expr *e);
+  /// Give @p e, a `None` or a conditional each of whose branches is one,
+  /// the optional type @p optTy.
+  static void giveNoneType(ast::Expr *e, ast::Type *optTy);
+  /// Whether @p ty is the placeholder or holds it as a part: the type of a
+  /// literal with a `None` no slot has typed (`(None, 1)`).  Structural
+  /// types only can hold it (a tuple's elements, an array's, an
+  /// optional's value, a function type's parts, under any qualifier).  A
+  /// type that holds none is remembered (NoneFreeTypes): a tuple of
+  /// tuples names each part's one canonical type many times over.
+  bool holdsUntypedNone(const ast::Type *ty);
+  std::unordered_set<const ast::Type *> NoneFreeTypes;
+  /// False (after reporting it) when @p ty, the type of the value a
+  /// variable @p name is declared with, holds an untyped `None`: the
+  /// declaration must say which optional it is (`x: Node? = None;`).
+  bool checkNotUntypedNone(ast::Type *ty, const std::string &name,
+                           ast::SourceLocation loc);
+  /// Whether `T?` of the value type @p ty is what a `None` beside a value
+  /// of it means (`if c then x else None`, `[None, x]`): a reference, a
+  /// function value, an enum, a tuple or a struct, a primitive.
+  bool makesOptional(const ast::Type *ty) const;
+  /// The error for `None` where a value alone is due (@p what: "call
+  /// 'clone' on", "move"): it is no value until a slot types it.
+  void errorNoneAlone(ast::SourceLocation loc, const std::string &what);
+  /// run's last check: a `None` that no slot typed, in a program with no
+  /// other error, is one (`None;`, `f(None)` for an `Obj`), so that the
+  /// placeholder never reaches the lowering.
+  void reportUntypedNones();
 
   // Emit the unwrap diagnostic for an operation that is not defined on an
   // optional value (member access, method call, subscript, arithmetic, …).
@@ -3280,6 +3319,17 @@ private:
     std::vector<InstantiationFrame> Frames;
   };
   std::vector<DeferredOptionalCheck> DeferredOptionalChecks;
+  /// The `None` literals the expression checker visited (#394).  Each is
+  /// typed with the placeholder ast::NoneType until a slot gives it an
+  /// optional type.
+  struct VisitedNone {
+    ast::NoneLiteral *Literal = nullptr;
+    /// Where it was visited: the file and the instantiation notes of the
+    /// error for one left untyped (reportUntypedNones).
+    const ModuleTemplates *Origin = nullptr;
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<VisitedNone> NoneLiterals;
   /// The types reported (by name): a second use of one is a follow-on.
   StringSet ReportedOptionalLimits;
   /// The depth of the instantiation whose body is being checked

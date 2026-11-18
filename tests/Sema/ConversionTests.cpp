@@ -524,8 +524,9 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
               "no specialization of 'int' for 'A'; its specializations are "
               "int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char\n");
   expectError(prog("n = float(None);"),
-              "no specialization of 'float' for 'Obj'; its specializations are "
-              "int, float, i8, i16, i32, u8, u16, u32, unsigned, f16, f32\n");
+              "no specialization of 'float' for 'None'; its specializations "
+              "are int, float, i8, i16, i32, u8, u16, u32, unsigned, f16, "
+              "f32\n");
   expectError(prog("n = char(Color::Red);"),
               "no specialization of 'char' for 'Color'; its specializations "
               "are int, i8, i16, i32, u8, u16, u32, unsigned, char\n");
@@ -599,7 +600,9 @@ TEST(Conversion, StrOfAStrReadsAView) {
 // ─── conversions.md, "To a string")
 
 // `Str(x)` is `x.toString()` for every type with a text: an optional, a
-// tuple, a struct, an enum, an object, `None`; in the explicit form too.
+// tuple, a struct, an enum, an object; in the explicit form too.  `None`
+// alone is no value to convert (#394): the absent value of an optional has
+// its text, "None".
 TEST(Conversion, StrTakesEveryTypeWithAText) {
   const std::string decls = R"(
     class P { x: int; view fn toString() -> Str { return "P"; } }
@@ -623,7 +626,8 @@ TEST(Conversion, StrTakesEveryTypeWithAText) {
     j: Str = Str(Q());
     ob: Obj = P(3);
     k: Str = Str(ob);
-    l: Str = Str(None);
+    absent: Obj? = None;
+    l: Str = Str(absent);
     m: Str = show(P(4)) + show((1, 2)) + show(o) + show(S(2, "c"));
     t = (P(5), Color::Green);
     n: Str = Str(t);

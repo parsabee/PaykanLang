@@ -494,28 +494,108 @@ TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
   g.expectNoLeaks("BreakContinueReturnInsideOptionalMatch");
 }
 
-// -- The existing Obj-subject idiom keeps working and keeps its semantics
+// -- `Obj?` is an optional like any other (#394), and an `Obj` subject is
+// -- matched as before
 
-TEST(Optional, ObjSubjectMatchUnchanged) {
+TEST(Optional, ObjOptionalIsAnOrdinaryOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
+    class Animal { name: Str; }
+    impl Animal { fn __init__(n: Str) { self.name = move n; } }
+    class Dog : Animal { }
+    impl Dog { fn __init__(n: Str) { __super__(move n); } }
+    fn what(o: view Obj?) -> Str {
+      match o {
+        d: Dog    { return "dog " + d.name; }
+        a: Animal { return "animal " + a.name; }
+        s: Str    { return "str " + s; }
+        x: Obj    { return "obj"; }
+        None      { return "none"; }
+      }
+    }
+    fn find(c: bool) -> Obj? { return if c then Dog("rex") else None; }
     fn main() -> int {
-      o: Obj = None;
-      match o {
-        Str { io::println("str"); }
-        _   { io::println("none"); }
-      }
+      o: Obj? = None;
+      io::println(what(o) + " " + Str<bool>(o == None));
       o = "text";
-      match o {
-        s: Str { io::println(s); }
-        _      { io::println("none"); }
-      }
-      io::println(Str<bool>(o == None));
+      io::println(what(o) + " " + Str<bool>(o == None));
+      o = Animal("cat");
+      io::println(what(o));
+      // An `Obj` converted is present, whatever its class.
+      plain: Obj = Dog("fido");
+      p: Obj? = move plain;
+      io::println(what(p) + " " + Str<bool>(p != None));
+      io::println(what(find(True)) + ", " + what(find(False)) + ", " + what(None));
+      // In an array, a field and a tuple.
+      xs: Obj?[3] = [None, "s", Dog("d")];
+      t: (Obj?, int) = (None, 1);
+      io::println(what(xs[0]) + ", " + what(xs[1]) + ", " + what(xs[2]) + ", " + what(t.0));
+      o = None;
+      io::println(o);
       return 0;
     }
   )pkn");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "none\ntext\nFalse\n");
+  EXPECT_EQ(r.StdOut, "none True\nstr text False\nanimal cat\n"
+                      "dog fido True\ndog rex, none, none\n"
+                      "none, str s, dog d, none\nNone\n");
+  g.expectNoLeaks("ObjOptionalIsAnOrdinaryOptional");
+}
+
+// `Str<T?>(None)` (#394): the text of the absent value of the optional
+// written, for a reference, a value and one held in place; and a
+// conditional of Nones in a weak field's parameter and a repeated element,
+// which is evaluated for each element as any value but a literal `None` or
+// a Copyable one is.
+TEST(Optional, NoneOfTheOptionalWritten) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+    class Node { key: int; }
+    impl Node { fn __init__(k: int) { self.key = k; } }
+    class Kid { key: int; parent: weak Kid?; }
+    class Ctr { n: int; }
+    fn tick(c: inout Ctr) -> bool { c.n = c.n + 1; return c.n > 100; }
+    fn main() -> int {
+      c = True;
+      t: mut = Ctr(0);
+      ys: Node?[3] = [if tick(t) then None else None; 3];
+      zs: Node?[3] = [if tick(t) then None else Node(1); 3];
+      io::println(Str(t.n) + " " + Str(ys[2] == None) + " " + Str(zs[2] == None));
+      io::println(Str<Node?>(None) + " " + Str<int?>(None) + " " +
+                  Str<(int, Str)?>(None) + " " + Str<Str?>(None) + " " +
+                  Str<Obj?>(if c then None else None));
+      k: mut = Kid(1, if c then None else None);
+      xs: Node?[3] = [if c then None else None; 3];
+      io::println(Str(k.parent == None) + " " + Str(xs[2] == None));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "6 True False\nNone None None None None\nTrue True\n");
+  g.expectNoLeaks("NoneOfTheOptionalWritten");
+}
+
+TEST(Optional, ObjSubjectMatchUnchanged) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+    class Thing { }
+    impl Thing { fn __init__() { } }
+    fn main() -> int {
+      o: Obj = Thing();
+      match o {
+        Str { io::println("str"); }
+        _   { io::println("other"); }
+      }
+      o = "text";
+      match o {
+        s: Str { io::println(s); }
+        _      { io::println("other"); }
+      }
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "other\ntext\n");
   g.expectNoLeaks("ObjSubjectMatchUnchanged");
 }
 

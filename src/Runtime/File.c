@@ -67,7 +67,7 @@ static size_t file_write(PaykanFile *f, const PaykanString *s) {
 static PaykanShared *file_read_no_memory(char *buf) {
   Paykan_free(buf);
   errno = ENOMEM;
-  return PaykanShared_new(&PaykanObject_None);
+  return (PaykanShared *)0;
 }
 
 /// The `Str?` result of a read: the first @p used bytes of @p buf as a fresh
@@ -76,7 +76,7 @@ static PaykanShared *file_read_result(char *buf, size_t used) {
   PaykanShared *result =
       used ? PaykanShared_new(
                  (PaykanObject *)PaykanString_new(buf, (int64_t)used))
-           : PaykanShared_new(&PaykanObject_None);
+           : (PaykanShared *)0;
   Paykan_free(buf);
   return result;
 }
@@ -84,7 +84,7 @@ static PaykanShared *file_read_result(char *buf, size_t used) {
 /// The next line of @p f, with its newline when it has one, or None.
 static PaykanShared *file_readln(PaykanFile *f) {
   if (file_start_read(f))
-    return PaykanShared_new(&PaykanObject_None);
+    return (PaykanShared *)0;
   size_t cap = 128;
   size_t used = 0;
   char *buf = (char *)Paykan_tryMalloc(cap);
@@ -113,7 +113,7 @@ static PaykanShared *file_readln(PaykanFile *f) {
 /// Up to @p n bytes of @p f, n positive, or None.
 static PaykanShared *file_readbytes(PaykanFile *f, int64_t n) {
   if (file_start_read(f))
-    return PaykanShared_new(&PaykanObject_None);
+    return (PaykanShared *)0;
   // @p n is a maximum: the buffer starts at 64 KiB at most and doubles each
   // time a read fills it, up to n, so a large n on a short file allocates
   // about what is there.  fread gives fewer bytes than asked for only at the
@@ -142,7 +142,7 @@ static PaykanShared *file_readbytes(PaykanFile *f, int64_t n) {
 /// The rest of @p f, or None.
 static PaykanShared *file_read(PaykanFile *f) {
   if (file_start_read(f))
-    return PaykanShared_new(&PaykanObject_None);
+    return (PaykanShared *)0;
   size_t cap = 4096;
   size_t used = 0;
   char *buf = (char *)Paykan_tryMalloc(cap);
@@ -214,9 +214,8 @@ static PaykanFile *io_file(int64_t file, const char *op) {
 /// ENOMEM there with no stream error is the read's own buffer failing.
 static PaykanShared *io_read_result(PaykanFile *f, PaykanShared *r,
                                     int64_t *err) {
-  if (r != &PaykanObject_None)
+  if (r)
     return r;
-  Paykan_release_inline(r);
   if (ferror(f->handle))
     *err = errno ? errno : EIO;
   else

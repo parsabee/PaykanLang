@@ -99,7 +99,7 @@ TEST(OptionalPrimitive, NotAnObj) {
   expectError(inMain("o: Obj = 5;"),
               "initializer of type 'int' does not match declared type 'Obj'");
   // No `Obj` holds one, so an `Obj` match has no `int` arm.
-  expectError(inMain("o: Obj = None; match o { n: int { } _ { } }"),
+  expectError(inMain("o: Obj = \"o\"; match o { n: int { } _ { } }"),
               "match arm type must be a class type");
 }
 

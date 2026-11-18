@@ -38,6 +38,9 @@ class ASTContext {
   // The internal poison type of a binder whose declaration failed (#89); not
   // a source type (see ast::PoisonType).
   PoisonType *PoisonTy;
+  // The placeholder type of a `None` no slot has typed yet (#394); not a
+  // source type (see ast::NoneType).
+  NoneType *NoneTy;
 
   // Canonical class types.
   ClassType *ObjTy;
@@ -181,6 +184,9 @@ public:
   /// The canonical poison type (see ast::PoisonType).  Sema-internal: it has
   /// no name, so lookupType never returns it.
   PoisonType *getPoisonTy() const { return PoisonTy; }
+  /// The canonical placeholder type of a `None` nothing has typed yet (see
+  /// ast::NoneType).  Sema-internal: it has no name.
+  NoneType *getNoneTy() const { return NoneTy; }
 
   // Canonical class type accessors.
   ClassType *getObjTy() const { return ObjTy; }

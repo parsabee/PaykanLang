@@ -237,7 +237,7 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
   auto r = semaCheck(withMain(R"(
     class Node<T> {
       v: T;
-      next: Obj;
+      next: Obj?;
       fn link(n: Node<T>) { self.next = move n; }
     }
 

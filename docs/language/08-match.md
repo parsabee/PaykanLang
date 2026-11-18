@@ -789,7 +789,18 @@ Two differences from type mode:
 - A `T` arm alone is **not exhaustive**; `T` together with `None` (or `_`) is, and then the
   `match` satisfies the "always returns" and field-initialisation analyses.
 
-A `None` arm is only valid on an optional subject; matching on an `Obj` is unchanged.
+A `None` arm is only valid on an optional subject: a subject of a class type, `Obj`
+included, is never `None`. An `Obj?` is matched as any class optional is, each subclass arm
+an exact test, the `Obj` arm every other present value:
+
+```pkn
+match found {                    // found: Obj?
+  d: Dog { io::println("a dog"); }
+  s: Str { io::println(s); }
+  x: Obj { io::println("something else"); }
+  None   { io::println("nothing"); }
+}
+```
 
 ---
 

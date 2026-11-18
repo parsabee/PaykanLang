@@ -64,7 +64,10 @@ TEST(RuntimeName, UserFunctionsWithTheRuntimeSignatures) {
     fn Paykan_panic_int_to_char(n: int) { io::println("user char " + Str(n)); }
     fn Paykan_println(s: Str) { io::print("[" + s + "]\n"); }
     fn PaykanString_new(s: Str, n: int) -> Str { return s + Str(n); }
-    fn PaykanObject_None() -> int { return 4; }
+    fn PaykanString_vtable() -> int { return 4; }
+    fn isText(o: view Obj) -> bool {
+      match o { s: Str { return True; } _ { return False; } }
+    }
     fn two() -> int { return 2; }
     fn main() -> int {
       Paykan_panic_div_by_zero();
@@ -75,9 +78,10 @@ TEST(RuntimeName, UserFunctionsWithTheRuntimeSignatures) {
       io::println(PaykanString_new("s", 1));
       a: Str? = None;
       io::println(a);
-      io::println(Str<int>(PaykanObject_None()));
+      io::println(isText("t"));
+      io::println(Str<int>(PaykanString_vtable()));
       return 0;
     }
   )",
-      "user div\nuser char 300\n5\nA\n[x]\ns1\nNone\n4\n");
+      "user div\nuser char 300\n5\nA\n[x]\ns1\nNone\nTrue\n4\n");
 }

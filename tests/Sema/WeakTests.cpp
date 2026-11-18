@@ -58,10 +58,9 @@ TEST(Weak, TypeIsAnOptionalClass) {
 
 // A `weak` local's type comes from its initializer's class, and `None` has
 // none: `a: weak = None;` (or a conditional of two Nones) is an error, once,
-// and the local is not reported again where it is used.  (It was a weak
-// reference to the None value itself, which never read None.)  With its
-// type written, it starts as None; a conditional of None and a `shared`
-// object infers that object's class.
+// and the local is not reported again where it is used.  With its type
+// written, it starts as None; a conditional of None and a `shared` object
+// infers that object's class.
 TEST(Weak, NoneInfersNoClass) {
   auto r = semaCheck(R"(
     class N { x: int; }
@@ -73,7 +72,6 @@ TEST(Weak, NoneInfersNoClass) {
       d: weak N? = None;
       e: weak Obj? = None;
       f: weak = if c then None else s;
-      a = N(1);
       if a == None && b == None && d == None && e == None && f == None {
         return 1;
       }

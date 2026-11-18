@@ -283,7 +283,6 @@ Every other value with a text converts the same way:
 | Value | Its text |
 |-------|----------|
 | an optional (`int?`, `Str?`, `Point?`) | `None`, or the value's text |
-| `None` | `None` |
 | a tuple | its elements in parentheses, a string unquoted: `(1, a, 2.5)` |
 | a struct | its name and fields: `Size(w: 2, h: 3)` |
 | an enum | its variant, then the variant's fields: `North`, `Circle(r: 1.5)` |
@@ -307,7 +306,8 @@ fn main() -> int {
   let o: int? = None;
   let s: Str? = "hi";
   let p = Point(1, 2);
-  io::println(Str(o) + " " + Str(s) + " " + Str(p) + " " + Str(None));
+  let q: Point? = None;
+  io::println(Str(o) + " " + Str(s) + " " + Str(p) + " " + Str(q));
   io::println(Str((1, "a", 2.5)) + " " + Str(Size(2, 3)) + " " + Str(Shape::Circle(1.5)));
   io::println(Str(p) == p.toString());
   return 0;
@@ -321,6 +321,10 @@ None hi Point(1, 2) None
 (1, a, 2.5) Size(w: 2, h: 3) Circle(r: 1.5)
 True
 ```
+
+`None` on its own is not a value to convert: `Str(None)` is an error (`'Str' cannot convert
+None: it is the absent value of an optional, and nothing here says which`). An absent
+optional's text is `None`, and so is `Str<Point?>(None)`, which writes the optional.
 
 `Str(s)` of a `Str` is a new string with the same text, as `s.clone()` is, and so is
 `Str<Str>(s)`: `s` is left as it was, and the result is the caller's own. It takes no

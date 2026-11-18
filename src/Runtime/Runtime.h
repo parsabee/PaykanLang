@@ -154,8 +154,8 @@ typedef struct PaykanObject PaykanWeak;
 //
 // Every constructor (the runtime's and the generated class constructors)
 // initialises `strong` and `weak` to 0: a new object is unowned until it is
-// boxed (PaykanShared_new).  An immortal static (PaykanObject_None) starts
-// with `strong` 1, which nothing ever releases.
+// boxed (PaykanShared_new).  An immortal static (a string literal's object)
+// has `strong` PAYKAN_REF_MAX from the start.
 
 // A vtable is an array of PaykanMethod, the generic function-pointer type:
 // every slot holds a method converted to `void (*)(void)` and is converted
@@ -252,9 +252,6 @@ int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other,
 
 // Global vtable instance.
 extern PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS];
-
-// Singleton None instance — an Obj whose toString returns "None".
-extern PaykanObject PaykanObject_None;
 
 // -- String
 //
@@ -1025,8 +1022,8 @@ void Paykan_args_free(PaykanShared **args, int64_t count);
 //       assert(Paykan_heap_live_blocks() == 0);   // no leaks
 //
 // The back-end is selected once at start-up (--track-heap in the driver, or
-// the test harness), before any allocation.  Immortal singletons (None,
-// Stdin) are static and never pass through here.
+// the test harness), before any allocation.  What is static (a string
+// literal's object, Stdin) never passes through here.
 //
 // An allocation never returns NULL: when the memory is not there the program
 // panics (`paykan: out of memory allocating <size> bytes`, after flushing

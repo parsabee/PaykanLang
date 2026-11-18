@@ -344,23 +344,26 @@ TEST(Weak, CursorInAViewMethod) {
 }
 
 // The runtime's classes are classes: a `shared Str` or `shared Obj` can be
-// referred to weakly, and the immortal `None` object stays.
+// referred to weakly.  A weak `Obj?` that names nothing reads None (#394).
 TEST(Weak, StringsAndObjects) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: shared = "abc";
       ws: weak Str? = s;
-      o: shared Obj = None;
+      o: shared Obj = "an " + "object";
       wo: weak Obj? = o;
+      wn: weak Obj? = None;
       match ws { t: Str { io::println(t); } None { io::println("gone"); } }
       s = "x";
       match ws { t: Str { io::println(t); } None { io::println("gone"); } }
+      io::println(Str(wo == None) + " " + Str(wn == None));
+      o = "another";
       io::println(Str(wo == None));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "abc\ngone\nFalse\n");
+  EXPECT_EQ(r.StdOut, "abc\ngone\nFalse True\nTrue\n");
   g.expectNoLeaks("weak strings");
 }

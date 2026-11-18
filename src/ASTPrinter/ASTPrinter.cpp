@@ -553,6 +553,11 @@ void ASTPrinter::visitPoisonType(PoisonType *node) {
   OS << "\n";
 }
 
+void ASTPrinter::visitNoneType(NoneType *node) {
+  header("NoneType", node);
+  OS << "\n";
+}
+
 void ASTPrinter::visitCallValueExpr(CallValueExpr *node) {
   header("CallValueExpr", node);
   OS << " " << node->getNumArguments() << " args\n";

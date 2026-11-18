@@ -49,7 +49,7 @@ strobj @.so = "an object" len 9
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
 bytes @.b = []
 bytes @.k = [0, 127, 128, 255]
-extern obj @$rt.PaykanObject_None
+extern obj @$rt.Paykan_an_object
 extern vtable @$rt.PaykanString_vtable
 
 class "ns::Shape" {

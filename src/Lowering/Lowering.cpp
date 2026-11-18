@@ -392,10 +392,6 @@ Val ModuleLowering::externGlobal(const std::string &symbol,
                      kind == pir::ExternGlobal::Object ? Type::Obj : Type::Ptr);
 }
 
-Val ModuleLowering::externObject(const std::string &symbol) {
-  return externGlobal(symbol, pir::ExternGlobal::Object);
-}
-
 Val ModuleLowering::externVTable(const std::string &symbol) {
   return externGlobal(symbol, pir::ExternGlobal::VTable);
 }
@@ -1088,8 +1084,8 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
                  CurrentScope->lookupASTType(id->getName()));
     } else {
       // Raw value — box it.  A fresh temporary gets its first box; an alias
-      // of an already-boxed object (`self`, a match binding, the immortal
-      // `None` singleton of an untyped `x = None`) acquires the existing one.
+      // of an already-boxed object (`self`, a match binding) acquires the
+      // existing one.
       val = emitSharedNew(val, "shared");
     }
   }
@@ -1970,10 +1966,8 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
 
   Val initVal;
   if (node->getInitExpr()) {
-    // Every ref-typed variable holds an owned box: a class value,
-    // an optional (`None` is the null box), and `o: Obj = None`, which boxes
-    // the immortal None singleton (acquire semantics; its destroy is a
-    // no-op, so the box is the only allocation).
+    // Every ref-typed variable holds an owned box: a class value, or an
+    // optional (`None` is the null box).
     bool isClassDecl = declTy && ast::isCountedRef(declTy);
     if (isClassDecl) {
       initVal = emitAsShared(node->getInitExpr());
@@ -2587,9 +2581,13 @@ Val ModuleLowering::emitOptionalToString(const Val &opt, ast::Type *astTy) {
   return str;
 }
 
-Val ModuleLowering::emitNoneObject(const Val &raw) {
-  Val isNone = B.cmp(pir::CmpPred::Eq, raw, Val::null(Type::Obj), "opt.isnone");
-  return B.select(isNone, externObject(kPaykanObjectNone), raw, "opt.obj");
+Val ModuleLowering::emitNoneText() {
+  return emitSharedNew(
+      callRuntime(kPaykanStringNew,
+                  {internString(kNoneText),
+                   Val::i64(static_cast<int64_t>(std::strlen(kNoneText)))},
+                  "opt.str"),
+      "str.shared");
 }
 
 Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {

@@ -7,10 +7,10 @@
 //   * a 1,000,000-node `Node?` linked list (class instances, Str fields);
 //   * a deep, wide tree: a 200,000-node spine whose every node also holds a
 //     three-node subtree and a Node (with its Str);
-//   * a chain of 200,000 links through arrays: each link's `Obj[3]` field
+//   * a chain of 200,000 links through arrays: each link's `Obj?[3]` field
 //     holds the next link, a string and a Node;
 //   * a chain of 200,000 objects linked through tuples: each link's tuple
-//     field holds, in place, a nested tuple with the next link and an `Obj`
+//     field holds, in place, a nested tuple with the next link and an `Obj?`
 //     slot, which carries the message of a failed io::open() in every
 //     10,000th link.  Releasing a link releases the references its tuple holds.
 //
@@ -48,15 +48,15 @@ impl Tree {
 }
 
 class Link {
-  slots: Obj[3];
+  slots: Obj?[3];
 }
 
 class Chain {
-  link: (int, (Chain?, Obj));             // the next link sits in a tuple
+  link: (int, (Chain?, Obj?));            // the next link sits in a tuple
 }
 
 impl Chain {
-  fn __init__(link: (int, (Chain?, Obj))) { self.link = move link; }
+  fn __init__(link: (int, (Chain?, Obj?))) { self.link = move link; }
 }
 
 fn leaf() -> Tree {
@@ -95,7 +95,7 @@ fn tree(depth: int) -> int {
 }
 
 fn arrays(n: int) -> int {
-  prev: Obj = None;
+  prev: Obj? = None;
   i = 0;
   while i < n {
     prev = Link([move prev, Str(i), Node(i)]);
@@ -105,7 +105,7 @@ fn arrays(n: int) -> int {
 }
 
 /// The message of an open that fails.
-fn openError() -> Obj {
+fn openError() -> Obj? {
   match io::open("/nonexistent/paykan/leak-check/deep.txt", "r") {
     e: Err { return e.error.message(); }
     _ { return None; }
@@ -116,7 +116,7 @@ fn tuples(n: int) -> int {
   prev: Chain? = None;
   i = 0;
   while i < n {
-    e: Obj = None;
+    e: Obj? = None;
     if i % 10000 == 0 {
       e = openError();
     }
