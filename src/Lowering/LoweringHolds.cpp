@@ -1596,6 +1596,16 @@ void ModuleLowering::readImportedCopies() {
         read(fn, cd->getName(), ct);
     ImportedCopies.insert(cd->getName());
   }
+  // The instantiations of generic methods on another module's type (#353)
+  // are this module's bodies; the type's other methods are not here.
+  for (const ast::StructDecl *sd : SemaCtx.ForeignMethodStructs)
+    if (ast::StructType *st = ASTCtx.lookupStructType(sd->getName()))
+      for (const ast::FuncDecl *fn : sd->getMethods())
+        read(fn, sd->getName(), st);
+  for (const ast::ClassDecl *cd : SemaCtx.ForeignMethodClasses)
+    if (ast::ClassType *ct = ASTCtx.lookupClassType(cd->getName()))
+      for (const ast::FuncDecl *fn : cd->getMethods())
+        read(fn, cd->getName(), ct);
 }
 
 const ModuleLowering::Effect &
@@ -2011,6 +2021,12 @@ ast::Type *ModuleLowering::bufferElementOf(ast::StructType *st,
   if (!names::isTypePrivateName(field) || !st->getInitMethod() ||
       slotType(st->findField(field)) != slotType(ASTCtx.getObjTy()))
     return nullptr;
+  // A generic method of the struct (#353) is code of the struct that
+  // another module may be the one to make: its stores are not all here,
+  // unless this is a program's main module, which makes its own.
+  if (!(Canonical.empty() && PL.MainWorld == World::Closed) &&
+      SemaCtx.GenericMemberTypes.count(st->getName()))
+    return nullptr;
   // Every method of the struct is lowered here, so every store to the
   // field that code can make is among the bodies this module has.
   std::vector<ast::MethodDecl *> methods = st->getImplMethods();
@@ -2419,9 +2435,17 @@ void ModuleLowering::scanFieldStores(ast::TranslationUnit *tu) {
     templates(cd->getMethods());
   for (const ast::StructDecl *sd : tu->getGenericStructDecls())
     templates(sd->getMethods());
-  for (const ast::ImplDecl *im : tu->getImplDecls())
-    if (!im->getTypeParams().empty())
+  for (const ast::ImplDecl *im : tu->getImplDecls()) {
+    if (!im->getTypeParams().empty()) {
       templates(im->getMethods());
+      continue;
+    }
+    // A generic method of a type that is not generic (#353) is a template
+    // too: an importer may make an instantiation this module never does.
+    for (const ast::FuncDecl *fn : im->getMethods())
+      if (!fn->getTypeParams().empty())
+        FieldStoreScan{*this, /*Template=*/true}.function(fn);
+  }
 }
 
 bool ModuleLowering::isFixedField(ast::ClassType *ct,

@@ -2093,13 +2093,14 @@ TEST(Interchange, NativeAndStaticOnlyWhereTheGrammarHasThem) {
       << error;
 }
 
-// Only a free function is generic, as the grammar has it: a class body's
-// method (pure virtual or not), an `impl` block's method and a `static fn`
-// with type parameters of their own get the recursive-descent frontend's
-// error, where they were read and their type parameters ignored.
-TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
+// A free function, an `impl` block's method and a `static fn` are generic,
+// as the grammar has it (#353).  A class body's method (pure virtual or
+// not), a constructor and a method of an `impl ... for` block with type
+// parameters of their own get the recursive-descent frontend's errors.
+TEST(Interchange, WhichFunctionsAreGeneric) {
   const std::string method(paykan::frontend::kGenericMethod);
-  const std::string staticFn(paykan::frontend::kGenericStaticFn);
+  const std::string init(paykan::frontend::kGenericInit);
+  const std::string traitImpl(paykan::frontend::kGenericTraitImplMethod);
   struct Case {
     const char *Text;
     const std::string &Error;
@@ -2111,13 +2112,13 @@ TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
       {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
        "(methods (fn \"f\" (type-params \"T\") (params) _ _)))))",
        method},
-      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"f\" (type-params "
-       "(bound \"T\" (named-type \"Showable\"))) (params) _ (block))))))",
-       method},
-      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"id\" (type-params "
-       "\"T\") (params (param \"y\" (named-type \"T\"))) (named-type \"T\") "
-       "(block (return (ident \"y\"))) (qual static))))))",
-       staticFn},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"__init__\" "
+       "(type-params \"T\") (params) _ (block))))))",
+       init},
+      {"(paykan-ast 1 (unit (impl \"A\" (for (named-type \"Showable\")) "
+       "(methods (fn \"toString\" (type-params \"T\") (params) "
+       "(named-type \"Str\") (block) (qual view))))))",
+       traitImpl},
   };
   for (const Case &c : cases) {
     ast::ASTContext ctx;
@@ -2126,21 +2127,34 @@ TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
     EXPECT_NE(error.find(c.Error), std::string::npos) << c.Text << "\n"
                                                       << error;
   }
-  // A generic type's methods use its type parameters; a free function's are
-  // its own.
+  // An `impl` block's method and `static fn` have their own, next to a
+  // generic type's; a free function's are its own.
   ast::ASTContext ctx;
   std::string error;
-  EXPECT_NE(read("(paykan-ast 1 (unit (class \"Box\" \"\" (type-params \"T\") "
-                 "(fields (var \"v\" (named-type \"T\") _)) (methods)) "
-                 "(impl \"Box\" (type-params \"T\") (methods (fn \"get\" "
-                 "(type-params) (params) (named-type \"T\") (block (return "
-                 "(member (ident \"self\") \"v\"))) (qual view)))) "
-                 "(fn \"id\" (type-params \"T\") (params (param \"x\" "
-                 "(named-type \"T\"))) (named-type \"T\") (block (return "
-                 "(ident \"x\"))))))",
-                 ctx, error),
-            nullptr)
-      << error;
+  ast::TranslationUnit *tu =
+      read("(paykan-ast 1 (unit (class \"Box\" \"\" (type-params \"T\") "
+           "(fields (var \"v\" (named-type \"T\") _)) (methods)) "
+           "(impl \"Box\" (type-params \"T\") (methods (fn \"get\" "
+           "(type-params) (params) (named-type \"T\") (block (return "
+           "(member (ident \"self\") \"v\"))) (qual view)) "
+           "(fn \"cast\" (type-params (bound \"U\" (named-type "
+           "\"Showable\"))) (params (param \"x\" (named-type \"U\"))) "
+           "(named-type \"U\") (block (return (ident \"x\"))) (qual view)) "
+           "(fn \"id\" (type-params \"V\") (params (param \"y\" "
+           "(named-type \"V\"))) (named-type \"V\") (block (return (ident "
+           "\"y\"))) (qual static)))) "
+           "(fn \"id\" (type-params \"T\") (params (param \"x\" "
+           "(named-type \"T\"))) (named-type \"T\") (block (return "
+           "(ident \"x\"))))))",
+           ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  const auto &methods = tu->getImplDecls()[0]->getMethods();
+  ASSERT_EQ(methods.size(), 3u);
+  EXPECT_TRUE(methods[0]->getTypeParams().empty());
+  ASSERT_EQ(methods[1]->getTypeParams().size(), 1u);
+  EXPECT_EQ(*methods[1]->getTypeParams()[0], "U");
+  ASSERT_EQ(methods[2]->getTypeParams().size(), 1u);
+  EXPECT_TRUE(methods[2]->isStatic());
 }
 
 // A class's superclass with type arguments, which the grammar does not

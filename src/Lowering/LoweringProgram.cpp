@@ -212,10 +212,15 @@ void ModuleLowering::markShared() {
     c.Shared = c.Name.find('<') != std::string::npos;
   auto shared = [&](const std::string &name) {
     const std::string owner(ownerTypeName(name));
+    // An instantiation of a generic method or `static fn` (#353) carries
+    // its own type arguments after its owner (`Point.scaled<int>`,
+    // `Point::make<int>`): every module that asks for it makes it.
+    const bool member = owner.size() < name.size() &&
+                        name.find('<', owner.size()) != std::string::npos;
     return (name.starts_with(kHiddenQualPrefix) &&
             name.find('<') != std::string::npos) ||
            (owner.find('<') != std::string::npos && OwnTypes.count(owner)) ||
-           DroppedCopyFunctions.count(name);
+           member || DroppedCopyFunctions.count(name);
   };
   for (pir::Function &f : Funcs) {
     if (f.IsExtern)

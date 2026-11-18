@@ -335,6 +335,13 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st,
   // A copy: a method's signature may ask for an instance, whose blocks are
   // added to the table this list is in.
   const std::vector<ast::ImplDecl *> impls = it->second;
+  // An instance's copy of a block leaves the block's generic methods
+  // (#353) out: they join the instance as templates, by name.
+  for (auto *im : impls)
+    if (!only || im == only)
+      if (auto of = ImplCopyOf.find(im);
+          of != ImplCopyOf.end() && !joinGenericMembers(st, of->second))
+        ok = false;
   for (auto *im : impls)
     for (auto *fn : im->getMethods()) {
       if (only && im != only)
@@ -350,9 +357,28 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st,
         ok = false;
         continue;
       }
+      // A generic method (#353) is a template of the struct: declared by
+      // its instantiations, where it is called.
+      if (!fn->getTypeParams().empty()) {
+        if (std::string has; name == names::kMethodToString ||
+                             st->findMethod(name) ||
+                             methodTemplateOwner(st, name, has)) {
+          error(fn->getLocation(), "struct '" + sd->getName() +
+                                       "' already has a method '" + name + "'");
+          ok = false;
+        } else if (!checkMethodTemplate(sd->getName(), fn, im)) {
+          ok = false;
+        } else {
+          noteMethodTemplate(fn, im, nullptr);
+          MethodTemplates[st->getName()][name] = MethodTemplate{fn, im};
+        }
+        continue;
+      }
       // `toString` is every struct's (the builtin `Showable`): `Point(x: 1,
       // y: 2)`, which nested structs and tuples print too.
-      if (name == names::kMethodToString || st->findMethod(name)) {
+      if (std::string has; name == names::kMethodToString ||
+                           st->findMethod(name) ||
+                           methodTemplateOwner(st, name, has)) {
         error(fn->getLocation(), "struct '" + sd->getName() +
                                      "' already has a method '" + name + "'");
         ok = false;
@@ -591,6 +617,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   // instantiation resolves to the stub, and is then reported below.
   StructInstantiations[instName] = st;
   StructInstantiationInfos[st] = StructInstantiationInfo{tmpl, args};
+  InstancesMadeHere.insert(st);
   HalfMade.insert(st);
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;

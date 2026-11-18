@@ -1216,6 +1216,7 @@ ImplDecl *Parser::parseImplDecl() {
                      "'self', so it is never a 'view fn')");
     } else if (atMethodStart()) {
       if (auto *m = parseFuncDecl(isStatic ? FuncKind::StaticFn
+                                  : trait  ? FuncKind::TraitImplMethod
                                            : FuncKind::ImplMethod)) {
         m->setStatic(isStatic);
         methods.push_back(m);
@@ -1367,6 +1368,10 @@ void Parser::prefixModeError() {
 FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   const bool native = kind == FuncKind::Native;
   const bool requirement = kind == FuncKind::Requirement;
+  // (An `impl ... for` block's method is an `impl` block's in all but its
+  // type parameters.)
+  const bool implMethod =
+      kind == FuncKind::ImplMethod || kind == FuncKind::TraitImplMethod;
   SourceLocation start = cur().Loc;
   // `async fn` (the concurrency prototype): a call of it starts a task.
   const bool async = !native && accept(Tok::KwAsync);
@@ -1394,12 +1399,20 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     if (!parseTypeParamList(typeParams, &bounds) ||
         !expect(Tok::Greater, "to close the type parameter list"))
       return nullptr;
-    // Only a free function is generic: a method's or a `static fn`'s own
-    // type parameters, which nothing would bind, are an error at the `<`.
-    if (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod ||
-        kind == FuncKind::StaticFn) {
-      error(less, std::string(kind == FuncKind::StaticFn ? kGenericStaticFn
-                                                         : kGenericMethod));
+    // A free function, a method of an `impl` block and a `static fn` are
+    // generic (#353).  A class body's method is virtual, a constructor
+    // takes its type's parameters, and an `impl ... for` block's methods
+    // are its trait's requirements: an error at the `<`.
+    std::string_view why;
+    if (kind == FuncKind::ClassMethod)
+      why = kGenericMethod;
+    else if (name == names::kMethodInit && kind != FuncKind::Free &&
+             kind != FuncKind::Native)
+      why = kGenericInit;
+    else if (kind == FuncKind::TraitImplMethod)
+      why = kGenericTraitImplMethod;
+    if (!why.empty()) {
+      error(less, std::string(why));
       return nullptr;
     }
   }
@@ -1511,7 +1524,7 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
     if (kind != FuncKind::ClassMethod) {
       // `destroy` is reserved whatever its body: reported at the function,
       // as Sema reports one with a body (which names its type).
-      if ((kind == FuncKind::ImplMethod || kind == FuncKind::StaticFn) &&
+      if ((implMethod || kind == FuncKind::StaticFn) &&
           name == names::kMethodDestroy) {
         error(span(start), "'destroy' is reserved for the compiler-generated "
                            "destructor and cannot be declared");
@@ -1520,10 +1533,10 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
       std::string why;
       if (kind == FuncKind::StaticFn)
         why = "'" + name + "' has no body: a 'static fn' needs one";
-      else if (kind == FuncKind::ImplMethod && name == names::kMethodInit)
+      else if (implMethod && name == names::kMethodInit)
         why = "'" + std::string(spelled) +
               "' has no body: an initializer needs one";
-      else if (kind == FuncKind::ImplMethod)
+      else if (implMethod)
         why = "'" + name +
               "' in an 'impl' block has no body: an 'impl' block's methods "
               "are called directly, so only a method in a class body can "
@@ -2974,13 +2987,15 @@ Expr *Parser::parsePostfix() {
 // The arguments and `)` of a call of the function value @p e, or of its
 // method @p method, after the `(` (parsePostfix).
 Expr *Parser::parseCallSuffix(Expr *e, SourceLocation start,
-                              const std::string *method) {
+                              const std::string *method,
+                              std::vector<Type *> typeArgs) {
   std::vector<Expr *> args;
   if (!parseArgumentList(Tok::RParen, args) ||
       !expect(Tok::RParen, "to close the argument list"))
     return nullptr;
   if (method)
-    return Ctx.make<MethodCallExpr>(span(start), e, *method, std::move(args));
+    return Ctx.make<MethodCallExpr>(span(start), e, *method, std::move(args),
+                                    std::move(typeArgs));
   return Ctx.make<CallValueExpr>(span(start), e, std::move(args));
 }
 
@@ -3013,9 +3028,34 @@ Expr *Parser::parseDotSuffix(Expr *e, SourceLocation start) {
     return nullptr;
   }
   const std::string &name = intern(consume().Text);
+  // `b.map<float>(f)`: a generic method's type arguments (#353).
+  std::vector<Type *> typeArgs;
+  if (at(Tok::Less) && tryMethodTypeArgs(typeArgs)) {
+    consume(); // '('
+    return parseCallSuffix(e, start, &name, std::move(typeArgs));
+  }
   if (accept(Tok::LParen))
     return parseCallSuffix(e, start, &name);
   return Ctx.make<MemberAccessExpr>(span(start), e, name);
+}
+
+bool Parser::tryMethodTypeArgs(std::vector<Type *> &out) {
+  size_t saved = Pos;
+  SourceLocation savedEnd = PrevEnd;
+  ++Speculating;
+  consume(); // '<'
+  bool ok = enterNesting();
+  if (ok) {
+    ok = parseTypeArgList(out) && accept(Tok::Greater) && at(Tok::LParen);
+    leaveNesting();
+  }
+  --Speculating;
+  if (!ok) {
+    Pos = saved;
+    PrevEnd = savedEnd;
+    out.clear();
+  }
+  return ok;
 }
 
 // argumentList ::= ( expression ( "," expression )* )?
@@ -3080,7 +3120,8 @@ Expr *Parser::parseLiteral() {
 // fields, `Option<int>::Some(1)`); followed by `> :: IDENT` alone it is a
 // generic enum's variant, `Option<int>::Nothing` (@p member set, no `(`
 // next); `a < b` is otherwise a comparison.
-bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
+bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member,
+                                std::vector<Type *> &memberArgs) {
   size_t saved = Pos;
   SourceLocation savedEnd = PrevEnd;
   ++Speculating;
@@ -3091,6 +3132,20 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
     if (ok && at(Tok::ColonColon) && kind(1) == Tok::Ident) {
       consume(); // '::'
       member = std::string(consume().Text);
+      // `Box<int>::withTag<Str>(...)`: the function's own type arguments
+      // (#353), when a list followed by `> (` fits; `Box<int>::N < x` is
+      // otherwise a comparison.
+      if (at(Tok::Less)) {
+        const size_t before = Pos;
+        const SourceLocation beforeEnd = PrevEnd;
+        consume(); // '<'
+        if (!(parseTypeArgList(memberArgs) && accept(Tok::Greater) &&
+              at(Tok::LParen))) {
+          Pos = before;
+          PrevEnd = beforeEnd;
+          memberArgs.clear();
+        }
+      }
     }
     ok = ok && (at(Tok::LParen) || !member.empty());
     leaveNesting();
@@ -3101,6 +3156,7 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
     PrevEnd = savedEnd;
     out.clear();
     member.clear();
+    memberArgs.clear();
   }
   return ok;
 }
@@ -3170,13 +3226,21 @@ Expr *Parser::parseNamePrimary() {
 
   std::vector<Type *> typeArgs;
   std::string member; // `Box<int>::of(...)`: the instantiation's function
-  bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs, member);
+  std::vector<Type *> memberArgs; // `Box<int>::withTag<Str>(...)`: its own
+  bool generic =
+      at(Tok::Less) && tryGenericCallArgs(typeArgs, member, memberArgs);
   // `Option<int>::Nothing`: a generic enum's variant without fields.
   if (generic && !member.empty() && !at(Tok::LParen))
     return Ctx.make<EnumValueExpr>(span(start), intern(full), intern(member),
                                    std::move(typeArgs));
-  if (!member.empty())
+  // The arguments written after an owner type are the owner's, and those
+  // after the function's name the function's (#353).
+  std::vector<Type *> ownerArgs;
+  if (!member.empty()) {
     full += "::" + member;
+    ownerArgs = std::move(typeArgs);
+    typeArgs = std::move(memberArgs);
+  }
   if (generic || at(Tok::LParen)) {
     consume(); // '('
     std::vector<Expr *> args;
@@ -3184,7 +3248,7 @@ Expr *Parser::parseNamePrimary() {
         !expect(Tok::RParen, "to close the argument list"))
       return nullptr;
     return Ctx.make<CallExpr>(span(start), intern(full), std::move(args),
-                              std::move(typeArgs));
+                              std::move(typeArgs), std::move(ownerArgs));
   }
   if (!path.empty())
     return Ctx.make<EnumValueExpr>(span(start), intern(path), intern(name));

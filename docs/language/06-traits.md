@@ -162,7 +162,9 @@ impl Same for A {
 A requirement is met by the method of the same name. Its signature must be the trait's,
 with `Self` and the trait's type parameters replaced. That covers the parameter and
 result types, the `view` / `inout` modes, and whether it is a `view fn`. An `impl ... for`
-block holds only the methods its trait requires, and no `static fn`.
+block holds only the methods its trait requires, and no `static fn`. No requirement has
+type parameters of its own, so a [generic method](13-generics.md#generic-methods) meets
+none, and none goes in an `impl ... for` block.
 
 `Self` also names the enclosing class in a class's own methods, those of its body and of
 its `impl` blocks; not in a `static fn`, where it is an unknown type.
@@ -660,6 +662,7 @@ declares one; it cannot be implemented`. As a bound, `T: Deinitializable` takes 
 | Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Showable`, `Hashable`, `ValueType`, `Copyable`, `Cloneable`, `Sendable`, `Deinitializable`: `'Copyable' is a builtin trait and cannot be redeclared`) |
 | Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__`, `__deinit__` or `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
+| A generic method for a requirement | The type's only method of a requirement's name has type parameters of its own: `method 'map' of 'Box<int>' is generic and cannot meet the requirement 'map' of trait 'Mapper'` |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Showable`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
@@ -727,7 +730,8 @@ a struct or an enum. An `impl Named for Box<T>` block of the module gives an imp
 `lib::Box<Str>` its methods, not the trait.
 
 Also not supported yet: `impl ... for` a built-in type, an enum or a class of another
-module, default methods and `static fn` requirements.
+module, default methods, `static fn` requirements and requirements with type parameters
+of their own.
 
 There are no trait objects, by design: a trait is a bound on a type parameter, never a
 type of its own, and a class hierarchy is what dispatches at run time (see

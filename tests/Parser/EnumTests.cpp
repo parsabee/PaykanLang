@@ -122,7 +122,7 @@ TEST(EnumParse, GenericEnum) {
   EXPECT_NE(dump.find("EnumValueExpr <3:7-3:16> 'M::B' 1 type args"),
             std::string::npos)
       << dump;
-  EXPECT_NE(dump.find("CallExpr <4:7-4:19> 'M::A' 1 type args"),
+  EXPECT_NE(dump.find("CallExpr <4:7-4:19> 'M::A' 1 owner type args"),
             std::string::npos)
       << dump;
   EXPECT_NE(dump.find("EnumValueExpr <5:7-5:11> 'M::B'\n"), std::string::npos)

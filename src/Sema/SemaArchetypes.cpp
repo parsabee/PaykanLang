@@ -84,6 +84,9 @@ void Sema::noteArchetypeCopy(ast::SourceLocation loc, const ast::Type *ty,
                    own->second.end())
     return;
   const std::vector<const std::string *> *params = typeParamsOf(tmpl);
+  // A generic method's code sees its block's names and its own (#353).
+  if (auto m = MethodTemplateParams.find(tmpl); m != MethodTemplateParams.end())
+    params = &m->second.Params;
   if (!params)
     return;
   std::unordered_set<const ast::Type *> mine;
@@ -270,6 +273,11 @@ const std::string *Sema::unsendableArchetype(const ast::ClassType *archetype) {
     return nullptr;
   const std::vector<const std::string *> *params = typeParamsOf(tmpl);
   const ast::TypeParamBounds *bounds = boundsOf(tmpl);
+  if (auto m = MethodTemplateParams.find(tmpl);
+      m != MethodTemplateParams.end()) {
+    params = &m->second.Params;
+    bounds = &m->second.Bounds;
+  }
   if (!params)
     return nullptr;
   // A method's names and bounds are also its `impl` block's.
@@ -356,8 +364,38 @@ bool Sema::checkArchetypes() {
   for (auto &[name, ed] : EnumTemplates)
     if (!foreignOrigin(ed))
       templates.push_back({name, ed});
-  if (templates.empty())
+  // And its generic methods and generic `static fn`s (#353), which no
+  // instance of their owner holds: each with its owner's name and, for a
+  // generic owner, its template.
+  struct Member {
+    std::string Owner;
+    const ast::Decl *OwnerTmpl;
+    MethodTemplate T;
+  };
+  std::vector<Member> members;
+  // (The table holds each instance's too; those are their template's,
+  // below.)
+  for (const auto &[owner, of] : MethodTemplates)
+    for (const auto &[name, mt] : of)
+      if (!foreignOrigin(mt.Fn) && mt.Impl->getTypeParams().empty())
+        members.push_back({owner, nullptr, mt});
+  for (const auto &[name, tmpl] : templates)
+    if (auto of = TemplateMethodTemplates.find(tmpl);
+        of != TemplateMethodTemplates.end())
+      for (const MethodTemplate &mt : of->second)
+        members.push_back({name, tmpl, mt});
+  if (templates.empty() && members.empty())
     return true;
+  std::sort(members.begin(), members.end(),
+            [](const Member &a, const Member &b) {
+              const ast::SourceLocation la = a.T.Fn->getLocation(),
+                                        lb = b.T.Fn->getLocation();
+              if (la.getLineStart() != lb.getLineStart())
+                return la.getLineStart() < lb.getLineStart();
+              if (la.getColumnStart() != lb.getColumnStart())
+                return la.getColumnStart() < lb.getColumnStart();
+              return a.Owner < b.Owner;
+            });
   std::sort(templates.begin(), templates.end(),
             [](const auto &a, const auto &b) {
               const ast::SourceLocation la = a.second->getLocation(),
@@ -396,7 +434,8 @@ bool Sema::checkArchetypes() {
                foreignStructs = ForeignInstantiatedStructDecls.size(),
                importedClasses = ImportedInstanceClassDecls.size(),
                importedStructs = ImportedInstanceStructDecls.size(),
-               methodUses = MethodUses.size();
+               methodUses = MethodUses.size(),
+               madeMethods = InstantiatedMethods.size();
   const StringSet copied = CopiedInstances;
 
   ArchetypeCheck check;
@@ -528,11 +567,48 @@ bool Sema::checkArchetypes() {
       return instantiateStruct(plan.Name, args, tmpl->getLocation()) != nullptr;
     return instantiateEnum(plan.Name, args, tmpl->getLocation()) != nullptr;
   };
+  // A generic member's own instance: on its owner's, the owner's
+  // parameters standing as its block bounds them.
+  struct MemberPlan {
+    const Member *M;
+    std::vector<ast::Type *> OwnerArgs, Args;
+  };
+  std::vector<MemberPlan> memberPlans;
+  for (const Member &m : members) {
+    const MethodTemplateNames &names = MethodTemplateParams.at(m.T.Fn);
+    const size_t owners = names.Params.size() - m.T.Fn->getTypeParams().size();
+    MemberPlan mp{&m, {}, {}};
+    std::vector<ast::Type *> all;
+    static_cast<void>(argsFor(m.T.Fn, names.Params, names.Bounds, values, all));
+    if (all.size() != names.Params.size())
+      continue; // no stand-in meets a bound
+    mp.OwnerArgs.assign(all.begin(), all.begin() + owners);
+    mp.Args.assign(all.begin() + owners, all.end());
+    check.Own[m.T.Fn] = {std::move(all)};
+    memberPlans.push_back(std::move(mp));
+  }
   for (const Plan &plan : plans) {
     if (!instantiate(plan, plan.Args) && !plan.Again.empty())
       instantiate(plan, plan.Again);
     for (const auto &args : plan.Blocks)
       instantiate(plan, args);
+  }
+  for (const MemberPlan &mp : memberPlans) {
+    const Member &m = *mp.M;
+    const ast::SourceLocation at = m.T.Fn->getLocation();
+    FoundMethodTemplate found;
+    found.T = m.T;
+    found.OwnerArgs = mp.OwnerArgs;
+    if (!m.OwnerTmpl) {
+      found.Class = Ctx.lookupClassType(m.Owner);
+      found.Struct = found.Class ? nullptr : Ctx.lookupStructType(m.Owner);
+    } else if (ast::isa<ast::ClassDecl>(m.OwnerTmpl)) {
+      found.Class = instantiateClass(m.Owner, mp.OwnerArgs, at);
+    } else {
+      found.Struct = instantiateStruct(m.Owner, mp.OwnerArgs, at);
+    }
+    if (found.Class || found.Struct)
+      static_cast<void>(instantiateMember(found, mp.Args, at, nullptr));
   }
   checkPendingInstantiations();
   Archetypes = saved;
@@ -567,6 +643,17 @@ bool Sema::checkArchetypes() {
   forget(ImportedInstanceStructDecls, importedStructs);
   CopiedInstances = copied;
   MethodUses.resize(methodUses);
+  // A generic method's instance was added to its owner, which may be one
+  // of the module's types.
+  for (size_t i = madeMethods; i < InstantiatedMethods.size(); ++i) {
+    const MadeMethod &m = InstantiatedMethods[i];
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(m.Type))
+      ct->dropImplMethod(m.Method);
+    else
+      ast::cast<ast::StructType>(m.Type)->dropImplMethod(m.Method);
+    MemberInstantiations.erase(m.Owner + names::kNameSep + m.Fn->getName());
+  }
+  InstantiatedMethods.resize(madeMethods);
   PendingInstantiations.clear();
 
   std::stable_sort(check.Copies.begin(), check.Copies.end(),

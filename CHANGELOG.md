@@ -13,6 +13,19 @@ samples/concurrency/README.md.
 
 ### Added
 
+- Generic methods (#353; docs/language/13-generics.md, "Generic Methods"): a method of an
+  `impl` block and a `static fn`, of a class or a struct, generic or not, can have type
+  parameters of its own next to its type's: `view fn map<U>(f: (view T) -> U) -> Box<U>`,
+  `static fn withTag<U>(v: T, tag: U)`. Type arguments go after the name (`b.map<float>(f)`,
+  `Point::make<int>(1)`, `Box<int>::withTag<Str>(7, "seven")`) or are inferred as a free
+  function's are. A generic method is an `impl` method: called directly, inherited by
+  subclasses, overridden by nothing; a class body's method, `__init__`, a method of an
+  `impl ... for` block and a trait's requirement take no type parameters. Each
+  instantiation is an ordinary method or function (`Box<int>.map<Str>`,
+  `Point::make<int>`), one per program whichever modules ask for it. A module's file
+  carries the templates, those of a type that is not generic in `impl` blocks of a new
+  kind in `TMPL` (docs/design/pkm.md §4.3). The archetype check reads a generic method's
+  code for copies and sends of its own parameters and of its type's.
 - A method can be `async`: a class's, an `impl` block's, a trait's requirement and a `static fn`
   (#368). An override keeps its slot's colour. The receiver crosses to the task under the send
   check, and unless it is frozen (`atomic shared`) the call is awaited where it is written. A
@@ -213,6 +226,24 @@ samples/concurrency/README.md.
   class', or write 'mem::replace(c.name, v)'`. A class another module derived, with a
   `__deinit__` that read the field, crashed. A program's main module is not affected.
 - **Breaking:** `final` is a keyword and no longer an identifier.
+- **Breaking:** a type argument list after a method's name opens a generic method's call
+  (#353): `g(a.b < c, d > (e))`, two comparisons before, is now `g` given `a.b<c, d>(e)`,
+  as `g(a < b, c > (d))` already was a generic call. Parenthesise a comparison to keep it
+  one. `x.m < y` and `x.f < a && b > (c)` are unchanged.
+- **Breaking:** the type arguments written after a `static fn`'s or a variant's name are
+  its own, no longer its owner's (#353): `Box::of<int>(1)` is `'Box::of' is a function of
+  the generic class 'Box': write 'Box<...>::of(...)' with its type arguments`, and
+  `Maybe::Just<int>(1)` asks for `Maybe<int>::Just(1)`. Both were accepted as the spelling
+  with the list after the owner.
+- The AST interchange format (docs/plugins/ast-format.md): a `call` has `(owner-args
+  TYPE...)` after its `type-args` for the type arguments written after its owner type
+  (`Box<int>::of(1)`, which had them in `type-args`), a `method-call` has `(type-args
+  TYPE...)` after its name when a generic method's are written, and a `fn` of an `impl`
+  block may have type parameters. `frontend::kGenericMethod` has a new text, for a class
+  body's method; `kGenericStaticFn` is gone, and `kGenericInit` and
+  `kGenericTraitImplMethod` are new.
+- `scripts/pkfmt.py` no longer breaks a line inside a type argument list: a long
+  `x = table.pair<Str, int>("...", 42);` breaks after the `=`, not after `<Str,`.
 - **Breaking:** `io::File` is a struct that closes its file in its `__deinit__` (#378;
   docs/stdlib/io.md, "`File`"), where it was a class around a counted runtime object. The file is
   closed where the `File` is destroyed: at the end of its variable's scope, with the object or
@@ -454,6 +485,13 @@ samples/concurrency/README.md.
 
 ### Fixed
 
+- An `atomic` parameter of a generic function called with its type arguments inferred took
+  a new cell instead of the place's handle, so the callee's change was lost: `bump(n, "x")`
+  left `n` as it was where `bump<Str>(n, "x")` changed it. The same holds for a generic
+  method and a generic `static fn` (#353).
+- A private `static fn` of a generic class or struct (`Box<int>::__plain()`) was callable
+  from outside the type; it is `'__plain' is private to 'Box<int>'`, as one of a type that
+  is not generic was.
 - A program that called a method of an `impl` block on an instance of a generic class that an
   imported module had made for itself, without calling that method, hit an assertion in the
   lowering on its second run, when the module came from the cache. The calling module now

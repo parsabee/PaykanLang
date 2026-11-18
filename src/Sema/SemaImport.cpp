@@ -520,8 +520,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     // calls it.
     if (auto *deinit = ct->getDeinitMethod())
       methods.push_back(deinit);
-    methods.insert(methods.end(), ct->getImplMethods().begin(),
-                   ct->getImplMethods().end());
+    // (Not the instantiations of its generic methods, #353: an importer
+    // makes its own from the template.)
+    for (auto *m : ct->getImplMethods())
+      if (m->getName().find('<') == std::string::npos)
+        methods.push_back(m);
     for (auto *m : methods)
       ci.Methods.push_back(methodInfo(m));
     info.ExportedClasses.push_back(std::move(ci));
@@ -554,7 +557,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     if (auto *deinit = st->getDeinitMethod())
       si.Methods.push_back(methodInfo(deinit));
     for (auto *m : st->getImplMethods())
-      si.Methods.push_back(methodInfo(m));
+      if (m->getName().find('<') == std::string::npos)
+        si.Methods.push_back(methodInfo(m));
     info.ExportedStructs.push_back(std::move(si));
     exportImpls(st, name);
     exportOptOut(st, name);
@@ -1713,8 +1717,25 @@ Sema::enumInstantiationInfo(ast::EnumType *et) {
 
 std::shared_ptr<Sema::ModuleTemplates>
 Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
+  // The `impl` blocks of its types that are not generic, each with its
+  // generic methods and generic `static fn`s (#353).
+  std::vector<std::pair<ast::ImplDecl *, std::vector<ast::FuncDecl *>>> members;
+  for (ast::ImplDecl *im : tu->getImplDecls()) {
+    auto of = MethodTemplates.find(im->getTypeName());
+    if (of == MethodTemplates.end() || im->getTrait() ||
+        !im->getTypeParams().empty())
+      continue;
+    std::vector<ast::FuncDecl *> fns;
+    for (ast::FuncDecl *fn : im->getMethods())
+      if (auto m = of->second.find(fn->getName());
+          m != of->second.end() && m->second.Fn == fn)
+        fns.push_back(fn);
+    if (!fns.empty())
+      members.emplace_back(im, std::move(fns));
+  }
   if (tu->getGenericClassDecls().empty() && tu->getGenericFuncDecls().empty() &&
-      tu->getGenericStructDecls().empty() && tu->getGenericEnumDecls().empty())
+      tu->getGenericStructDecls().empty() &&
+      tu->getGenericEnumDecls().empty() && members.empty())
     return nullptr;
   // What the module declares, by the names its bodies use for them.
   StringSet types, generics, callees;
@@ -1832,6 +1853,15 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   for (auto *ed : tu->getGenericEnumDecls())
     if (EnumTemplates.count(ed->getName()))
       mt->Enums.push_back(cloner.cloneTemplate(ed));
+  for (const auto &[im, fns] : members) {
+    std::vector<ast::FuncDecl *> copies;
+    for (ast::FuncDecl *fn : fns)
+      copies.push_back(cloner.cloneTemplate(fn));
+    // By the type's own name: it is one type program-wide.
+    mt->MemberImpls.push_back(Ctx.make<ast::ImplDecl>(
+        im->getLocation(), Ctx.intern(im->getTypeName()), std::move(copies),
+        nullptr));
+  }
   return mt;
 }
 
@@ -1856,6 +1886,10 @@ std::vector<uint8_t> Sema::encodeTemplates(const ModuleTemplates &mt,
     implsOf(mt.Classes[i], pkm::Templates::OwnerKind::Class, i);
   for (uint32_t i = 0; i < mt.Structs.size(); ++i)
     implsOf(mt.Structs[i], pkm::Templates::OwnerKind::Struct, i);
+  for (ast::ImplDecl *im : mt.MemberImpls) {
+    impls.push_back(im);
+    t.Impls.push_back({pkm::Templates::OwnerKind::Type, 0});
+  }
   ast::TranslationUnit unit(ast::SourceLocation(), {}, {}, {}, {}, mt.Classes,
                             mt.Functions, std::move(impls), {}, {}, mt.Structs,
                             mt.Enums);
@@ -1899,6 +1933,19 @@ Sema::decodeTemplates(std::span<const uint8_t> bytes,
                          " owners");
   for (size_t i = 0; i < impls.size(); ++i) {
     const pkm::Templates::Impl &owner = t->Impls[i];
+    if (owner.Kind == pkm::Templates::OwnerKind::Type) {
+      // A block of a type that is not generic holds only what is.
+      if (!impls[i]->getTypeParams().empty() || impls[i]->getTrait() ||
+          std::any_of(impls[i]->getMethods().begin(),
+                      impls[i]->getMethods().end(),
+                      [](const ast::FuncDecl *fn) {
+                        return fn->getTypeParams().empty();
+                      }))
+        return Status::error("TMPL: impl block " + std::to_string(i) +
+                             " of a type holds more than its generic methods");
+      mt->MemberImpls.push_back(impls[i]);
+      continue;
+    }
     const bool isClass = owner.Kind == pkm::Templates::OwnerKind::Class;
     const size_t n = isClass ? mt->Classes.size() : mt->Structs.size();
     if (owner.Owner >= n)
@@ -1969,10 +2016,33 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
     ForeignTemplates[sd] = &mt;
   for (auto *ed : mt.Enums)
     ForeignTemplates[ed] = &mt;
-  for (const auto &[cd, impls] : mt.Impls)
+  for (const auto &[cd, impls] : mt.Impls) {
     TemplateImpls[cd] = impls;
+    // Their generic methods and generic `static fn`s (#353): templates of
+    // the type's template, as in the module that declares them.
+    const ast::TypeParamBounds *ownerBounds = nullptr;
+    if (const auto *c = ast::dyn_cast<ast::ClassDecl>(cd))
+      ownerBounds = &c->getTypeParamBounds();
+    else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(cd))
+      ownerBounds = &sd->getTypeParamBounds();
+    for (ast::ImplDecl *im : impls)
+      for (ast::FuncDecl *fn : im->getMethods())
+        if (!fn->getTypeParams().empty() && !MethodTemplateParams.count(fn)) {
+          noteMethodTemplate(fn, im, ownerBounds);
+          TemplateMethodTemplates[cd].push_back({fn, im});
+          ForeignTemplates[fn] = &mt;
+        }
+  }
   for (auto *fn : mt.Functions)
     ForeignTemplates[fn] = &mt;
+  // And those of its types that are not generic, by the type's name.
+  for (ast::ImplDecl *im : mt.MemberImpls)
+    for (ast::FuncDecl *fn : im->getMethods()) {
+      noteMethodTemplate(fn, im, nullptr);
+      MethodTemplates[im->getTypeName()][fn->getName()] =
+          MethodTemplate{fn, im};
+      ForeignTemplates[fn] = &mt;
+    }
   return ok;
 }
 

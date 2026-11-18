@@ -62,17 +62,21 @@ inline constexpr unsigned kMaxChain = 2048;
 /// with `'<file>' is too large for a source file (more than 256 MiB)`.
 inline constexpr size_t kMaxSourceBytes = size_t{256} << 20;
 
-/// The diagnostics every frontend reports for a method's or a `static fn`'s
-/// own type parameters (docs/grammar.md section 4): only a free function is
-/// generic, and a generic type's methods use the type's.
+/// The diagnostics every frontend reports for type parameters of its own on
+/// a function that cannot have them (docs/grammar.md section 4).  A method
+/// of an `impl` block and a `static fn` can (#353); a class body's method
+/// is virtual, a constructor takes its type's, and an `impl ... for`
+/// block's methods are the trait's requirements, none of which is generic.
 inline constexpr std::string_view kGenericMethod =
-    "a method cannot have type parameters of its own: only a free function "
-    "is generic (the methods of a generic class or struct use its type "
-    "parameters)";
-inline constexpr std::string_view kGenericStaticFn =
-    "a 'static fn' cannot have type parameters of its own: only a free "
-    "function is generic (the static fns of a generic class or struct use "
-    "its type parameters)";
+    "a class body's method cannot have type parameters of its own: its "
+    "methods are virtual, and a generic method has no vtable slot; declare "
+    "it in an 'impl' block, whose methods are called directly";
+inline constexpr std::string_view kGenericInit =
+    "'__init__' cannot have type parameters of its own: a type's "
+    "constructor takes the type's";
+inline constexpr std::string_view kGenericTraitImplMethod =
+    "a method of an 'impl ... for' block cannot have type parameters of its "
+    "own: a trait's requirements have none";
 
 /// The diagnostic every frontend reports for a superclass with type
 /// arguments, `class Full : Half<int>` (docs/language/13-generics.md): no

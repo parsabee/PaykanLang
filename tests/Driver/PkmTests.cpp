@@ -2350,6 +2350,337 @@ TEST(Pkm, AFinalClassIsFinalForAnImporter) {
   fs::remove_all(dir);
 }
 
+// Generic methods and generic `static fn`s (#353) reach an importer through
+// the module's file: those of a generic type in its `impl` blocks, those of
+// a type that is not generic in a block of their own.  The interface lists
+// no instantiation.  Three modules make `Point.scaled<int>`, linked once.
+TEST(Pkm, GenericMethodsReachAnImporter) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_generic_methods_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(
+      dir / "geo.pkn",
+      R"pkn(// A class that is not generic, with generic methods and a generic `static
+// fn`, and a generic struct with a generic method: an importer makes the
+// instantiations it calls from the module's templates.
+
+class Point {
+  x: int;
+  view fn area() -> float { return 0.0; }
+}
+
+impl Point {
+  view fn scaled<U>(k: U, f: (int, U) -> int) -> Point {
+    return Point(f(self.x, move k));
+  }
+  static fn make<U>(v: U, f: (U) -> int) -> Point { return Point(f(move v)); }
+
+  // A private one, and what the module's own functions are to it.
+  view fn __weight<U>(u: view U) -> int { return self.x; }
+  view fn weighed<U>(u: view U) -> int { return self.__weight(u) + bonus(); }
+
+  // Calls the receiver's own `area` through the vtable.
+  view fn measured<U>(unit: view U, show: (float, view U) -> Str) -> Str {
+    return show(self.area(), unit);
+  }
+}
+
+fn bonus() -> int { return 100; }
+
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+
+impl Pair<A, B> {
+  view fn fold<U>(seed: U, f: (U, view A) -> U) -> U {
+    let step = fn(u: U, a: view A) => f(move u, a);
+    return step(move seed, self.a);
+  }
+  fn first<C>(c: C, pick: (C) -> A) { self.a = pick(move c); }
+}
+
+fn pair() -> Pair<int, Str> { return Pair<int, Str>(4, "four"); }
+
+// The same `Point.scaled<int>` and `Pair<int, Str>.fold<int>` as its
+// importers make: the program keeps one of each.
+fn twice() -> int {
+  let p = Point(4);
+  return p.scaled<int>(2, fn(a: int, b: int) => a * b).x
+      + pair().fold(10, fn(u: int, a: view int) => u + a);
+}
+)pkn");
+  writeFile(
+      dir / "other.pkn",
+      R"pkn(// Makes the same `Point.scaled<int>` as `geo` and the main module.
+import geo;
+
+fn thrice() -> int {
+  let p = geo::Point(5);
+  return p.scaled<int>(3, fn(a: int, b: int) => a * b).x;
+}
+)pkn");
+  writeFile(
+      dir / "main.pkn",
+      R"pkn(// OK: generic methods and generic `static fn`s (#353) across modules.  The
+// templates of `geo`'s `Point` (a class that is not generic) and `Pair<A,
+// B>` travel in its module file; this program instantiates them, on its own
+// instance (`Pair<Str, int>`), on one `geo` made (`Pair<int, Str>`), on
+// `geo`'s `Point` and through a class of its own derived from it.  `geo`,
+// `other` and this module all make `Point.scaled<int>`: it is linked once.
+// expect-stdout: 21 7 5 10 103
+// expect-stdout: 22 15
+// expect-stdout: 2.25 m2
+// expect-stdout: 28 x4 6 1
+import ::io;
+import geo;
+import other;
+
+class Square : geo::Point {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+impl Square {
+  fn __init__(s: float) { __super__(0); self.side = s; }
+}
+
+fn main() -> int {
+  let p = geo::Point(3);
+  let q = p.scaled<int>(7, fn(a: int, b: int) => a * b);
+  let r = p.scaled("abcd", fn(a: int, s: Str) => a + s.len());
+  let m = geo::Point::make<Str>("hello", fn(s: Str) => s.len());
+  let n = geo::Point::make(2.5, fn(f: float) => int(f * 4.0));
+  io::println(Str(q.x) + " " + Str(r.x) + " " + Str(m.x) + " " + Str(n.x)
+      + " " + Str(p.weighed(1)));
+  io::println(Str(geo::twice()) + " " + Str(other::thrice()));
+
+  let s = Square(1.5);
+  io::println(s.measured("m2", fn(a: float, u: view Str) => Str(a) + " " + u));
+
+  made = geo::pair();
+  let sum = made.fold(10, fn(u: int, a: view int) => u + a) + 14;
+  let text = made.fold("x", fn(u: Str, a: view int) => u + Str(a));
+  made.first("abcdef", fn(s: Str) => s.len());
+  own = geo::Pair<Str, int>("s", 1);
+  let size = own.fold(0, fn(u: int, a: view Str) => u + a.len());
+  io::println(Str(sum) + " " + text + " " + Str(made.a) + " " + Str(size));
+  return 0;
+}
+)pkn");
+  writeFile(dir / "bad.pkn",
+            "import geo;\n"
+            "class Sub : geo::Point {\n"
+            "  view fn scaled(k: int) -> int { return k; }\n"
+            "}\n"
+            "class Low : geo::Point { n: int; }\n"
+            "impl Low {\n"
+            "  view fn weighed() -> int { return 1; }\n"
+            "}\n"
+            "fn main() -> int {\n"
+            "  let p = geo::Point(1);\n"
+            "  let w = p.__weight(1);\n"
+            "  let s = p.scaled<int, int>(1, fn(a: int, b: int) => a);\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  const std::string want = "21 7 5 10 103\n22 15\n2.25 m2\n28 x4 6 1\n";
+  // From source, with and without the cache it writes.
+  for (const char *args :
+       {"--no-module-cache main.pkn", "main.pkn", "main.pkn"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, want) << args;
+  }
+  // From the module's file.
+  auto made = paykan("--emit-pkm --module-name=geo -o lib/geo.pkm geo.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  auto tmpl = paykan("pkm dump --section=tmpl lib/geo.pkm");
+  EXPECT_TRUE(contains(tmpl.out, "  impls 2\n    struct 0\n    type\n"))
+      << tmpl.out;
+  EXPECT_TRUE(contains(tmpl.out, "(impl @10:1-24:2 \"Point\"")) << tmpl.out;
+  auto iface = paykan("pkm dump --section=iface lib/geo.pkm");
+  EXPECT_TRUE(contains(iface.out, "area")) << iface.out;
+  for (const char *name : {"scaled", "fold", "weighed", "make"})
+    EXPECT_FALSE(contains(iface.out, name)) << name << "\n" << iface.out;
+  fs::remove(dir / "geo.pkn");
+  fs::remove_all(dir / ".paykan_cache");
+  for (const char *args :
+       {"--module-path=lib main.pkn", "--module-path=lib main.pkn"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, want) << args;
+  }
+  // An importer learns the names from the templates.
+  auto bad = paykan("--check-only --module-path=lib bad.pkn");
+  EXPECT_NE(bad.exitCode, 0) << bad.out;
+  for (const char *msg :
+       {"bad.pkn:3:3: error: method 'scaled' of 'Point' is declared in an "
+        "'impl' block and cannot be overridden",
+        "bad.pkn:7:3: error: class 'Low' already has a method 'weighed' (from "
+        "'Point')",
+        "bad.pkn:11:11: error: '__weight' is private to 'Point': it is "
+        "reachable only from its own methods",
+        "bad.pkn:12:11: error: generic method 'Point.scaled' expects 1 type "
+        "argument(s), got 2"})
+    EXPECT_TRUE(contains(bad.out, msg)) << msg << "\n" << bad.out;
+  fs::remove_all(dir);
+}
+
+// A type an import's interface gives, of a module the program does not
+// import itself, has its generic methods (#353): the program finds them by
+// the type, in the templates of the module that declares it.
+TEST(Pkm, AGenericMethodOfATypeAnImportGives) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_generic_indirect_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  writeFile(dir / "a.pkn",
+            "class Point { x: int; }\n"
+            "impl Point {\n"
+            "  view fn scaled<U: Showable>(k: view U) -> Str { return "
+            "Str(self.x) + k.toString(); }\n"
+            "  view fn plain(k: int) -> Str { return Str(self.x + k); }\n"
+            "}\n"
+            "struct Pair<A, B> { a: A; b: B; }\n"
+            "impl Pair<A, B> {\n"
+            "  view fn tagged<U: Showable>(u: view U) -> Str { return "
+            "u.toString() + \"!\"; }\n"
+            "}\n"
+            "// An owner bounded by the module's own trait: the bound is the\n"
+            "// owner's, met where the instance was made.\n"
+            "trait Named { view fn name() -> Str; }\n"
+            "class Cat { n: int; }\n"
+            "impl Named for Cat { view fn name() -> Str { return \"cat\"; } }\n"
+            "class Holder<T: Named> { v: T; }\n"
+            "impl Holder<T> {\n"
+            "  view fn tag<U: Showable>(u: view U) -> Str { return "
+            "self.v.name() + u.toString(); }\n"
+            "}\n"
+            "fn mkHolder() -> Holder<Cat> { return Holder<Cat>(Cat(3)); }\n"
+            "// A type private to the module, with a generic `static fn`.\n"
+            "class _Hidden { h: int; }\n"
+            "impl _Hidden {\n"
+            "  static fn gs<U: Showable>(u: view U) -> Str { return "
+            "u.toString(); }\n"
+            "}\n");
+  writeFile(dir / "b.pkn", "import a;\n"
+                           "class Circle : a::Point { r: int; }\n"
+                           "fn mkCircle() -> Circle { return Circle(1, 2); }\n"
+                           "fn mkPair() -> a::Pair<int, Str> { return "
+                           "a::Pair<int, Str>(1, \"p\"); }\n"
+                           "// Its body names nothing of `a`.\n"
+                           "fn show<T: Showable>(c: view Circle, t: view T) -> "
+                           "Str { return c.scaled<T>(t); }\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io;\n"
+      "import b;\n"
+      "fn main() -> int {\n"
+      "  let c = b::mkCircle();\n"
+      "  io::println(c.plain(1) + \" \" + c.scaled(5) + \" \" + b::show(c, 6)\n"
+      "      + \" \" + b::mkPair().tagged(7));\n"
+      "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import b;\n"
+                             "class Mine : b::Circle {\n"
+                             "  view fn scaled() -> Str { return \"mine\"; }\n"
+                             "}\n"
+                             "fn main() -> int {\n"
+                             "  let s = _Hidden::gs(1);\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  // From source, and from the cache the first run writes.
+  for (const char *args :
+       {"--no-module-cache main.pkn", "main.pkn", "main.pkn"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, "2 15 16 7!\n") << args;
+  }
+  // The owner's bound is by the module's own trait, which an importer
+  // cannot name: it held where the module made the instance, and a
+  // generic method's own bounds are all its call checks.
+  writeFile(dir / "direct.pkn", "import ::io;\n"
+                                "import a;\n"
+                                "fn main() -> int {\n"
+                                "  io::println(a::mkHolder().tag(8));\n"
+                                "  return 0;\n}\n");
+  auto direct = paykan("--no-module-cache direct.pkn");
+  EXPECT_EQ(direct.exitCode, 0) << direct.out;
+  EXPECT_EQ(direct.out, "cat8\n");
+  auto bad = paykan("--check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0) << bad.out;
+  EXPECT_TRUE(contains(bad.out,
+                       "bad.pkn:3:3: error: method 'scaled' of 'Point' is "
+                       "declared in an 'impl' block and cannot be overridden"))
+      << bad.out;
+  // Seeing a module's templates makes none of its private types nameable.
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:6:11: error: call to undeclared "
+                                "function '_Hidden::gs'"))
+      << bad.out;
+  fs::remove_all(dir);
+}
+
+// A generic method of a class that is not generic is code its module may
+// never instantiate, though an importer does (#353): what the module's own
+// code assumes of a private field counts the template's stores.  Here the
+// importer's `swap<int>` replaces the string `show` has lent to `shown`, so
+// `show` holds it across the call.
+TEST(Pkm, AGenericMethodsStoresAreItsModulesToCount) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_generic_stores_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  writeFile(
+      dir / "c.pkn",
+      "class C { __s: Str; }\n"
+      "impl C {\n"
+      "  fn __init__(s: Str) { self.__s = move s; }\n"
+      "  shared fn swap<U: Showable>(u: view U) { self.__s = u.toString() + \" "
+      "swapped\"; }\n"
+      "  shared fn show(f: () -> int) -> Str { return shown(self.__s, f); }\n"
+      "}\n"
+      "fn shown(s: view Str, f: () -> int) -> Str {\n"
+      "  let n = f();\n"
+      "  return s + \" \" + Str(n);\n"
+      "}\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\n"
+            "import c;\n"
+            "fn main() -> int {\n"
+            "  let o: shared mut c::C = c::C(\"the first string, long enough "
+            "for the heap\");\n"
+            "  let out = o.show(fn() -> int { o.swap(12345); return 1; });\n"
+            "  io::println(out);\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  auto r = paykan("--no-module-cache main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, "the first string, long enough for the heap 1\n");
+  // The module's `show`: the field it lends is held across the call.
+  auto pir = paykan("--no-module-cache --emit-pir main.pkn");
+  ASSERT_EQ(pir.exitCode, 0) << pir.out;
+  const size_t show = pir.out.find("\nfn @C.show(");
+  ASSERT_NE(show, std::string::npos) << pir.out;
+  const std::string body =
+      pir.out.substr(show, pir.out.find("\n}", show) - show);
+  const size_t load = body.find("field.load %self.");
+  ASSERT_NE(load, std::string::npos) << body;
+  EXPECT_NE(body.find("retain nonnull %__s.", load), std::string::npos) << body;
+  fs::remove_all(dir);
+}
+
 // A struct's `__deinit__` is in its module's interface: a value of it has
 // its byte more in the importer too, which runs the module's `__deinit__`
 // where the value is destroyed, in what the importer builds around it, in

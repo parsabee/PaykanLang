@@ -1,0 +1,45 @@
+// OK: generic methods and generic `static fn`s (#353) across modules.  The
+// templates of `geo`'s `Point` (a class that is not generic) and `Pair<A,
+// B>` travel in its module file; this program instantiates them, on its own
+// instance (`Pair<Str, int>`), on one `geo` made (`Pair<int, Str>`), on
+// `geo`'s `Point` and through a class of its own derived from it.  `geo`,
+// `other` and this module all make `Point.scaled<int>`: it is linked once.
+// expect-stdout: 21 7 5 10 103
+// expect-stdout: 22 15
+// expect-stdout: 2.25 m2
+// expect-stdout: 28 x4 6 1
+import ::io;
+import geo;
+import other;
+
+class Square : geo::Point {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+impl Square {
+  fn __init__(s: float) { __super__(0); self.side = s; }
+}
+
+fn main() -> int {
+  let p = geo::Point(3);
+  let q = p.scaled<int>(7, fn(a: int, b: int) => a * b);
+  let r = p.scaled("abcd", fn(a: int, s: Str) => a + s.len());
+  let m = geo::Point::make<Str>("hello", fn(s: Str) => s.len());
+  let n = geo::Point::make(2.5, fn(f: float) => int(f * 4.0));
+  io::println(Str(q.x) + " " + Str(r.x) + " " + Str(m.x) + " " + Str(n.x) + " "
+      + Str(p.weighed(1)));
+  io::println(Str(geo::twice()) + " " + Str(other::thrice()));
+
+  let s = Square(1.5);
+  io::println(s.measured("m2", fn(a: float, u: view Str) => Str(a) + " " + u));
+
+  made = geo::pair();
+  let sum = made.fold(10, fn(u: int, a: view int) => u + a) + 14;
+  let text = made.fold("x", fn(u: Str, a: view int) => u + Str(a));
+  made.first("abcdef", fn(s: Str) => s.len());
+  let own = geo::Pair<Str, int>("s", 1);
+  let size = own.fold(0, fn(u: int, a: view Str) => u + a.len());
+  io::println(Str(sum) + " " + text + " " + Str(made.a) + " " + Str(size));
+  return 0;
+}

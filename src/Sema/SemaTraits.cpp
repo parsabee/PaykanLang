@@ -572,6 +572,24 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
         fnSignature(req->isAsync(), req->isShared(), req->isView(),
                     req->getName(), sig.Params, sig.Modes, sig.Ret);
     ast::MethodDecl *m = methodOf(ty, req->getName());
+    // No requirement is generic, so a generic method (#353) meets none.
+    if (FoundMethodTemplate generic;
+        !m && findMethodTemplate(ast::dyn_cast<ast::ClassType>(ty),
+                                 ast::dyn_cast<ast::StructType>(ty),
+                                 req->getName(), generic)) {
+      std::string msg = "method '";
+      msg += req->getName();
+      msg += "' of '";
+      msg += name;
+      msg += "' is generic and cannot meet the requirement '";
+      msg += req->getName();
+      msg += "' of trait '";
+      msg += trait;
+      msg += "'";
+      error(im->getLocation(), msg);
+      ok = false;
+      continue;
+    }
     if (!m) {
       std::string msg = kind;
       msg += " '";
@@ -638,6 +656,12 @@ std::string Sema::unmetRequirement(ast::Type *ty, const TraitRef &tr) {
         fnSignature(req->isAsync(), req->isShared(), req->isView(),
                     req->getName(), sig.Params, sig.Modes, sig.Ret);
     const ast::MethodDecl *m = methodOf(ty, req->getName());
+    if (FoundMethodTemplate generic;
+        !m && findMethodTemplate(ast::dyn_cast<ast::ClassType>(ty),
+                                 ast::dyn_cast<ast::StructType>(ty),
+                                 req->getName(), generic))
+      return "its method '" + req->getName() +
+             "' is generic, and a generic method meets no requirement";
     if (!m)
       return "it has no method '" + want + "'";
     if (!sameSignature(m, req, sig))
@@ -673,6 +697,17 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
     check(ed, ed->getTypeParams(), ed->getTypeParamBounds());
   for (auto *fn : tu->getGenericFuncDecls())
     check(fn, fn->getTypeParams(), fn->getTypeParamBounds());
+  // A generic method's and a generic `static fn`'s (#353), which may name
+  // their block's parameters too (`U: Keyed<T>`).
+  for (auto *im : tu->getImplDecls())
+    for (auto *fn : im->getMethods()) {
+      if (fn->getTypeParams().empty())
+        continue;
+      std::vector<const std::string *> params = im->getTypeParams();
+      params.insert(params.end(), fn->getTypeParams().begin(),
+                    fn->getTypeParams().end());
+      check(fn, params, fn->getTypeParamBounds());
+    }
   return ok;
 }
 

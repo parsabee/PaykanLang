@@ -1228,7 +1228,15 @@ class CallExpr : public Expr {
 private:
   const std::string *CalleeName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
-  std::vector<Type *> TypeArgs; // explicit type arguments; empty if none
+  // The type arguments written after the function's name (`first<int>(xs)`,
+  // `Point::make<int>(1)`, `Box<int>::withTag<Str>(7, "a")`'s `Str`, and a
+  // generic type's constructor, `Box<int>(1)`); empty if none.
+  std::vector<Type *> TypeArgs;
+  // The type arguments written after the owner type of a `static fn` or of
+  // an enum's variant (#353): `Box<int>::of(1)`, `Option<int>::Some(1)`,
+  // `Box<int>::withTag<Str>(7, "a")`'s `int`.  The callee's name is spelled
+  // without them (`Box::of`); empty if none.
+  std::vector<Type *> OwnerTypeArgs;
   // Set by Sema when the callee is a variable or parameter of function type
   // (`f(1)` with `f: (int) -> int`): a call through a function value.
   bool CalleeIsValue = false;
@@ -1237,9 +1245,11 @@ private:
 
 public:
   CallExpr(SourceLocation loc, const std::string &internedCallee,
-           std::vector<Expr *> args, std::vector<Type *> typeArgs = {})
+           std::vector<Expr *> args, std::vector<Type *> typeArgs = {},
+           std::vector<Type *> ownerTypeArgs = {})
       : Expr(NK_CallExpr, loc), CalleeName(&internedCallee),
-        Arguments(std::move(args)), TypeArgs(std::move(typeArgs)) {}
+        Arguments(std::move(args)), TypeArgs(std::move(typeArgs)),
+        OwnerTypeArgs(std::move(ownerTypeArgs)) {}
 
   const std::string &getCalleeName() const { return *CalleeName; }
   /// Rebind the callee (Sema: generic call -> instantiation name).
@@ -1250,6 +1260,8 @@ public:
   size_t getNumArguments() const { return Arguments.size(); }
   const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
   bool hasTypeArgs() const { return !TypeArgs.empty(); }
+  const std::vector<Type *> &getOwnerTypeArgs() const { return OwnerTypeArgs; }
+  bool hasOwnerTypeArgs() const { return !OwnerTypeArgs.empty(); }
   void setCalleeIsValue(bool v) { CalleeIsValue = v; }
   bool calleeIsValue() const { return CalleeIsValue; }
   /// Set by Sema for `E::V(a, b)`: an enum's variant made with its fields.
@@ -1350,6 +1362,9 @@ private:
   Expr *Receiver;
   const std::string *MethodName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
+  // The type arguments of a generic method's call, `b.map<float>(f)` (#353);
+  // empty if none are written.
+  std::vector<Type *> TypeArgs;
   // Set by Sema when the name is a field of function type, not a method
   // (`obj.cb(1)` with `cb: (int) -> int`): a call through the field's value.
   bool FieldCall = false;
@@ -1365,12 +1380,21 @@ private:
 
 public:
   MethodCallExpr(SourceLocation loc, Expr *receiver,
-                 const std::string &internedMethod, std::vector<Expr *> args)
+                 const std::string &internedMethod, std::vector<Expr *> args,
+                 std::vector<Type *> typeArgs = {})
       : Expr(NK_MethodCallExpr, loc), Receiver(receiver),
-        MethodName(&internedMethod), Arguments(std::move(args)) {}
+        MethodName(&internedMethod), Arguments(std::move(args)),
+        TypeArgs(std::move(typeArgs)) {}
 
   Expr *getReceiver() const { return Receiver; }
   const std::string &getMethodName() const { return *MethodName; }
+  /// Rebind the method (Sema: a generic method's call -> the instantiation's
+  /// name, `map<Str>`).
+  void setMethodName(const std::string &internedMethod) {
+    MethodName = &internedMethod;
+  }
+  const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
+  bool hasTypeArgs() const { return !TypeArgs.empty(); }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
   void setFieldCall(bool v) { FieldCall = v; }
@@ -1749,6 +1773,12 @@ public:
   // -- Methods
 
   void addMethod(MethodDecl *m);
+  /// Take back an `impl` method added by addMethod (one the archetype
+  /// check made of a generic method, which is no method of the type).
+  void dropImplMethod(const MethodDecl *m) {
+    ImplMethods.erase(std::remove(ImplMethods.begin(), ImplMethods.end(), m),
+                      ImplMethods.end());
+  }
 
   /// Reset the vtable to start with the parent's slots (re-inherit).
   /// Call this after the parent's methods are fully populated.
@@ -2605,6 +2635,12 @@ public:
 
   /// Add an `impl` method, or the `__init__`.
   void addMethod(MethodDecl *m);
+  /// Take back an `impl` method added by addMethod (one the archetype
+  /// check made of a generic method, which is no method of the type).
+  void dropImplMethod(const MethodDecl *m) {
+    ImplMethods.erase(std::remove(ImplMethods.begin(), ImplMethods.end(), m),
+                      ImplMethods.end());
+  }
   /// The `impl` method (or `__init__`) named @p name, or nullptr.
   MethodDecl *findMethod(const std::string &name) const;
   const std::vector<MethodDecl *> &getImplMethods() const {

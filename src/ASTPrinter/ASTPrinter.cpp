@@ -396,12 +396,20 @@ void ASTPrinter::visitIdentifier(Identifier *node) {
 void ASTPrinter::visitCallExpr(CallExpr *node) {
   header("CallExpr", node);
   OS << " '" << node->getCalleeName() << "'";
+  if (node->hasOwnerTypeArgs())
+    OS << " " << node->getOwnerTypeArgs().size() << " owner type args";
   if (node->hasTypeArgs())
     OS << " " << node->getTypeArgs().size() << " type args";
   OS << "\n";
-  // Explicit type arguments are printed first, then the value arguments.
+  // The owner type's arguments, then the function's, then the values.
+  const auto &oargs = node->getOwnerTypeArgs();
   const auto &targs = node->getTypeArgs();
   const auto &args = node->getArguments();
+  for (size_t i = 0; i < oargs.size(); ++i) {
+    ChildScope cs(*this,
+                  targs.empty() && args.empty() && i + 1 == oargs.size());
+    visit(oargs[i]);
+  }
   for (size_t i = 0; i < targs.size(); ++i) {
     ChildScope cs(*this, args.empty() && i + 1 == targs.size());
     visit(targs[i]);
@@ -411,10 +419,19 @@ void ASTPrinter::visitCallExpr(CallExpr *node) {
 
 void ASTPrinter::visitMethodCallExpr(MethodCallExpr *node) {
   header("MethodCallExpr", node);
-  OS << " '" << node->getMethodName() << "'\n";
+  OS << " '" << node->getMethodName() << "'";
+  if (node->hasTypeArgs())
+    OS << " " << node->getTypeArgs().size() << " type args";
+  OS << "\n";
+  const auto &targs = node->getTypeArgs();
   {
-    ChildScope cs(*this, node->getNumArguments() == 0);
+    ChildScope cs(*this, targs.empty() && node->getNumArguments() == 0);
     visit(node->getReceiver());
+  }
+  // A generic method's type arguments, then the values.
+  for (size_t i = 0; i < targs.size(); ++i) {
+    ChildScope cs(*this, node->getNumArguments() == 0 && i + 1 == targs.size());
+    visit(targs[i]);
   }
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     ChildScope cs(*this, i + 1 == node->getNumArguments());
