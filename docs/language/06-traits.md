@@ -641,15 +641,17 @@ reads no such value of the enclosing function either. `impl Sendable for C` is a
 ## Deinitializable
 
 `Deinitializable` is the trait of the types that run code when a value of them is
-destroyed: `__deinit__` ([Classes](05-classes.md#deinitializers)). Every class is
+destroyed: `__deinit__` ([Classes](05-classes.md#deinitializers),
+[Structs](11-structs.md#running-code-when-a-value-is-destroyed-__deinit__)). Every class is
 Deinitializable, by the `__deinit__` it declares or by none, since an object of it may be of
-a subclass that declares one. No other type is in this version.
+a subclass that declares one. A struct is when it declares one. No other type is: not a
+struct without one, also when a field of it has one, nor a tuple, an enum or an optional.
 
 The trait has no method a bound can call (`__deinit__` is never called by name), and no
 block implements it: `impl Deinitializable for C` is `'Deinitializable' is built in: every
-class is Deinitializable, by the '__deinit__' it declares or by none, and it cannot be
-implemented`. As a bound it tells a class apart from a value: `T: Deinitializable` takes
-`Node`, `shared Node` and `Str`, and not `int` or a struct.
+class is Deinitializable, by the '__deinit__' it declares or by none, and a struct that
+declares one; it cannot be implemented`. As a bound, `T: Deinitializable` takes `Node`,
+`shared Node`, `Str` and a struct with a `__deinit__`, and not `int` or a plain struct.
 
 ## Semantic Checks
 

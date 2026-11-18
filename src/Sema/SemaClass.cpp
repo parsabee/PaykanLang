@@ -1524,14 +1524,17 @@ bool Sema::isWhole(const ast::Type *ty) const {
 
 bool Sema::checkDeinitDecl(const ast::FuncDecl *fn, const ast::Type *owner) {
   std::string why;
-  if (!ast::isa<ast::ClassType>(owner))
-    why = "is a class's in this version: a " +
-          std::string(typeKindWord(owner)) + " has none yet";
+  const bool object = ast::isa<ast::ClassType>(owner);
+  if (!object && !ast::isa<ast::StructType>(owner))
+    why = "is a class's or a struct's: a " + std::string(typeKindWord(owner)) +
+          " has none";
   else if (fn->isStatic() || fn->isView() || fn->isShared())
     why = "is a plain 'fn', not a 'static', 'view' or 'shared' one";
   else if (fn->isAsync())
-    why = "cannot be 'async': an object is destroyed where its last "
-          "reference goes, which waits for no task";
+    why = object ? "cannot be 'async': an object is destroyed where its last "
+                   "reference goes, which waits for no task"
+                 : "cannot be 'async': a value is destroyed where its storage "
+                   "ends, which waits for no task";
   else if (!fn->getParams().empty())
     why = "takes no parameters";
   else if (fn->getReturnType() || fn->hasInferredResult())
@@ -1540,9 +1543,10 @@ bool Sema::checkDeinitDecl(const ast::FuncDecl *fn, const ast::Type *owner) {
     why = "needs a body";
   if (why.empty())
     return true;
-  error(fn->getLocation(),
-        std::string("'") + names::kMethodDeinit + "' " + why +
-            " ('fn __deinit__() { ... }' runs when the object is destroyed)");
+  error(fn->getLocation(), std::string("'") + names::kMethodDeinit + "' " +
+                               why + " ('fn __deinit__() { ... }' runs when " +
+                               (object ? "the object" : "the value") +
+                               " is destroyed)");
   return false;
 }
 
@@ -2093,6 +2097,35 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     if (!bounded) {
       ok = false;
       continue;
+    }
+    // Every instance is destroyed one way: whether a value has a
+    // `__deinit__` is its layout's, and a block that only some instances
+    // have is decided after the first of them are laid out (#378).
+    const bool conditional = std::any_of(
+        im->getTypeParamBounds().begin(), im->getTypeParamBounds().end(),
+        [](const auto &bs) { return !bs.empty(); });
+    if (conditional) {
+      bool deinit = false;
+      for (const ast::FuncDecl *fn : im->getMethods())
+        if (fn->getName() == names::kMethodDeinit && !fn->isStatic()) {
+          std::string plain = name;
+          for (size_t i = 0; i < params.size(); ++i)
+            (plain += i ? ", " : "<") += *params[i];
+          plain += ">";
+          std::string msg = "'";
+          msg += names::kMethodDeinit;
+          msg += "' cannot be in a conditional 'impl' block: every '";
+          msg += plain;
+          msg += "' is destroyed the same way; declare it in 'impl ";
+          msg += plain;
+          msg += "'";
+          error(fn->getLocation(), msg);
+          deinit = true;
+        }
+      if (deinit) {
+        ok = false;
+        continue;
+      }
     }
     TemplateImpls[tmpl].push_back(im);
   }
@@ -3476,6 +3509,36 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
             "call to undeclared generic function or class '" + callee + "'");
   }
   return false;
+}
+
+bool Sema::checkBufferElements() {
+  bool ok = true;
+  std::vector<BufferElementCheck> checks =
+      std::exchange(BufferElementChecks, {});
+  for (BufferElementCheck &c : checks) {
+    if (!ast::holdsDeinit(c.Elem))
+      continue;
+    // Reported where the buffer was asked for, in that file, under the
+    // instantiations that asked.
+    const InstantiationFrame own = std::move(c.Frames.back());
+    c.Frames.pop_back();
+    std::vector<InstantiationFrame> saved =
+        std::exchange(InstantiationStack, std::move(c.Frames));
+    const std::string savedName = Diags.getSourceName();
+    const std::vector<std::string> *savedLines = Diags.getSourceLines();
+    if (!own.File.empty())
+      Diags.setSourceInfo(own.File, own.Lines);
+    error(own.RequestLoc,
+          "a buffer cannot hold a '" + typeName(c.Elem) +
+              "' yet: its elements run no '__deinit__' when the buffer lets "
+              "them go; hold each in a 'mem::Box<" +
+              typeName(c.Elem) + ">'");
+    if (!own.File.empty())
+      Diags.setSourceInfo(savedName, savedLines);
+    InstantiationStack = std::move(saved);
+    ok = false;
+  }
+  return ok;
 }
 
 bool Sema::checkPendingInstantiations() {

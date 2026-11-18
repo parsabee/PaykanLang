@@ -622,6 +622,7 @@ void ModuleLowering::holdObjectsIn(const Val &addr, ast::Type *ty) {
   Val copy = B.localAddr(tmp, "held.addr");
   B.memCopy(copy, addr, Val::i64(l.Size));
   emitMemRetain(copy, ty);
+  emitMemMovedOut(copy, ty); // a hold of what it holds, not a value
   MemTemps.emplace_back(copy, ty);
 }
 
@@ -683,7 +684,24 @@ std::optional<pir::LocalId> ModuleLowering::emitMatchPlace(ast::Expr *subject) {
 bool ModuleLowering::emitMemMatchSubject(ast::MatchStmt *node, const Val &dst,
                                          std::optional<pir::LocalId> &place) {
   if (!hasInoutArm(node)) {
-    emitMemInit(node->getSubject(), dst);
+    ast::Expr *subject = node->getSubject();
+    if (!ast::holdsDeinit(subject->getResolvedType())) {
+      emitMemInit(subject, dst);
+      return true;
+    }
+    // The arms look at a value that runs a `__deinit__` where it is, and
+    // nothing counts a value: what the subject's expression made on the way
+    // to it (an object a call returned, the value a `view` result is in)
+    // stays until the match ends, on every way out of it.
+    const size_t mark = MemTemps.size();
+    const pir::Block *outer = std::exchange(KeepMemTempsIn, B.block());
+    emitMemInit(subject, dst);
+    KeepMemTempsIn = outer;
+    while (MemTemps.size() > mark) {
+      auto [v, ty, len] = MemTemps.back();
+      MemTemps.pop_back();
+      CurrentScope->PendingMemTemps.emplace_back(v, ty, len);
+    }
     return true;
   }
   place = emitMatchPlace(node->getSubject());
@@ -692,6 +710,8 @@ bool ModuleLowering::emitMemMatchSubject(ast::MatchStmt *node, const Val &dst,
   ast::Type *ty = node->getSubject()->getResolvedType();
   B.memCopy(dst, B.load(*place, "subj.addr"), Val::i64(memLayout(ty).Size));
   emitMemRetain(dst, ty);
+  // The value stays in its place; the copy is the arms' look at it.
+  emitMemMovedOut(dst, ty);
   return true;
 }
 
@@ -699,6 +719,19 @@ void ModuleLowering::bindInoutArm(const ast::MatchArm *arm,
                                   pir::LocalId binding, pir::LocalId place,
                                   ast::Type *placeTy, ast::Type *bindTy,
                                   int64_t offset, const Val &header) {
+  // A binding that is written back is the value while the arm uses it: a
+  // struct with a `__deinit__` in it is the binding's then, as the place
+  // has it (the bytes are the place's own, the references the binding
+  // retained), and the place's again at the write-back.
+  if (ast::isMemType(bindTy) && ast::holdsDeinit(bindTy) &&
+      arm->bindingUses() > 0) {
+    Val part = B.load(place, "subj.addr");
+    if (offset != 0)
+      part = B.ptrAdd(part, Val::i64(offset), "subj.part.addr");
+    B.memCopy(B.localAddr(binding, "arm.addr"), part,
+              Val::i64(memLayout(bindTy).Size));
+    emitMemMovedOut(part, bindTy);
+  }
   CurrentScope->WriteBacks.push_back(
       {arm, place, binding, placeTy, bindTy, offset, header});
 }
@@ -757,8 +790,12 @@ void ModuleLowering::emitWriteBack(const Scope::WriteBack &wb) {
     part = at;
   }
   emitMemRetain(part, wb.BindTy);
-  emitMemRelease(place, wb.PlaceTy);
+  const Val old = emitMemSetAside(place, wb.PlaceTy);
   B.memCopy(place, value, Val::i64(l.Size));
+  // The value is the place's again (bindInoutArm).
+  emitMemMovedOut(B.localAddr(wb.Binding, "arm.addr"), wb.BindTy);
+  if (old)
+    emitMemRelease(old, wb.PlaceTy);
 }
 
 } // namespace paykan::lowering

@@ -157,12 +157,15 @@ struct Sema::ParSafety {
   void derivedClone(ast::ClassType *ct, ast::SourceLocation loc);
   /// Destroying an object runs its `__deinit__`s (#378).  An object dies in
   /// the code that made it or in what that code hands it to, so the ones a
-  /// function may destroy are the ones it makes (makes), and the contents
-  /// of a `locked mut` cell it has `inout` (drops), which were made
-  /// anywhere.
+  /// function may destroy are the ones it makes (makes), and what it can
+  /// write that was made anywhere (drops): the contents of a `locked mut`
+  /// cell it has `inout`, and what a `parallel for` body writes of the
+  /// enclosing function.
   ///
-  /// The `__deinit__` of @p c, where it declares one.
-  void deinitOf(ast::ClassType *c, ast::SourceLocation loc);
+  /// The `__deinit__` @p md of the class or struct named @p owner, where
+  /// it declares one.
+  void deinitOf(const ast::MethodDecl *md, const std::string &owner,
+                ast::SourceLocation loc);
   /// An object of exactly @p ct is made at @p loc: its own `__deinit__`
   /// and its superclasses'.
   void makes(ast::ClassType *ct, ast::SourceLocation loc);
@@ -462,6 +465,15 @@ void Sema::ParSafety::stmt(ast::Stmt *s) {
     expr(x->getStart());
     expr(x->getEnd());
     expr(x->getStep());
+    // What a body writes of the enclosing function, an element at the
+    // loop's variable, was made anywhere: an assignment over it, or what it
+    // is handed to `inout`, may destroy it, whatever it is.
+    auto written = [&] {
+      if (auto it = S.ParallelOuterWrites.find(x);
+          it != S.ParallelOuterWrites.end())
+        for (const auto &[place, field] : it->second)
+          drops(field ? field : typeOf(place), place->getLocation());
+    };
     // A nested one is part of the outermost's body, and reported with it.
     if (x->isParallel() && !ParallelUses) {
       ParallelBody &body = ParallelBodies.emplace_back();
@@ -469,9 +481,12 @@ void Sema::ParSafety::stmt(ast::Stmt *s) {
       body.Report = Current->Report;
       body.Decl = Current->Decl;
       ParallelUses = &body.Uses;
+      written();
       stmt(x->getBody());
       ParallelUses = nullptr;
     } else {
+      if (x->isParallel())
+        written();
       stmt(x->getBody());
     }
   }
@@ -567,6 +582,9 @@ void Sema::ParSafety::call(ast::CallExpr *ce) {
   // it to: its `__deinit__`s are this call's (#378).
   if (ast::ClassType *made = S.Ctx.lookupClassType(name))
     makes(made, loc);
+  // So is a value of a struct that has one.
+  else if (ast::StructType *value = S.Ctx.lookupStructType(name))
+    deinitOf(value->getDeinitMethod(), value->getName(), loc);
   if (isLocalType(name)) {
     if (const ast::FuncDecl *init = bodyOf(name, names::kMethodInit))
       add({loc, shown, init, ""});
@@ -710,13 +728,13 @@ void Sema::ParSafety::valueMethod(ast::Type *ty, const std::string &name,
   }
 }
 
-void Sema::ParSafety::deinitOf(ast::ClassType *c, ast::SourceLocation loc) {
-  const ast::MethodDecl *md = c->getDeinitMethod();
+void Sema::ParSafety::deinitOf(const ast::MethodDecl *md,
+                               const std::string &owner,
+                               ast::SourceLocation loc) {
   if (!md)
     return;
-  const std::string shown =
-      c->getName() + names::kNameSep + names::kMethodDeinit;
-  if (const ast::FuncDecl *fn = bodyOf(c->getName(), names::kMethodDeinit))
+  const std::string shown = owner + names::kNameSep + names::kMethodDeinit;
+  if (const ast::FuncDecl *fn = bodyOf(owner, names::kMethodDeinit))
     add({loc, shown, fn, ""});
   else if (!md->isParSafe())
     add({loc, shown, nullptr, "is not par-safe"});
@@ -724,7 +742,7 @@ void Sema::ParSafety::deinitOf(ast::ClassType *c, ast::SourceLocation loc) {
 
 void Sema::ParSafety::makes(ast::ClassType *ct, ast::SourceLocation loc) {
   for (ast::ClassType *c = ct; c && !c->isBuiltin(); c = c->getSuperClass())
-    deinitOf(c, loc);
+    deinitOf(c->getDeinitMethod(), c->getName(), loc);
 }
 
 void Sema::ParSafety::drops(ast::Type *ty, ast::SourceLocation loc) {
@@ -759,7 +777,7 @@ void Sema::ParSafety::drops(ast::Type *ty, ast::SourceLocation loc) {
       }
       for (ast::ClassType *c = ct; c && !c->isBuiltin();
            c = c->getSuperClass()) {
-        deinitOf(c, loc);
+        deinitOf(c->getDeinitMethod(), c->getName(), loc);
         // Then what it holds, a `weak` field aside.
         for (const auto &[field, fty] : c->getFields())
           if (!c->isWeakField(field))
@@ -776,6 +794,7 @@ void Sema::ParSafety::drops(ast::Type *ty, ast::SourceLocation loc) {
         work.push_back({elem, false});
         continue;
       }
+      deinitOf(st->getDeinitMethod(), st->getName(), loc); // its own
       for (size_t i = 0; i < st->getNumFields(); ++i)
         work.push_back({st->getElementType(i), false});
     } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {

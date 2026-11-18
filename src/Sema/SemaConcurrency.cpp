@@ -201,7 +201,11 @@ Sema::ParallelContext::ElementPath Sema::elementPath(const ast::Expr *place,
 }
 
 bool Sema::checkParallelWrite(const ast::Expr *place, const ast::Expr *last,
-                              const std::string &how, ast::SourceLocation loc) {
+                              const std::string &how, ast::SourceLocation loc,
+                              const std::string *field, ast::Type *fieldTy) {
+  // (A move says so itself: checkNotReadByArm.)
+  if (how != "moved" && !checkNotLookedAt(place, how, loc, field))
+    return false;
   if (ParallelStack.empty())
     return true;
   const ast::Identifier *root = placeRoot(place);
@@ -218,6 +222,7 @@ bool Sema::checkParallelWrite(const ast::Expr *place, const ast::Expr *last,
           const auto *id = ast::dyn_cast<ast::Identifier>(path.Indices[i]);
           if (id && id->getName() == var && path.Owners[i] == loop.Boundary) {
             loop.Writes.push_back({root->getName(), place, path});
+            ParallelOuterWrites[loop.Loop].push_back({place, fieldTy});
             return;
           }
         }
@@ -795,6 +800,9 @@ bool Sema::isCopyable(ast::Type *ty, std::string *why) {
   // A struct's fields carry qualifiers (a `shared` one copies), as a
   // tuple's elements do.  Before the tuple case, which a struct is too.
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    // One with a `__deinit__` is move-only: each copy would run it (#378).
+    if (st->getDeinitMethod())
+      return false;
     const auto &types = st->getElementTypes();
     for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
       const ast::Qualifier q = st->findFieldQualifier(st->getFieldName(i));
@@ -899,6 +907,16 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
   if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     if (hasBuiltinTraitImpl(st, names::kTraitCloneable))
       return true;
+    // No clone is built in for a struct with a `__deinit__`: a copy of its
+    // fields is a second value to destroy, which only its own code can say
+    // how to make (#378).
+    if (st->getDeinitMethod()) {
+      if (why && why->empty())
+        *why = "a struct with a '__deinit__' is Cloneable only with an 'impl "
+               "Cloneable for " +
+               st->getName() + "' block";
+      return false;
+    }
     const auto &types = st->getElementTypes();
     for (size_t i = 0; i < types.size() && i < st->getNumFields(); ++i) {
       const ast::Qualifier q = st->findFieldQualifier(st->getFieldName(i));
@@ -1773,6 +1791,58 @@ void Sema::checkLoopIteration(const LoopMoves &loop, ast::SourceLocation loc) {
   }
 }
 
+std::string Sema::lookedAtBy(const std::string &path) const {
+  // Two places overlap when one is the other or a part of it; any two
+  // elements of one array may be one.
+  auto whole = [](std::string p) {
+    if (const size_t at = p.find('['); at != std::string::npos)
+      p.erase(at);
+    return p;
+  };
+  auto within = [](const std::string &outer, const std::string &inner) {
+    return inner.size() >= outer.size() &&
+           inner.compare(0, outer.size(), outer) == 0 &&
+           (inner.size() == outer.size() || inner[outer.size()] == '.');
+  };
+  const std::string written = whole(path);
+  for (const Scope *s = CurrentScope; s; s = s->Parent)
+    for (const auto &[binding, subject] : s->ViewSubjects) {
+      if (!ast::holdsDeinit(
+              const_cast<ast::Expr *>(subject)->getResolvedType()))
+        continue;
+      // The places the subject is in: its own, or the ones a call that
+      // lent it borrowed (`pin(t).held` is in `t`).
+      std::vector<std::string> reads;
+      const_cast<Sema *>(this)->borrowedPaths(subject, reads);
+      if (reads.empty() && placeRoot(subject))
+        reads.push_back(placeText(subject));
+      for (const std::string &r : reads) {
+        const std::string read = whole(r);
+        if (within(written, read) || within(read, written))
+          return binding;
+      }
+    }
+  return "";
+}
+
+bool Sema::checkNotLookedAt(const ast::Expr *place, const std::string &how,
+                            ast::SourceLocation loc, const std::string *field) {
+  if (!placeRoot(place))
+    return true;
+  std::string path = placeText(place);
+  if (field)
+    path += "." + *field;
+  const std::string binding = lookedAtBy(path);
+  if (binding.empty())
+    return true;
+  // A write of what the binding looks at would destroy the value it reads.
+  error(loc, "'" + path + "' cannot be " + how + " here: 'match' binding '" +
+                 binding +
+                 "' reads a value of it that runs a '__deinit__' where it "
+                 "is replaced, until its arm ends");
+  return false;
+}
+
 bool Sema::checkNotReadByArm(const std::string &name, ast::SourceLocation loc) {
   if (!isViewBindingSubject(name))
     return true;
@@ -1864,6 +1934,17 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
                      "', not a unique part of '" + name + "'");
       return nullptr;
     }
+    // A struct's `__deinit__` runs on the whole value (#378).
+    if (const auto *st = ast::dyn_cast<ast::StructType>(
+            ast::stripOptional(link->getReceiver()->getResolvedType()));
+        st && st->getDeinitMethod()) {
+      error(loc, "cannot move '" + placeText(link) + "' out of '" +
+                     placeText(link->getReceiver()) + "': a '" + st->getName() +
+                     "' has a '__deinit__', which runs on the whole value; "
+                     "write 'mem::replace(" +
+                     placeText(link) + ", v)'");
+      return nullptr;
+    }
   }
   // A value moves out as a copy of its bytes, which takes over the
   // references among them; a Copyable one is the copy, so that generic code
@@ -1874,6 +1955,77 @@ ast::Type *Sema::checkPartialMove(ast::UnaryExpr *node,
   }
   MovedVars[varKey(name)] = MovedState{loc, false, ""};
   return ty;
+}
+
+bool Sema::partLeavesTemporary(const ast::Expr *e) {
+  if (!ast::isa<ast::MemberAccessExpr>(e) && !ast::isa<ast::SubscriptExpr>(e) &&
+      !ast::isa<ast::TupleIndexExpr>(e))
+    return false;
+  if (isCopyPlace(e))
+    return false;
+  for (const ast::Expr *p = e;;) {
+    // What a call lent stays where it is: a part of it is a look.
+    if (borrowResultOf(p))
+      return false;
+    const ast::Expr *next = nullptr;
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p))
+      next = ma->getReceiver();
+    else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+      next = se->getArray();
+    else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p))
+      next = ti->getTuple();
+    if (!next)
+      return true;
+    p = next;
+  }
+}
+
+bool Sema::noteLeavesTemporary(ast::Expr *subject, bool branch) {
+  if (auto *te = ast::dyn_cast<ast::TernaryExpr>(subject)) {
+    bool ok = true;
+    for (ast::Expr *b : conditionalBranches(te))
+      ok = noteLeavesTemporary(b, /*branch=*/true) && ok;
+    return ok;
+  }
+  ast::Type *ty = subject->getResolvedType();
+  if (!ast::holdsDeinit(ty))
+    return true;
+  if (partLeavesTemporary(subject)) {
+    subject->setLeavesTemporary();
+    return true;
+  }
+  // What a branch reads from a temporary that keeps it (an object others
+  // may hold, the value a `view` result is in) is gone when the branch
+  // ends.
+  const bool part = ast::isa<ast::MemberAccessExpr>(subject) ||
+                    ast::isa<ast::SubscriptExpr>(subject) ||
+                    ast::isa<ast::TupleIndexExpr>(subject) ||
+                    borrowResultOf(subject);
+  std::vector<std::string> places;
+  if (branch && part && !placeRoot(subject)) {
+    borrowedPaths(subject, places);
+    if (places.empty()) {
+      error(subject->getLocation(),
+            "a branch of a 'match' subject cannot read '" + placeText(subject) +
+                "': it is in a temporary, which is destroyed before the "
+                "arms run, and a '" +
+                typeName(ty) +
+                "' runs a '__deinit__' there; bind the temporary to a "
+                "variable first");
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string Sema::wholeSelfLent(const ast::Expr *e) const {
+  const auto *self = e ? ast::dyn_cast<ast::Identifier>(e) : nullptr;
+  if (!self || self->getName() != names::kSelf || !CurrentClassCtx ||
+      !CurrentClassCtx->Struct || !CurrentClassCtx->Struct->getDeinitMethod())
+    return "";
+  return "a '" + CurrentClassCtx->Struct->getName() +
+         "' has a '__deinit__', and what a method is called on stays the "
+         "value it is (lend its fields)";
 }
 
 std::string Sema::deinitOfObject(const ast::ClassType *ct) const {
@@ -2637,8 +2789,43 @@ bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
     moved = true;
     inner = u->getOperand();
   }
-  if (moved || !isCopyPlace(inner))
+  if (moved)
     return true;
+  if (!isCopyPlace(inner)) {
+    // A part of a temporary leaves it; one that runs a `__deinit__` is
+    // moved, not looked at (#378).
+    if (ast::holdsDeinit(ty) && partLeavesTemporary(inner)) {
+      // As from a variable (checkPartialMove): an object that runs a
+      // `__deinit__` gives up no part of itself.
+      for (const ast::Expr *p = inner;;) {
+        const ast::Expr *next = nullptr;
+        if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p))
+          next = ma->getReceiver();
+        else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+          next = se->getArray();
+        else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p))
+          next = ti->getTuple();
+        if (!next)
+          break;
+        ast::Type *holder = const_cast<ast::Expr *>(next)->getResolvedType();
+        const auto *ct =
+            holder ? ast::dyn_cast<ast::ClassType>(ast::stripOptional(holder))
+                   : nullptr;
+        if (const std::string why = ct ? deinitOfObject(ct) : std::string();
+            !why.empty()) {
+          error(src->getLocation(),
+                "cannot move '" + placeText(inner) + "' out of '" +
+                    placeText(next) + "': " + why +
+                    ", which runs on the whole object; write 'mem::replace(" +
+                    placeText(inner) + ", v)' on a variable that holds it");
+          return false;
+        }
+        p = next;
+      }
+      src->setLeavesTemporary();
+    }
+    return true;
+  }
   // The copy rule: a move-only value read from a place is moved, never
   // copied.  A `shared` reference, a handle, and a value of such parts are
   // Copyable.  A borrow, or a part reached through one, is the borrow
@@ -2677,9 +2864,10 @@ bool Sema::checkCopyRule(ast::Expr *src, ast::SourceLocation loc,
           ? qualifiedName(ast::Qualifier{ast::QualForm::Shared, sq.Mut}, ty)
           : std::string();
   if (id && id->getName() == names::kSelf)
+    // (Only an object has a `shared fn`.)
     msg += "; a method borrows its receiver" +
            (clone.empty() ? "" : ": write " + clone) +
-           " (a 'shared fn' hands on a shared one)";
+           (ast::isRefType(ty) ? " (a 'shared fn' hands on a shared one)" : "");
   else if (kind == VarKind::Inout)
     msg += "; it is an 'inout' borrow of the caller's storage" +
            (clone.empty() ? "" : ": write " + clone);

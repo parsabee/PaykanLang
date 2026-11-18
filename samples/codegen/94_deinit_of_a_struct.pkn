@@ -1,0 +1,137 @@
+// 94 — `__deinit__` of a struct: code that runs when a value is destroyed
+// Exercises: a struct's `__deinit__` runs once where the value's storage
+//            ends: its variable's scope, the assignment that replaces it,
+//            the object, tuple, array, optional or enum that holds it; a
+//            moved value runs it where it ends up, a parameter in its
+//            function, a result in the caller; the struct's own runs
+//            before its fields'; a scope's variables go in the reverse of
+//            their declarations, objects among the values; `clone` is the
+//            struct's own; a generic struct's is each instance's.
+// expect-stdout: inner 2
+// expect-stdout: return 2
+// expect-stdout: using 1
+// expect-stdout: return 1
+// expect-stdout: return 3
+// expect-stdout: assigned 4
+// expect-stdout: return 4
+// expect-stdout: --
+// expect-stdout: return 15
+// expect-stdout: return 16
+// expect-stdout: held 61
+// expect-stdout: untag n
+// expect-stdout: untag g
+// expect-stdout: return 17
+// expect-stdout: return 13
+// expect-stdout: return 14
+// expect-stdout: return 12
+// expect-stdout: pair of 10
+// expect-stdout: return 10
+// expect-stdout: return 11
+// expect-stdout: --
+// expect-stdout: desk 22 20 120 False
+// expect-stdout: return 120
+// expect-stdout: return 21
+// expect-stdout: return 20
+// expect-stdout: desk closes
+// expect-stdout: return 22
+import ::io;
+import ::memory as mem;
+
+struct Lease {
+  id: int;
+}
+
+impl Lease {
+  fn __deinit__() { io::println("return " + Str(self.id)); }
+}
+
+impl Cloneable for Lease {
+  view fn clone() -> Self { return Lease(self.id + 100); }
+}
+
+struct Pair {
+  first: Lease;
+  second: Lease;
+}
+
+impl Pair {
+  fn __deinit__() { io::println("pair of " + Str(self.first.id)); }
+}
+
+struct Tagged<T> {
+  v: T;
+  tag: Str;
+}
+
+impl Tagged<T> {
+  fn __deinit__() { io::println("untag " + self.tag); }
+}
+
+class Desk {
+  held: Lease;
+  spare: Lease?;
+
+  fn __deinit__() { io::println("desk closes"); }
+}
+
+enum Slot {
+  Empty,
+  Full(l: Lease, n: int)
+}
+
+fn make(i: int) -> Lease {
+  let l = Lease(i);
+  return l;
+}
+
+fn use(l: Lease) -> int {
+  io::println("using " + Str(l.id));
+  return l.id;
+}
+
+fn look(l: view Lease) -> int {
+  return l.id;
+}
+
+fn scopes() {
+  let a = make(1);
+  {
+    let b = make(2);
+    io::println("inner " + Str(look(b)));
+  }
+  use(move a);
+  c = make(3);
+  c = make(4);
+  io::println("assigned " + Str(c.id));
+}
+
+fn holders() {
+  let p = Pair(make(10), make(11));
+  let t = (make(12), "twelve");
+  let xs = [make(13), make(14)];
+  o: Lease? = make(15);
+  o = None;
+  s = Slot::Full(make(16), 0);
+  s = Slot::Empty;
+  let g = Tagged(make(17), "g");
+  let n = Tagged(7, "n");
+  io::println("held " + Str(p.second.id + t.0.id + xs[1].id + g.v.id + n.v));
+}
+
+fn objects() {
+  let d: mut = Desk(make(20), make(21));
+  let old = mem::replace(d.held, make(22));
+  let spare = mem::take(d.spare);
+  let copy = old.clone();
+  io::println("desk " + Str(d.held.id) + " " + Str(old.id) + " " + Str(copy.id)
+      + " " + Str(spare == None));
+}
+
+fn main() -> int {
+  scopes();
+  io::println("--");
+  holders();
+  io::println("--");
+  objects();
+  return 0;
+}

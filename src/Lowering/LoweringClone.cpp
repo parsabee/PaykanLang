@@ -191,6 +191,9 @@ void ModuleLowering::emitDerivedClone(pir::Function *fn, ast::ClassType *ct) {
       B.memCopy(to, B.fieldAddr(self, cls, fname, fname + ".from"),
                 Val::i64(l.Size));
       emitMemRetain(to, fty);
+      // (A struct with a `__deinit__` in it is no value yet: its `clone`,
+      // which cloneMemParts calls, makes the one the clone holds.)
+      emitMemMovedOut(to, fty);
       cloneMemParts(to, fty);
       continue;
     }

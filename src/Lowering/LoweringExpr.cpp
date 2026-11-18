@@ -1955,6 +1955,9 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
         Val dst = B.localAddr(local, name + ".addr");
         B.memCopy(dst, at, Val::i64(size));
         emitMemRetain(dst, elemTy);
+        // The element is the variable's now: the tuple it left runs no
+        // `__deinit__` for it.
+        emitMemMovedOut(at, elemTy);
         CurrentScope->declare(name, local, bindTy);
         continue;
       }
@@ -1963,8 +1966,11 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
                     ? B.load(local, name + ".addr")
                     : B.localAddr(local, name + ".addr");
       emitMemRetain(at, elemTy);
-      emitMemRelease(dst, elemTy);
+      const Val old = emitMemSetAside(dst, elemTy);
       B.memCopy(dst, at, Val::i64(size));
+      emitMemMovedOut(at, elemTy);
+      if (old)
+        emitMemRelease(old, elemTy);
       continue;
     }
 

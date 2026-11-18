@@ -507,6 +507,13 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
                             receiver->getLocation()))
       ok = false;
   }
+  // A method that changes an object may replace a value a `match` binding
+  // looks at in it (#378): the receiver, or what holds it.
+  if (receiver && method && !method->isView() &&
+      !ast::dyn_cast<ast::StructType>(receiver->getResolvedType()) &&
+      !checkNotLookedAt(receiver, "changed by '" + method->getName() + "'",
+                        receiver->getLocation()))
+    ok = false;
   if (receiver && method) {
     std::vector<std::string> paths;
     borrowedPaths(receiver, paths);
@@ -640,6 +647,11 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
     } else if (std::string why = inoutPlaceError(arg, "passed to " + param);
                !why.empty()) {
       msg = std::move(why);
+    } else if (std::string why = wholeSelfLent(arg); !why.empty()) {
+      msg = "'self' cannot be passed to ";
+      msg += param;
+      msg += ": ";
+      msg += why;
     } else {
       arg->setChangedByCall(true);
       if (!checkParallelWrite(arg, nullptr, "passed 'inout'",

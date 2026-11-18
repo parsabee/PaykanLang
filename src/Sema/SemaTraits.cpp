@@ -339,6 +339,9 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   if (isBuiltinTrait(names::kTraitDeinitializable)) {
     if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ty))
       return traitImplOwner(qt->getInnerType(), tr);
+    // And a struct that declares one.
+    if (auto *st = ast::dyn_cast<ast::StructType>(ty))
+      return st->getDeinitMethod() ? ty : nullptr;
     return ast::isa<ast::ClassType>(ty) ? ty : nullptr;
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
@@ -510,7 +513,8 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
   // is Cloneable has the built-in one already.
   bool structClone = false;
   if (auto *st = ast::dyn_cast<ast::StructType>(ty); st && cloneable) {
-    bool partMissing = false;
+    // (One with a `__deinit__` has no built-in clone: #378.)
+    bool partMissing = st->getDeinitMethod() != nullptr;
     for (size_t i = 0; i < st->getNumFields(); ++i)
       if (!isCloneablePart(st->getElementType(i),
                            st->findFieldQualifier(st->getFieldName(i))))
@@ -712,8 +716,8 @@ bool Sema::checkImplForm(const ast::ImplDecl *im, const std::string &trait,
   if (builtin && trait == names::kTraitDeinitializable) {
     error(im->getLocation(),
           "'Deinitializable' is built in: every class is Deinitializable, "
-          "by the '__deinit__' it declares or by none, and it cannot be "
-          "implemented");
+          "by the '__deinit__' it declares or by none, and a struct that "
+          "declares one; it cannot be implemented");
     return false;
   }
   // So does Sendable (#378).  A class whose `shared` and `weak` links stay
@@ -819,8 +823,14 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
                             "for '" + displayName(name) + "', which needs it");
           std::string part;
           isCopyable(args[i], &part);
-          why = part.empty() ? "a reference, a 'Str' or a task is move-only"
-                             : "it holds move-only " + part;
+          if (const auto *own = ast::dyn_cast<ast::StructType>(args[i]);
+              own && own->getDeinitMethod())
+            why = "a struct with a '__deinit__' is move-only";
+          else if (part.empty() && ast::holdsDeinit(args[i]))
+            why = "it holds a struct with a '__deinit__', which is move-only";
+          else
+            why = part.empty() ? "a reference, a 'Str' or a task is move-only"
+                               : "it holds move-only " + part;
         } else if (tr->Trait->IsBuiltin &&
                    tr->Trait->Decl->getName() == names::kTraitSendable) {
           noteArchetypeSend(loc, args[i],

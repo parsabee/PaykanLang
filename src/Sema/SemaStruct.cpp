@@ -360,11 +360,12 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st,
       }
       std::optional<TypeParamScope> params;
       implTypeParamScope(params, fn);
-      if (auto *md =
-              declareMethod(fn, st, nullptr,
-                            name == names::kMethodInit ? ast::MethodDecl::None
-                                                       : ast::MethodDecl::Impl,
-                            ok)) {
+      if (auto *md = declareMethod(fn, st, nullptr,
+                                   name == names::kMethodInit ||
+                                           name == names::kMethodDeinit
+                                       ? ast::MethodDecl::None
+                                       : ast::MethodDecl::Impl,
+                                   ok)) {
         st->addMethod(md);
         sd->addMethod(fn); // checked and lowered with the struct
       } else {
@@ -643,6 +644,10 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   }
 
   PendingInstantiations.push_back(pending);
+  if (ast::Type *elem = bufferElementType(st)) {
+    BufferElementChecks.push_back({elem, InstantiationStack});
+    BufferElementChecks.back().Frames.push_back(request);
+  }
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
   if (origin)
@@ -983,6 +988,10 @@ ValueLayout valueLayout(const ast::Type *ty) {
       l.Size = alignUp(l.Size, el.Align) + el.Size;
       l.Align = std::max(l.Align, el.Align);
     }
+    // The byte that says a struct with a `__deinit__` holds a value (#378).
+    if (const auto *st = ast::dyn_cast<ast::StructType>(tt);
+        st && st->getDeinitMethod())
+      l.Size += 1;
     return {alignUp(l.Size, l.Align), l.Align};
   }
   // A tagged union: its tag, then each variant's fields in place, as the

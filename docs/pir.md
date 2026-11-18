@@ -823,7 +823,9 @@ CodeGen enforced, now in one place.
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
-  A value held in memory is released in place at the end of its scope.  At
+  A value held in memory is released in place at the end of its scope, in
+  its turn among the references: one order for what the `__deinit__`s of
+  objects and values do.  At
   a `ret`, `break` or `continue`, and as a statement's temporary, one whose
   release takes more than four `release`s (a struct, a tuple, an array or a
   tagged union with more than four references, an array of more than four
@@ -921,6 +923,36 @@ CodeGen enforced, now in one place.
   and `==`/`!=` pass the address and the `.structN` layout to
   `PaykanStruct_toString` and `PaykanStruct_equals`, with the conventions
   of the tuple calls.
+  A struct with a `__deinit__` (docs/language/11-structs.md, "Running code
+  when a value is destroyed") has one byte more, a `bool` after its last
+  field and before the padding to its alignment: whether the storage holds
+  a value still to destroy.  The constructor stores `true` there after
+  `S.__init__` returns.  Every release of such a struct in place, at a
+  scope's exit, of an assignment's old value, of a field in `C.destroy`, of
+  an element or a payload, and in a drop function, is `if` the byte is set:
+  store `false`, call `S.__deinit__` with the struct's address, then
+  release the fields, each in turn, a field that is such a struct by the
+  same steps; storage that is all zeros (an absent optional, a tagged
+  union's other variants) runs none.  Sema makes such a value move-only, so
+  a `mem.copy` of one is a move, or the lowering's own look at a value that
+  stays where it is.  A move leaves no value behind: it zeroes the storage
+  the value left (a `move`, a parameter passed by value, a `return` of a
+  local, a `match` that takes its subject), or, for a part read out of a
+  temporary into an owner (`let g = make().g;`, which Sema marks), stores
+  `false` in the byte of each such struct in the part it left, so the
+  temporary's release at the end of the statement runs nothing for it.  A
+  look (a `view`'s copy, a slice's, an arm's binding that only reads, a
+  derived `clone`'s source) stores `false` in the byte of each such struct
+  in the copy, which then runs nothing when it is let go.  An assignment
+  over such a value (and an `inout` arm's write-back) first `mem.copy`s the
+  old value to a slot of its own, stores the new one, and releases the slot
+  last: the `__deinit__` it runs may reach the storage, and finds the new
+  value there.  A `match` whose arms only look at such a value keeps the
+  temporaries its subject was read from until it ends: they are released
+  with the match's scope, after the subject's slot, on every way out (the
+  ones made in the match's own block; a conditional subject's branch
+  releases its own).  No runtime function releases such a value by a
+  `PaykanType`: Sema refuses a `mem::Buffer` of them.
 * **Enums** (docs/language/07-enums.md) whose variants have no fields are
   `i64`, the variant's index.  A tagged union, an enum with fields, is
   held in `mem` as the tuple of its tag (`i64`) and each variant's fields,
