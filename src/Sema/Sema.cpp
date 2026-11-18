@@ -5019,6 +5019,8 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     if (im->getTypeParams().empty())
       ImplsByClass[im->getTypeName()].push_back(im);
 
+  Unit = node;
+
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
   for (auto *ed : node->getEnumDecls())
