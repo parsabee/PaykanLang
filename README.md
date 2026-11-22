@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="docs/assets/images/paykan-logo.png" alt="PaykanLang logo" width="480">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/paykan-logo-dark.svg">
+    <img src="docs/assets/images/paykan-logo.svg" alt="PaykanLang logo" width="360">
+  </picture>
 </p>
 
 # PaykanLang

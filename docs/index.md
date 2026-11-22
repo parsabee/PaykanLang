@@ -1,7 +1,7 @@
 # PaykanLang
 
 <p align="center">
-  <img src="assets/images/paykan-logo.png" alt="PaykanLang logo" width="480">
+  <img src="assets/images/paykan-logo.svg" alt="PaykanLang logo" width="360">
 </p>
 
 PaykanLang (source files end in `.pkn`) is a statically typed language that compiles to native
