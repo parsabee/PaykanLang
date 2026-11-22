@@ -219,6 +219,13 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- A new logo: a slim arrow with a tapered trail, its tip on a small red target dot, beside a
+  `paykan` wordmark. The README and the documentation site use it as SVG (the README picks
+  the light or dark version by the viewer's colour scheme), and the site has a favicon made
+  from it. The files are in docs/assets/images: `paykan-logo.svg` and
+  `paykan-logo-dark.svg` (the wordmark), `paykan-mark.svg` (the arrow alone) and
+  `paykan-icon.svg` (the arrow on a tile, for avatars and icons); `paykan-logo.png` is a
+  raster of the new wordmark.
 - `None` is no longer an `Obj` (#394; docs/language/12-optionals.md, "`None` and its
   context"). It is the absent value of the optional its context expects and has no type of
   its own, so an `Obj` is always an object of a class and `Obj?` is an optional like any
