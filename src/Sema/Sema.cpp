@@ -1090,7 +1090,7 @@ ast::Type *Sema::resolveQualifiedAnnotation(ast::QualifiedType *qt,
   ast::Type *inner = resolveType(qt->getInnerType(), loc, context);
   if (!inner)
     return nullptr;
-  // `shared Node[4]` is four shared references: `shared` and `shared mut`
+  // `shared Node[4]` is four shared references: `shared` and `shared mutable`
   // bind to the primary type (docs/design/concurrency.md, "Syntax"), so
   // on an array of references they qualify its elements.
   if (written.Form == ast::QualForm::Shared) {
@@ -1100,24 +1100,25 @@ ast::Type *Sema::resolveQualifiedAnnotation(ast::QualifiedType *qt,
     if (failed)
       return nullptr;
   }
-  // What the inner annotation held: a template's type argument (`mut T`
-  // with T = `shared mut Node`, `mut T?` with T = `shared Node`).  A
+  // What the inner annotation held: a template's type argument (`mutable T`
+  // with T = `shared mutable Node`, `mutable T?` with T = `shared Node`).  A
   // qualifier written on T joins it (#368).
   const ast::Qualifier held = std::exchange(slot, ast::Qualifier{});
-  // Marked as a type argument's when the argument gave the form: `mut T`
-  // with T = `shared mut Node` is, `shared mut T` with T = `mut Node` is the
-  // template's own.
+  // Marked as a type argument's when the argument gave the form: `mutable T`
+  // with T = `shared mutable Node` is, `shared mutable T` with T = `mutable
+  // Node` is the template's own.
   bool substituted = qt->isCanonical() || held.FromArgument;
   ast::Qualifier q = written;
   if (!joinQualifiers(written, held, q)) {
-    // `weak T` with T = `shared mut Node`: the declaration's form.
+    // `weak T` with T = `shared mutable Node`: the declaration's form.
     if (ResolvingWeakDecl) {
-      error(loc, std::string("a '") + (written.Mut ? "weak mut" : "weak") +
+      error(loc, std::string("a '") +
+                     (written.Mutable ? "weak mutable" : "weak") +
                      "' reference names a '" + written.spelling() +
                      "' object, and the type argument is '" +
                      qualifiedName(held, inner) + "'" +
                      (held == ast::Qualifier{ast::QualForm::Shared, true}
-                          ? ": write 'weak mut'"
+                          ? ": write 'weak mutable'"
                           : ""));
       return nullptr;
     }
@@ -1143,7 +1144,7 @@ ast::Type *Sema::resolveQualifiedAnnotation(ast::QualifiedType *qt,
   if (!checkQualifierApplies(q, inner, loc))
     return nullptr;
   if (inTypePart()) {
-    // A template's `mut` on an element (`(T, int)` with T = `mut Node`)
+    // A template's `mutable` on an element (`(T, int)` with T = `mutable Node`)
     // is the element's own: an element is written as its variable is.
     if (substituted && PartFrames.back().Kind == PartKind::Element &&
         q == ast::Qualifier{ast::QualForm::Unique, true})
@@ -1179,7 +1180,7 @@ ast::Type *Sema::resolveAtomicAnnotation(ast::AtomicType *at,
       // An object crosses threads frozen or behind a lock.
       msg += ": an object crosses threads as 'atomic shared ";
       msg += typeName(inner);
-      msg += "' (frozen) or 'locked mut ";
+      msg += "' (frozen) or 'locked mutable ";
       msg += typeName(inner);
       msg += "'";
     }
@@ -1374,7 +1375,7 @@ ast::Type *Sema::resolveGenericAnnotation(ast::GenericType *gt,
     args.push_back(arg);
   }
   // The template's own declarations are no part of this type: their
-  // qualifiers stand (`fn put(o: mut Obj)` of a `Tag<int>` in a tuple),
+  // qualifiers stand (`fn put(o: mutable Obj)` of a `Tag<int>` in a tuple),
   // and are theirs, not this annotation's.
   const size_t savedBase = std::exchange(PartBase, PartFrames.size());
   const ast::Qualifier savedQual = LastQualifier;
@@ -1709,8 +1710,8 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
   }
   // A conditional is held in its true branch's form (qualifierOf), which
   // each branch must have, a `None` aside: a frozen object is never bound
-  // `shared mut`, a `shared mut` one never `atomic shared`.  A new object
-  // may become `shared` (only a whole conditional is made a cell or
+  // `shared mutable`, a `shared mutable` one never `atomic shared`.  A new
+  // object may become `shared` (only a whole conditional is made a cell or
   // frozen); storage of a unique one never does.
   if (ast::isRefType(bindTy) && ast::isa<ast::TernaryExpr>(subject)) {
     std::string other;
@@ -1723,8 +1724,9 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
       if (ast::isa<ast::NoneLiteral>(b) || !other.empty())
         return;
       const ast::Qualifier q = qualifierOf(b);
-      const bool same = q.Form == form.Form &&
-                        (q.Form == ast::QualForm::Unique || q.Mut == form.Mut);
+      const bool same =
+          q.Form == form.Form &&
+          (q.Form == ast::QualForm::Unique || q.Mutable == form.Mutable);
       const bool fresh = q.Form == ast::QualForm::Unique &&
                          form.Form == ast::QualForm::Shared && !readsStorage(b);
       if (!same && !fresh)
@@ -1765,7 +1767,7 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
                                            arm->getLocation())) {
       // Reported.
     } else if (msg.empty()) {
-      // The storage's writes; a `shared mut` subject's binding is that
+      // The storage's writes; a `shared mutable` subject's binding is that
       // form (#368), so `mem::replace` through it trades shared references.
       CurrentScope->Kinds[name] = VarKind::Inout;
       CurrentScope->Quals[name] =
@@ -1805,7 +1807,7 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
                                k == VarKind::ViewBinding);
       }
     // A plain binding is a copy of the subject's reference and keeps its
-    // form (the prototype): a `mut` subject's object stays writable.  A
+    // form (the prototype): a `mutable` subject's object stays writable.  A
     // borrow's keeps it too, for what it reads (a type argument's form, a
     // clone of which is its copy in a template's code).
     if (!form.isUnique())
@@ -1822,18 +1824,19 @@ bool Sema::checkArmForm(const ast::Expr *subject, ast::Type *bindTy,
                         ast::SourceLocation loc) {
   if (written.isUnique() || !ast::isRefType(bindTy))
     return true;
-  // An `inout` result names writable storage, as a `mut` place is; so
+  // An `inout` result names writable storage, as a `mutable` place is; so
   // does a conditional of such branches.  A `None` branch is no storage,
-  // and the binding is then immutable (qualifierOf), as a `mut` would not be.
+  // and the binding is then immutable (qualifierOf), as a `mutable` would not
+  // be.
   ast::Qualifier form = qualifierOf(subject);
   std::function<bool(const ast::Expr *)> writable = [&](const ast::Expr *b) {
     if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(b))
       return writable(te->getTrueExpr()) && writable(te->getFalseExpr());
-    return b->isInoutResult() || qualifierOf(b).Mut;
+    return b->isInoutResult() || qualifierOf(b).Mutable;
   };
   if (form.Form == ast::QualForm::Unique && writable(subject))
-    form.Mut = true;
-  if (written.Form == form.Form && written.Mut == form.Mut)
+    form.Mutable = true;
+  if (written.Form == form.Form && written.Mutable == form.Mutable)
     return true;
   error(loc,
         who + " part of a '" +
@@ -3667,7 +3670,8 @@ ast::Type *Sema::ExprChecker::checkMethodCall(ast::MethodCallExpr *node) {
     if (ast::isa<ast::NoneLiteral>(e))
       return true;
     const ast::Qualifier q = S.qualifierOf(e);
-    return q.FromArgument && q.Form == joined.Form && q.Mut == joined.Mut;
+    return q.FromArgument && q.Form == joined.Form &&
+           q.Mutable == joined.Mutable;
   };
   if (const ast::Qualifier q = S.qualifierOf(node->getReceiver());
       node->getMethodName() == names::kMethodClone &&
@@ -4927,7 +4931,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
-    // A weak variable names a `shared` (`shared mut`) object: an element
+    // A weak variable names a `shared` (`shared mutable`) object: an element
     // held so (#368), or a literal's None.
     const ast::Qualifier want = qualifierOfVar(name);
     if (const VarKind k = varKind(name);
@@ -4938,7 +4942,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
                                   : nullptr;
       if ((!elem || !ast::isa<ast::NoneLiteral>(elem)) &&
           !(tt->getElemQual(i) == want)) {
-        const char *form = want.Mut ? "weak mut" : "weak";
+        const char *form = want.Mutable ? "weak mutable" : "weak";
         error(target.Loc, "cannot store element " + std::to_string(i) +
                               " of the tuple (a '" +
                               qualifiedName(tt->getElemQual(i), elemTy) +
@@ -5940,7 +5944,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
   // A `weak` variable owns nothing: assigning it copies no owner.  It
-  // names a `shared` object (`weak mut`, a `shared mut` one).
+  // names a `shared` object (`weak mutable`, a `shared mutable` one).
   const VarKind kind = varKind(varName);
   if ((kind == VarKind::Weak || kind == VarKind::WeakView) &&
       !checkWeakStore(node->getValue(), qualifierOfVar(varName),
@@ -6032,9 +6036,9 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
         why = "an 'inout' result has type '" + typeName(CurrentReturnType) +
               "', but what it returns has type '" + typeName(valTy) + "'";
       // Nor in form (#368), as an `inout` parameter takes it: a plain
-      // `-> inout C` names a unique or a `shared mut` slot (an `inout`
+      // `-> inout C` names a unique or a `shared mutable` slot (an `inout`
       // takes either), and a type argument's form names exactly its own
-      // (`-> inout T` with T = `shared mut Node`).
+      // (`-> inout T` with T = `shared mutable Node`).
       if (const ast::Qualifier have = qualifierOf(node->getReturnValue());
           why.empty() && CurrentResult.Mode == ast::ParamMode::Inout &&
           ast::isRefType(valTy) &&
@@ -6048,7 +6052,7 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
               qualifiedName(have, valTy) + "'";
       // A `view` of a type argument's shared form, a frozen object's or a
       // cell's lends exactly that form (#368): the template's code may keep
-      // a copy of it, as the argument's.  A unique one (`mut Node`) copies
+      // a copy of it, as the argument's.  A unique one (`mutable Node`) copies
       // for no T, and a `view` of it reads any form.
       if (why.empty() && CurrentResult.Mode == ast::ParamMode::View &&
           CurrentResultQual.FromArgument &&
@@ -6059,7 +6063,7 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
           const ast::Qualifier have = qualifierOf(b);
           if (ast::isa<ast::NoneLiteral>(b) ||
               (have.Form == CurrentResultQual.Form &&
-               have.Mut == CurrentResultQual.Mut))
+               have.Mutable == CurrentResultQual.Mutable))
             continue;
           why = "a 'view' result of a type argument's form is held as '" +
                 qualifiedName(CurrentResultQual, CurrentReturnType) +
@@ -6324,14 +6328,14 @@ bool Sema::visitLockStmt(ast::LockStmt *node) {
   if (!checkBinderName(b->getName(), b->getLocation()) ||
       !checkNotSelf(b->getName(), b->getLocation()))
     return false;
-  // The lock buys the writes: an `inout` block takes a `locked mut` cell.
-  if (b->getMode() == ast::ParamMode::Inout && !cellQ.Mut) {
-    error(b->getLocation(),
-          "'" + placeText(node->getCell()) + "' is 'locked " +
-              typeName(cellTy) +
-              "', whose contents are never written; declare it 'locked mut " +
-              typeName(cellTy) + "' for a 'lock ... as " + b->getName() +
-              ": inout' block");
+  // The lock buys the writes: an `inout` block takes a `locked mutable` cell.
+  if (b->getMode() == ast::ParamMode::Inout && !cellQ.Mutable) {
+    error(
+        b->getLocation(),
+        "'" + placeText(node->getCell()) + "' is 'locked " + typeName(cellTy) +
+            "', whose contents are never written; declare it 'locked mutable " +
+            typeName(cellTy) + "' for a 'lock ... as " + b->getName() +
+            ": inout' block");
     return false;
   }
   b->setType(cellTy);
@@ -6841,7 +6845,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       ast::Qualifier q = p.Qual;
       // (a shared form, a template argument\'s, is its own: #368)
       if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
-        q.Mut = true; // the borrow's writes
+        q.Mutable = true; // the borrow's writes
       CurrentScope->Quals[p.getName()] = q;
     }
     declareParamKinds(node);
@@ -7304,15 +7308,15 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   // the initializer's (a copy of a `shared` reference is `shared`); a
   // qualified slot takes what converts into it.
   if (!sharesStorage(declTy) || node->isWeak()) {
-    // One written alone (`x: shared = 1;`, `w: weak mut = n;`) is
+    // One written alone (`x: shared = 1;`, `w: weak mutable = n;`) is
     // checked as an annotation's is (resolveValueType).  A weak variable is
-    // `weak` (the `shared` form) or `weak mut` (`shared mut`): it names a
-    // `shared` object, or a `shared mut` one.
+    // `weak` (the `shared` form) or `weak mutable` (`shared mutable`): it names
+    // a `shared` object, or a `shared mutable` one.
     if (node->isWeak() && qual.Form != ast::QualForm::Shared) {
-      error(node->getLocation(),
-            "weak variable '" + node->getName() +
-                "' is 'weak' or 'weak mut': a weak reference names a 'shared' "
-                "object");
+      error(node->getLocation(), "weak variable '" + node->getName() +
+                                     "' is 'weak' or 'weak mutable': a weak "
+                                     "reference names a 'shared' "
+                                     "object");
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
@@ -7328,7 +7332,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       return false;
     }
     // A weak variable holds nothing: it reads as the `shared` (`shared
-    // mut`) reference it names, while its object lives.
+    // mutable`) reference it names, while its object lives.
     if (!node->isWeak())
       qual = ast::Qualifier{};
   } else if (!qualified && node->getInitExpr()) {
@@ -7386,7 +7390,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   // form is its own, #368).
   if (node->getMode() == ast::ParamMode::Inout && sharesStorage(declTy) &&
       qual.Form == ast::QualForm::Unique)
-    qual.Mut = true;
+    qual.Mutable = true;
   node->setQualifier(qual);
 
   // A `let` cell (the prototype): nothing changes it through its name, and
@@ -7487,7 +7491,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   const bool recvFailed =
       Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;
   // A cell's contents are written in a `lock` block (#368: `c.f = v` on a
-  // `locked mut` cell wrote into the cell).
+  // `locked mutable` cell wrote into the cell).
   if (!checkNotLocked(node->getReceiver(), node->getLocation()))
     return false;
 
@@ -7611,7 +7615,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
   // A `weak` field owns nothing: storing a reference there copies no owner.
-  // It names a `shared` object (`weak mut`, a `shared mut` one).
+  // It names a `shared` object (`weak mutable`, a `shared mutable` one).
   if (weakField)
     return checkWeakStore(node->getValue(), fieldQual, fieldTy,
                           "field '" + node->getFieldName() + "'",

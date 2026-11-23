@@ -58,7 +58,7 @@ fn main() -> int {
   bump(q.y);
   l = Line(p, q);
   l.a.y = 0;
-  let s: mut = Shape(Point::origin());
+  let s: mutable = Shape(Point::origin());
   s.at.shift(3);
   ps = [p, q];
   ps[1].x = 9;

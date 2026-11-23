@@ -109,7 +109,7 @@ TEST(StrOfValue, EveryPlaceAValueComesFromOrGoesTo) {
     fn show<T>(x: T) -> Str { return Str(x); }
     fn len(s: Str) -> int { return s.len(); }
     fn main() -> int {
-      bx: mut = Box(make(1), "x");
+      bx: mutable = Box(make(1), "x");
       xs = collections::List<P>();
       xs.push(make(2));
       io::println(Str(make(3)) + Str(bx.p) + Str(xs.at(0)) + show(make(4))
@@ -177,23 +177,23 @@ TEST(StrOfValue, AnObjectItsToStringLetsGoOfStaysAlive) {
       view fn told() -> Str { return self.c.toString(); }
     }
     class B { c: C; }
-    class A { b: shared mut B; }
-    fn arm(h: shared mut H, n: int) {
-      v: shared mut H = h;
+    class A { b: shared mutable B; }
+    fn arm(h: shared mutable H, n: int) {
+      v: shared mutable H = h;
       h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
     }
-    fn armB(b: shared mut B, n: int) {
-      v: shared mut B = b;
+    fn armB(b: shared mutable B, n: int) {
+      v: shared mutable B = b;
       b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
     }
     fn shown(h: view H) -> Str { return Str(h.c); }
     fn main() -> int {
-      h: shared mut H = H(C("one" + Str(1), fn() {}));
+      h: shared mutable H = H(C("one" + Str(1), fn() {}));
       arm(h, 1);
       io::println("Str(h.c): " + Str(h.c));
       arm(h, 2);
       io::println("h.c.toString(): " + h.c.toString());
-      a: mut = A(B(C("one" + Str(1), fn() {})));
+      a: mutable = A(B(C("one" + Str(1), fn() {})));
       armB(a.b, 3);
       io::println("Str(a.b.c): " + Str(a.b.c));
       armB(a.b, 4);

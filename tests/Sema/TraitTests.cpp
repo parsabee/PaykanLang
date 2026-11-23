@@ -127,7 +127,7 @@ async fn eat<T>(x: T) -> int { return 1; }
 async fn back<T>(x: T) -> T { return move x; }
 fn relay<T>(x: T) -> int { return await eat(move x); }
 fn freeze<T>(x: T) -> int { let f: atomic shared T = move x; return 1; }
-fn cell<T>(x: T) -> int { let c: locked mut T = move x; return 1; }
+fn cell<T>(x: T) -> int { let c: locked mutable T = move x; return 1; }
 fn ask<T>(x: view T) -> int { return need(x); }
 fn list<T>(xs: cl::List<T>) -> int { return await total(move xs); }
 fn fine<T: Sendable>(x: T) -> int { return await eat(move x) + need(1); }
@@ -149,7 +149,7 @@ fn main() -> int { return fine(1); }
           ":8:29: error: 'T' is not 'Sendable': declare 'T: Sendable' to make "
           "it 'atomic shared'",
           ":9:27: error: 'T' is not 'Sendable': declare 'T: Sendable' to make "
-          "it 'locked mut'",
+          "it 'locked mutable'",
           ":10:38: error: 'T' is not 'Sendable': declare 'T: Sendable' for "
           "'need', which needs it",
           ":11:51: error: 'T' is not 'Sendable': declare 'T: Sendable' for "

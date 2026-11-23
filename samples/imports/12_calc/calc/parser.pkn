@@ -9,7 +9,7 @@
 //   IDENT  ::= [A-Za-z_] [A-Za-z0-9_]*
 //
 // A `factor` may be a variable name, looked up in the shared environment
-// (a `shared mut` calc::hashmap::HashMap, which the parser and its caller
+// (a `shared mutable` calc::hashmap::HashMap, which the parser and its caller
 // both hold). A leading `IDENT '='` is an assignment; anything else is an
 // expression — so the parser saves its position and backtracks if the `=`
 // does not materialise.
@@ -37,7 +37,7 @@ fn applyOp(op: Op, a: float, b: float) -> float {
 class Parser {
   input: Str;
   pos: int;
-  env: shared mut hashmap::HashMap;
+  env: shared mutable hashmap::HashMap;
   error: Str?;   // the first error, or None
 
   // Record the first error only; later errors are usually cascades.
@@ -233,7 +233,7 @@ class Parser {
 }
 
 impl Parser {
-  fn __init__(s: Str, env: shared mut hashmap::HashMap) {
+  fn __init__(s: Str, env: shared mutable hashmap::HashMap) {
     self.input = move s;
     self.pos = 0;
     self.env = env;

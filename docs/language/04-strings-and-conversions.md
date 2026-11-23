@@ -14,7 +14,7 @@ another. It ends by adding some text helpers to `tasks`.
 `Str`. Evaluating one allocates nothing: the program holds one string for each literal, and
 every evaluation gives that one. No program can tell: the shared string is only ever in a
 bare `Str` variable or parameter or in the middle of an expression, where nothing changes a
-string, and it becomes a string of its own where it is stored anywhere else (a `mut`
+string, and it becomes a string of its own where it is stored anywhere else (a `mutable`
 variable or parameter, a field, an element, a `shared` name). `c == "{"` in a loop compares against the
 same string each time. It is written in double quotes and must close on the line it opens: a raw newline
 inside a literal is a compile-time error (`unterminated string literal (string literals
@@ -109,9 +109,9 @@ Besides `len()`, a string has the methods every object has, `toString()` and `eq
 `HashMap` key; see [Traits](06-traits.md)). Twelve methods parse it, `s.toInt()` …
 `s.toBool()` ([Parsing a string](#parsing-a-string)). One more method, `s.concat(t)`,
 appends `t` to `s` in place. A string is an object with one owner, as every object is:
-`let t = s;` is an error (`cannot copy 's' (a unique 'mut Str'); write 'move s' to transfer
-it, 's.clone()' to copy it, or declare it 'shared mut Str'`), so a change through `s` is
-seen through no other name. A `shared mut Str` is one string that several names hold, and
+`let t = s;` is an error (`cannot copy 's' (a unique 'mutable Str'); write 'move s' to transfer
+it, 's.clone()' to copy it, or declare it 'shared mutable Str'`), so a change through `s` is
+seen through no other name. A `shared mutable Str` is one string that several names hold, and
 the change is seen through all of them, while `+` leaves its operands alone; `concat` cannot
 be called through a `view` (`'s' is a 'view' parameter; 'concat' is not a 'view fn'`):
 
@@ -119,10 +119,10 @@ be called through a `view` (`'s' is a 'view' parameter; 'concat' is not a 'view 
 import ::io;
 
 fn main() -> int {
-  let s: shared mut Str = "to";  // `concat` writes the string, which s and t share
-  let t = s;                     // t and s name one string
-  s.concat("do");                // changes that string in place
-  let u = s + "!";               // a new string; s is unchanged
+  let s: shared mutable Str = "to";  // `concat` writes the string, which s and t share
+  let t = s;                         // t and s name one string
+  s.concat("do");                    // changes that string in place
+  let u = s + "!";                   // a new string; s is unchanged
   io::println(s + " " + t + " " + u);
   return 0;
 }
@@ -773,7 +773,7 @@ Output:
 Call the plumber
 ```
 
-`padRight` owns `s`, which its caller hands over, so `out` takes it by `move`; with `out: mut
+`padRight` owns `s`, which its caller hands over, so `out` takes it by `move`; with `out: mutable
 = move s;` it could append in place with `out.concat(" ")`, since no other name holds that
 string. `slice` only reads its string, so it takes a `view Str`, and `trim` and
 `capitalize` lend it the string they own and go on using it.

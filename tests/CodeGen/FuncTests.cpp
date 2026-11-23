@@ -167,7 +167,7 @@ TEST(Func, ScopeCleanupIfElseBranches) {
 // Str.concat() mutates self in-place (void return).
 TEST(Func, MethodCallConcatInPlace) {
   auto r = compileAndRun(wrapMain(R"(
-    a: mut Str = "hello";
+    a: mutable Str = "hello";
     b: Str = " world";
     a.concat(move b);
     io::println(a);

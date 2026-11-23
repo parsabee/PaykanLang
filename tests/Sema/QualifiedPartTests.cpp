@@ -34,19 +34,19 @@ void expectErrors(const SemaResult &r,
 TEST(QualifiedPart, PartsKeepTheirQualifier) {
   auto r = semaCheck(R"(import ::collections as cl;
 class Node { v: int; }
-fn keep(n: shared mut Node) -> int { return n.v; }
+fn keep(n: shared mutable Node) -> int { return n.v; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  t: (int, shared mut Node) = (1, s);
+  s: shared mutable Node = Node(1);
+  t: (int, shared mutable Node) = (1, s);
   u = t;
-  xs: shared mut Node[3] = [s, s, Node(2)];
+  xs: shared mutable Node[3] = [s, s, Node(2)];
   ys = xs;
-  l = cl::List<shared mut Node>();
+  l = cl::List<shared mutable Node>();
   l.push(s);
   l.push(Node(3));
   first = l.get(0);
   first.v = 4;
-  f: (shared mut Node) -> int = keep;
+  f: (shared mutable Node) -> int = keep;
   return u.1.v + ys[2].v + f(s) + keep(t.1);
 }
 )");
@@ -78,16 +78,16 @@ fn main() -> int {
 }
 
 // What each part takes: a type argument every form but `locked`, an element
-// `shared` and `shared mut` (it is written as its variable is, so no `mut`),
-// and a function type's part the forms a parameter takes but the handles;
-// a borrow in a function type takes none, as a parameter does.
+// `shared` and `shared mutable` (it is written as its variable is, so no
+// `mutable`), and a function type's part the forms a parameter takes but the
+// handles; a borrow in a function type takes none, as a parameter does.
 TEST(QualifiedPart, EachPartTakesItsForms) {
   auto r = semaCheck(R"(import ::collections as cl;
 class Node { v: int; }
 fn main() -> int {
-  a: (int, mut Node) = (1, Node(1));
+  a: (int, mutable Node) = (1, Node(1));
   b: (int, atomic shared Node) = (1, Node(1));
-  c: cl::List<locked mut Node> = cl::List<locked mut Node>();
+  c: cl::List<locked mutable Node> = cl::List<locked mutable Node>();
   d: (atomic shared Node) -> int = fn(n: atomic shared Node) => 1;
   e: (view shared Node) -> int = fn(n: view Node) => 1;
   g: cl::List<shared int> = cl::List<shared int>();
@@ -95,23 +95,23 @@ fn main() -> int {
 }
 )");
   expectErrors(
-      r,
-      {":4:3: error: an element takes no 'mut': it is written as its variable "
-       "is",
-       ":5:3: error: 'atomic shared' cannot qualify an element yet",
-       ":6:3: error: 'locked mut' cannot qualify a type argument yet: a "
-       "cell's contents are reached in a 'lock' block",
-       ":7:3: error: 'atomic shared' cannot qualify a function type's "
-       "parameter or result yet",
-       ":8:3: error: variable 'e' parameter 1 is 'view shared': a borrow "
-       "carries no qualifier",
-       ":9:3: error: 'shared' qualifies a reference; 'int' is a value"});
+      r, {":4:3: error: an element takes no 'mutable': it is written as its "
+          "variable "
+          "is",
+          ":5:3: error: 'atomic shared' cannot qualify an element yet",
+          ":6:3: error: 'locked mutable' cannot qualify a type argument yet: a "
+          "cell's contents are reached in a 'lock' block",
+          ":7:3: error: 'atomic shared' cannot qualify a function type's "
+          "parameter or result yet",
+          ":8:3: error: variable 'e' parameter 1 is 'view shared': a borrow "
+          "carries no qualifier",
+          ":9:3: error: 'shared' qualifies a reference; 'int' is a value"});
   auto fine = semaCheck(R"(import ::collections as cl;
 class Node { v: int; }
 fn main() -> int {
-  a: cl::List<mut Node> = cl::List<mut Node>();
+  a: cl::List<mutable Node> = cl::List<mutable Node>();
   b: cl::List<atomic shared Node> = cl::List<atomic shared Node>();
-  c: (mut Node) -> shared Node = fn(n: mut Node) -> shared Node { return move n; };
+  c: (mutable Node) -> shared Node = fn(n: mutable Node) -> shared Node { return move n; };
   d: shared Node?[2] = [None, Node(1)];
   return 0;
 }
@@ -119,7 +119,7 @@ fn main() -> int {
   EXPECT_TRUE(fine.Ok) << fine.Diagnostics;
 }
 
-// `shared` and `shared mut` bind to the primary type: on an array of
+// `shared` and `shared mutable` bind to the primary type: on an array of
 // references they qualify its elements, and an array of values takes none.
 TEST(QualifiedPart, SharedOnAnArrayIsItsElements) {
   auto r = semaCheck(R"(class Node { v: int; }
@@ -148,21 +148,21 @@ fn main() -> int {
                {":3:3: error: 'shared' qualifies a reference; 'int[2]' is a "
                 "value",
                 ":6:3: error: element 'xs[0]' is immutable (a 'shared Node'; "
-                "write 'shared mut Node' to change it)",
+                "write 'shared mutable Node' to change it)",
                 ":8:3: error: element 't.1' is immutable (a 'shared Node'"});
   EXPECT_EQ(bad.ErrorCount, 3u) << bad.Diagnostics;
 }
 
 // A qualifier written on `T` joins T's own (docs/design/concurrency.md,
-// "Generics and Copyable"): `mut T` with T = `shared mut Node` writes
+// "Generics and Copyable"): `mutable T` with T = `shared mutable Node` writes
 // through it, `T?` with T = `shared Node` is `shared Node?`, and a join
 // that is no qualifier is an error.
 TEST(QualifiedPart, AWrittenQualifierJoinsTheArgument) {
   auto r = semaCheck(R"(class Node { v: int; }
-struct Slot<T> { x: mut T; o: T?; }
+struct Slot<T> { x: mutable T; o: T?; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  w = Slot<shared mut Node>(s, None);
+  s: shared mutable Node = Node(1);
+  w = Slot<shared mutable Node>(s, None);
   w.x.v = 2;
   w.o = s;
   return w.x.v;
@@ -170,22 +170,22 @@ fn main() -> int {
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   auto bad = semaCheck(R"(class Node { v: int; }
-struct Slot<T> { x: mut T; }
+struct Slot<T> { x: mutable T; }
 struct Twice<T> { x: shared T; }
 fn main() -> int {
   s: shared Node = Node(1);
   w = Slot<shared Node>(s);
-  m: shared mut Node = Node(2);
-  t = Twice<shared mut Node>(m);
+  m: shared mutable Node = Node(2);
+  t = Twice<shared mutable Node>(m);
   return 0;
 }
 )");
-  expectErrors(bad,
-               {"error: 'mut' cannot qualify the type argument 'shared Node': "
-                "a 'shared' reference is never written through",
-                "error: 'shared' cannot qualify the type argument 'shared mut "
-                "Node': a type takes one qualifier, and 'shared' and 'shared "
-                "mut' are two"});
+  expectErrors(
+      bad, {"error: 'mutable' cannot qualify the type argument 'shared Node': "
+            "a 'shared' reference is never written through",
+            "error: 'shared' cannot qualify the type argument 'shared mutable "
+            "Node': a type takes one qualifier, and 'shared' and 'shared "
+            "mutable' are two"});
 }
 
 // A by-value `T` (or `T?`) parameter binds T to a `shared` argument's form,
@@ -244,7 +244,7 @@ fn main() -> int {
   auto bad = semaCheck(R"(class Node { v: int; }
 fn main() -> int {
   s: shared Node = Node(1);
-  m: shared mut Node = Node(2);
+  m: shared mutable Node = Node(2);
   xs = [s, m];
   t = (1, s);
   a, b: Node = t;
@@ -252,7 +252,7 @@ fn main() -> int {
 }
 )");
   expectErrors(bad, {":5:12: error: array literal has elements of two forms: "
-                     "'shared Node' and 'shared mut Node'",
+                     "'shared Node' and 'shared mutable Node'",
                      ":7:6: error: cannot store element 1 of the tuple (a "
                      "'shared Node') in variable 'b', a 'Node': a 'shared' "
                      "reference is stored only as 'shared'"});
@@ -263,10 +263,10 @@ fn main() -> int {
 // parameter's form and its result the function type's.
 TEST(QualifiedPart, FunctionTypesCarryTheirPartsForms) {
   auto r = semaCheck(R"(class Node { v: int; }
-fn make() -> shared mut Node { return Node(1); }
+fn make() -> shared mutable Node { return Node(1); }
 fn read(n: shared Node) -> int { return n.v; }
 fn main() -> int {
-  f: () -> shared mut Node = make;
+  f: () -> shared mutable Node = make;
   n = f();
   n.v = 2;
   g = n;
@@ -302,8 +302,8 @@ TEST(QualifiedPart, TheCloneOfASharedTypeArgumentIsItsCopy) {
   auto r = semaCheck(R"(class Node { v: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  c = dup<shared mut Node>(s);
+  s: shared mutable Node = Node(1);
+  c = dup<shared mutable Node>(s);
   c.v = 2;
   return s.v;
 }
@@ -311,7 +311,7 @@ fn main() -> int {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   auto bad = semaCheck(R"(class Node { v: int; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
+  s: shared mutable Node = Node(1);
   c = s.clone();
   return 0;
 }
@@ -349,8 +349,8 @@ fn main() -> int {
 // A `view T` or `inout T` whose T is a `shared` form reads as that form, so
 // the template's code may keep a copy: it takes exactly that form (a
 // `view` also a temporary), and inference binds an `inout` T to its
-// argument's form, so `mem::replace` of a `shared mut` place gives back a
-// `shared mut` reference, never the object as a unique one.
+// argument's form, so `mem::replace` of a `shared mutable` place gives back a
+// `shared mutable` reference, never the object as a unique one.
 TEST(QualifiedPart, ABorrowOfATypeArgumentsFormTakesThatForm) {
   auto r = semaCheck(R"(import ::memory as mem;
 class Node { id: int; }
@@ -358,43 +358,46 @@ fn grab<T>(a: T, x: inout T) -> T { return x; }
 fn put<T>(slot: inout T, v: T) { slot = v; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  u: mut Node = Node(2);
+  s: shared mutable Node = Node(1);
+  u: mutable Node = Node(2);
   a = grab(s, u);
-  w: shared mut Node = Node(3);
+  w: shared mutable Node = Node(3);
   ro: shared Node = Node(4);
   put(w, ro);
   f = dup<atomic shared Node>(u);
-  m: shared mut Node = Node(5);
-  let back: mut Node = mem::replace(m, Node(6));
+  m: shared mutable Node = Node(5);
+  let back: mutable Node = mem::replace(m, Node(6));
   return 0;
 }
 )");
   expectErrors(
       r,
-      {":9:15: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
-       "'grab<shared mut Node>', an 'inout shared mut Node': a borrow of a "
+      {":9:15: error: cannot pass 'u' (a 'mutable Node') to parameter 'x' of "
+       "'grab<shared mutable Node>', an 'inout shared mutable Node': a borrow "
+       "of a "
        "type argument's form takes that form, which the callee may keep a "
        "copy of",
        ":12:3: error: cannot infer type parameter 'T' of 'put': deduced as "
-       "both 'shared mut Node' and 'shared Node'",
-       ":13:31: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
+       "both 'shared mutable Node' and 'shared Node'",
+       ":13:31: error: cannot pass 'u' (a 'mutable Node') to parameter 'x' of "
        "'dup<atomic shared Node>', a 'view atomic shared Node'",
-       ":15:3: error: cannot store a 'shared mut Node' in variable 'back', a "
-       "'mut' reference: a 'shared mut' reference is stored only as 'shared "
-       "mut'"});
+       ":15:3: error: cannot store a 'shared mutable Node' in variable 'back', "
+       "a "
+       "'mutable' reference: a 'shared mutable' reference is stored only as "
+       "'shared "
+       "mutable'"});
   auto fine = semaCheck(R"(import ::memory as mem;
 class Node { id: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn main() -> int {
-  m: shared mut Node = Node(5);
+  m: shared mutable Node = Node(5);
   let back = mem::replace(m, Node(6));
   back.id = 7;
-  a: shared mut Node = Node(1);
-  b: shared mut Node = Node(2);
+  a: shared mutable Node = Node(1);
+  b: shared mutable Node = Node(2);
   mem::swap(a, b);
-  c = dup<shared mut Node>(Node(3));
-  d = dup<shared mut Node>(a);
+  c = dup<shared mutable Node>(Node(3));
+  d = dup<shared mutable Node>(a);
   return back.id + c.id + d.id;
 }
 )");
@@ -465,18 +468,18 @@ fn main() -> int {
 // exactly its form, and an `inout` of an object's field writes the object.
 TEST(QualifiedPart, OnlyAFreshValueTakesABorrowsForm) {
   auto r = semaCheck(R"(class Node { id: int; }
-class H { n: Node; m: shared mut Node; }
+class H { n: Node; m: shared mutable Node; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn giveRO(r: shared Node) -> shared Node { return r; }
-fn getH(h: shared mut H) -> shared mut H { return h; }
+fn getH(h: shared mutable H) -> shared mutable H { return h; }
 fn slot(xs: inout shared Node[2]) -> inout Node { return xs[0]; }
 fn put<T>(s: inout T, v: T) { s = v; }
 fn main() -> int {
   ro: shared Node = Node(1);
-  a = dup<shared mut Node>(giveRO(ro));
-  h: shared mut H = H(Node(2), Node(6));
-  b = dup<shared mut Node>(getH(h).n);
-  u: mut Node = Node(3);
+  a = dup<shared mutable Node>(giveRO(ro));
+  h: shared mutable H = H(Node(2), Node(6));
+  b = dup<shared mutable Node>(getH(h).n);
+  u: mutable Node = Node(3);
   c = dup<shared Node>(if ro.id > 0 then ro else u);
   let fixed: H = H(Node(4), Node(7));
   put(fixed.m, Node(5));
@@ -484,23 +487,25 @@ fn main() -> int {
 }
 )");
   expectErrors(
-      r, {":10:28: error: cannot pass 'giveRO(...)' (a 'shared Node') to "
-          "parameter "
-          "'x' of 'dup<shared mut Node>', a 'view shared mut Node'",
-          ":12:28: error: cannot pass 'getH(...).n' (a 'mut Node')",
-          ":14:50: error: cannot pass 'u' (a 'mut Node') to parameter 'x' of "
-          "'dup<shared Node>'",
-          ":6:58: error: element 'xs[0]' is a 'shared Node', which nothing "
-          "changes, so it cannot be returned 'inout'",
-          ":16:7: error: 'fixed' is immutable (an 'H'; write 'mut H' to change "
-          "it); its field 'm' cannot be passed to 'inout' parameter 's'"});
+      r,
+      {":10:32: error: cannot pass 'giveRO(...)' (a 'shared Node') to "
+       "parameter "
+       "'x' of 'dup<shared mutable Node>', a 'view shared mutable Node'",
+       ":12:32: error: cannot pass 'getH(...).n' (a 'mutable Node')",
+       ":14:50: error: cannot pass 'u' (a 'mutable Node') to parameter 'x' of "
+       "'dup<shared Node>'",
+       ":6:58: error: element 'xs[0]' is a 'shared Node', which nothing "
+       "changes, so it cannot be returned 'inout'",
+       ":16:7: error: 'fixed' is immutable (an 'H'; write 'mutable H' to "
+       "change "
+       "it); its field 'm' cannot be passed to 'inout' parameter 's'"});
   auto fine = semaCheck(R"(class Node { id: int; }
 fn dup<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn make() -> Node { return Node(1); }
 fn main() -> int {
-  a = dup<shared mut Node>(Node(1));
+  a = dup<shared mutable Node>(Node(1));
   b = dup<atomic shared Node>(make());
-  u: mut Node = Node(2);
+  u: mutable Node = Node(2);
   c = dup<shared Node>(move u);
   return a.id + b.id + c.id;
 }
@@ -519,18 +524,18 @@ class Box1<T> {
   item: shared T;
   view fn fresh() -> T { return self.item.clone(); }
 }
-fn gen<T>(x: T, s: shared mut Node) -> mut Node { return s.clone(); }
+fn gen<T>(x: T, s: shared mutable Node) -> mutable Node { return s.clone(); }
 trait Src<T> { view fn count() -> int; }
 class Bag<T> { item: T; }
 impl Src<T> for Bag<T> { view fn count() -> int { return 1; } }
 fn need<S: Src<U>, U>(s: view S) -> int { return 1; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
+  s: shared mutable Node = Node(1);
   b = Box1<Node>(Node(2));
-  let f: mut Node = b.fresh();
+  let f: mutable Node = b.fresh();
   let g = gen(0, s);
-  let bag = Bag<shared mut Node>(s);
-  return need<Bag<shared mut Node>, shared mut Node>(bag) + f.id + g.id;
+  let bag = Bag<shared mutable Node>(s);
+  return need<Bag<shared mutable Node>, shared mutable Node>(bag) + f.id + g.id;
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -540,28 +545,29 @@ class Bag<T> { item: T; }
 impl Src<T> for Bag<T> { view fn count() -> int { return 1; } }
 fn need<S: Src<U>, U>(s: view S) -> int { return 1; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  let bag = Bag<shared mut Node>(s);
-  return need<Bag<shared mut Node>, Node>(bag);
+  s: shared mutable Node = Node(1);
+  let bag = Bag<shared mutable Node>(s);
+  return need<Bag<shared mutable Node>, Node>(bag);
 }
 )");
-  expectErrors(bad, {":9:10: error: 'Bag<shared mut Node>' does not implement "
-                     "trait 'Src<Node>'"});
+  expectErrors(bad,
+               {":9:10: error: 'Bag<shared mutable Node>' does not implement "
+                "trait 'Src<Node>'"});
 }
 
-// A function type holds only the forms a caller sees: `mut` is the
-// function's own (`fn grow(n: mut Node)` is a `(Node) -> int`), and a
+// A function type holds only the forms a caller sees: `mutable` is the
+// function's own (`fn grow(n: mutable Node)` is a `(Node) -> int`), and a
 // borrow carries none.  Values whose parts differ only in their forms
 // compare; a constructor takes its forms from the slot's type; and a
 // literal in a conditional's branch takes the slot's forms.
 TEST(QualifiedPart, FormsTheTypeDoesNotTie) {
   auto r = semaCheck(R"(class Node { id: int; }
 class H<T> { v: T; }
-fn grow(n: mut Node) -> int { n.id += 1; return n.id; }
-fn mk() -> mut Node { return Node(1); }
+fn grow(n: mutable Node) -> int { n.id += 1; return n.id; }
+fn mk() -> mutable Node { return Node(1); }
 fn apply(f: (Node) -> int, n: Node) -> int { return f(move n); }
 fn make(g: () -> Node) -> Node { return g(); }
-fn pick(c: bool, s: shared mut Node) -> (int, shared mut Node) {
+fn pick(c: bool, s: shared mutable Node) -> (int, shared mutable Node) {
   return if c then (1, s) else (2, Node(0));
 }
 fn main() -> int {
@@ -585,17 +591,17 @@ TEST(QualifiedPart, FormsThatMustAgree) {
   auto r = semaCheck(R"(class Node { v: int; }
 class Base { fn make() -> Node { return Node(1); } }
 class Der : Base {
-  s: shared mut Node;
-  fn make() -> shared mut Node { return self.s; }
+  s: shared mutable Node;
+  fn make() -> shared mutable Node { return self.s; }
 }
 class H { n: Node; fn slot() -> inout Node { return self.n; } }
 enum E<T> { A(v: T), B }
 fn main() -> int {
-  h: mut H = H(Node(2));
+  h: mutable H = H(Node(2));
   let c = h.slot();
-  l: locked mut Node = Node(3);
-  let m: locked mut Node = if c.v > 0 then l else Node(4);
-  let e = E<shared mut Node>::A(Node(5));
+  l: locked mutable Node = Node(3);
+  let m: locked mutable Node = if c.v > 0 then l else Node(4);
+  let e = E<shared mutable Node>::A(Node(5));
   total = 0;
   parallel for i in 0..4 {
     match e { a: A { total += a.v.v; } B { } }
@@ -607,21 +613,21 @@ fn main() -> int {
       r,
       {":5:3: error: override of 'Base.make() -> Node' takes and gives the "
        "forms "
-       "it does: its result is 'shared mut Node', not 'Node'",
+       "it does: its result is 'shared mutable Node', not 'Node'",
        ":11:3: error: cannot copy 'h.slot()' (a unique 'Node')",
        "has a branch of that form and a new value: make the new value 'locked "
-       "mut' first",
-       ":17:11: error: 'e' (an 'E<shared mut Node>') cannot be used in a "
+       "mutable' first",
+       ":17:11: error: 'e' (an 'E<shared mutable Node>') cannot be used in a "
        "'parallel for' body"});
 }
 
 // What the rules leave free: a type argument's form through destructuring,
-// a function value's result and an inferred result; a `mut T` given a
-// `shared mut` argument; arrays of tuples, slices and literals whose parts
+// a function value's result and an inferred result; a `mutable T` given a
+// `shared mutable` argument; arrays of tuples, slices and literals whose parts
 // join; a returned local, `move` and `None` as fresh values.
 TEST(QualifiedPart, FormsTheRulesLeaveFree) {
   auto r = semaCheck(R"(class Node { v: int; }
-fn bump<T>(x: mut T) -> T { return x; }
+fn bump<T>(x: mutable T) -> T { return x; }
 fn sum<T>(xs: view T[], n: T) -> int { return 0; }
 fn pair(s: shared Node) -> (int, shared Node) {
   let u = (1, Node(2));
@@ -630,7 +636,7 @@ fn pair(s: shared Node) -> (int, shared Node) {
 async fn make() -> Node { return Node(9); }
 fn keep<T: Cloneable>(x: view T) -> T { return x.clone(); }
 fn main() -> int {
-  s: shared mut Node = Node(1);
+  s: shared mutable Node = Node(1);
   let b = bump(s);
   let n = sum([Node(1), Node(2)], b);
   let xs: (int, shared Node)[2] = [(1, Node(1)), (2, Node(2))];
@@ -664,13 +670,13 @@ fn poke<T: Cloneable>(n: view Node, w: T) -> T {
 }
 class H { n: Node; fn slot() -> inout Node { return self.n; } }
 fn main() -> int {
-  let c = Copier<shared mut Node>();
-  s: shared mut Node = Node(1);
+  let c = Copier<shared mutable Node>();
+  s: shared mutable Node = Node(1);
   let p = poke(Node(2), s);
-  h: mut H = H(Node(3));
+  h: mutable H = H(Node(3));
   let m = move h.slot();
-  u: mut Node = Node(4);
-  w: mut Node = Node(5);
+  u: mutable Node = Node(4);
+  w: mutable Node = Node(5);
   let k = move (if s.v > 0 then u else w);
   return 0;
 }
@@ -678,9 +684,9 @@ fn main() -> int {
   expectErrors(
       r,
       {":6:3: error: override of 'Base.alias(Node) -> int' takes and gives the "
-       "forms it does: its parameter 'x' is 'shared mut Node', not 'Node'",
+       "forms it does: its parameter 'x' is 'shared mutable Node', not 'Node'",
        ":9:15: error: cannot pass 'n' (a 'Node') to local 'v', a 'view shared "
-       "mut Node': a borrow of a type argument's form takes that form",
+       "mutable Node': a borrow of a type argument's form takes that form",
        ":18:11: error: cannot move 'h.slot()': it is a borrow of storage its "
        "owner keeps",
        ":21:11: error: cannot move a conditional: write 'move' in each "

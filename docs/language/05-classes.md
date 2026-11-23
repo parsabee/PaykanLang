@@ -36,7 +36,7 @@ impl Counter {
 }
 
 fn main() -> int {
-  let c: mut = Counter("visitors");
+  let c: mutable = Counter("visitors");
   c.increment();
   c.increment();
   io::println(c.report());
@@ -71,11 +71,11 @@ Create an object by calling the class name with the constructor's arguments, as 
   underscores (`__count`) is private to its class: only the class's own methods reach it. A
   name starting with one underscore (`_cache`) is private to its module. See
   [Private fields and methods](#private-fields-and-methods).
-- An object is immutable unless the reference to it says `mut`. `main` declares `c` as
-  `let c: mut = Counter("visitors")` (or `c: mut Counter = ...`), so it can call
+- An object is immutable unless the reference to it says `mutable`. `main` declares `c` as
+  `let c: mutable = Counter("visitors")` (or `c: mutable Counter = ...`), so it can call
   `increment`, which changes the object, and assign `c.count`; with `let c =
   Counter("visitors")` only `report`, a `view fn`, could be called on it. `let` fixes the
-  variable to that one object; `mut` is about the object
+  variable to that one object; `mutable` is about the object
   ([Variables](02-basics.md#variables--declarations)).
 - By convention class names are `UpperCamelCase`.
 
@@ -83,7 +83,7 @@ Create an object by calling the class name with the constructor's arguments, as 
 
 A method may change its object. A method that only reads it is written `view fn`, and the
 compiler holds it to that: inside it, `self` is read-only. A `view fn` is what can be called
-on an object that is not `mut`, and on a `view` parameter (see
+on an object that is not `mutable`, and on a `view` parameter (see
 [Parameter modes](03-functions.md#parameter-modes-view-and-inout)), which promises the
 caller that the function will not change what it was given:
 
@@ -105,7 +105,7 @@ fn show(a: view Account) {
 }
 
 fn main() -> int {
-  let a: mut = Account(10);
+  let a: mutable = Account(10);
   a.deposit(5);
   show(a);
   return 0;
@@ -149,8 +149,8 @@ error: 'self' is read-only in 'view fn report'; cannot assign to its field 'bala
 error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
 ```
 
-So is `deposit` on an `Account` that is not `mut`: with `let a = Account(10);` in `main`,
-`a.deposit(5)` is `'a' is immutable (an 'Account'; write 'mut Account' to change it);
+So is `deposit` on an `Account` that is not `mutable`: with `let a = Account(10);` in `main`,
+`a.deposit(5)` is `'a' is immutable (an 'Account'; write 'mutable Account' to change it);
 'deposit' is not a 'view fn'`.
 
 The compiler warns about a method that never changes its object but is not a `view fn`,
@@ -164,15 +164,15 @@ read but not change or keep. The exact rules are in
 Objects live on the heap, and a variable holds a **reference** to one. An object has one
 owner, the variable, field or element that holds its reference, so assigning it to another
 variable or passing it to a plain parameter hands it over: `let b = move a;` leaves `a`
-empty, and `let b = a;` is an error (`cannot copy 'a' (a unique 'mut Box'); write 'move a'
-to transfer it, or declare it 'shared mut Box'`). A function that only reads the object
+empty, and `let b = a;` is an error (`cannot copy 'a' (a unique 'mutable Box'); write 'move a'
+to transfer it, or declare it 'shared mutable Box'`). A function that only reads the object
 takes a `view` of it, and one that changes it in place an `inout`, so the caller keeps it
 ([Parameter modes](03-functions.md#parameter-modes-view-and-inout)); a class that opts into
 [`Cloneable`](06-traits.md#cloneable) is copied with `clone()`. Several names hold one
-object when its reference is `shared`, or `shared mut` to change it through them: then
+object when its reference is `shared`, or `shared mutable` to change it through them: then
 assigning or passing the reference shares the object, and copies nothing
 ([Ownership transfers](16-memory.md#ownership-transfers)). Each reference says whether the
-object may be changed through it: here `a`, `b` and `bump`'s parameter are `shared mut`,
+object may be changed through it: here `a`, `b` and `bump`'s parameter are `shared mutable`,
 and each sees the others' writes:
 
 ```pkn
@@ -186,12 +186,12 @@ impl Box {
   fn __init__(v: int) { self.value = v; }
 }
 
-fn bump(b: shared mut Box) {
+fn bump(b: shared mutable Box) {
   b.value = b.value + 1;
 }
 
 fn main() -> int {
-  let a: shared mut Box = Box(1);
+  let a: shared mutable Box = Box(1);
   let b = a;       // b and a are the same object
   a.value = 5;
   bump(a);
@@ -215,13 +215,13 @@ shared is a [struct](11-structs.md).
 A method borrows its object: `self` is the caller's reference, lent for the call, so a
 method cannot return it, pass it to a plain parameter, store it or capture it in a
 function. Any of those would make a second owner of an object that has one (`cannot copy
-'self' (a unique 'mut Counter'); a method borrows its receiver (a 'shared fn' hands on a
+'self' (a unique 'mutable Counter'); a method borrows its receiver (a 'shared fn' hands on a
 shared one)`). A method that hands its object on is declared `shared fn`: its `self` is a
-`shared mut` reference, which copies, so the method may return it (for chained calls),
-pass it, store it in a `shared mut` field or capture it. A `shared view fn` only reads its
+`shared mutable` reference, which copies, so the method may return it (for chained calls),
+pass it, store it in a `shared mutable` field or capture it. A `shared view fn` only reads its
 object, and its `self` is a `shared` reference. Storing `self` in a weak field or local,
-the back link of a child to its parent, takes one of them too: a `weak mut` reference
-names the `shared mut` `self` of a `shared fn`, a `weak` one the `shared` `self` of a
+the back link of a child to its parent, takes one of them too: a `weak mutable` reference
+names the `shared mutable` `self` of a `shared fn`, a `weak` one the `shared` `self` of a
 `shared view fn` ([Weak references](16-memory.md#weak-references)).
 
 ```pkn
@@ -229,7 +229,7 @@ import ::io;
 
 class Counter {
   n: int;
-  shared fn add(by: int) -> shared mut Counter {
+  shared fn add(by: int) -> shared mutable Counter {
     self.n = self.n + by;
     return self;
   }
@@ -237,8 +237,8 @@ class Counter {
 }
 
 class Board {
-  last: shared mut Counter?;
-  fn keep(c: shared mut Counter) { self.last = c; }
+  last: shared mutable Counter?;
+  fn keep(c: shared mutable Counter) { self.last = c; }
 }
 
 impl Counter {
@@ -246,9 +246,9 @@ impl Counter {
 }
 
 fn main() -> int {
-  let c: shared mut = Counter(1);
+  let c: shared mutable = Counter(1);
   c.add(2).add(3);
-  b: mut = Board(None);
+  b: mutable = Board(None);
   c.post(b);
   let fresh = Counter(10).add(5);
   match b.last {
@@ -266,13 +266,13 @@ Output:
 ```
 
 The method hands on what its caller holds, so it is called on a receiver held the same way:
-a `shared fn` on a `shared mut` one (`c` above), a `shared view fn` on a `shared` one, or
+a `shared fn` on a `shared mutable` one (`c` above), a `shared view fn` on a `shared` one, or
 on a new object nothing else holds yet (`Counter(10).add(5)`), which the call shares.
 On any other receiver it is an error: `'add' is a 'shared fn', which takes its receiver
-as a 'shared mut Counter'; 'u' is a 'mut Counter': declare it 'shared mut Counter'`. So
+as a 'shared mutable Counter'; 'u' is a 'mutable Counter': declare it 'shared mutable Counter'`. So
 is calling it on `self` in a method that is not a `shared fn` itself (`'self' is borrowed
 in 'reset': make it a 'shared fn' too`). The result of `return self` is the shared form,
-`-> shared mut Counter`; `-> Counter` is `cannot store a 'shared mut Counter' in the
+`-> shared mutable Counter`; `-> Counter` is `cannot store a 'shared mutable Counter' in the
 result, a 'Counter'`. An override is a `shared fn` exactly when the method it overrides
 is, and a trait's `shared fn` is implemented by one. `__init__` is never one (the new
 object is the constructor's result, held as its caller declares), nor is a struct's
@@ -690,7 +690,7 @@ impl DeadlineTask {
 }
 
 fn main() -> int {
-  let milk: mut = Task("buy milk");
+  let milk: mutable = Task("buy milk");
   let taxes: Task = DeadlineTask("file taxes", "April 15");
   milk.complete();
   io::println(milk);
@@ -721,7 +721,7 @@ The rest of this chapter gives the precise rules.
   one of those may have type parameters of its own, `view fn map<U>(...)`
   ([Generic Methods](13-generics.md#generic-methods)).
 - A method **borrows** its object: it cannot return, pass, store or capture `self`. A
-  **`shared fn`** can: its `self` is `shared mut` (a `shared view fn`'s is `shared`), and it
+  **`shared fn`** can: its `self` is `shared mutable` (a `shared view fn`'s is `shared`), and it
   is called on a receiver held that way or on a new object (see
   [Methods that hand on self](#methods-that-hand-on-self-shared-fn)).
 - A method of the class body declared **without a body** (`view fn area() -> float;`) is
@@ -771,17 +771,17 @@ The rest of this chapter gives the precise rules.
   Flow](08-match.md#exhaustiveness-and-control-flow)).
 - Field types may be builtins, `Str`, fixed-size arrays (`T[n]`), other class types, enums,
   tuples, structs, optionals and function types; not a slice (`T[]`). A field holding an
-  object follows the object it is part of: it is written through a `mut` reference to that
+  object follows the object it is part of: it is written through a `mutable` reference to that
   object (or through `self` in a method that may change it) and read through any other, so
-  it is never declared `mut` itself. A field whose object has several owners says so,
-  `next: shared Node` or `next: shared mut Node` ([Concurrency](19-concurrency.md)); a
-  `shared mut` field is the object's own form and keeps its writes through any object that
+  it is never declared `mutable` itself. A field whose object has several owners says so,
+  `next: shared Node` or `next: shared mutable Node` ([Concurrency](19-concurrency.md)); a
+  `shared mutable` field is the object's own form and keeps its writes through any object that
   holds it, a `shared` one is read-only by its declaration.
 - A field whose type is qualified `weak` is a `shared` reference that owns nothing: it
   refers to its object without keeping it alive and reads as `None` once the object is
   gone; its type is `T?` for a class `T`. `parent: weak Node?` names a `shared` object and
-  reads as a `shared Node?`, `parent: weak mut Node?` a `shared mut` one, read as a `shared
-  mut Node?`, and what is stored in it has exactly that form. It is the back link that
+  reads as a `shared Node?`, `parent: weak mutable Node?` a `shared mutable` one, read as a `shared
+  mutable Node?`, and what is stored in it has exactly that form. It is the back link that
   breaks a reference cycle (see [Weak references](16-memory.md#weak-references)).
 
 ```pkn
@@ -904,7 +904,7 @@ class Counter {
 }
 
 fn main() -> int {
-  let c: mut = Counter(0, 2);                           // the private field is a constructor argument
+  let c: mutable = Counter(0, 2);                           // the private field is a constructor argument
   c.tick();
   c.tick();
   io::println(Str(c.value()) + " " + Str(c.step));
@@ -1020,13 +1020,13 @@ different parameter lists are not supported.
 ### Methods that hand on self
 
 A method's `self` is a borrow of its receiver. A `shared fn` (`shared fn name(...)`, in the
-class body or an `impl` block) has a `shared mut` `self`, and a `shared view fn` a
+class body or an `impl` block) has a `shared mutable` `self`, and a `shared view fn` a
 `shared` one, which the body may return, pass, store or capture like any `shared`
 reference ([Methods that hand on self: `shared fn`](#methods-that-hand-on-self-shared-fn)).
 
 - It is called on a receiver of exactly that form, or a temporary: `'add' is a 'shared
-  fn', which takes its receiver as a 'shared mut Counter'; 'u' is a 'mut Counter': declare
-  it 'shared mut Counter'`, and for `self` in a method that is not one, `'self' is
+  fn', which takes its receiver as a 'shared mutable Counter'; 'u' is a 'mutable Counter': declare
+  it 'shared mutable Counter'`, and for `self` in a method that is not one, `'self' is
   borrowed in 'reset': make it a 'shared fn' too`.
 - An override is a `shared fn` exactly when the method it overrides is (`override of
   'bump' must be a 'shared fn', like the method it overrides: ...`), and a trait's `shared
@@ -1037,7 +1037,7 @@ reference ([Methods that hand on self: `shared fn`](#methods-that-hand-on-self-s
   never shared`), nor a free function (`only a method can be a 'shared fn': 'free' is a
   free function, with no 'self'`).
 - It gets no warning to make it a `view fn`: a `shared view fn` takes a `shared` receiver,
-  not a `shared mut` one.
+  not a `shared mutable` one.
 - A module's `shared fn` markers are part of its interface, from source or from a `.pkm`.
 
 ### Methods that don't change self
@@ -1070,15 +1070,15 @@ count() -> int`, `view fn bounds() -> (int, int)`). An override of a
 method that returns a copy, such as `toString`, returns a new value instead. A method that
 is not a `view fn` may return part of `self` for its caller to change.
 
-Only a `view fn` can be called on an object that is not `mut`, held by a variable, a
-parameter or a field alike (`'c' is immutable (a 'Counter'; write 'mut Counter' to change
+Only a `view fn` can be called on an object that is not `mutable`, held by a variable, a
+parameter or a field alike (`'c' is immutable (a 'Counter'; write 'mutable Counter' to change
 it); 'increment' is not a 'view fn'`), or on a `view`, a parameter or a local
 ([`view`: read-only](03-functions.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
-`toString`, `equals`, `len`; `concat` is not, so it needs a `mut Str`. `let` is about the
+`toString`, `equals`, `len`; `concat` is not, so it needs a `mutable Str`. `let` is about the
 variable, not the object:
 a `let` local cannot be reassigned, and whether a method may change what it holds is its
-type's, `mut` or not ([Variables](02-basics.md#variables--declarations)).
+type's, `mutable` or not ([Variables](02-basics.md#variables--declarations)).
 
 - `__init__` cannot be a `view fn`: it sets up `self`.
 - An override keeps the marker of the method it overrides, both ways:
@@ -1127,7 +1127,7 @@ impl Point {
 }
 
 fn main() -> int {
-  let p: mut = Point::origin();
+  let p: mutable = Point::origin();
   p.shift(3);
   return p.lengthSquared();   // 18
 }
@@ -1197,7 +1197,7 @@ no object's end waits.
 
 The object cannot be kept: `self` is borrowed as in any method that is not a `shared fn`, so
 it is not stored, returned, passed by value or captured, a `shared fn` is not called on it
-(`'share' is a 'shared fn', which takes its receiver as a 'shared mut Node'; 'self' is
+(`'share' is a 'shared fn', which takes its receiver as a 'shared mutable Node'; 'self' is
 borrowed in '__deinit__', where the object is being destroyed`), and a field is not moved
 out of it. Should a reference to the object remain when its `__deinit__`s are done, the
 program stops (`an object was kept by its '__deinit__'`). `await` is an error there (`'await' cannot be used in '__deinit__': an object is
@@ -1493,9 +1493,9 @@ created for that argument list. See [Generics](13-generics.md).
 | Direct call to `destroy` | User code calls `obj.destroy()` explicitly |
 | `weak` field of the wrong type | `f: weak Node;` (not optional) or `f: weak int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
 | `weak` field passed `inout` | `f(obj.parent)` where `parent` is `weak` and the parameter is `inout`: a weak reference is not a place a strong reference could be written to |
-| Store of another form in a `weak` field | A `weak` field takes a `shared T` and a `weak mut` one a `shared mut T` (or `None`), assigned or passed to the generated `__init__`: `cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object; declare 'a' 'shared mut Node'`, `cannot pass 'b' (a 'shared Node') to parameter 'tail' of 'Node', a 'weak mut' field's: ...`; for `self` in a plain method, `...; a 'shared fn' has a 'shared mut' 'self'` |
-| `weak` before the field's name | `weak parent: Node?;`, the spelling of earlier releases: `'weak' goes after the colon, before the type: write 'parent: weak Node?' (a weak reference names a 'shared' object, 'weak mut' a 'shared mut' one)` |
-| A qualifier after `weak` but `mut` | `parent: weak shared Node?;`: `'weak' takes 'mut' or nothing: 'weak Node?' names a 'shared' object, 'weak mut Node?' a 'shared mut' one` |
+| Store of another form in a `weak` field | A `weak` field takes a `shared T` and a `weak mutable` one a `shared mutable T` (or `None`), assigned or passed to the generated `__init__`: `cannot store 'a' (a 'mutable Node') in field 'tail', a 'weak mutable Node?': a 'weak mutable' reference names a 'shared mutable' object; declare 'a' 'shared mutable Node'`, `cannot pass 'b' (a 'shared Node') to parameter 'tail' of 'Node', a 'weak mutable' field's: ...`; for `self` in a plain method, `...; a 'shared fn' has a 'shared mutable' 'self'` |
+| `weak` before the field's name | `weak parent: Node?;`, the spelling of earlier releases: `'weak' goes after the colon, before the type: write 'parent: weak Node?' (a weak reference names a 'shared' object, 'weak mutable' a 'shared mutable' one)` |
+| A qualifier after `weak` but `mutable` | `parent: weak shared Node?;`: `'weak' takes 'mutable' or nothing: 'weak Node?' names a 'shared' object, 'weak mutable Node?' a 'shared mutable' one` |
 | Override of `destroy` | A class declares its own `fn destroy()` or `static fn destroy()`, in its body or an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in class 'A'` |
 | Declaration of `__walk` | A class declares a method or `static fn` named `__walk`, in its body or an `impl` block: `'__walk' is reserved for the compiler-generated walk and cannot be declared in class 'C'` (the walk freezes what an `atomic shared` object holds, [Concurrency](19-concurrency.md#atomic-shared-frozen-objects)) |
 | Override signature mismatch | Override has a different parameter or return type than the base method |
@@ -1507,7 +1507,7 @@ created for that argument list. See [Generics](13-generics.md).
 | Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
 | `self` handed on by a method that is not a `shared fn` | Returned, passed to a plain parameter, stored or captured: a method borrows its receiver |
-| `shared fn` called on another receiver | The receiver is not held in the method's form (`shared mut`, or `shared` for a `shared view fn`) and is not a temporary |
+| `shared fn` called on another receiver | The receiver is not held in the method's form (`shared mutable`, or `shared` for a `shared view fn`) and is not a temporary |
 | Override changes `shared fn` | An override is a `shared fn` exactly when the method it overrides is |
 | `shared fn` on `__init__`, a struct's method or a free function | The new object is the constructor's; a struct's `self` is a value; a free function has no `self` |
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // Parser tests: `weak` declarations (docs/grammar.md): a local `y: weak
-// Point? = x;` and a class field `parent: weak Node?;`, `weak mut` for one
-// that changes a `shared mut` object, and the old `weak y: ...` spelling.
+// Point? = x;` and a class field `parent: weak Node?;`, `weak mutable` for one
+// that changes a `shared mutable` object, and the old `weak y: ...` spelling.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -68,37 +68,37 @@ TEST(Weak, OnlyStartsALocalOrAField) {
   }
 }
 
-// `weak mut T` is the `shared mut` form, marked weak: a weak reference that
-// changes its `shared mut` object.  The spelling before the qualifier,
+// `weak mutable T` is the `shared mutable` form, marked weak: a weak reference
+// that changes its `shared mutable` object.  The spelling before the qualifier,
 // `weak NAME: T`, is an error naming the declaration as it is written now.
-TEST(Weak, WeakMutAndTheOldSpelling) {
+TEST(Weak, WeakMutableAndTheOldSpelling) {
   auto [ok, driver] = parse(R"(class Node {
-  prev: weak mut Node?;
+  prev: weak mutable Node?;
 }
 fn main() -> int {
-  let x: shared mut = Node(None);
-  w: weak mut = x;
+  let x: shared mutable = Node(None);
+  w: weak mutable = x;
   return 0;
 })");
   ASSERT_TRUE(ok);
   std::string ast = dumpAST(*driver);
-  EXPECT_NE(ast.find("VarDecl <2:3-2:23> 'prev' weak type\n"),
+  EXPECT_NE(ast.find("VarDecl <2:3-2:27> 'prev' weak type\n"),
             std::string::npos)
       << ast;
-  EXPECT_NE(ast.find("QualifiedType <2:9-2:23> 'shared mut'"),
+  EXPECT_NE(ast.find("QualifiedType <2:9-2:27> 'shared mutable'"),
             std::string::npos)
       << ast;
   const std::pair<const char *, const char *> old[] = {
       {"class Node { weak next: Node?; }\nfn main() -> int { return 0; }",
        "'weak' goes after the colon, before the type: write 'next: weak "
        "Node?'"},
-      {"class Node { weak up: shared mut Node?; }\n"
+      {"class Node { weak up: shared mutable Node?; }\n"
        "fn main() -> int { return 0; }",
-       "write 'up: weak mut Node?'"},
+       "write 'up: weak mutable Node?'"},
       {"fn main() -> int { weak w = 1; return 0; }", "write 'w: weak = ...'"},
       {"class N { v: int; }\nfn main() -> int { w: weak shared N? = None; "
        "return 0; }",
-       "'weak' takes 'mut' or nothing"},
+       "'weak' takes 'mutable' or nothing"},
       {"class N { v: int; }\nfn main() -> int { let w: weak = N(1); return 0; "
        "}",
        "a 'weak' local cannot be 'let'"},

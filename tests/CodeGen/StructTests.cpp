@@ -85,7 +85,7 @@ TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
       o = Outer(r.clone(), 5);
       o.r.name = "o";
       io::println(o.r.name + " " + r.name + " " + Str(o.r.node == r.node));
-      h: mut = Holder(mk(4), [mk(5), mk(6)]);
+      h: mutable = Holder(mk(4), [mk(5), mk(6)]);
       h.r.name = "h";
       h.rs[1].name = "h6";
       io::println(h.r.name + " " + h.rs[0].name + " " + h.rs[1].name);
@@ -177,7 +177,7 @@ TEST(Struct, MethodsChangeTheReceiverInPlace) {
       c = Counter::named("a");
       c.tick();
       c.tickTwice();
-      b: mut = Box(c.clone());    // a copy in the field
+      b: mutable = Box(c.clone());    // a copy in the field
       b.c.tick();
       cs: Counter[2] = [c.clone(), c.clone()];
       cs[1].tick();
@@ -227,12 +227,12 @@ TEST(Struct, ImplBlocksTraitsAndGenerics) {
     fn main() -> int {
       p = Point(1, 2);
       p.shift(1);
-      h: mut = Holder(p);
+      h: mutable = Holder(p);
       h.p.y = 3;
       io::println(show(p) + " " + greet(p) + " " + Str(hashOf(p)) + " " + Str(p.hash() == Point(2, 3).hash()));
       pair = twice(p);
       m = Point::origin().moved(2);
-      b: mut = Box(Point(1, 2));
+      b: mutable = Box(Point(1, 2));
       b.set(Point(3, 4));
       q: Point = b.get();
       io::println(show(q) + " " + show(b.get()) + " " + Str(pick(True, Point(1, 1), Point(2, 2)).sum()));
@@ -339,7 +339,7 @@ TEST(Struct, GenericStructsInstantiateLikeClasses) {
       b = Box(Pair(3, 4));
       b.set(Pair(5, 6));
       io::println(Str(sumInts(b.get())) + " " + Str(b.hash()) + " " + show(mkBox("s")));
-      h: mut = Holder(9);
+      h: mutable = Holder(9);
       h.p.a = 10;
       bs: Box<int>[2] = [Box(1), Box(2)];
       bs[1].v = 7;
@@ -506,7 +506,7 @@ fn main() -> int {
     io::println("parts");
   }
   {
-    h: mut = Holder(make(9), make(10));
+    h: mutable = Holder(make(9), make(10));
     h.o = None;
     io::println("none");
     h.g = make(11);
@@ -564,7 +564,7 @@ fn main() -> int {
   io::println("picked " + Str(p.id));
   let f = first((make(31), make(32)));
   io::println("first " + Str(f.id));
-  h: mut = Holder(make(4), make(5));
+  h: mutable = Holder(make(4), make(5));
   let old = mem::replace(h.g, make(6));
   let t = mem::take(h.o);
   io::println("taken " + Str(old.id) + " " + Str(h.o == None));
@@ -632,7 +632,7 @@ class Holder { o: Guard?; }
 enum Slot { Empty, Full(g: Guard, n: int) }
 fn bump(g: inout Guard) { g.id = g.id + 100; }
 fn main() -> int {
-  h: mut = Holder(Guard(1));
+  h: mutable = Holder(Guard(1));
   match h.o {
     g: inout Guard { g.id = g.id + 1; bump(g); }
     None { }
@@ -674,7 +674,7 @@ TEST(Struct, DeinitClonesAndWhatItReaches) {
   auto r = compileAndRun(R"(
 import ::io;
 class Board { top: Str; }
-struct Guard { id: int; b: shared mut Board?; }
+struct Guard { id: int; b: shared mutable Board?; }
 impl Guard {
   fn __deinit__() {
     io::println("release " + Str(self.id));
@@ -691,14 +691,14 @@ class Owner { g: Guard; gs: (Guard, int); }
 impl Cloneable for Owner {}
 fn show(s: view Str, n: int) -> int { io::println(s + " / " + Str(n)); return n; }
 fn eat(g: Guard) -> int { return g.id; }
-fn mk(b: shared mut Board, i: int) -> Guard { return Guard(i, b); }
+fn mk(b: shared mutable Board, i: int) -> Guard { return Guard(i, b); }
 fn main() -> int {
   {
     let o = Owner(Guard(1, None), (Guard(2, None), 0));
     let c = o.clone();
     io::println("cloned " + Str(c.g.id) + " " + Str(c.gs.0.id));
   }
-  let board: shared mut Board = Board("a board text long enough for the heap");
+  let board: shared mutable Board = Board("a board text long enough for the heap");
   let g = mk(board, 7);
   show(board.top, eat(move g));
   show(board.top, mk(board, 8).id);
@@ -737,7 +737,7 @@ fn main() -> int {
   x = mkh(2).g;                       io::println("assigned " + Str(x.id));
   xs = [G(3), G(4)];
   xs[0] = mkh(5).g;                   io::println("element " + Str(xs[0].id));
-  let c: mut = C(G(6));
+  let c: mutable = C(G(6));
   c.f = mkh(7).g;                     io::println("field " + Str(c.f.id));
   let o: G? = mkh(8).g;               io::println("optional " + Str(o == None));
   let s = Slot::Full(mkh(9).g, 1);    io::println("variant");
@@ -776,7 +776,7 @@ TEST(Struct, DeinitMayReachTheStorageItsValueWasIn) {
 import ::io;
 import ::memory as mem;
 class Reg { slot: G?; spare: G?; }
-struct G { r: shared mut Reg; id: int; }
+struct G { r: shared mutable Reg; id: int; }
 impl G {
   fn __deinit__() {
     io::println("deinit " + Str(self.id));
@@ -795,7 +795,7 @@ impl G {
   }
 }
 fn main() -> int {
-  let r: shared mut = Reg(None, None);
+  let r: shared mutable = Reg(None, None);
   r.slot = G(r, 1);
   r.slot = None;
   io::println("cleared");
@@ -845,7 +845,7 @@ struct H { o: Lock?; n: int; }
 class Session { held: Lock?; }
 impl Session { view fn me() -> view Session { return self; } }
 fn mkh(s: Str) -> H { return H(Lock(move s), 0); }
-fn mks(s: Str) -> shared mut Session { return Session(Lock(move s)); }
+fn mks(s: Str) -> shared mutable Session { return Session(Lock(move s)); }
 fn part(h: view H) -> view Lock? { return h.o; }
 fn main() -> int {
   let s = Session(Lock("a"));
@@ -958,7 +958,7 @@ fn main() -> int {
 
   match io::open(a, "w") {
     w: Ok {
-      let log: mut = Log(move w.value, 0);
+      let log: mutable = Log(move w.value, 0);
       log.add("one,");
       log.add("two");
       io::println("lines " + Str(log.lines) + ": " + text(a));
@@ -978,7 +978,7 @@ fn main() -> int {
 }
 
 // A file under several names is in a `mem::Box`, written through `get()` of
-// a `shared mut` box and closed when the box goes; one moved into a task
+// a `shared mutable` box and closed when the box goes; one moved into a task
 // is written and closed there.
 TEST(Struct, AFileIsSharedInABoxAndMovesIntoATask) {
   LeakGuard g;
@@ -993,7 +993,7 @@ fn main() -> int {
   match io::open(a, "w") {
     w: Ok {
       {
-        let box: shared mut = mem::Box(move w.value);
+        let box: shared mutable = mem::Box(move w.value);
         let other = box;
         other.get().write("boxed");
         box.get().write(" twice");

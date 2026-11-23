@@ -104,7 +104,7 @@ impl P {
   static fn zero() -> P { return P(0, fn(n: int) => n); }
 }
 fn main() -> int {
-  p: mut = P(1, fn(n: int) => n);
+  p: mutable = P(1, fn(n: int) => n);
   io::println(p.get<int>());
   io::println(p.cb<int>(2));
   io::println(p.map<int, int>(fn(n: view int) => n));
@@ -560,9 +560,9 @@ impl Box<T> {
   fn size<U>(u: view U) -> int { return 1; }
 }
 fn main() -> int {
-  x: mut = C(0);
+  x: mutable = C(0);
   io::println(x.a(1) + x.a("s") + x.b(2.5) + x.c(1) + x.d(1));
-  b: mut = Box<int>(1); c: mut = Box<Str>("a");
+  b: mutable = Box<int>(1); c: mutable = Box<Str>("a");
   io::println(b.size(1) + c.size("x") + c.size(2));
   return 0;
 }
@@ -608,7 +608,7 @@ impl V {
   }
 }
 fn main() -> int {
-  c: shared mut = Counter(0);
+  c: shared mutable = Counter(0);
   io::println(c.each([1, 2, 3], fn(n: view int) => n * 2));
   io::println(c.peek(1));
   let v = V(1);

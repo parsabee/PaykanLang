@@ -324,7 +324,7 @@ impl TaskList {
 }
 
 fn main() -> int {
-  let list: mut = TaskList();
+  let list: mutable = TaskList();
   list.add("buy milk");
   list.add("fix the leak");
   list.add("call mum");
@@ -357,7 +357,7 @@ same reason `clearDone` cannot write `self.tasks[kept] = self.tasks[i]`, which w
 task (`cannot copy 'self.tasks[i]'`): it moves a kept task down by
 [`mem::replace`](../stdlib/memory.md#moving-values-out-of-places-swap-replace-and-take),
 which takes the task out of its slot, an `inout` place, and leaves a blank one there.
-`list` is declared `mut`,
+`list` is declared `mutable`,
 since `add`, `complete` and `clearDone` change the list; `show` and `pending` only read it
 and are `view fn`s ([Classes](05-classes.md#methods-that-only-read-view-fn)).
 
@@ -754,9 +754,9 @@ elements`).
 
 A class's field can be an array: it is held inside its object, and `__init__` assigns it like
 any other field (a struct's field cannot be one yet). Its elements change only where the
-object can: through a `mut` reference, as `b` is below, and not in a `view fn`
-(`self.cells[0][1] = 5;`) or through a reference that is not `mut` (`'b' is immutable (a
-'Board'; write 'mut Board' to change it); cannot assign to its elements`).
+object can: through a `mutable` reference, as `b` is below, and not in a `view fn`
+(`self.cells[0][1] = 5;`) or through a reference that is not `mutable` (`'b' is immutable (a
+'Board'; write 'mutable Board' to change it); cannot assign to its elements`).
 
 ```pkn
 import ::io;
@@ -764,7 +764,7 @@ import ::io;
 class Board { cells: char[3][3]; }
 
 fn main() -> int {
-  let b: mut = Board([['.'; 3]; 3]);
+  let b: mutable = Board([['.'; 3]; 3]);
   b.cells[1][1] = 'x';
   io::println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
   return 0;

@@ -1,20 +1,20 @@
 // OK: the qualifiers of another module's signatures and fields
 // (docs/language/19-concurrency.md: the qualifier is part of the type of a
-// parameter, a field or a result).  A result `-> mut Cell` is written
-// through by the importer as by the module itself, a `mut` parameter takes
-// a new object and hands it back as a `mut Cell`, a `shared fn` stays one
-// (called on the `shared mut` receiver `a`, its `shared mut Cell?` result
-// written through in the arm), and a `shared mut` field keeps its writes.
+// parameter, a field or a result).  A result `-> mutable Cell` is written
+// through by the importer as by the module itself, a `mutable` parameter takes
+// a new object and hands it back as a `mutable Cell`, a `shared fn` stays one
+// (called on the `shared mutable` receiver `a`, its `shared mutable Cell?` result
+// written through in the arm), and a `shared mutable` field keeps its writes.
 // The module's interface spelled every type without its qualifier, so `b`
 // and the arm's `m` were immutable here: `'b' is immutable (a 'Cell'; write
-// 'mut Cell' to change it); 'bump' is not a 'view fn'`.
+// 'mutable Cell' to change it); 'bump' is not a 'view fn'`.
 // expect-stdout: 2 6 8
 import ::io;
 import cells;
 
 fn main() -> int {
-  let s: shared mut cells::Cell = cells::make(7);
-  let a: shared mut = cells::link(cells::Cell(1, None), s);
+  let s: shared mutable cells::Cell = cells::make(7);
+  let a: shared mutable = cells::link(cells::Cell(1, None), s);
   match a.me() {
     m: cells::Cell { m.bump(); }
   }

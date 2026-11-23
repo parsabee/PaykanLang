@@ -58,7 +58,7 @@ Keywords (reserved; never identifiers):
 ```
 import  as  class  struct  enum  match  fn  native  return  if  then  else
 elif  while  for  break  continue  True  False  None  _  view  inout  let  weak  impl
-static  trait  move  async  await  parallel  atomic  shared  const  locked  lock  mut
+static  trait  move  async  await  parallel  atomic  shared  const  locked  lock  mutable
 final
 ```
 
@@ -224,15 +224,15 @@ param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
 
 varDecl     ::= IDENT ":" typeAnnotation
 fieldDecl   ::= varDecl | IDENT ":" weakType   -- a class's field
-weakType    ::= "weak" "mut"? typeAnnotation   -- a weak reference
+weakType    ::= "weak" "mutable"? typeAnnotation   -- a weak reference
 ```
 
 `weak` qualifies the type of a class field or a local (§6): `parent: weak
-Node?` is a weak reference to a `shared` object, `prev: weak mut Node?` to
-a `shared mut` one ([language/16-memory.md](language/16-memory.md#weak-references)).
+Node?` is a weak reference to a `shared` object, `prev: weak mutable Node?` to
+a `shared mutable` one ([language/16-memory.md](language/16-memory.md#weak-references)).
 The parser gives the `VarDecl` its weak mark and its type the `shared`
-(`shared mut`) form, a `QualifiedType` around the written type.  Only `mut`
-follows `weak` (`'weak' takes 'mut' or nothing: ...`), and a struct's field
+(`shared mutable`) form, a `QualifiedType` around the written type.  Only `mutable`
+follows `weak` (`'weak' takes 'mutable' or nothing: ...`), and a struct's field
 is never weak (`a struct field cannot be 'weak': ...`).  The spelling
 before the qualifier, `weak parent: Node?;` (and `weak w = x;` for a
 local), is a syntax error that writes the declaration as it is spelled now
@@ -352,11 +352,11 @@ error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is
 allowed there (the parameter's type, an override) is Sema's job.  A mode
 is followed by a `typeAnnotation` (§5), a qualified one included: `n: view
-mut N`, `-> view shared N` and `x: inout shared mut N = e;` parse, and Sema
-rejects the qualifier on every borrow (`parameter 'n' is 'view mut': a
+mutable N`, `-> view shared N` and `x: inout shared mutable N = e;` parse, and Sema
+rejects the qualifier on every borrow (`parameter 'n' is 'view mutable': a
 borrow carries no qualifier; a 'view' takes every form of the object
-(read-only through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'mut'`; `the result of 'f' is 'view shared':
-...`, `local 'x' is 'inout shared mut': ...`).
+(read-only through it) and an 'inout' a 'mutable' or 'shared mutable' one; write it without 'mutable'`; `the result of 'f' is 'view shared':
+...`, `local 'x' is 'inout shared mutable': ...`).
 
 ## 5. Types
 
@@ -365,7 +365,7 @@ typeAnnotation ::= qualifier plainType
                  | qualifier                    -- alone: the type is inferred (§6)
                  | "atomic" typeAnnotation      -- a cell holding a number
                  | plainType
-qualifier      ::= "mut" | "shared" "mut"? | "atomic" "shared" | "locked" "mut"?
+qualifier      ::= "mutable" | "shared" "mutable"? | "atomic" "shared" | "locked" "mutable"?
 plainType      ::= primaryType ( "[" "]" | "[" ( INT | "_" ) "]" | "?" )*
 primaryType    ::= IDENT
                  | modulePath "::" IDENT
@@ -421,36 +421,36 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 - A qualifier ([design/concurrency.md](design/concurrency.md), the
   concurrency prototype) says how the place of that type holds its object,
   and whether it writes it.  The bare type is the cheapest form, one owner
-  that never writes the object, and each word buys one thing: `mut T` (one
-  owner, who writes it), `shared T` and `shared mut T` (aliases on one
+  that never writes the object, and each word buys one thing: `mutable T` (one
+  owner, who writes it), `shared T` and `shared mutable T` (aliases on one
   thread, writing or not), `atomic shared T` (frozen, shared across
-  threads) and `locked mut T` (a cell written in `lock` blocks, §6; `locked
+  threads) and `locked mutable T` (a cell written in `lock` blocks, §6; `locked
   T` alone is a cell nothing writes, which Sema accepts with a warning).  It
-  is a `QualifiedType` node (the `Qualifier`, its form and its `mut`, and
+  is a `QualifiedType` node (the `Qualifier`, its form and its `mutable`, and
   the inner type) around the whole annotation, suffixes included: `shared
   N?` and `atomic shared Str?` are a `QualifiedType` over an
   `OptionalType`, and `shared N[3]` one over a `FixedArrayType`.  `shared`
-  and `shared mut` bind to the primary type, so on an array of references
+  and `shared mutable` bind to the primary type, so on an array of references
   Sema reads them as its elements' (`shared N[3]` is three shared
   references, `shared N?[2]` two optional ones), while `atomic shared` and
   `locked` cover the whole type.  Sema rejects a qualifier on a value type,
   an array of values and an `atomic shared` array included (`'atomic
   shared' qualifies a reference; 'N[3]' is a value: hold it in a class to share what it holds`, `'shared' qualifies a
-  reference; 'int[2]' is a value`, `'shared mut' qualifies a reference;
-  'int' is a value`, `'mut' applies to objects; 'int' is a value: its
+  reference; 'int[2]' is a value`, `'shared mutable' qualifies a reference;
+  'int' is a value`, `'mutable' applies to objects; 'int' is a value: its
   storage is rewritten by assignment, which 'let' fixes`).  A reference is
-  immutable unless written `mut`.  The writes come after the form: `mut shared N` is `'mut shared' is spelled
-  'shared mut': the form first, then the writes`, and `mut locked N` the
-  same with `locked`.  What nothing writes takes no `mut`: `atomic shared
-  mut N` is `'atomic shared mut T' would be written from several threads
-  with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to
-  change it under a lock`, at the `mut`, and `atomic mut int` or `mut
-  atomic int` is `an 'atomic' cell takes no 'mut': it changes by its
+  immutable unless written `mutable`.  The writes come after the form: `mutable shared N` is `'mutable shared' is spelled
+  'shared mutable': the form first, then the writes`, and `mutable locked N` the
+  same with `locked`.  What nothing writes takes no `mutable`: `atomic shared
+  mutable N` is `'atomic shared mutable T' would be written from several threads
+  with no lock; write 'atomic shared T' to freeze it, or 'locked mutable T' to
+  change it under a lock`, at the `mutable`, and `atomic mutable int` or `mutable
+  atomic int` is `an 'atomic' cell takes no 'mutable': it changes by its
   operations; an object crosses threads as 'atomic shared T' (frozen) or
-  'locked mut T'`.  A type takes one qualifier: a second one, or `atomic`,
+  'locked mutable T'`.  A type takes one qualifier: a second one, or `atomic`,
   after it is a syntax error at the second (`a type takes one qualifier:
-  'shared mut shared' is two`, `... 'shared atomic' is two`, `... 'locked
-  atomic' is two` for `locked atomic shared C`, `... 'mut mut' is two`).
+  'shared mutable shared' is two`, `... 'shared atomic' is two`, `... 'locked
+  atomic' is two` for `locked atomic shared C`, `... 'mutable mutable' is two`).
   `atomic shared` is one qualifier of two words, so a qualifier after it
   is the second: `atomic shared shared N` is `a type takes one qualifier:
   'atomic shared shared' is two`, at the second `shared`.  A qualifier
@@ -464,23 +464,23 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 - `atomic T` is a cell holding a number, which the variable or field of
   that type names; a copy of it is another handle to the same cell.  It is
   an `AtomicType` node over `T`, which at parse time is any annotation
-  that does not start with `shared`, `mut` or `const` (`atomic int?` and
+  that does not start with `shared`, `mutable` or `const` (`atomic int?` and
   `atomic atomic int` parse); Sema holds `T` to a number type, `bool` or
   `char` (`'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not
   'int?'`, and for a class `'atomic' holds a
   number, a 'bool' or a 'char', not 'N': an object crosses threads as
-  'atomic shared N' (frozen) or 'locked mut N'`).  `atomic` followed by
+  'atomic shared N' (frozen) or 'locked mutable N'`).  `atomic` followed by
   `shared` is the qualifier `atomic shared`, never a cell: each of its
   words says one thing (`atomic`, the reference crosses threads; `shared`,
   the object has several owners), and nothing writes the frozen object,
-  so `mut` after it is the syntax error above.
-- A qualifier alone (`x: shared = e;`, `let c: mut = e;`, §6) is a
+  so `mutable` after it is the syntax error above.
+- A qualifier alone (`x: shared = e;`, `let c: mutable = e;`, §6) is a
   `QualifiedType` with no inner type: the type is the initializer's, which
   Sema infers.  The recursive-descent frontend reads the bare qualifier
   wherever `=`, `;`, `,` or `)` directly follows it, so a parameter `x:
   shared`, a field `f: shared;`, a destructuring target and a `weak` or
   borrow declaration's type parse too, and Sema allows it in a variable
-  declaration only (`'mut' needs a type here ('mut T'); only a variable
+  declaration only (`'mutable' needs a type here ('mutable T'); only a variable
   declaration infers it`).  Where anything else follows, the qualifier
   needs a type (`fn f() -> shared {`: `unexpected '{'; expected a type`),
   and `atomic` alone is never a type (`x: atomic = 0;`: `unexpected '=';
@@ -513,7 +513,7 @@ statement ::= ";"
 assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
             | ">" ">="                   -- the two adjacent: ">>="
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
-weakDecl  ::= IDENT ":" "weak" "mut"? typeAnnotation? ( "=" expression )? ";"
+weakDecl  ::= IDENT ":" "weak" "mutable"? typeAnnotation? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
 ifStmt    ::= "if" expression block elseTail?
@@ -569,8 +569,8 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
   `let` without an initializer is a syntax error.
 - `weakDecl` declares one local holding a weak reference
-  (`VarDecl::isWeak`, its type the `shared` or, with `mut`, the `shared mut`
-  form): `w: weak = x;`, `w: weak mut Node? = x;`.  Its type, when not
+  (`VarDecl::isWeak`, its type the `shared` or, with `mutable`, the `shared mutable`
+  form): `w: weak = x;`, `w: weak mutable Node? = x;`.  Its type, when not
   written, is its initializer's, and without an initializer it starts as
   `None`.  It needs a type or an initializer (`a 'weak' declaration needs a
   type or an initial value`), and is neither `let` (`a 'weak' local cannot
@@ -580,11 +580,11 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   not written, is its initializer's.  It needs an initializer, is never
   `let` (`let x: view = e;`) and is not a destructuring target.  With the
   mode before the name (`view x = e;`) the syntax error shows the fix.
-- `x: shared = e;` and `let c: mut = e;` declare a local with a
+- `x: shared = e;` and `let c: mutable = e;` declare a local with a
   qualifier and no type (a `QualifiedType` with no inner type, §5): the
   type is the initializer's, which Sema infers, as for a borrow.  Every
-  qualifier has the form (`y: shared mut = e;`, `z: atomic shared = e;`,
-  `w: locked mut = e;`); `atomic` alone has not (`x: atomic = 0;` is
+  qualifier has the form (`y: shared mutable = e;`, `z: atomic shared = e;`,
+  `w: locked mutable = e;`); `atomic` alone has not (`x: atomic = 0;` is
   `unexpected '='; expected a type`).
 - A condition is not parenthesised (`if x > 0 {`, `while i < n {`); it ends
   at the block's `{`, which no expression consumes outside brackets except a
@@ -995,9 +995,9 @@ specification does not. Every frontend must reject them (the
 - Shifts in the forms of other languages (§7, §9): a `>>` or `>>=` with a
   space or a newline between its two tokens (`a > > b`, `x > >= 1;`), a
   `>>>` (`a >>> b`), and a chain of shifts (`a << b << c`).
-- A run of qualifiers on one type, or `atomic` after one (§5): `shared mut
-  shared N`, `shared atomic int`, `locked atomic shared C`, `mut mut N`;
-  `mut` before the form, `mut shared N` and `mut locked N`; `mut` on what
-  nothing writes, `atomic shared mut N`, `atomic mut int` and `mut atomic
+- A run of qualifiers on one type, or `atomic` after one (§5): `shared mutable
+  shared N`, `shared atomic int`, `locked atomic shared C`, `mutable mutable N`;
+  `mutable` before the form, `mutable shared N` and `mutable locked N`; `mutable` on what
+  nothing writes, `atomic shared mutable N`, `atomic mutable int` and `mutable atomic
   int`; and `const` anywhere in a type: `const N`, `shared const N`,
   `atomic shared const N`, `atomic const N`.

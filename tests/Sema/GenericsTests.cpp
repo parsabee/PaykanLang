@@ -162,12 +162,12 @@ TEST(Generics, InstantiationAsFieldParamReturnAndArray) {
         self.ps = [Pair<Str, int>("a", 1), Pair<Str, int>("b", 2)];
       }
     }
-    fn unwrap(b: mut Box<int>) -> int { return b.get(); }
-    fn nest(b: mut Box<Box<int>>) -> int { return b.get().get(); }
+    fn unwrap(b: mutable Box<int>) -> int { return b.get(); }
+    fn nest(b: mutable Box<Box<int>>) -> int { return b.get().get(); }
     fn total(bs: view Box<int>[]) -> int { return bs[0].v + bs[1].v; }
   )",
                               R"(
-    h: mut Holder = Holder();
+    h: mutable Holder = Holder();
     n: int = unwrap(h.get());
     m: int = nest(Box<Box<int>>(h.get()));
     arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
@@ -207,7 +207,7 @@ TEST(Generics, ArmNamingAnOptionalTypeArgument) {
       match x { v: inout T { v = move d; } None { } }
     }
   )",
-                               R"(a: mut Node? = Node(1);
+                               R"(a: mutable Node? = Node(1);
     b = same<Node?>(a, None);
     put<Node?>(a, None);
     c: int? = 3;
@@ -223,7 +223,7 @@ TEST(Generics, ArmNamingAnOptionalTypeArgument) {
       match a { v: inout T { v = move d; } _ { } }
     }
   )",
-                         "a: mut Animal = Dog(1); swapIn<Dog?>(a, None);"));
+                         "a: mutable Animal = Dog(1); swapIn<Dog?>(a, None);"));
   EXPECT_FALSE(bad.Ok);
   EXPECT_TRUE(has(bad.Diagnostics,
                   "cannot use optional 'Dog?' as 'Dog' without unwrapping"))
@@ -234,7 +234,8 @@ TEST(Generics, ArmNamingAnOptionalTypeArgument) {
 }
 
 TEST(Generics, RecursiveInstantiationInFieldIsFine) {
-  auto r = semaCheck(withMain(R"(
+  auto r =
+      semaCheck(withMain(R"(
     class Node<T> {
       v: T;
       next: Obj?;
@@ -245,7 +246,7 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
       fn __init__(v: T) { self.v = move v; self.next = None; }
     }
   )",
-                              "a: mut = Node<int>(1); a.link(Node<int>(2));"));
+                         "a: mutable = Node<int>(1); a.link(Node<int>(2));"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
@@ -753,7 +754,7 @@ TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
 TEST(Generics, InferenceFromSliceAndBoxParams) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
     fn first<T>(xs: view T[]) -> view T { return xs[0]; }
-    fn unbox<T>(b: mut Box<T>) -> T { return b.get().clone(); }
+    fn unbox<T>(b: mutable Box<T>) -> T { return b.get().clone(); }
     fn pick<A, B>(a: A, b: B) -> B { return b; }
   )",
                               R"(
@@ -828,7 +829,7 @@ TEST(Generics, InferenceAmbiguous) {
 }
 
 TEST(Generics, ConstructorArgumentInference) {
-  auto r = semaCheck(withMain(kBox, "b: mut = Box(5); n: int = b.get(); "
+  auto r = semaCheck(withMain(kBox, "b: mutable = Box(5); n: int = b.get(); "
                                     "c: Box<Str> = Box(\"s\");"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
@@ -1636,7 +1637,7 @@ TEST(GenericsTypes, TupleAndOptionalBodiesInstantiate) {
       }
     }
     fn main() -> int {
-      q: mut = Pair<Str, int>("a", 1);
+      q: mutable = Pair<Str, int>("a", 1);
       s: (int, Str) = q.swap();
       k: Str = q.first();
       n: Node = orElse(Slot<Node>().get(), Node(0));
@@ -1704,7 +1705,7 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
       fn __init__() { }
     }
     fn main() -> int {
-      b: mut = Slot<int>();
+      b: mutable = Slot<int>();
       b.put(3);
       match b.get() { n: int { x: int = n + 1; } None { } }
       return 0;
@@ -1741,7 +1742,7 @@ TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
                                   "class Node {}\n"
                                   "impl Node { fn __init__() { } }\n",
                               R"(
-    a: mut Box<(int, Str)> = Box<(int, Str)>((1, "a"));
+    a: mutable Box<(int, Str)> = Box<(int, Str)>((1, "a"));
     t: (int, Str) = a.get().clone();
     n: Node? = None;
     b: Box<Node?> = Box<Node?>(move n);
@@ -1799,8 +1800,8 @@ static const char *const kBoxWithStatics = R"(
 
 TEST(Generics, StaticFnOfAnInstantiation) {
   auto r = check(withMain(kBoxWithStatics, R"(
-    b: mut = Box<int>::of(1);
-    s: mut Box<Str> = Box<Str>::of("s");
+    b: mutable = Box<int>::of(1);
+    s: mutable Box<Str> = Box<Str>::of("s");
     t = Box<int>::pair(2);
     n = t.0.get() + t.1.get() + b.get();
     io::println(s.get() + Str(n));

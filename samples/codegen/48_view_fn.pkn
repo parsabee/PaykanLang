@@ -50,14 +50,14 @@ fn report(c: view Counter) {
 }
 
 fn main() -> int {
-  let c: mut = Counter();
+  let c: mutable = Counter();
   c.tick();
   c.tick();
   let done = move c;
   done.tick();
   report(done);
 
-  let f: mut Counter = Fast();
+  let f: mutable Counter = Fast();
   f.tick();
   f.tick();
   report(f);

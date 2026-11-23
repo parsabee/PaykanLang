@@ -202,8 +202,9 @@ private:
   void prefixModeError();
   void prefixBorrowError();
   bool parseBorrowDecl(ast::Stmt *&out);
-  /// `name: Type`, or `name: weak T` / `name: weak mut T` (a weak reference,
-  /// marked on the VarDecl, the type `shared mut T` for `weak mut`) where
+  /// `name: Type`, or `name: weak T` / `name: weak mutable T` (a weak
+  /// reference, marked on the VarDecl, the type `shared mutable T` for `weak
+  /// mutable`) where
   /// @p notWeak is null; else `weak` is that error.
   ast::VarDecl *parseVarDecl(const char *notWeak = nullptr);
   /// After the colon, at `weak`: the type of a weak reference into @p ty

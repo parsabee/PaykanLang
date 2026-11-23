@@ -1645,9 +1645,9 @@ private:
   /// Declare parameter @p name of a function being emitted, of type @p astTy,
   /// mode @p mode and qualifier @p qual, whose value is @p params[@p at]
   /// (and the next one for a slice), in the current scope; returns how many
-  /// values it takes.  A `mut` parameter that may be a string is made the
+  /// values it takes.  A `mutable` parameter that may be a string is made the
   /// function's own string here (#363): its callers do not all know it is
-  /// `mut` (a function value's type and an overridden method's signature do
+  /// `mutable` (a function value's type and an overridden method's signature do
   /// not say so), and the body owns it either way (emitParamPrologue).
   size_t declareParam(const std::string &name,
                       const std::vector<pir::Value> &params, size_t at,

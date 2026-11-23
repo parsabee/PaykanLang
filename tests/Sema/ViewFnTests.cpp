@@ -74,7 +74,7 @@ class Counter {
   view fn i() { t: inout = self.n; }
   view fn child() -> Child { return self.c; }
   view fn ok() -> int {
-    o: mut = Child();
+    o: mutable = Child();
     o.tick();
     return self.n + self.xs.len() + self.c.k;
   }
@@ -150,7 +150,7 @@ fn main() -> int { return 0; }
             });
 }
 
-// `let` only fixes the variable: any method can be called on what a `mut`
+// `let` only fixes the variable: any method can be called on what a `mutable`
 // reference it holds names, its own and the builtins', `view fn` or not.
 TEST(ViewFn, LetCanCallAnyMethod) {
   auto r = semaCheck(R"(import ::io; class Counter {
@@ -163,8 +163,8 @@ impl Counter {
   fn __init__() { self.n = 0; }
 }
 fn main() -> int {
-  let c: mut Counter = Counter();
-  let s: mut Str = "abc";
+  let c: mutable Counter = Counter();
+  let s: mutable Str = "abc";
   let xs = [1, 2];
   c.tick();
   s.concat("d");
@@ -239,8 +239,8 @@ impl Square {
 class Box<T: Copyable> { v: T; n: int; fn get() -> T { return self.v; } fn count() -> int { return self.n; } }
 impl Box<T> { fn __init__(v: T) { self.v = move v; self.n = 1; } }
 fn main() -> int {
-  b: mut = Box<int>(1);
-  c: mut = Box<bool>(True);
+  b: mutable = Box<int>(1);
+  c: mutable = Box<bool>(True);
   return Shape().twice() + b.get() + (if c.get() then 1 else 0) + b.count() + c.count();
 }
 fn twiceOf(n: int) -> int { return 2 * n; }
@@ -272,8 +272,8 @@ fn twiceOf(n: int) -> int { return 2 * n; }
 // warned about only when it could be a `view fn` in every one.  `get`, which
 // returns a copy of `self.v` (so `Box` declares `T: Copyable`), is not warned
 // about: a copy of a type argument's value is a `view fn`'s to hand out only
-// while the argument is a value (`int`, `Pt`); one that is a `shared mut`
-// reference (`Box<shared mut Node>`, #368) is Copyable too, but could be
+// while the argument is a value (`int`, `Pt`); one that is a `shared mutable`
+// reference (`Box<shared mutable Node>`, #368) is Copyable too, but could be
 // changed through the copy.  So it is not warned about with
 // `Box<int>` alone either, which another file, an importer of the module, may
 // instantiate otherwise; nor is `first`, which calls it.  A method every
@@ -288,14 +288,14 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
       "impl Cell<T> { fn __init__(v: T) { self.v = move v; } }\n"
       "struct Pt { x: int; }\n";
   const std::string warning = "never changes 'self': make it a 'view fn'";
-  auto both =
-      semaCheck(boxes + "fn main() -> int {\n"
-                        "  a = Box<int>(1, 2); b = Box<Pt>(Pt(5), 3);\n"
-                        "  c: mut = Cell<int>(4); d: mut = Cell<Pt>(Pt(6));\n"
-                        "  io::println(Str(a.get() + a.count() + b.count() + "
-                        "c.get() + b.get().x + d.get().x));\n"
-                        "  return 0;\n"
-                        "}\n");
+  auto both = semaCheck(
+      boxes + "fn main() -> int {\n"
+              "  a = Box<int>(1, 2); b = Box<Pt>(Pt(5), 3);\n"
+              "  c: mutable = Cell<int>(4); d: mutable = Cell<Pt>(Pt(6));\n"
+              "  io::println(Str(a.get() + a.count() + b.count() + "
+              "c.get() + b.get().x + d.get().x));\n"
+              "  return 0;\n"
+              "}\n");
   EXPECT_TRUE(both.Ok) << both.Diagnostics;
   EXPECT_EQ(both.Diagnostics.find("'get' " + warning), std::string::npos)
       << both.Diagnostics;
@@ -305,10 +305,11 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   EXPECT_EQ(both.Diagnostics.find("'count' never"),
             both.Diagnostics.rfind("'count' never"))
       << both.Diagnostics;
-  auto ints = semaCheck(boxes + "fn main() -> int {\n"
-                                "  a = Box<int>(1, 2); c: mut = Cell<int>(4);\n"
-                                "  return a.get() + c.get() + a.first();\n"
-                                "}\n");
+  auto ints =
+      semaCheck(boxes + "fn main() -> int {\n"
+                        "  a = Box<int>(1, 2); c: mutable = Cell<int>(4);\n"
+                        "  return a.get() + c.get() + a.first();\n"
+                        "}\n");
   EXPECT_TRUE(ints.Ok) << ints.Diagnostics;
   for (const char *quiet : {"'get' ", "'first' "})
     EXPECT_EQ(ints.Diagnostics.find(quiet + warning), std::string::npos)
@@ -405,7 +406,7 @@ TEST(ViewFn, AcrossModules) {
 class Q : base::P { fn get() -> int { return 1; } }
 impl Q { fn __init__() { __super__(); } }
 fn main() -> int {
-  let p: mut base::P = base::P();
+  let p: mutable base::P = base::P();
   p.set(2);
   return p.get();
 })"));
@@ -418,30 +419,30 @@ fn main() -> int {
 // -- `shared fn` (#369): a method that hands on `self`
 //
 // A method borrows its receiver, so it cannot return, pass, store or capture
-// `self`.  A `shared fn`'s `self` is a `shared mut` reference (a `shared view
-// fn`'s a `shared` one), Copyable: the body hands it on, and it is called on
-// a receiver held in that form, or on a temporary nothing else holds.
+// `self`.  A `shared fn`'s `self` is a `shared mutable` reference (a `shared
+// view fn`'s a `shared` one), Copyable: the body hands it on, and it is called
+// on a receiver held in that form, or on a temporary nothing else holds.
 TEST(ViewFn, ASharedFnHandsOnSelf) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  shared fn add(by: int) -> shared mut Counter { self.n = self.n + by; return self; }
+  shared fn add(by: int) -> shared mutable Counter { self.n = self.n + by; return self; }
   shared view fn same() -> shared Counter { return self; }
   shared view fn kept() -> int { let me = self; return look(me) + me.n; }
-  shared fn twice() -> shared mut Counter { return self.add(1).add(1); }
+  shared fn twice() -> shared mutable Counter { return self.add(1).add(1); }
   shared fn later() -> () -> int { return fn() -> int => self.n; }
   shared fn post(b: inout Board) { b.keep(self); }
   view fn value() -> int { return self.n; }
 }
-class Board { last: shared mut Counter?; fn keep(c: shared mut Counter) { self.last = c; } }
+class Board { last: shared mutable Counter?; fn keep(c: shared mutable Counter) { self.last = c; } }
 fn look(c: shared Counter) -> int { return c.n; }
-trait Giver { shared fn give() -> shared mut Counter; }
-impl Giver for Counter { shared fn give() -> shared mut Counter { return self; } }
-class Fast : Counter { shared fn add(by: int) -> shared mut Counter { self.n = self.n + 2 * by; return self; } }
+trait Giver { shared fn give() -> shared mutable Counter; }
+impl Giver for Counter { shared fn give() -> shared mutable Counter { return self; } }
+class Fast : Counter { shared fn add(by: int) -> shared mutable Counter { self.n = self.n + 2 * by; return self; } }
 fn main() -> int {
-  let c: shared mut = Counter(1);
+  let c: shared mutable = Counter(1);
   c.add(2).twice();
   let t = Counter(10).add(5);
-  b: mut = Board(None);
+  b: mutable = Board(None);
   c.post(b);
   let f = c.later();
   let k: shared = Counter(3);
@@ -455,7 +456,7 @@ fn main() -> int {
 TEST(ViewFn, ASharedFnTakesASharedReceiver) {
   auto calls = semaCheck(R"(class Counter {
   n: int;
-  shared fn add() -> shared mut Counter { self.n = self.n + 1; return self; }
+  shared fn add() -> shared mutable Counter { self.n = self.n + 1; return self; }
   shared view fn same() -> shared Counter { return self; }
   fn plain() -> Counter { return self; }
   fn reset() { self.add(); }
@@ -463,38 +464,39 @@ TEST(ViewFn, ASharedFnTakesASharedReceiver) {
   fn keepIt() -> () -> int { return fn() -> int => self.n; }
 }
 fn main() -> int {
-  let u: mut = Counter(1);
+  let u: mutable = Counter(1);
   u.add();
-  let m: shared mut = Counter(2);
+  let m: shared mutable = Counter(2);
   m.same();
   return 0;
 })");
   EXPECT_FALSE(calls.Ok);
-  expectAll(calls,
-            {":5:27: error: cannot copy 'self' (a unique 'mut Counter'); a "
-             "method borrows its receiver (a 'shared fn' hands on a shared "
-             "one)",
-             ":6:16: error: 'add' is a 'shared fn', which takes its receiver "
-             "as a 'shared mut Counter'; 'self' is borrowed in 'reset': make "
-             "it a 'shared fn' too",
-             ":7:34: error: cannot store a 'shared mut Counter' in the result, "
-             "a unique reference: a 'shared mut' reference is stored only as "
-             "'shared mut'",
-             ":8:52: error: cannot capture 'self': a method borrows its "
-             "receiver",
-             ":12:3: error: 'add' is a 'shared fn', which takes its receiver "
-             "as a 'shared mut Counter'; 'u' is a 'mut Counter': declare it "
-             "'shared mut Counter'",
-             ":14:3: error: 'same' is a 'shared view fn', which takes its "
-             "receiver as a 'shared Counter'; 'm' is a 'shared mut Counter': "
-             "declare it 'shared Counter'"});
+  expectAll(
+      calls,
+      {":5:27: error: cannot copy 'self' (a unique 'mutable Counter'); a "
+       "method borrows its receiver (a 'shared fn' hands on a shared "
+       "one)",
+       ":6:16: error: 'add' is a 'shared fn', which takes its receiver "
+       "as a 'shared mutable Counter'; 'self' is borrowed in 'reset': make "
+       "it a 'shared fn' too",
+       ":7:34: error: cannot store a 'shared mutable Counter' in the result, "
+       "a unique reference: a 'shared mutable' reference is stored only as "
+       "'shared mutable'",
+       ":8:52: error: cannot capture 'self': a method borrows its "
+       "receiver",
+       ":12:3: error: 'add' is a 'shared fn', which takes its receiver "
+       "as a 'shared mutable Counter'; 'u' is a 'mutable Counter': declare it "
+       "'shared mutable Counter'",
+       ":14:3: error: 'same' is a 'shared view fn', which takes its "
+       "receiver as a 'shared Counter'; 'm' is a 'shared mutable Counter': "
+       "declare it 'shared Counter'"});
   EXPECT_EQ(calls.ErrorCount, 6u) << calls.Diagnostics;
 
   // Where a `shared fn` cannot be: an initializer, an override of a method
   // that is not one (or the reverse), a struct's method, a free function.
   auto decls = semaCheck(
-      R"(class C { n: int; shared fn give() -> shared mut C { return self; } fn plain() {} }
-class D : C { fn give() -> shared mut C { return C(1); } shared fn plain() {} }
+      R"(class C { n: int; shared fn give() -> shared mutable C { return self; } fn plain() {} }
+class D : C { fn give() -> shared mutable C { return C(1); } shared fn plain() {} }
 impl C { shared fn __init__(n: int) { self.n = n; } }
 struct P { x: int; }
 impl P { shared fn s() {} }
@@ -526,22 +528,22 @@ TEST(ViewFn, SharedFnMarkersAcrossModules) {
   std::filesystem::remove_all(dir);
   writeModule(dir, "counter.pkn",
               "class Counter { n: int;\n"
-              "  shared fn add(by: int) -> shared mut Counter { self.n = "
+              "  shared fn add(by: int) -> shared mutable Counter { self.n = "
               "self.n + by; return self; }\n"
               "  view fn value() -> int { return self.n; } }\n");
   auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import counter;
-class Slow : counter::Counter { fn add(by: int) -> shared mut counter::Counter { return counter::Counter(by); } }
+class Slow : counter::Counter { fn add(by: int) -> shared mutable counter::Counter { return counter::Counter(by); } }
 fn main() -> int {
-  let c: shared mut = counter::Counter(1);
+  let c: shared mutable = counter::Counter(1);
   c.add(2).add(3);
-  let u: mut = counter::Counter(1);
+  let u: mutable = counter::Counter(1);
   u.add(1);
   return c.value();
 })"));
   EXPECT_FALSE(r.Ok);
   expectAll(r, {":2:33: error: override of 'add' must be a 'shared fn'",
                 ":7:3: error: 'add' is a 'shared fn', which takes its receiver "
-                "as a 'shared mut Counter'; 'u' is a 'mut Counter'"});
+                "as a 'shared mutable Counter'; 'u' is a 'mutable Counter'"});
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }

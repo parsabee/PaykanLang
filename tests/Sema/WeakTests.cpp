@@ -3,7 +3,8 @@
 // Sema tests: weak references (docs/language/16-memory.md, "Weak
 // references"): the type of a `weak` declaration, and the places a weak
 // reference cannot be.  A weak reference is a `shared` reference that owns
-// nothing: `weak` names a `shared` object, `weak mut` a `shared mut` one.
+// nothing: `weak` names a `shared` object, `weak mutable` a `shared mutable`
+// one.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -208,8 +209,8 @@ TEST(Weak, LocalMayNameWhatAViewNames) {
 }
 
 // What a `weak` local of a `view` reads is a `view` too: the object is
-// reached through the view, so nothing changes through it (a `weak mut` one
-// of a `shared mut` object neither), and it is never stored, returned or
+// reached through the view, so nothing changes through it (a `weak mutable` one
+// of a `shared mutable` object neither), and it is never stored, returned or
 // captured except as a `view`.  It may be assigned another `view` (the
 // cursor moves on).
 TEST(Weak, LocalOfAViewReadsAsAView) {
@@ -231,7 +232,7 @@ TEST(Weak, LocalOfAViewReadsAsAView) {
         cur: weak = self.head;
         match cur { n: Node { n.v = 9; n.bump(); take(n); } None { } }
       }
-      view fn keep(k: mut Keep) {
+      view fn keep(k: mutable Keep) {
         cur: weak = self.head;
         match cur { n: Node { k.n = n; } None { } }
       }
@@ -241,9 +242,9 @@ TEST(Weak, LocalOfAViewReadsAsAView) {
       }
     }
     class Ring {
-      head: shared mut Node?;
+      head: shared mutable Node?;
       view fn poke() {
-        cur: weak mut = self.head;
+        cur: weak mutable = self.head;
         match cur { n: Node { n.v = 9; n.bump(); } None { } }
       }
     }
@@ -317,7 +318,7 @@ TEST(Weak, IsOtherwiseAnOptional) {
       w = o;
       w = None;
       w = u;
-      h: mut = Holder(None, None);
+      h: mutable = Holder(None, None);
       h.item = w;
       h.peek = x;
       h.peek = h.peek;
@@ -337,7 +338,7 @@ TEST(Weak, IsOtherwiseAnOptional) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   // An element held `shared` is one a destructuring stores in a weak
-  // variable; a unique one or a `shared mut` one is not.
+  // variable; a unique one or a `shared mutable` one is not.
   auto good = semaCheck(R"(
     class Point { x: int; }
     fn pair(p: shared Point) -> (shared Point?, int) { return (p, 2); }
@@ -356,7 +357,7 @@ TEST(Weak, IsOtherwiseAnOptional) {
     fn pair() -> (Point?, int) { return (Point(1), 2); }
     fn main() -> int {
       x: shared Point = Point(1);
-      m: shared mut Point = Point(3);
+      m: shared mutable Point = Point(3);
       w: weak = x;
       n = 0;
       w, n = (Point(2), 1);
@@ -371,7 +372,7 @@ TEST(Weak, IsOtherwiseAnOptional) {
         "variable 'w', a 'weak Point?': a 'weak' reference names a 'shared' "
         "object",
         ":10:7: error: cannot store element 0 of the tuple (a 'Point?')",
-        ":11:7: error: cannot store element 0 of the tuple (a 'shared mut "
+        ":11:7: error: cannot store element 0 of the tuple (a 'shared mutable "
         "Point')"})
     EXPECT_NE(bad.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                           << bad.Diagnostics;

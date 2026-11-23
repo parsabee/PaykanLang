@@ -104,13 +104,13 @@ std::optional<int64_t> ForStmt::constantStep() const {
 const char *Qualifier::spelling() const {
   switch (Form) {
   case QualForm::Unique:
-    return Mut ? "mut" : "";
+    return Mutable ? "mutable" : "";
   case QualForm::Shared:
-    return Mut ? "shared mut" : "shared";
+    return Mutable ? "shared mutable" : "shared";
   case QualForm::AtomicShared:
     return "atomic shared";
   case QualForm::Locked:
-    return Mut ? "locked mut" : "locked";
+    return Mutable ? "locked mutable" : "locked";
   }
   return "";
 }
@@ -578,11 +578,11 @@ Type *ASTCloner::cloneType(Type *ty) {
   }
   if (auto *qt = dyn_cast<QualifiedType>(ty)) {
     Type *inner = qt->getInnerType() ? cloneType(qt->getInnerType()) : nullptr;
-    // `mut T` (or `mut T?`) of a type argument that is a value is that
-    // value: a template's `mut` joins T's own form, as its `T?` does T's
+    // `mutable T` (or `mutable T?`) of a type argument that is a value is that
+    // value: a template's `mutable` joins T's own form, as its `T?` does T's
     // None (docs/design/concurrency.md, "Generics and Copyable"), and a
     // value's storage is rewritten by assignment, so it has no writes to add
-    // (a written `mut int` is still an error).  Only `mut` joins so:
+    // (a written `mutable int` is still an error).  Only `mutable` joins so:
     // `shared` on a value stays an error.
     const Type *written = qt->getInnerType();
     if (const auto *ot = written ? dyn_cast<OptionalType>(written) : nullptr)

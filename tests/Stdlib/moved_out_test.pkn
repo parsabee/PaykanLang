@@ -14,7 +14,7 @@ class Node {
   v: int;
 }
 class H {
-  n: mut Node;
+  n: mutable Node;
 }
 struct P {
   n: Node;
@@ -27,41 +27,41 @@ class Item {
   n: int;
 }
 class Shelf {
-  items: cl::List<shared mut Item>;
-  ends: shared mut Item?[2];
+  items: cl::List<shared mutable Item>;
+  ends: shared mutable Item?[2];
 }
 
-fn drain(q: shared mut Queue) -> int {
+fn drain(q: shared mutable Queue) -> int {
   let t = q.jobs.pop();
   return t.id;
 }
 
-fn swapIn(h: shared mut H) -> int {
+fn swapIn(h: shared mutable H) -> int {
   let o = mem::replace(h.n, Node(2));
   return o.v;
 }
 
-fn replaceField(b: shared mut B) -> int {
+fn replaceField(b: shared mutable B) -> int {
   let x = mem::replace(b.p, P(Node(9), 1));
   return x.n.v;
 }
 
-fn take(h: shared mut H) -> Node {
+fn take(h: shared mutable H) -> Node {
   return mem::replace(h.n, Node(0));
 }
 
-fn through(h: shared mut H, t: (shared mut H) -> Node) -> int {
+fn through(h: shared mutable H, t: (shared mutable H) -> Node) -> int {
   let x = t(h);
   return x.v;
 }
 
-fn stock(i: shared mut Item) -> Shelf {
-  l = cl::List<shared mut Item>();
+fn stock(i: shared mutable Item) -> Shelf {
+  l = cl::List<shared mutable Item>();
   l.push(i);
   return Shelf(move l, [i, None]);
 }
 
-fn shelve(i: shared mut Item, f: (shared mut Item) -> Shelf) -> Shelf {
+fn shelve(i: shared mutable Item, f: (shared mutable Item) -> Shelf) -> Shelf {
   let r = f(i);
   return move r;
 }
@@ -73,27 +73,27 @@ class Q2 {
   items: cl::List<Tags>;
 }
 class O {
-  o: mut Node?;
+  o: mutable Node?;
 }
 
 // What moves into an object or through a by-value parameter has one
 // owner at once: the place it left holds zeros.
-fn store(b: shared mut B, s: P) -> int {
+fn store(b: shared mutable B, s: P) -> int {
   b.p = move s;
   let x = mem::replace(b.p, P(Node(7), 1));
   return x.n.v;
 }
 
-fn drainTags(q: shared mut Q2) -> int {
+fn drainTags(q: shared mutable Q2) -> int {
   let x = q.items.pop();
   return int(x.names.isEmpty());
 }
 
 fn fromLocals() -> int {
-  q: shared mut Q2 = Q2(cl::List<Tags>());
+  q: shared mutable Q2 = Q2(cl::List<Tags>());
   n = cl::List<Str>();
   q.items.push(Tags(move n));
-  b: shared mut B = B(P(Node(1), 0));
+  b: shared mutable B = B(P(Node(1), 0));
   s = P(Node(2), 0);
   let t = (Node(3), 4);
   let u = move t;
@@ -101,7 +101,7 @@ fn fromLocals() -> int {
 }
 
 // A `view` local's hold ends with its last use.
-fn afterAView(h: shared mut H) -> int {
+fn afterAView(h: shared mutable H) -> int {
   l: view Node = h.n;
   let a = l.v;
   let o = mem::replace(h.n, Node(2));
@@ -109,7 +109,7 @@ fn afterAView(h: shared mut H) -> int {
 }
 
 // Nothing bound: the subject is read for its test alone.
-fn noBinding(h: shared mut O) -> int {
+fn noBinding(h: shared mutable O) -> int {
   match h.o {
     Node {
       let t = mem::take(h.o);
@@ -139,7 +139,7 @@ fn makeJob() -> Job? {
 // A binding takes over the match's reference: what the arm moves on has
 // one owner.
 fn fromBindings() -> int {
-  q: shared mut Queue = Queue(cl::List<Job>());
+  q: shared mutable Queue = Queue(cl::List<Job>());
   match makeJob() {
     j: Job { q.jobs.push(move j); }
     None { }
@@ -194,7 +194,7 @@ class Machine {
 }
 
 // An arm that binds nothing lets go of the subject, whatever its siblings do.
-fn step(m: shared mut Machine) -> int {
+fn step(m: shared mutable Machine) -> int {
   match m.s {
     r: Running { return r.j.id; }
     Waiting {
@@ -209,7 +209,7 @@ class InInit {
   k: int;
 }
 impl InInit {
-  fn __init__(h: shared mut H) {
+  fn __init__(h: shared mutable H) {
     v: view Node = h.n;
     let a = v.v;
     let o = mem::replace(h.n, Node(2));
@@ -221,17 +221,17 @@ class Inner {
   count: int;
 }
 class Outer {
-  a: mut Inner;
+  a: mutable Inner;
 }
 
 // An `inout` local's hold ends with its last use, a view computed from a
 // view does not keep it.
 fn holds() -> int {
-  h: shared mut Outer = Outer(Inner(1));
+  h: shared mutable Outer = Outer(Inner(1));
   c: inout = h.a.count;
   c = c + 1;
   let o = mem::replace(h.a, Inner(0));
-  k: shared mut H = H(Node(1));
+  k: shared mutable H = H(Node(1));
   v: view Node = k.n;
   w: view = v.v + 1;
   let p = mem::replace(k.n, Node(2));
@@ -245,7 +245,7 @@ fn nextIndex(i: inout int) -> int {
 
 // The place a swap fills is not evaluated again to check it.
 fn swapOnce() -> int {
-  h: shared mut H = H(Node(1));
+  h: shared mutable H = H(Node(1));
   arr: Node[2] = [Node(10), Node(20)];
   i = 0;
   mem::swap(h.n, arr[nextIndex(i)]);
@@ -253,27 +253,27 @@ fn swapOnce() -> int {
 }
 
 fn lists() -> int {
-  let a: shared mut = cl::LinkedList<shared Job>();
+  let a: shared mutable = cl::LinkedList<shared Job>();
   let s: shared Job = Job(1);
   a.pushBack(s);
   a.pushBack(s);
   let x = a.popFront();
-  let b: shared mut = cl::LinkedList<JobBox>();
+  let b: shared mutable = cl::LinkedList<JobBox>();
   b.pushBack(JobBox(Job(2), 3));
   let d = b.popBack();
-  let c: shared mut = cl::LinkedList<Job?>();
+  let c: shared mutable = cl::LinkedList<Job?>();
   c.pushBack(None);
   c.pushBack(Job(5));
   let e = c.popBack();
   let f = c.popFront();
-  let g: shared mut = cl::LinkedList<io::File>();
+  let g: shared mutable = cl::LinkedList<io::File>();
   g.pushBack(io::stdin());
   let h = g.popFront();
   return x.id + d.k;
 }
 
 fn stepped() -> int {
-  m: shared mut Machine = Machine(State::Waiting(Job(7)));
+  m: shared mutable Machine = Machine(State::Waiting(Job(7)));
   return step(m);
 }
 
@@ -285,27 +285,27 @@ fn main() -> int {
   io::println(Str(holds()));
   io::println(Str(swapOnce()));
   io::println(Str(lists()));
-  q: shared mut Queue = Queue(cl::List<Job>());
+  q: shared mutable Queue = Queue(cl::List<Job>());
   q.jobs.push(Job(7));
   io::println(Str(drain(q)));
 
-  h: shared mut H = H(Node(1));
+  h: shared mutable H = H(Node(1));
   io::println(Str(swapIn(h)));
   io::println(Str(h.n.v));
 
-  b: shared mut B = B(P(Node(3), 2));
+  b: shared mutable B = B(P(Node(3), 2));
   io::println(Str(replaceField(b)));
 
-  t: shared mut H = H(Node(4));
+  t: shared mutable H = H(Node(4));
   io::println(Str(through(t, take)));
 
   // An owned path needs no check, and has its own storage.
-  o: mut H = H(Node(5));
+  o: mutable H = H(Node(5));
   let n = mem::replace(o.n, Node(6));
   io::println(Str(n.v + o.n.v));
 
   // The shared links of a moved value keep their other references.
-  let i: shared mut Item = Item(8);
+  let i: shared mutable Item = Item(8);
   let s = shelve(i, stock);
   io::println(Str(i.n) + " " + Str(s.items.len()));
   io::println(Str(fromLocals()));

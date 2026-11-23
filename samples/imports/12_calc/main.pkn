@@ -126,16 +126,16 @@ fn show(v: float) -> Str {
 }
 
 // Seed the environment with the constants and the `ans` register.
-fn defineConstants(env: shared mut hashmap::HashMap) {
+fn defineConstants(env: shared mutable hashmap::HashMap) {
   env.put("pi", 3.141592653589793);
   env.put("e", 2.718281828459045);
   env.put("ans", 0.0);
 }
 
 // Evaluate one statement line (an assignment or a bare expression) and print.
-fn evalStatement(src: Str, env: shared mut hashmap::HashMap,
+fn evalStatement(src: Str, env: shared mutable hashmap::HashMap,
                  history: inout Ring<(Str, float)>, quiet: bool) {
-  let p: mut = parser::Parser(src.clone(), env);
+  let p: mutable = parser::Parser(src.clone(), env);
   target, value = p.parseStatement();
 
   match p.error {
@@ -232,7 +232,7 @@ fn splitCommand(s: view Str) -> (Str, Str) {
 }
 
 // Run a `:command`. Returns False only for :quit (stop the REPL).
-fn runCommand(s: view Str, env: shared mut hashmap::HashMap,
+fn runCommand(s: view Str, env: shared mutable hashmap::HashMap,
               history: view Ring<(Str, float)>, quiet: bool) -> bool {
   word, arg = splitCommand(s);
 
@@ -278,7 +278,7 @@ fn runCommand(s: view Str, env: shared mut hashmap::HashMap,
 }
 
 // Handle one input line. Returns False only when the user asked to quit.
-fn handle(line: view Str, env: shared mut hashmap::HashMap,
+fn handle(line: view Str, env: shared mutable hashmap::HashMap,
           history: inout Ring<(Str, float)>, quiet: bool) -> bool {
   let s = utils::stripLine(line);
   if s.len() == 0 { return True; }
@@ -290,7 +290,7 @@ fn handle(line: view Str, env: shared mut hashmap::HashMap,
 }
 
 // Read-evaluate-print loop over standard input.
-fn repl(env: shared mut hashmap::HashMap, history: inout Ring<(Str, float)>,
+fn repl(env: shared mutable hashmap::HashMap, history: inout Ring<(Str, float)>,
         quiet: bool) -> int {
   if !quiet {
     io::println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
@@ -324,7 +324,7 @@ fn printHelp() {
 // The scripted session: each line goes through handle(), as if typed at the
 // REPL. It covers expressions, assignment, `ans`, the constants, every
 // command and a few errors, and ends with `a` and `b` defined.
-fn demo(env: shared mut hashmap::HashMap, history: inout Ring<(Str, float)>) {
+fn demo(env: shared mutable hashmap::HashMap, history: inout Ring<(Str, float)>) {
   let script = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
       "(x + y) / 4", "ans * 2", "-x + 10 % 4", "2.5 * 2", ":vars", ":history",
       ":del y", "y + 1", ":del y", "1 / 0", "3 +", "4 4", ":frobnicate",
@@ -389,9 +389,9 @@ fn main(args: view Str[]) -> int {
     i = i + 1;
   }
 
-  let env: shared mut = hashmap::HashMap();
+  let env: shared mutable = hashmap::HashMap();
   defineConstants(env);
-  history: mut = Ring(("", 0.0));
+  history: mutable = Ring(("", 0.0));
   if runDemo { demo(env, history); }
 
   // Batch mode: walk the arguments again and evaluate every expression, in

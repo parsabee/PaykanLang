@@ -30,7 +30,7 @@ class Counter {
   fn __bump(by: int) { self.__count = self.__count + by; }
 }
 impl Counter {
-  static fn make(n: int) -> Counter { c: mut = Counter(0, n); c.__count = 1; c.__bump(1); return c; }
+  static fn make(n: int) -> Counter { c: mutable = Counter(0, n); c.__count = 1; c.__bump(1); return c; }
   fn reset() { self.__count = 0; }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
   shared view fn later() -> (int) -> int { me: weak = self; return fn(d: int) -> int { match me { m: Counter { return m.__count + d; } None { return d; } } }; }
@@ -49,14 +49,14 @@ fn _helper(n: view _Node) -> int { return n.v; }
 class Box<T: Copyable> { __v: T; view fn get() -> T { return self.__v; } fn set(v: T) { self.__v = v; } }
 impl Box<T> { fn __init__(v: T) { self.__v = v; } fn take(o: Box<T>) { self.__v = o.__v; } }
 fn main() -> int {
-  c: mut = Counter::make(3);
+  c: mutable = Counter::make(3);
   c.tick();
-  d: mut = Counter(0, 1);
+  d: mutable = Counter(0, 1);
   d.copyFrom(c);
   p = P::origin();
   p.bump();
   n = _Node(5, None);
-  b: mut = Box(7);
+  b: mutable = Box(7);
   b.set(8);
   s: shared = Counter(4, 1);
   return c.value() + d.value() + c.name().len() + p.x() + _helper(n) + b.get() + s.later()(1);
@@ -187,7 +187,7 @@ impl Box<T> {
   view fn sameAs(o: view Box<int>) -> bool { return o.__v == 1; }
 }
 fn main() -> int {
-  a: mut = Box("s");
+  a: mutable = Box("s");
   b = Box(1);
   if a.sameAs(b) { return a.get().len(); }
   return b.__v;

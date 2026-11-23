@@ -594,7 +594,7 @@ TEST(Class, MatchBindingInScope) {
   auto r = semaCheck(R"(
     class Dog { name: Str; }
     fn main() -> int {
-      x: mut Obj = Dog("");
+      x: mutable Obj = Dog("");
       match x { d: inout Dog { d.name = "Rex"; } _ {} }
       return 0;
     }
@@ -1763,7 +1763,7 @@ TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
       "impl D { fn __init__() { __super__(); } }\n"
       "class Ok {}\n"
       "impl Ok { fn __init__() { } }",
-      "c: mut = C();\nc.y = 4;\nd = D();\nn = d.inherited();\no = Ok();\n"
+      "c: mutable = C();\nc.y = 4;\nd = D();\nn = d.inherited();\no = Ok();\n"
       "return d.get();"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("superclass 'Missing' of class 'C' is not "
@@ -1885,7 +1885,7 @@ class Child { v: int; }
 class Node {
   id: int;
   kid: Child;
-  reg: shared mut Reg;
+  reg: shared mutable Reg;
   fn __deinit__() {
     self.reg.last = self;
     let me = self;
@@ -1897,7 +1897,7 @@ class Node {
     self.id = 3;
   }
   fn touch() { self.id = self.id + 1; }
-  shared fn share() -> shared mut Node { return self; }
+  shared fn share() -> shared mutable Node { return self; }
 }
 fn keep(n: Node) -> int { return n.id; }
 async fn tick() -> int { return 1; }
@@ -1923,13 +1923,14 @@ fn main() -> int {
 )");
   EXPECT_EQ(r.ErrorCount, 15u) << r.Diagnostics;
   for (const char *want :
-       {":8:5: error: cannot copy 'self' (a unique 'mut Node'); a method "
+       {":8:5: error: cannot copy 'self' (a unique 'mutable Node'); a method "
         "borrows its receiver",
         ":9:5: error: cannot copy 'self'", ":10:10: error: cannot copy 'self'",
         ":11:34: error: cannot capture 'self'",
         ":12:13: error: cannot move 'self.kid'",
         ":13:13: error: 'share' is a 'shared fn', which takes its receiver as "
-        "a 'shared mut Node'; 'self' is borrowed in '__deinit__', where the "
+        "a 'shared mutable Node'; 'self' is borrowed in '__deinit__', where "
+        "the "
         "object is being destroyed",
         ":22:19: error: '__deinit__' cannot be 'async': an object is "
         "destroyed where its last reference goes, which waits for no task",
@@ -2012,7 +2013,7 @@ fn under(c: Under) -> Str { return move c.name; }
 fn plain(c: Plain) -> Str { return move c.name; }
 fn held(h: Holder) -> Str { return move h.o.name; }
 fn holder(h: Holder) -> Plain { return move h.p; }
-fn swapped(c: mut Own) -> Str { return mem::replace(c.name, ""); }
+fn swapped(c: mutable Own) -> Str { return mem::replace(c.name, ""); }
 fn main() -> int { return 0; }
 )");
   for (const char *want :
@@ -2325,7 +2326,7 @@ fn main() -> int {
     l: Lock { clear(o); }
     None { }
   }
-  let d: mut = Desk(Lock("b"), 0);
+  let d: mutable = Desk(Lock("b"), 0);
   match d.o {
     l: Lock { d.o = None; }
     None { }
@@ -2388,12 +2389,12 @@ impl Pool { fn reset() { self.s = Session(None, 0); } }
 class Loud { g: Lock; fn __deinit__() { } }
 fn pin(s: inout Session) -> inout Session { return s; }
 fn mkh(s: Str) -> H { return H(Lock(move s), 0); }
-fn mks(s: Str) -> shared mut Session { return Session(Lock(move s), 0); }
+fn mks(s: Str) -> shared mutable Session { return Session(Lock(move s), 0); }
 fn mkl(s: Str) -> Loud { return Loud(Lock(move s)); }
 fn main() -> int {
-  s: mut = Session(Lock("a"), 0);
+  s: mutable = Session(Lock("a"), 0);
   match s.held { l: Lock { s.release(); } None { } }
-  p: mut = Pool(Session(Lock("b"), 0));
+  p: mutable = Pool(Session(Lock("b"), 0));
   match p.s.held { l: Lock { p.reset(); } None { } }
   match pin(s).held { l: Lock { s.held = None; } None { } }
   v: view = mkh("d").o;
@@ -2455,7 +2456,7 @@ fn main() -> int {
   let frozen: atomic shared = mem::Box(io::stdin());
   frozen.get().readln();
   frozen.value().readln();
-  let sh: shared mut = mem::Box(io::stdin());
+  let sh: shared mutable = mem::Box(io::stdin());
   sh.get().readln();
   let n = drain(a) + need(a) + copies(a);
   let t = await send(move a);
@@ -2477,7 +2478,7 @@ fn main() -> int {
         "move-only"})
     EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
                                                            << r.Diagnostics;
-  // Through a `shared mut` box, an `inout` parameter, the bounds it meets
+  // Through a `shared mutable` box, an `inout` parameter, the bounds it meets
   // and a move into a task.
   for (const char *line : {".pkn:7:", ".pkn:9:", ".pkn:21:", ".pkn:22:17:",
                            ".pkn:22:27:", ".pkn:23:"})
@@ -2507,13 +2508,13 @@ fn main() -> int {
 }
 
 // Closing a file is I/O: a `parallel for` body that may destroy a File, the
-// one a `locked mut` cell holds, is refused; one that only reads the cell
+// one a `locked mutable` cell holds, is refused; one that only reads the cell
 // destroys nothing.
 TEST(Deinit, DestroyingAFileIsNotParSafe) {
   auto r = semaCheck(R"(import ::io;
 class Desk { f: io::File?; n: int; }
 fn main() -> int {
-  let cell: locked mut Desk = Desk(None, 0);
+  let cell: locked mutable Desk = Desk(None, 0);
   parallel for i in 0..4 { lock cell as d: inout { d.n = i; } }
   parallel for i in 0..4 { lock cell as d: view { let n = d.n; } }
   return 0;
@@ -2596,7 +2597,7 @@ fn main() -> int { return 0; }
 // Destroying an object runs its `__deinit__`.  An object dies in the code
 // that made it or in what that code hands it to, so making one is a call
 // of its `__deinit__`s in the par-safe check; and so is taking `inout` the
-// contents of a `locked mut` cell, which were made anywhere.
+// contents of a `locked mutable` cell, which were made anywhere.
 TEST(Deinit, IsACallOfTheParSafeCheck) {
   auto r = semaCheck(R"(native fn shout(n: int) = "pk_test_shout";
 class Loud { n: int; fn __deinit__() { shout(self.n); } }
@@ -2616,13 +2617,13 @@ fn held(i: int) -> int { let h = Holder(Loud(i)); return h.l.n; }
 fn clear(s: inout Slot) { s.l = None; }
 fn main() -> int {
   total: atomic int = 0;
-  let cell: locked mut Slot = Slot(Loud(1), Noisy(2));
+  let cell: locked mutable Slot = Slot(Loud(1), Noisy(2));
   parallel for i in 0..4 { let q = Quiet(i); total += q.n + quiet(i); }
   parallel for i in 0..4 { let l = Loud(i); total += l.n; }
   parallel for i in 0..4 { total += loud(i); }
   parallel for i in 0..4 { total += held(i); }
   parallel for i in 0..4 { let b = mk(i); total += b.n; }
-  parallel for i in 0..4 { s: mut = Slot(None, Base(i)); clear(s); }
+  parallel for i in 0..4 { s: mutable = Slot(None, Base(i)); clear(s); }
   parallel for i in 0..4 { lock cell as c: inout { c.b = Base(i); } }
   parallel for i in 0..4 { lock cell as c: view { total += c.b.n; } }
   parallel for i in 0..4 { let g = Guard(i); total += g.n; }

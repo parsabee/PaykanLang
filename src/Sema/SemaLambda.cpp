@@ -158,17 +158,17 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
         !isCopyablePart(ty, qualifierOfVar(name))) {
       const ast::Qualifier q = qualifierOfVar(name);
       noteArchetypeCopy(loc, ty, "to capture it");
-      error(
-          loc,
-          "cannot capture '" + name + "' (a unique '" + qualifiedName(q, ty) +
-              "'): a function captures by copy" +
-              (ast::isRefType(ast::stripOptional(ty))
-                   ? "; declare it '" +
-                         qualifiedName(
-                             ast::Qualifier{ast::QualForm::Shared, q.Mut}, ty) +
-                         "' (and then, to keep no owner, capture a 'weak' "
-                         "local of it)"
-                   : std::string()));
+      error(loc,
+            "cannot capture '" + name + "' (a unique '" + qualifiedName(q, ty) +
+                "'): a function captures by copy" +
+                (ast::isRefType(ast::stripOptional(ty))
+                     ? "; declare it '" +
+                           qualifiedName(
+                               ast::Qualifier{ast::QualForm::Shared, q.Mutable},
+                               ty) +
+                           "' (and then, to keep no owner, capture a 'weak' "
+                           "local of it)"
+                     : std::string()));
       return false;
     }
     // An `atomic` cell's handle is not captured yet.
@@ -186,7 +186,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
       if (outer && !outer->Struct && !outer->ViewMethod && !outer->SharedMethod)
         error(loc, "cannot capture 'self': a method borrows its receiver, "
                    "and a function captures by copy; a 'shared fn' may "
-                   "capture it, or a 'weak' local of it ('me: weak mut = "
+                   "capture it, or a 'weak' local of it ('me: weak mutable = "
                    "self;')");
       if (outer && outer->Struct) {
         error(loc, "'self' is the receiver's storage in a method of struct '" +
@@ -212,7 +212,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
     lc.Node->addCapture(Ctx.intern(name), ty, weak);
     lc.Boundary->declare(name, ty);
     lc.Boundary->Kinds[name] = weak ? VarKind::CapturedWeak : VarKind::Captured;
-    // The capture keeps the variable's form (the prototype): a `mut`
+    // The capture keeps the variable's form (the prototype): a `mutable`
     // object stays writable through it, though the capture itself is a
     // read-only copy.
     if (auto q = owner->Quals.find(name); q != owner->Quals.end())
@@ -336,7 +336,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
       ast::Qualifier q = p.Qual;
       // (a shared form, a template argument\'s, is its own: #368)
       if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
-        q.Mut = true; // the borrow's writes
+        q.Mutable = true; // the borrow's writes
       CurrentScope->Quals[p.getName()] = q;
     }
     CurrentResult = {ast::ParamMode::Value, nullptr, CurrentScope};

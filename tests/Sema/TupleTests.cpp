@@ -426,7 +426,7 @@ TEST(Tuple, AsFieldParamReturnAndArrayElement) {
     }
     fn swap(p: (int, Str)) -> (Str, int) { return (p.1.clone(), p.0); }
     fn main() -> int {
-      h: mut Holder = Holder((1, "a"));
+      h: mutable Holder = Holder((1, "a"));
       q, r = h.get();
       pairs: (int, Str)[2] = [(1, "a"), (2, "b")];
       pairs[1] = h.pair.clone();
@@ -529,7 +529,7 @@ TEST(Tuple, ViewHoldingReferencesCannotBeStored) {
                            "(\"b\", Node())];\n";
   for (const char *stmt :
        {"k = first(refs);", "k: (Str, Node) = first(refs);",
-        "h: mut = H();\nh.t = first(refs);", "s: Str = first(refs).0;"}) {
+        "h: mutable = H();\nh.t = first(refs);", "s: Str = first(refs).0;"}) {
     std::string body = refs;
     body += stmt;
     auto r = semaCheck(decls + wrapMain(body));
@@ -608,7 +608,7 @@ fn take(p: (Pt, (int, Str))) -> int { return p.0.x; }
 import geo;
 fn main() -> int {
   q, r = geo::divmod(7, 2);
-  b: mut geo::Bag = geo::Bag();
+  b: mutable geo::Bag = geo::Bag();
   n, s = b.get();
   ps: (int, Str)[1] = geo::pairs();
   t: (geo::Pt, (int, Str)) = b.nested();

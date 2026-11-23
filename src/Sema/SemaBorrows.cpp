@@ -545,7 +545,7 @@ std::string Sema::reachOf(const ast::Expr *p, bool through, bool &written) {
     const ast::Qualifier q = qualifierOf(p);
     if (q.Form != ast::QualForm::Unique) {
       if (!(q.Form == ast::QualForm::AtomicShared ||
-            (q.Form == ast::QualForm::Shared && !q.Mut)))
+            (q.Form == ast::QualForm::Shared && !q.Mutable)))
         written = true;
       return std::string("through '") + q.form().spelling() + "' reference '" +
              placeText(p) + "'";

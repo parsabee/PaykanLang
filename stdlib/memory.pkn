@@ -198,14 +198,14 @@ native fn swap<T>(a: inout T, b: inout T) = "Paykan_mem_swap";
 
 /// The value of @p slot, which takes @p v in its place.
 fn replace<T>(slot: inout T, v: T) -> T {
-  out: mut T = move v;
+  out: mutable T = move v;
   swap(slot, out);
   return out;
 }
 
 /// The value of @p slot, which becomes None.
 fn take<T>(slot: inout T?) -> T? {
-  out: mut T? = None;
+  out: mutable T? = None;
   swap(slot, out);
   return out;
 }
@@ -213,7 +213,7 @@ fn take<T>(slot: inout T?) -> T? {
 // One value of a ValueType (int, float, bool, char, an enum or a tuple) in
 // an object of its own.  A Box is a unique object: assigning or passing one
 // moves it (`c = move b`).  To share one, declare it `shared` (`b: shared
-// mut = mem::Box(0)`): then every name of it is the same box, and a change
+// mutable = mem::Box(0)`): then every name of it is the same box, and a change
 // through one shows through every other.  get() is the value's storage,
 // which the caller reads, assigns through an `inout` local or passes to an
 // `inout` parameter.

@@ -1,7 +1,7 @@
 // Module: shelf — signatures whose parts carry a qualifier (#368), which an
 // importer reads back from the module's interface: a tuple's element, an
 // array's elements, a function type's parameter and result, and a type
-// argument, the instance `List<shared mut Item>` this module made itself.
+// argument, the instance `List<shared mutable Item>` this module made itself.
 import ::collections as cl;
 
 class Item {
@@ -9,23 +9,23 @@ class Item {
 }
 
 class Shelf {
-  items: cl::List<shared mut Item>;
-  ends: shared mut Item?[2];
+  items: cl::List<shared mutable Item>;
+  ends: shared mutable Item?[2];
 }
 
 // The item's count, and the item itself, the caller's object.
-fn count(i: shared mut Item) -> (int, shared mut Item) {
+fn count(i: shared mutable Item) -> (int, shared mutable Item) {
   return (i.n, i);
 }
 
 // Applies `f` to `i`, handing back what `f` gives.
-fn apply(f: (shared mut Item) -> shared mut Item, i: shared mut Item)
-         -> shared mut Item {
+fn apply(f: (shared mutable Item) -> shared mutable Item,
+         i: shared mutable Item) -> shared mutable Item {
   return f(i);
 }
 
 // The total of the items' counts.
-fn total(xs: view shared mut Item[]) -> int {
+fn total(xs: view shared mutable Item[]) -> int {
   t = 0;
   for k in 0..xs.len() {
     t += xs[k].n;
@@ -34,8 +34,8 @@ fn total(xs: view shared mut Item[]) -> int {
 }
 
 // A shelf holding `i` twice: in its list and at its first end.
-fn stock(i: shared mut Item) -> Shelf {
-  l = cl::List<shared mut Item>();
+fn stock(i: shared mutable Item) -> Shelf {
+  l = cl::List<shared mutable Item>();
   l.push(i);
   return Shelf(move l, [i, None]);
 }

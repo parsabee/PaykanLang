@@ -391,7 +391,7 @@ TEST(Concurrency, BorrowsAcrossAnAwait) {
       n = n + e;
       return await p.bump() + await p.sum() + await q.sum();
     }
-    fn held(h: shared mut Holder) -> int {
+    fn held(h: shared mutable Holder) -> int {
       let t = tick(2);
       return use(h.label, await t);
     }
@@ -399,14 +399,14 @@ TEST(Concurrency, BorrowsAcrossAnAwait) {
       return await h.p.sum() + await h.nm.size();
     }
     fn main() -> int {
-      h: mut = Holder(Pair(1, 2), Named("ab", 3), "lbl");
+      h: mutable = Holder(Pair(1, 2), Named("ab", 3), "lbl");
       let w = await h.work();
       p = Pair(3, 4);
       let g = await p.grow();
       let own = await h.nm.size() + await h.p.bump();
       io::println(Str(w) + " " + Str(g) + " " + Str(viaView(h)) + " " +
                   Str(viaInout(p, Pair(1, 1))) + " " + Str(own));
-      s: shared mut = Holder(Pair(0, 0), Named("n", 0), "shared");
+      s: shared mutable = Holder(Pair(0, 0), Named("n", 0), "shared");
       let f: atomic shared = Holder(Pair(5, 6), Named("xyz", 1), "f");
       io::println(Str(held(s)) + " " + Str(frozen(f)));
       return 0;
@@ -803,7 +803,7 @@ TEST(Concurrency, AtomicHandlesShareACell) {
 TEST(Concurrency, LockedCellIsReachedInLockBlocks) {
   auto r = compileAndRun(R"(import ::io;
     class Counts { hits: int[4]; total: int; }
-    async fn record(counts: locked mut Counts, id: int, n: int) -> int {
+    async fn record(counts: locked mutable Counts, id: int, n: int) -> int {
       for i in 0..n {
         lock counts as c: inout {
           c.hits[(id + i) % 4] += 1;
@@ -813,7 +813,7 @@ TEST(Concurrency, LockedCellIsReachedInLockBlocks) {
       return id;
     }
     fn main() -> int {
-      let counts: locked mut Counts = Counts([0; 4], 0);
+      let counts: locked mutable Counts = Counts([0; 4], 0);
       lock counts as c: inout { c.total = 10; c.hits[1] = 2; }
       lock counts as v: view {
         io::println(Str(v.total) + " " + Str(v.hits[1]));
@@ -866,8 +866,8 @@ TEST(Concurrency, AtomicSharedObjectIsReadByTasks) {
 }
 
 // A unique object stored in an `atomic shared` field is frozen at the
-// store, with what it holds, and one stored in a `locked mut` field becomes
-// a cell there: in `__init__` and in a later assignment through a `mut`
+// store, with what it holds, and one stored in a `locked mutable` field becomes
+// a cell there: in `__init__` and in a later assignment through a `mutable`
 // reference, as in a variable or a parameter.  Tasks read the frozen field
 // and lock the cell; a `lock` block takes the field itself (`lock
 // self.account`, `lock b.account`).  The field stores once kept the object
@@ -882,7 +882,7 @@ TEST(Concurrency, AFieldStoreFreezesOrMakesACell) {
     class Account { balance: int; }
     class Bank {
       catalog: atomic shared Item;
-      account: locked mut Account;
+      account: locked mutable Account;
       view fn deposit(n: int) -> int {
         total = 0;
         lock self.account as a: inout { a.balance += n; total = a.balance; }
@@ -901,12 +901,12 @@ TEST(Concurrency, AFieldStoreFreezesOrMakesACell) {
         None { return c.v; }
       }
     }
-    async fn work(acct: locked mut Account, n: int) -> int {
+    async fn work(acct: locked mutable Account, n: int) -> int {
       for i in 0..n { lock acct as a: inout { a.balance += 1; } }
       return n;
     }
     fn main() -> int {
-      let b: mut = Bank();
+      let b: mutable = Bank();
       let r0 = read(b.catalog);
       let r1 = read(b.catalog);
       let w0 = work(b.account, 500);
@@ -1014,7 +1014,7 @@ TEST(Concurrency, QualifiersAtRunTime) {
     }
     fn describe(n: view Node) -> Str { return n.name + " #" + Str(n.id); }
     fn main() -> int {
-      let s: shared mut Node = Node(2, "s");
+      let s: shared mutable Node = Node(2, "s");
       let t = s;
       t.id = 22;
       s.name = "ss";
@@ -1076,7 +1076,7 @@ TEST(Concurrency, CellsAndFrozenValuesAreFreedByTheirLastHandle) {
     fn bump(c: atomic int) { c += 1; }
     fn same(c: atomic int) -> atomic int { return c; }
     async fn read(c: atomic shared Item) -> int { return c.v; }
-    async fn add(l: locked mut Item, n: int) -> int {
+    async fn add(l: locked mutable Item, n: int) -> int {
       for i in 0..n { lock l as a: inout { a.v += 1; } }
       return n;
     }
@@ -1090,7 +1090,7 @@ TEST(Concurrency, CellsAndFrozenValuesAreFreedByTheirLastHandle) {
       let f: atomic shared Item = Item(1, Item(2, None, "in"), "out");
       let t = read(f);
       let u = read(f);
-      l: locked mut Item = Item(10, None, "cell");
+      l: locked mutable Item = Item(10, None, "cell");
       let w = add(l, 100);
       n = await t + await u + await w;
       lock l as v: view { n += v.v; }
@@ -1147,7 +1147,7 @@ TEST(Concurrency, CompareExchangeWritesTheValueFound) {
       t: atomic bool = True;
       be = False;
       let bno = t.compareExchange(be, False);
-      m: mut B = B(0);
+      m: mutable B = B(0);
       let fieldNo = n.compareExchange(m.e, 1);
       io::println(Str(no) + " " + Str(e) + " " + Str(ok) + " " + Str(n) + " "
           + Str(fno) + " " + Str(fe) + " " + Str(cno) + " " + Str(ce) + " "
@@ -1198,13 +1198,13 @@ TEST(Concurrency, AHoldOfAPartOfAFrozenValueKeepsItAlive) {
     class C { name: Str; opt: K?; }
     class H { cfg: atomic shared C; }
     fn mk() -> atomic shared C { return C("a" + Str(1), K(4)); }
-    fn look(n: view Str, h: shared mut H) -> int {
+    fn look(n: view Str, h: shared mutable H) -> int {
       h.cfg = C("r", None);
       return n.len();
     }
     fn main() -> int {
       io::println(mk().name);
-      let h: shared mut H = H(C("o" + Str(2), None));
+      let h: shared mutable H = H(C("o" + Str(2), None));
       io::println(Str(look(h.cfg.name, h)));
       r: atomic shared C = C("s", K(1));
       match r.opt {
@@ -1223,10 +1223,10 @@ TEST(Concurrency, ALockBlockHoldsItsCell) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class K { v: int; }
-    class C { l: locked mut K; }
-    fn mk() -> locked mut K { return K(7); }
+    class C { l: locked mutable K; }
+    fn mk() -> locked mutable K { return K(7); }
     fn main() -> int {
-      c: locked mut K = K(1);
+      c: locked mutable K = K(1);
       lock c as v: inout {
         c = K(2);
         v.v = 5;
@@ -1250,11 +1250,11 @@ TEST(Concurrency, AnOperationHoldsItsCellWhileLaterOperandsRun) {
     fn rep(o: inout C) -> int { o = C(2); return 0; }
     fn mk() -> atomic int[3] { return [7, 8, 9]; }
     fn main() -> int {
-      o: mut C = C(1);
+      o: mutable C = C(1);
       let x = o.n.exchange(rep(o));
-      p: mut C = C(3);
+      p: mutable C = C(3);
       let y = p.a[rep(p)];
-      q: mut C = C(5);
+      q: mutable C = C(5);
       q.a[0] = rep(q);
       io::println(Str(x) + " " + Str(y) + " " + Str(mk()[1]));
       return 0;
@@ -1359,14 +1359,14 @@ TEST(Concurrency, CompareExchangeHoldsWhatExpectedIsIn) {
   auto r = compileAndRun(R"(import ::io;
     class B { e: int; }
     class W { b: B; c: B?; }
-    fn rep(w: shared mut W) -> int {
+    fn rep(w: shared mutable W) -> int {
       w.b = B(7);
       w.c = B(9);
       return 1;
     }
     fn main() -> int {
       n: atomic int = 5;
-      w: shared mut W = W(B(0), None);
+      w: shared mutable W = W(B(0), None);
       n.compareExchange(w.b.e, rep(w));
       match w.c {
         c: B { io::println(Str(c.e)); }
@@ -1385,7 +1385,7 @@ TEST(Concurrency, AHandleInAHeldReadIsRetainedOnce) {
   auto r = compileAndRun(R"(class C { n: atomic int; }
     fn f(c: atomic int, o: inout C) -> int { return 1; }
     fn main() -> int {
-      o: mut C = C(1);
+      o: mutable C = C(1);
       f(o.n, o);
       p = C(1);
       h: atomic int = (move p).n;

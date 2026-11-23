@@ -208,7 +208,7 @@ TEST(FixedArray, AnElementIsAnInoutPlace) {
       ys: Node?[2] = [Node(5), None];
       match ys[0] { n: inout Node { n = Node(n.v + 10); } None { } }
       match ys[0] { n: Node { io::print(Str(n.v) + " "); } None { } }
-      b: mut = Bag();
+      b: mutable = Bag();
       grow(b.items[0]);
       grow(b.at(2));
       io::println(old + ss[0] + ss[1] + " " + b.items[0] + b.items[2]);
@@ -339,7 +339,7 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
       rename(ns);
       zoo: Animal[2] = [Dog("rex"), Animal("cat")];
       zoo[1] = Dog("fido");
-      k: mut = Kennel(zoo);
+      k: mutable = Kennel(zoo);
       p = k.pair(move ns);
       io::println(zoo[1].speak() + ", " + p[0] + ", " + p[1] + ", " +
               k.pair(["x", "y"])[1]);
@@ -385,7 +385,7 @@ TEST(FixedArray, Fields) {
     fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
     fn clear(ts: inout Str[2]) { ts = ["", ts[0].clone()]; }
     fn main() -> int {
-      g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]);
+      g: mutable = Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]);
       g.set(1, 2, 60);
       g.rename(0, "P" + g.tags[1]);
       io::println(Str(g.at(1, 2)) + " " + g.tags[0] + " " +
@@ -459,7 +459,7 @@ TEST(FixedArray, SliceParameters) {
       ss: Str[2] = ["ab", "c"];
       rename(ss, "zzz");
       io::println(Str(first(ss)) + " " + ss[1] + " " + Str(first(["hello"])));
-      c: mut = Counter(b);
+      c: mutable = Counter(b);
       rename(c.tags, "B" + c.tags[1]);
       grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
       io::println(Str(c.total(a)) + " " + Str(c.total([1])) + " " + c.tags[1] +
@@ -622,7 +622,7 @@ TEST(FixedArray, RepeatLiteralsOfReferences) {
     import ::memory as mem;
     class Node { v: int; }
     impl Node { fn __init__(v: int) { self.v = v; } }
-    struct Ref { n: shared mut Node; }
+    struct Ref { n: shared mutable Node; }
     class Counter {
       n: int;
       fn next() -> int {
@@ -643,7 +643,7 @@ TEST(FixedArray, RepeatLiteralsOfReferences) {
       nodes = [Node(1); 3];
       nodes[0].v = 42;
       io::println(Str(nodes[0].v) + " " + Str(nodes[1].v) + " " + Str(nodes[2].v));
-      k: shared mut = Node(2);
+      k: shared mutable = Node(2);
       refs = [Ref(k); 3];
       refs[0].n.v = 43;
       io::println(Str(refs[1].n.v) + " " + Str(refs[2].n.v) + " " + Str(k.v));
@@ -667,7 +667,7 @@ TEST(FixedArray, RepeatLiteralsOfReferences) {
         n: Node { io::println("node " + Str(n.v)); }
         None { io::println("none"); }
       }
-      c: mut = Counter(0);
+      c: mutable = Counter(0);
       tens = [c.next(); 4];
       io::println(Str(c.n) + " " + Str(tens[0] + tens[3]));
       labels = [c.label(); 3];

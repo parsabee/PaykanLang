@@ -107,7 +107,7 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
       };
     }
     fn main() -> int {
-      c: shared mut = Counter(5);
+      c: shared mutable = Counter(5);
       get = c.make();                  // captures self: the same object
       add = c.adder();
       add(10);
@@ -147,7 +147,7 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
   for (const char *msg :
        {"cannot capture 'self': a method borrows its receiver, and a function "
         "captures by copy; a 'shared fn' may capture it, or a 'weak' local of "
-        "it ('me: weak mut = self;')",
+        "it ('me: weak mutable = self;')",
         "cannot capture 't' (a unique '(Node, Str)'): a function captures by "
         "copy"})
     EXPECT_NE(e.StdErr.find(msg), std::string::npos) << msg << "\n" << e.StdErr;
@@ -260,7 +260,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class O { cb: (int) -> int; n: int; }
-    fn reset(o: shared mut O) -> int {
+    fn reset(o: shared mutable O) -> int {
       o.cb = fn(x: int) -> int { return x * 100; };
       o.n = o.n + 1;
       return o.n;
@@ -271,7 +271,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
     }
     fn main() -> int {
       k = 5;
-      o: shared mut = O(fn(x: int) -> int { return x + k; }, 0);
+      o: shared mutable = O(fn(x: int) -> int { return x + k; }, 0);
       a = o.cb(reset(o));              // the closure held before, with 1
       b = o.cb(1);                     // the replacement
       f = fn(x: int) -> int { return x + k; };
@@ -296,7 +296,7 @@ TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
       f = fn(x: int) -> int { return x + 1; };
       g = f;                           // the same closure
       h = fn(x: int) -> int { return x + 1; };
-      b: mut = Box(f);
+      b: mutable = Box(f);
       b.set(h);
       k = b.get() == h;                // a view of a function value: compared, not stored
       fs: ((int) -> int)[2] = [f, h];
@@ -323,7 +323,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
   // when both are the same, Copyable (copied with its closure shared), a
   // ValueType, and optional with None as no code.  A call through a field
   // keeps its closure while an argument replaces it; the object is `shared
-  // mut`, since a unique one cannot be copied into that argument.
+  // mutable`, since a unique one cannot be copied into that argument.
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     fn square(x: int) -> int { return x * x; }
@@ -337,7 +337,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
     struct Pair { f: (int) -> int; g: ((int) -> int)?; }
     class Holder { cb: ((int) -> int)?; }
     class Runner { run: (int) -> int; }
-    fn clear(x: shared mut Runner) -> int { x.run = square; return 2; }
+    fn clear(x: shared mutable Runner) -> int { x.run = square; return 2; }
     fn main() -> int {
       a = square;
       b = square;
@@ -348,7 +348,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
       q = p;
       io::println(Str(k(3)) + " " + Str(q.f(3)) + " " + Str(p.g == None) + " " +
               Str(q.f == p.f));
-      h: mut = Holder(None);
+      h: mutable = Holder(None);
       e = h.cb == None;
       h.cb = adder(10);
       io::println(Str(e) + " " + Str(h.cb != None));
@@ -359,7 +359,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
       match pick(False) { f: (int) -> int { io::println("some"); } None { io::println("none"); } }
       match pick(True) { _ { io::println("any"); } }
       match pick(True) { f: (int) -> int { io::println(Str(f(4))); } _ { } }
-      run: shared mut = Runner(adder(10));
+      run: shared mutable = Runner(adder(10));
       io::println(Str(run.run(clear(run))) + " " + Str(run.run(2)));
       v = square;
       swapIn(v);
@@ -384,17 +384,18 @@ TEST(FunctionType, FunctionValuesAreValues) {
   auto e = compileAndRun(R"(
     fn square(x: int) -> int { return x * x; }
     class Runner { run: (int) -> int; }
-    fn clear(x: mut Runner) -> int { x.run = square; return 2; }
+    fn clear(x: mutable Runner) -> int { x.run = square; return 2; }
     fn main() -> int {
-      run: mut = Runner(square);
+      run: mutable = Runner(square);
       return run.run(clear(run));
     }
   )");
   EXPECT_FALSE(e.CompileOk);
-  EXPECT_NE(e.StdErr.find("cannot copy 'run' (a unique 'mut Runner'); write "
-                          "'move run' to transfer it, or declare it 'shared "
-                          "mut Runner'"),
-            std::string::npos)
+  EXPECT_NE(
+      e.StdErr.find("cannot copy 'run' (a unique 'mutable Runner'); write "
+                    "'move run' to transfer it, or declare it 'shared "
+                    "mutable Runner'"),
+      std::string::npos)
       << e.StdErr;
 }
 
@@ -429,7 +430,7 @@ fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
   sq = ops::square;                    // an imported function as a value
   t = ops::twice(ops::square);         // a closure made in the other module
-  b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  b: mutable = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
   k: (int) -> int = ops::twice(fn(x: int) -> int { return x + 1; });

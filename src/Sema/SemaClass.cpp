@@ -1022,7 +1022,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       sigMatches = typesEqual(baseParams[i], paramTys[i]);
     // And in the forms a caller sees (#368), as a function type's: a call
     // through the base gives and takes what the override does, so an
-    // override's `-> shared mut Node` of a base's `-> Node` would be a
+    // override's `-> shared mutable Node` of a base's `-> Node` would be a
     // shared object handed out as a new unique one.
     // A borrow's form is a type argument's (a written one is refused): it
     // is what the override takes, exactly.
@@ -1833,7 +1833,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         ast::Qualifier q = p.Qual;
         // (a shared form, a template argument\'s, is its own: #368)
         if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
-          q.Mut = true;
+          q.Mutable = true;
         CurrentScope->Quals[p.getName()] = q;
       }
       declareParamKinds(method);
@@ -3515,7 +3515,7 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
       actual == Ctx.getNoneTy() ||
       (aq && aq->getInnerType() == Ctx.getNoneTy()))
     return true;
-  // `mut T`, `shared T` & co. (the prototype): the form is the slot's, the
+  // `mutable T`, `shared T` & co. (the prototype): the form is the slot's, the
   // type parameter is the plain type.
   // Against a part of the same form (`(shared T) -> int` against a
   // `(shared Node) -> int`, #368), T is the plain type, as the form is the
@@ -3555,7 +3555,7 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
       return true;
     }
     // A value whose unique parts another argument holds `shared` joins its
-    // parts' forms (`replace(t, (0, Node(7)))` with t: `(int, shared mut
+    // parts' forms (`replace(t, (0, Node(7)))` with t: `(int, shared mutable
     // Node)`): its unique references convert into them.
     if (ast::Type *joined = joinPartForms(it->second, actual)) {
       it->second = joined;
@@ -3776,13 +3776,13 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   for (size_t i = 0; i < paramTypes.size(); ++i) {
     // A by-value or `inout` `T` (or `T?`) parameter given a `shared`
     // reference binds T to its form (#368): `twice(s)` with `s: shared Node`
-    // is `twice<shared Node>`, and `mem::replace(m, n)` with `m: shared mut
-    // Node` gives back a `shared mut Node`, never the object as a unique
+    // is `twice<shared Node>`, and `mem::replace(m, n)` with `m: shared mutable
+    // Node` gives back a `shared mutable Node`, never the object as a unique
     // one.  A `view` binds the plain type.
     ast::Type *actual = argTypes[i];
     if (i < argForms.size() && !argForms[i].isUnique() && actual) {
-      // Through a written qualifier too (`x: mut T` given a `shared mut
-      // Node` binds T to it, which `mut` joins); one of the argument's own
+      // Through a written qualifier too (`x: mutable T` given a `shared mutable
+      // Node` binds T to it, which `mutable` joins); one of the argument's own
       // form takes the plain type (unifyTypes).
       ast::Type *p = paramTypes[i];
       if (auto *qt = p ? ast::dyn_cast<ast::QualifiedType>(p) : nullptr;
@@ -3811,7 +3811,7 @@ bool Sema::inferTypeArgs(const std::string &templateName,
       for (auto &[name, ty] : fromResult) {
         auto [it, fresh] = bindings.try_emplace(name, ty);
         // An argument's plain type takes the form the slot gives it
-        // (#368): `res::ok(n)` into a `Result<mut Node>`, `Box(Node(1))`
+        // (#368): `res::ok(n)` into a `Result<mutable Node>`, `Box(Node(1))`
         // into a `Box<shared Node>`; the argument flows into that form.
         if (fresh)
           continue;

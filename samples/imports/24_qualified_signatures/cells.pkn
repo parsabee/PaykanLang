@@ -2,17 +2,17 @@
 // qualifier, which an importer reads back from the module's interface.
 class Cell {
   n: int;
-  next: shared mut Cell?;
-  fn bump()                          { self.n += 1; }
-  shared fn me() -> shared mut Cell? { return self; }
+  next: shared mutable Cell?;
+  fn bump()                              { self.n += 1; }
+  shared fn me() -> shared mutable Cell? { return self; }
 }
 
-fn make(n: int) -> mut Cell {
+fn make(n: int) -> mutable Cell {
   return Cell(n, None);
 }
 
 // Links `a` to `b` and hands `a` back.
-fn link(a: mut Cell, b: shared mut Cell) -> mut Cell {
+fn link(a: mutable Cell, b: shared mutable Cell) -> mutable Cell {
   a.next = b;
   return a;
 }

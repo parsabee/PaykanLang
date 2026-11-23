@@ -132,7 +132,7 @@ void Sema::warnMissingViewFns() {
     for (const MethodUse *m : members) {
       introducedHere |= ownerOf(*m) == family.first;
       changes |= m->ChangesSelf;
-      // A `shared fn` hands on a `shared mut` self, which a `view fn`'s is
+      // A `shared fn` hands on a `shared mutable` self, which a `view fn`'s is
       // not: it is no family to suggest the marker for.
       changes |= m->Decl->isShared();
     }

@@ -331,9 +331,9 @@ size_t ModuleLowering::declareParam(const std::string &name,
   if (mode == ast::ParamMode::View)
     B.markView(local);
   Val value(pir::Operand::value(arg), arg.Ty);
-  // A `mut` string is the function's to change in place: never a literal's
+  // A `mutable` string is the function's to change in place: never a literal's
   // static object, whatever its caller knew of the parameter.
-  if (mode == ast::ParamMode::Value && arg.Ty == Type::Box && qual.Mut &&
+  if (mode == ast::ParamMode::Value && arg.Ty == Type::Box && qual.Mutable &&
       qual.Form == ast::QualForm::Unique &&
       ast::mayBeStringLiteral(astTy, ASTCtx.getStrTy(), ASTCtx.getObjTy()))
     value = callRuntime(names::kPaykanStringOwned, {value}, name + ".str");

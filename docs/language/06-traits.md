@@ -112,7 +112,7 @@ You use a built-in trait every time you print: `io::println` is declared
   [ValueType](#valuetype)).
 - The built-in trait `Copyable` has no methods and is never implemented: a type is
   Copyable by what it holds. A number, `bool`, `char`, a `shared` reference (`shared T` or
-  `shared mut T`) and an `atomic`, `atomic shared` or `locked` handle are, and so are a
+  `shared mutable T`) and an `atomic`, `atomic shared` or `locked` handle are, and so are a
   struct, a tuple, a fixed-size array, an optional and an enum of such parts, and a
   function value (its copies share its closure); a unique reference, a `Str`, a container
   and a task are not. `T: Copyable`
@@ -335,7 +335,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 `Copyable` is a built-in trait with no methods, of the types a program may copy freely
 ([Ownership transfers](16-memory.md#ownership-transfers)). It is structural: a type is
 Copyable by what it holds, and no `impl` block gives it. A number, `bool`, `char`, a
-`shared` reference (`shared T` or `shared mut T`) and an `atomic`, `atomic shared` or
+`shared` reference (`shared T` or `shared mutable T`) and an `atomic`, `atomic shared` or
 `locked` handle are Copyable, and so are a struct, a tuple, a fixed-size array and an
 optional whose every part is (a struct's `shared` field counts), and an enum whose every
 variant's fields are (`enum Color { Red, Green }` is; `enum Shape { Named(s: Str), Empty }`
@@ -358,7 +358,7 @@ class Node {
 }
 
 struct Ref {
-  n: shared mut Node;
+  n: shared mutable Node;
 }
 
 fn twice<T: Copyable>(v: T) -> (T, T) { return (v, v); }
@@ -366,8 +366,8 @@ fn twice<T: Copyable>(v: T) -> (T, T) { return (v, v); }
 fn main() -> int {
   let p = twice(Point(1, 2));
   let n = twice(3);
-  let s: shared mut Node = Node(7);
-  let both = twice(s);                // twice<shared mut Node>: a shared reference
+  let s: shared mutable Node = Node(7);
+  let both = twice(s);                // twice<shared mutable Node>: a shared reference
   let pair = twice(Ref(s));           // a struct of a shared reference is Copyable
   s.id = 8;                           // the one node, seen through every copy
   io::println(Str(p.0.x + p.1.y) + " " + Str(n.0 + n.1));
@@ -411,8 +411,8 @@ Error:
 ```
 
 A qualifier is part of a type argument ([Qualifiers in a
-type](19-concurrency.md#qualifiers-in-a-type)), so `twice(s)` with `s: shared mut Node`
-binds `T` to `shared mut Node`, which is Copyable: its copies are the same node, as the
+type](19-concurrency.md#qualifiers-in-a-type)), so `twice(s)` with `s: shared mutable Node`
+binds `T` to `shared mutable Node`, which is Copyable: its copies are the same node, as the
 copies of `Ref` are. A value that is not Copyable flows into an owning slot only by `move`,
 by `clone()` or to a borrow ([Ownership transfers](16-memory.md#ownership-transfers)).
 A template that copies its `T` without the bound is reported at the template, even if it
@@ -427,9 +427,9 @@ is only ever used with `int`: `'T' is not 'Copyable': declare 'T: Copyable' to c
 trait Cloneable { view fn clone() -> Self; }
 ```
 
-`clone` is a `view fn`, so it is called through every form of a value: a plain or `mut`
+`clone` is a `view fn`, so it is called through every form of a value: a plain or `mutable`
 one, a `shared` one, a frozen `atomic shared` one and a `view`. It returns a new value with
-one owner, which a `mut` variable takes as it takes a temporary (`m: mut = n.clone();`).
+one owner, which a `mutable` variable takes as it takes a temporary (`m: mutable = n.clone();`).
 
 - Every Copyable type is Cloneable: its clone is the copy. So a template bounded by
   `T: Cloneable` takes numbers and `shared` references as well as `Str`: a `T` whose
@@ -468,7 +468,7 @@ impl Cloneable for Tag {}
 class Note {
   text: Str;
   tag: Tag;
-  owner: shared mut Tag;
+  owner: shared mutable Tag;
 }
 
 impl Cloneable for Note {}
@@ -479,8 +479,8 @@ fn main() -> int {
   let s = "text";
   let t = s.clone();                      // a new string: s is still s
   let pair = twoOf((1, "one"));           // a tuple of Cloneable parts
-  let owner: shared mut Tag = Tag("me");
-  let a: mut = Note("a", Tag("todo"), owner);
+  let owner: shared mutable Tag = Tag("me");
+  let a: mutable = Note("a", Tag("todo"), owner);
   let b = a.clone();                      // the derived clone
   a.tag.label = "done";                   // b's tag is its own
   owner.label = "us";                     // b's owner is a's
@@ -551,7 +551,7 @@ exactly when that check finds nothing against it. Like `Copyable` it is structur
 `impl` block gives it:
 
 - a number, `bool`, `char` and a `Str`;
-- a unique object (a `T` or a `mut T`) whose fields, own and inherited, are Sendable;
+- a unique object (a `T` or a `mutable T`) whose fields, own and inherited, are Sendable;
 - a struct, a tuple, a fixed-size array, an optional and an enum whose parts are;
 - an `atomic`, `atomic shared` or `locked` handle, whose contents were checked when it was
   made;
@@ -626,7 +626,7 @@ thread`. A method that sends the type's `T` can instead go in a conditional `imp
 `impl Box<T: Sendable> { ... }`, which only the instances that meet the bound have.
 
 There is no second trait for sharing between threads: threads share an object only frozen
-(`atomic shared`), behind a lock (`locked mut`) or as a single atomic value, and each of
+(`atomic shared`), behind a lock (`locked mutable`) or as a single atomic value, and each of
 those is made by a send.
 
 A type its structure makes Sendable may be tied to the thread that made it, a native handle

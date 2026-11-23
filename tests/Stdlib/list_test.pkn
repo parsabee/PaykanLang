@@ -42,8 +42,8 @@ class Hooked {
 
 // A list of two elements, 1 and 2, the first of which empties the list when
 // its `equals` is called.
-fn emptiedByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
-  xs: shared mut = memory::Box(collections::List<Hooked>());
+fn emptiedByEquals() -> shared mutable memory::Box<collections::List<Hooked>> {
+  xs: shared mutable = memory::Box(collections::List<Hooked>());
   xs.get().push(Hooked(1, fn() -> int { xs.get().clear(); return 0; }));
   xs.get().push(Hooked(2, None));
   return xs;
@@ -52,8 +52,8 @@ fn emptiedByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
 // A list of 1, 2 and 3, whose 2 removes the first element when its `equals`
 // is called.  Its hook holds the box: clear the list when done, or the list
 // holds itself.
-fn shrunkByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
-  xs: shared mut = memory::Box(collections::List<Hooked>());
+fn shrunkByEquals() -> shared mutable memory::Box<collections::List<Hooked>> {
+  xs: shared mutable = memory::Box(collections::List<Hooked>());
   xs.get().push(Hooked(1, None));
   xs.get().push(Hooked(2, fn() -> int { xs.get().removeAt(0); return 0; }));
   xs.get().push(Hooked(3, None));
@@ -62,8 +62,8 @@ fn shrunkByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
 
 // A list of 1, 2 and 3, whose 2 swaps itself with the 3 after it when its
 // `equals` is called.  Its hook holds the box: clear the list when done.
-fn swappedByEquals() -> shared mut memory::Box<collections::List<Hooked>> {
-  xs: shared mut = memory::Box(collections::List<Hooked>());
+fn swappedByEquals() -> shared mutable memory::Box<collections::List<Hooked>> {
+  xs: shared mutable = memory::Box(collections::List<Hooked>());
   xs.get().push(Hooked(1, None));
   xs.get().push(Hooked(2, fn() -> int { xs.get().swap(1, 2); return 0; }));
   xs.get().push(Hooked(3, None));
@@ -131,7 +131,7 @@ fn main() -> int {
   // the first.  100,000 elements take time linear in the text, where putting
   // it together with `+` copied it per element.
   let none = collections::List<int>();
-  let first: mut = collections::listToString(none);
+  let first: mutable = collections::listToString(none);
   let second = collections::listToString(none);
   first.concat("!");
   io::println(first + " " + second);

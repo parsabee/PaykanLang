@@ -1521,7 +1521,7 @@ TEST(ASTInterchange, LocalBorrows) {
                              "a local borrow has an initialiser"},
                         Case{"(var \"n\" _ (int 1) (qual view) (let))",
                              "a local borrow cannot be let"},
-                        Case{"(var \"n\" _ (int 1) (qual mut))",
+                        Case{"(var \"n\" _ (int 1) (qual mutable))",
                              "expected (qual view) or (qual inout)"}}) {
     std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
                       "_ (block (decl " +
@@ -1558,7 +1558,7 @@ TEST(ASTInterchange, MatchArmModes) {
   for (const Case &c :
        {Case{"(type-arm \"\" (named-type \"Dog\") (qual view) (block))",
              "an arm without a binding has no mode"},
-        Case{"(type-arm \"d\" (named-type \"Dog\") (qual mut) (block))",
+        Case{"(type-arm \"d\" (named-type \"Dog\") (qual mutable) (block))",
              "expected (qual view) or (qual inout)"}}) {
     std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
                       "_ (block (match (ident \"a\") " +

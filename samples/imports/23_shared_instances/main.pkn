@@ -26,11 +26,11 @@ fn setsSlot(h: inout Holder)
             -> Str => h.slot.v + Str(h.slot.set("other" + "?"));
 
 fn main() -> int {
-  c: mut = cells::cellOf("old" + "?");
+  c: mutable = cells::cellOf("old" + "?");
   io::println(reads(c));
   io::println(replaces(c));
   io::println(reads(c));
-  h: mut = Holder(cells::slotOf("first" + "."));
+  h: mutable = Holder(cells::slotOf("first" + "."));
   io::println(readsSlot(h));
   io::println(setsSlot(h));
   io::println(readsSlot(h));

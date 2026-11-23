@@ -135,7 +135,7 @@ TEST(Module, MethodReturnsChainedModuleLocalClassOk) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import shapes;
 fn main() -> int {
-  m: mut shapes::Mid = shapes::Mid();
+  m: mutable shapes::Mid = shapes::Mid();
   z: shapes::Zeta = m.alpha().make();
   return z.v;
 }
@@ -222,7 +222,7 @@ TEST(Module, TransitiveTypeFlowsThroughSignaturesOk) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import mid;
 fn main() -> int {
-  w: mut mid::Wrap = mid::Wrap();
+  w: mutable mid::Wrap = mid::Wrap();
   t = w.get();            // leaf's Thing, reached through mid's signature
   u = mid::make();
   m = w.getMode();
@@ -242,7 +242,7 @@ TEST(Module, TransitiveTypeNotNameableThroughMiddleErr) {
   auto main = writeFile(tmp, "main.pkn", R"(
 import mid;
 fn main() -> int {
-  w: mut mid::Wrap = mid::Wrap();
+  w: mutable mid::Wrap = mid::Wrap();
   t: mid::Thing = w.get();   // names are not re-exported
   return t.val();
 }
@@ -280,7 +280,7 @@ TEST(Module, TransitiveTypeIdentityWithDirectImportOk) {
     writeFile(tmp, "mid.pkn", kMidModule);
     auto main = writeFile(tmp, "main.pkn", std::string(order) + R"(
 fn main() -> int {
-  w: mut mid::Wrap = mid::Wrap();
+  w: mutable mid::Wrap = mid::Wrap();
   t: leaf::Thing = w.get();
   m: leaf::Mode = w.getMode();
   n: int = w.put(leaf::Thing(3));
@@ -1322,16 +1322,16 @@ TEST(Module, ALockBlockReadsWhatAnotherModulesFunctionsDo) {
 class Counts { total: int; }
 final class Meter { n: int; view fn read() -> int { return self.n; } }
 class Shape { n: int; view fn area() -> int { return self.n; } }
-struct Gate { c: locked mut Counts; }
+struct Gate { c: locked mutable Counts; }
 impl Gate {
   view fn pass() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
   view fn peek() -> int { return 2; }
 }
-fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
-fn relay(c: locked mut Counts) { bump(c); }
+fn bump(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
+fn relay(c: locked mutable Counts) { bump(c); }
 fn twice(n: int) -> int { return n * 2; }
 fn apply(f: (int) -> int) -> int { return f(1); }
-fn guarded<T>(c: locked mut Counts, x: view T) -> int {
+fn guarded<T>(c: locked mutable Counts, x: view T) -> int {
   r = 0;
   lock c as v: inout { r = twice(v.total); bump(c); }
   return r;
@@ -1339,7 +1339,7 @@ fn guarded<T>(c: locked mut Counts, x: view T) -> int {
 )");
   auto main = writeFile(tmp, "main.pkn", R"(import gates as g;
 fn main() -> int {
-  counts: locked mut g::Counts = g::Counts(0);
+  counts: locked mutable g::Counts = g::Counts(0);
   let gate = g::Gate(g::Counts(1));
   let m = g::Meter(2);
   let s = g::Shape(3);
@@ -1386,12 +1386,12 @@ TEST(Module, ALockBlockStartsAnotherModulesTaskThatWaitsForNothing) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_lock_tasks").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "jobs.pkn", R"(class Counts { total: int; }
-async fn bump(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn bump(c: locked mutable Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn quiet(n: int) -> int { return n + 1; }
 )");
   auto main = writeFile(tmp, "main.pkn", R"(import jobs as j;
 async fn main() -> int {
-  counts: locked mut j::Counts = j::Counts(0);
+  counts: locked mutable j::Counts = j::Counts(0);
   t = j::quiet(0);
   n = await t;
   lock counts as c: inout { t = j::bump(counts); }

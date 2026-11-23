@@ -7,7 +7,7 @@ class Node {
 }
 
 fn main() -> int {
-  o: mut Node? = Node(1);
+  o: mutable Node? = Node(1);
   match o {
     // 'n' reads the value 'o' holds: the path is not owned while it lives.
     n: Node {

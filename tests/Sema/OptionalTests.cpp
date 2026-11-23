@@ -98,12 +98,13 @@ TEST(Optional, OptionalIsNotAnObj) {
                   "fn give(n: Node?) -> Obj { return n; }\n"
                   "fn main() -> int { return 0; }\n",
               msg);
-  expectError(std::string(kNodeClass) +
-                  "class H { o: Obj; }\n"
-                  "impl H { fn __init__() { self.o = \"o\"; } }\n"
-                  "fn main() -> int { h: mut = H(); n: Node? = None; h.o = n; "
-                  "return 0; }\n",
-              msg);
+  expectError(
+      std::string(kNodeClass) +
+          "class H { o: Obj; }\n"
+          "impl H { fn __init__() { self.o = \"o\"; } }\n"
+          "fn main() -> int { h: mutable = H(); n: Node? = None; h.o = n; "
+          "return 0; }\n",
+      msg);
   expectError(withNode("n: Node? = None; xs: Obj[1] = [Node(1)]; xs[0] = n;"),
               "an optional is not an object");
   expectError(withNode("s: Str? = None; t: (Obj, int) = (move s, 1);"),
@@ -617,7 +618,7 @@ TEST(OptionalNone, ObjOptionalIsAnOrdinaryOptional) {
       z = Leaf(2);
       z = "text";
       z = None;
-      b: mut = Box();
+      b: mutable = Box();
       b.any = Node(3);
       b.any = None;
       eq = y == None || z != None || b.any == None || b.w == None;
@@ -650,13 +651,13 @@ TEST(OptionalNone, ObjOptionalIsAnOrdinaryOptional) {
 // into, as a None is.
 TEST(OptionalNone, ConditionalOfNonesTakesTheSlotsType) {
   expectOk(std::string(kNodeClass) + R"(
-    class Kid { key: int; parent: weak Kid?; up: weak mut Kid?; }
+    class Kid { key: int; parent: weak Kid?; up: weak mutable Kid?; }
     fn take(n: Node?) -> bool { return n == None; }
     fn give(c: bool) -> Node? { return if c then None else None; }
     fn main() -> int {
       c = True;
       // A weak field's parameter of a generated `__init__`, and its store.
-      k: mut = Kid(1, if c then None else None, if c then None else None);
+      k: mutable = Kid(1, if c then None else None, if c then None else None);
       k.parent = if c then None else None;
       xs: Node?[3] = [if c then None else None; 3];
       v: int? = if c then None else None;
@@ -790,7 +791,7 @@ TEST(Optional, OptionalFieldAssignedViaMatch) {
   expectOk(std::string(kNodeClass) + R"(
     import ::memory as mem;
     fn main() -> int {
-      a: mut Node = Node(1);
+      a: mutable Node = Node(1);
       b: Node = Node(2);
       a.next = move b;
       a.next = None;
@@ -817,7 +818,7 @@ TEST(Optional, LinkedListTraversal) {
       return total;
     }
     fn main() -> int {
-      a: mut Node = Node(1);
+      a: mutable Node = Node(1);
       b: Node = Node(2);
       a.next = move b;
       return sum(move a);
@@ -878,7 +879,7 @@ TEST(Optional, OptionalEnumTupleAndStructAreAccepted) {
     fn main() -> int {
       c: Color? = None;
       c = Color::Green;
-      p: mut = P();
+      p: mutable = P();
       p.s = S(2);
       t: (int, Str)? = (1, "a");
       match t { v: (int, Str) { n = v.0; } None { } }
@@ -954,7 +955,7 @@ TEST(OptionalModule, ExportedOptionalSignaturesRoundTrip) {
   auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import list;
 fn main() -> int {
-  n: mut list::Node = list::Node(1);
+  n: mutable list::Node = list::Node(1);
   n.link(None);
   n.link(list::Node(2));
   t: list::Node? = n.tail();
@@ -1099,7 +1100,7 @@ TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
       b: (Node?, int) = (None, 1);
       b = (None, 3);
       take((None, "x"));
-      bx: mut = Box();
+      bx: mutable = Box();
       bx.set((None, "y"));
       bx.p = (None, 4);
       ps: (Node?, int)[1] = [(None, 5)];

@@ -15,7 +15,7 @@
 //            and `continue`, and a return from inside a match.  The `weak`
 //            references show when each object dies: where it does without
 //            the pass, when what last held it lets it go.
-// The nodes, the list, the shelf and the bag are `shared` (`shared mut` where
+// The nodes, the list, the shelf and the bag are `shared` (`shared mutable` where
 // a function changes them): a unique reference has one holder, which nothing
 // else can clear while a match reads it, so the hazards are those of shared
 // ones (the bag's own elements are unique, in a shared bag; the shelf's
@@ -64,14 +64,14 @@ fn firstTwo(n: shared Node) -> int {
 }
 
 /// Lets the whole list go: what the caller's match read loses its holder.
-fn clear(l: shared mut List) -> int {
+fn clear(l: shared mutable List) -> int {
   l.head = None;
   return 0;
 }
 
 /// A match on l.head whose arm clears l: the node lives on in the match,
 /// which alone holds it until the match ends.
-fn cleared(l: shared mut List) -> Str {
+fn cleared(l: shared mutable List) -> Str {
   match l.head {
     n: Node {
       let k = clear(l);
@@ -83,7 +83,7 @@ fn cleared(l: shared mut List) -> Str {
 
 /// x.next = x.next.next while a match holds x.next: the node unlinked
 /// lives on in the match.
-fn unlink(x: shared mut Node) -> Str {
+fn unlink(x: shared mutable Node) -> Str {
   match x.next {
     n: Node {
       x.next = n.next;
@@ -113,14 +113,14 @@ class Shelf {
 }
 
 /// Replaces the shelf's first element.
-fn swapIn(s: shared mut Shelf) -> int {
+fn swapIn(s: shared mutable Shelf) -> int {
   s.items[0] = Slot(Node("new", 7, None));
   return 0;
 }
 
 /// A match on an element's node whose arm replaces the element: the old
 /// node lives on in the match.
-fn element(s: shared mut Shelf) -> Str {
+fn element(s: shared mutable Shelf) -> Str {
   match s.items[0].node {
     n: Node {
       let k = swapIn(s);
@@ -131,7 +131,7 @@ fn element(s: shared mut Shelf) -> Str {
 }
 
 /// The name of the shelf's first node.
-fn firstName(s: shared mut Shelf) -> Str {
+fn firstName(s: shared mutable Shelf) -> Str {
   match s.items[0].node {
     n: Node { return n.name.clone(); }
     None { return "none"; }
@@ -143,7 +143,7 @@ class Bag {
 }
 
 /// Empties the bag: each element loses its holder.
-fn empty(b: shared mut Bag) -> int {
+fn empty(b: shared mutable Bag) -> int {
   b.items[0] = None;
   b.items[1] = None;
   return 10;
@@ -152,7 +152,7 @@ fn empty(b: shared mut Bag) -> int {
 /// Iterates over the bag while `empty` empties it: the node the match read
 /// lives on in the match (no weak reference keeps its memory: it is freed
 /// when it dies).
-fn iterate(b: shared mut Bag) -> int {
+fn iterate(b: shared mutable Bag) -> int {
   total = 0;
   for i in 0..2 {
     match b.items[i] {
@@ -221,14 +221,14 @@ fn main() -> int {
 
   let y: shared = Node("y", 2, Node("z", 3, None));
   let wy = Watch(y);
-  let x: shared mut = Node("x", 1, y);
+  let x: shared mutable = Node("x", 1, y);
   io::println("unlinked: " + unlink(x) + " | list: " + names(x) + " | y "
       + state(wy));
 
   // The shelf's elements hold the node, which moves in.
   let old: shared = Node("old", 0, None);
   let wo = Watch(old);
-  let shelf: shared mut = Shelf([Slot(move old), Slot(None)]);
+  let shelf: shared mutable = Shelf([Slot(move old), Slot(None)]);
   io::println("element: " + element(shelf) + " | old " + state(wo) + ", "
       + firstName(shelf));
 

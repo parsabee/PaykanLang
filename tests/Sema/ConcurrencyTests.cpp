@@ -3,7 +3,7 @@
 // Sema tests: the concurrency prototype's checks (docs/design/concurrency.md;
 // src/Sema/SemaConcurrency.cpp and the visitors in Sema.cpp that call it):
 // `async fn` and `await`, the send check, `Copyable`, `parallel for`
-// bodies, `atomic` places and `locked mut` cells.  The programs of
+// bodies, `atomic` places and `locked mutable` cells.  The programs of
 // samples/concurrency are the map; each diagnostic's text is the compiler's.
 
 #include "TestUtils.h"
@@ -227,7 +227,7 @@ fn main() -> int {
   let u = f();
   let b = if True then await u else 2;
   let h: atomic shared = C(1);
-  c: mut = C(2);
+  c: mutable = C(2);
   let v = (if True then h else c).get();
   return 0;
 }
@@ -360,14 +360,14 @@ fn main() -> int {
 
 // What the call of an async method says: an `await` of something else than
 // the call names the call, a unique argument copied is copied into a task,
-// and a `mut` result stays `mut` through the `await`.
+// and a `mutable` result stays `mutable` through the `await`.
 TEST(Concurrency, AsyncMethodCalls) {
   auto r = semaCheck(R"(class Node { v: int; }
 class C {
   n: int;
   async view fn dup() -> C { return C(self.n); }
   async view fn eat(o: Node) -> int { return o.v + self.n; }
-  async view fn made() -> mut Node { return Node(self.n); }
+  async view fn made() -> mutable Node { return Node(self.n); }
 }
 fn main() -> int {
   let u = C(2);
@@ -389,14 +389,14 @@ fn main() -> int {
   expectCleanLines(r, {":13:", ":14:", ":15:"});
 }
 
-// A unique result's `mut` is no part of a task's type: tasks of a `mut Node`
-// and of a `Node` are one type in a variable, a conditional, an override
+// A unique result's `mutable` is no part of a task's type: tasks of a `mutable
+// Node` and of a `Node` are one type in a variable, a conditional, an override
 // and a requirement, and an `await` where the call is written keeps the
-// `mut`.  `hash`, `clone` and `toString` are the compiler's to call only
+// `mutable`.  `hash`, `clone` and `toString` are the compiler's to call only
 // with the parameters it calls them with.
 TEST(Concurrency, ATasksTypeAndTheNamesTheCompilerCalls) {
   auto r = semaCheck(R"(class Node { id: int; }
-async fn fresh(id: int) -> mut Node { return Node(id); }
+async fn fresh(id: int) -> mutable Node { return Node(id); }
 async fn plain(id: int) -> Node { return Node(id); }
 trait AMaker { async view fn amake() -> Node; }
 class Base {
@@ -408,12 +408,12 @@ class Base {
 }
 impl Base { fn __init__(k: int) { self.k = k; } }
 class Der : Base {
-  async view fn amake() -> mut Node { return Node(2); }
+  async view fn amake() -> mutable Node { return Node(2); }
 }
 impl Der { fn __init__() { __super__(0); } }
 class F {
   n: int;
-  async view fn amake() -> mut Node { return Node(4); }
+  async view fn amake() -> mutable Node { return Node(4); }
 }
 impl AMaker for F {}
 fn main() -> int {
@@ -502,7 +502,7 @@ async fn owned(k: int) -> int {
   a = a + e;
   return p.a;
 }
-async fn viaShared(s: shared mut Counter) -> int {
+async fn viaShared(s: shared mutable Counter) -> int {
   x: inout = s.n;
   let r = await tick(x);
   y: inout = s.n;
@@ -513,7 +513,7 @@ async fn viaShared(s: shared mut Counter) -> int {
   w = w + q;
   return r;
 }
-fn param(c: inout Counter, h: shared mut Holder) -> int {
+fn param(c: inout Counter, h: shared mutable Holder) -> int {
   n: inout = c.n;
   let e = await tick(1);
   n = n + e;
@@ -533,11 +533,13 @@ fn main() -> int { return 0; }
        ":8:13: note: 'c' is used after this 'await'",
        ":21:11: error: 'self.c' is reached through 'self'; it cannot be "
        "borrowed 'inout' across an 'await'",
-       ":40:14: error: 's.n' is reached through 'shared mut' reference 's'; "
+       ":40:14: error: 's.n' is reached through 'shared mutable' reference "
+       "'s'; "
        "it cannot be borrowed 'inout' across an 'await'",
-       ":43:14: error: 'z' is reached through 'shared mut' reference 's'; it "
+       ":43:14: error: 'z' is reached through 'shared mutable' reference 's'; "
+       "it "
        "cannot be borrowed 'inout' across an 'await'",
-       ":52:14: error: 'h.p.a' is reached through 'shared mut' reference "
+       ":52:14: error: 'h.p.a' is reached through 'shared mutable' reference "
        "'h'; it cannot be borrowed 'inout' across an 'await'"});
   expectCleanLines(r, {":14:", ":31:", ":38:", ":49:", ":54:"});
 }
@@ -576,7 +578,7 @@ fn frozen(h: atomic shared Holder) -> int {
   return await h.p.sum() + await h.nm.size();
 }
 fn main() -> int {
-  h: mut = Holder(Pair(1, 2), Named("ab", 3));
+  h: mutable = Holder(Pair(1, 2), Named("ab", 3));
   p = Pair(3, 4);
   return await h.nm.size() + await h.p.bump() + await p.grow();
 }
@@ -600,16 +602,16 @@ fn main() -> int {
 // names is where the place is, whatever reference it holds.
 TEST(Concurrency, HowABorrowedPlaceIsReached) {
   auto r = semaCheck(R"(class Counter { n: int; }
-class Holder { c: Counter; d: Counter; sh: shared mut Counter; }
+class Holder { c: Counter; d: Counter; sh: shared mutable Counter; }
 class Outer { h: Holder; }
 impl Outer { fn slot() -> inout Holder { return self.h; } }
-impl Holder { fn get() -> shared mut Counter { return self.sh; } }
+impl Holder { fn get() -> shared mutable Counter { return self.sh; } }
 async fn tick(k: int) -> int { return k; }
 fn pick(a: inout int, b: inout int, first: bool) -> inout int {
   return if first then a else b;
 }
-fn viaResult(c: shared mut Counter) -> int {
-  o: mut = Outer(Holder(Counter(1), Counter(2), c));
+fn viaResult(c: shared mutable Counter) -> int {
+  o: mutable = Outer(Holder(Counter(1), Counter(2), c));
   x: inout = o.slot().sh.n;
   let e = await tick(1);
   x = x + e;
@@ -629,7 +631,7 @@ impl Holder {
     return e;
   }
 }
-fn twoSources(s: shared mut Counter) -> int {
+fn twoSources(s: shared mutable Counter) -> int {
   own = 0;
   p: inout = pick(s.n, own, True);
   q: inout = p;
@@ -637,11 +639,11 @@ fn twoSources(s: shared mut Counter) -> int {
   q = q + e;
   return own;
 }
-fn ownSlots(s: shared mut Counter) -> int {
+fn ownSlots(s: shared mutable Counter) -> int {
   x: inout = s;
   let e = await tick(7);
   x = Counter(e);
-  h: mut = Holder(Counter(1), Counter(2), Counter(3));
+  h: mutable = Holder(Counter(1), Counter(2), Counter(3));
   y: inout = h.sh;
   let f = await tick(9);
   y = Counter(f);
@@ -651,17 +653,17 @@ fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
   expectErrors(
-      r,
-      {":12:14: error: 'o.slot().sh.n' is reached through 'shared mut' "
-       "reference 'o.slot().sh'; it cannot be borrowed 'inout' across an "
-       "'await'",
-       ":19:16: error: 'self.get().n' is reached through 'shared mut' "
-       "reference 'self.get()'; it cannot be borrowed 'inout' across an "
-       "'await'",
-       ":25:16: error: '(if ... then self.c else self.d).n' is reached "
-       "through 'self'; it cannot be borrowed 'inout' across an 'await'",
-       ":34:14: error: 'p' is reached through 'shared mut' reference 's'; it "
-       "cannot be borrowed 'inout' across an 'await'"});
+      r, {":12:14: error: 'o.slot().sh.n' is reached through 'shared mutable' "
+          "reference 'o.slot().sh'; it cannot be borrowed 'inout' across an "
+          "'await'",
+          ":19:16: error: 'self.get().n' is reached through 'shared mutable' "
+          "reference 'self.get()'; it cannot be borrowed 'inout' across an "
+          "'await'",
+          ":25:16: error: '(if ... then self.c else self.d).n' is reached "
+          "through 'self'; it cannot be borrowed 'inout' across an 'await'",
+          ":34:14: error: 'p' is reached through 'shared mutable' reference "
+          "'s'; it "
+          "cannot be borrowed 'inout' across an 'await'"});
   expectCleanLines(r, {":41:", ":45:"});
 }
 
@@ -742,15 +744,16 @@ fn frozen(f: atomic shared Holder) -> int { return await f.nm.size(); }
 fn both(f: atomic shared Holder, g: shared Holder) -> int {
   return await pick(f.nm, g.nm, False).size();
 }
-fn one(f: atomic shared Holder, s: shared mut Holder) -> int {
+fn one(f: atomic shared Holder, s: shared mutable Holder) -> int {
   return await pick(f.nm, s.nm, False).size();
 }
 fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
-  expectErrors(r, {":16:16: error: 'pick(...)' is reached through 'shared "
-                   "mut' reference 's' and is not Copyable; it cannot be lent "
-                   "to an awaited call: another task may change it there"});
+  expectErrors(r,
+               {":16:16: error: 'pick(...)' is reached through 'shared "
+                "mutable' reference 's' and is not Copyable; it cannot be lent "
+                "to an awaited call: another task may change it there"});
   expectCleanLines(r, {":4:", ":10:", ":11:", ":13:"});
 }
 
@@ -936,11 +939,11 @@ fn viaViewLocal() -> int {
   v: view = n;
   return await v.size();
 }
-fn notOwned(h: shared mut Holder) -> int {
+fn notOwned(h: shared mutable Holder) -> int {
   v: view = h.nm;
   return await v.size();
 }
-fn notOwnedArm(h: shared mut Holder) -> int {
+fn notOwnedArm(h: shared mutable Holder) -> int {
   match h.on {
     n: Named { return await n.size(); }
     None { return 0; }
@@ -950,10 +953,10 @@ fn notOwnedArm(h: shared mut Holder) -> int {
 fn main() -> int { return viaMatch() + viaViewLocal(); }
 )");
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
-  expectErrors(r, {":21:16: error: 'v' is reached through 'shared mut' "
+  expectErrors(r, {":21:16: error: 'v' is reached through 'shared mutable' "
                    "reference 'h' and is not Copyable; it cannot be lent to "
                    "an awaited call",
-                   ":25:29: error: 'n' is reached through 'shared mut' "
+                   ":25:29: error: 'n' is reached through 'shared mutable' "
                    "reference 'h' and is not Copyable"});
   expectCleanLines(r, {":9:", ":17:"});
 }
@@ -1040,7 +1043,7 @@ fn main() -> int {
 
 // What crosses: a moved unique reference, a temporary (`move` before one
 // does nothing), a class whose reference field is a handle, a cell's
-// handle and the handles of an `atomic shared` object and a `locked mut`
+// handle and the handles of an `atomic shared` object and a `locked mutable`
 // cell, each copied into any number of tasks, and a `Str` temporary.
 TEST(Concurrency, HandlesAndTemporariesCrossToATask) {
   auto r = semaCheck(R"(class Cache { hits: atomic int; }
@@ -1051,7 +1054,7 @@ async fn consume(n: Node) -> int { return n.id; }
 async fn run(j: Job, x: int) -> int { j.cache.hits += 1; return j.name.len() + x; }
 async fn cell(c: atomic int) -> int { return c; }
 async fn frozen(n: atomic shared Node) -> int { return n.id; }
-async fn guarded(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn guarded(c: locked mutable Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn opt(n: Node?) -> int { return 1; }
 async fn name(s: Str) -> int { return s.len(); }
 fn main() -> int {
@@ -1067,7 +1070,7 @@ fn main() -> int {
   let fr: atomic shared Node = Node(5);
   let t7 = frozen(fr);
   let t8 = frozen(fr);
-  let lk: locked mut Counts = Counts(0);
+  let lk: locked mutable Counts = Counts(0);
   let t9 = guarded(lk);
   let t10 = guarded(lk);
   let o = Node(6);
@@ -1082,10 +1085,10 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
-// At a conversion to `atomic shared` or `locked mut`, the object is frozen
+// At a conversion to `atomic shared` or `locked mutable`, the object is frozen
 // or made a cell with everything it holds, so the send check runs on its
 // fields, named by path.  A unique value converts, moved or a temporary,
-// `mut` or not.
+// `mutable` or not.
 TEST(Concurrency, SendCheckAtAConversionToAtomicSharedOrLocked) {
   auto r = semaCheck(R"(class Cache { hits: int; }
 class Job { name: Str; cache: shared Cache; }
@@ -1095,14 +1098,14 @@ class Any { o: Obj; }
 class Node { id: int; }
 fn main() -> int {
   let k: atomic shared Holder = Holder(Job("k", Cache(2)));
-  let l: locked mut Holder = Holder(Job("l", Cache(3)));
-  let m: locked mut Fun = Fun(fn() => 1);
+  let l: locked mutable Holder = Holder(Job("l", Cache(3)));
+  let m: locked mutable Fun = Fun(fn() => 1);
   let a: atomic shared Any = Any(Node(0));
   let n = Node(1);
   let f: atomic shared Node = move n;
-  let g: locked mut Node = Node(2);
+  let g: locked mutable Node = Node(2);
   let h: atomic shared Node = Node(3);
-  let c: mut Node = Node(4);
+  let c: mutable Node = Node(4);
   let v: atomic shared Node = move c;
   return f.id + h.id + v.id;
 })");
@@ -1116,10 +1119,11 @@ fn main() -> int {
         "shared': " +
         shared)
            .c_str(),
-       (":9:3: error: cannot make 'Holder(...)' (a 'Holder') 'locked mut': " +
+       (":9:3: error: cannot make 'Holder(...)' (a 'Holder') 'locked "
+        "mutable': " +
         shared)
            .c_str(),
-       ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked mut': field "
+       ":10:3: error: cannot make 'Fun(...)' (a 'Fun') 'locked mutable': field "
        "'f' is a function value, whose captures are not known",
        ":11:3: error: cannot make 'Any(...)' (an 'Any') 'atomic shared': field "
        "'o' is an 'Obj', which may be any class"});
@@ -1189,7 +1193,7 @@ fn main() -> int {
 // -- `parallel for`
 
 // A body reads the enclosing function's values, arrays of values, `atomic`
-// variables and handles (an `atomic shared` object's fields, a `locked mut`
+// variables and handles (an `atomic shared` object's fields, a `locked mutable`
 // cell under a `lock`), declares what it likes, changes an outer number by
 // a reduction (`+=`, `-=`, `*=`, under an `if`, a `match` or an inner loop
 // too), bumps an atomic, and writes an `inout` or outer array at the loop's
@@ -1217,7 +1221,7 @@ fn main() -> int {
   ys = [0.0; 100];
   hits: atomic int = 0;
   let cfg: atomic shared Config = Config(0, 50);
-  let counts: locked mut Counts = Counts(0);
+  let counts: locked mutable Counts = Counts(0);
   let st: atomic shared Stats = Stats(0);
   total = 0;
   prod = 1;
@@ -1620,7 +1624,7 @@ fn twice(x) => x + x;
 fn main() -> int {
   s = 0;
   parallel for i in 0..4 { s += sq(i) + same(i); }
-  let c: locked mut = C(0);
+  let c: locked mutable = C(0);
   parallel for i in 0..2 {
     lock c as v: inout {
       v.x = twice(1);
@@ -2071,7 +2075,7 @@ fn main() -> int {
                 ":9:3: error: 'atomic' holds a number, a 'bool', a 'char' or a "
                 "fixed array of them, "
                 "not 'Str': an object crosses threads as 'atomic shared "
-                "Str' (frozen) or 'locked mut Str'",
+                "Str' (frozen) or 'locked mutable Str'",
                 (":11:3" + bnReads).c_str(), (":12:3" + bnReads).c_str(),
                 (":13:3" + bnReads).c_str(), (":14:3" + hitsReads).c_str(),
                 (":15:3" + hitsReads).c_str(), (":16:3" + hitsReads).c_str(),
@@ -2126,27 +2130,27 @@ fn main() -> int {
 
 // -- `locked`
 
-// A `locked mut` cell is made where a unique object flows into a `locked
-// mut` slot (a variable, a parameter, a field, a result); its handle copies
+// A `locked mutable` cell is made where a unique object flows into a `locked
+// mutable` slot (a variable, a parameter, a field, a result); its handle copies
 // into tasks, variables and parallel bodies, and its contents are reached
 // in a `lock` block: `inout` to change them, `view` to read.
 TEST(Concurrency, LockedCells) {
   auto r = semaCheck(R"(class Counts { hits: int[16]; total: int; }
-class Holder { cell: locked mut Counts; }
-async fn record(counts: locked mut Counts, id: int, n: int) -> int {
+class Holder { cell: locked mutable Counts; }
+async fn record(counts: locked mutable Counts, id: int, n: int) -> int {
   for i in 0..n {
     lock counts as c: inout { c.hits[(id + i) % 16] += 1; c.total += 1; }
   }
   return id;
 }
-fn total(counts: locked mut Counts) -> int {
+fn total(counts: locked mutable Counts) -> int {
   sum = 0;
   lock counts as v: view { for i in 0..16 { sum += v.hits[i]; } sum += v.total; }
   return sum;
 }
-fn make() -> locked mut Counts { return Counts([0; 16], 0); }
+fn make() -> locked mutable Counts { return Counts([0; 16], 0); }
 fn main() -> int {
-  let counts: locked mut Counts = Counts([0; 16], 0);
+  let counts: locked mutable Counts = Counts([0; 16], 0);
   let a = record(counts, 1, 10);
   let b = record(counts, 2, 10);
   let ids = await a + await b;
@@ -2165,7 +2169,7 @@ fn main() -> int {
 // borrow of the cell by a `view` or `inout` parameter, the handle in a
 // unique slot; inside a `lock` block, a write through a `view` binding,
 // `await`, another `lock`, a `parallel for`, `return`, `break` and
-// `continue`; a `lock` of what is not `locked`; and a `locked mut` value
+// `continue`; a `lock` of what is not `locked`; and a `locked mutable` value
 // (the prototype locks objects).
 TEST(Concurrency, LockedRules) {
   auto r = semaCheck(R"(class Counts { hits: int[16]; total: int; }
@@ -2174,7 +2178,7 @@ fn look(c: view Counts) -> int { return c.total; }
 fn change(c: inout Counts) { c.total = 1; }
 fn take(c: Counts) -> int { return c.total; }
 fn main() -> int {
-  let counts: locked mut Counts = Counts([0; 16], 0);
+  let counts: locked mutable Counts = Counts([0; 16], 0);
   let t = counts.total;
   let h = counts.hits[0];
   counts.total += 1;
@@ -2195,7 +2199,7 @@ fn main() -> int {
   for i in 0..2 { lock counts as c: inout { continue; } }
   let n = 3;
   lock n as m: inout { }
-  let k: locked mut int = 1;
+  let k: locked mutable int = 1;
   let o = Counts([0; 16], 0);
   lock o as m: inout { }
   return 0;
@@ -2211,37 +2215,38 @@ fn main() -> int {
       "' is not 'locked': a 'lock' block takes a 'locked' variable, field or "
       "parameter";
   expectErrors(
-      r, {(":8:11" + reach).c_str(), (":9:11" + reach).c_str(),
-          (":10:3" + reach).c_str(), (":11:3" + reach).c_str(),
-          (":12:8" + borrowed + "view' parameter 'c' of 'look'").c_str(),
-          (":13:10" + borrowed + "inout' parameter 'c' of 'change'").c_str(),
-          ":14:8: error: cannot store a 'locked mut Counts' in parameter 1 of "
-          "'take', a unique reference: a 'locked mut' cell is stored only "
-          "as 'locked mut'",
-          ":16:5: error: 'c' is a 'view' local; cannot assign to its field "
-          "'total'",
-          ":17:5: error: 'c' is a 'view' local; cannot assign to its elements",
-          ":19:13: error: 'await' cannot be used in a 'lock' block: the task "
-          "would wait while it holds the lock",
-          ":20:5: error: a 'lock' block cannot hold another 'lock'",
-          ":21:14: error: a 'parallel for' cannot run in a 'lock' block",
-          ":22:5: error: 'return' cannot leave a 'lock' block",
-          ":24:45: error: 'break' cannot leave a 'lock' block",
-          ":25:45: error: 'continue' cannot leave a 'lock' block",
-          (":27:8: error: 'n" + notLocked).c_str(),
-          ":28:3: error: 'locked mut' holds an object for now, not 'int': "
-          "wrap the value in a class",
-          (":30:8: error: 'o" + notLocked).c_str()});
+      r,
+      {(":8:11" + reach).c_str(), (":9:11" + reach).c_str(),
+       (":10:3" + reach).c_str(), (":11:3" + reach).c_str(),
+       (":12:8" + borrowed + "view' parameter 'c' of 'look'").c_str(),
+       (":13:10" + borrowed + "inout' parameter 'c' of 'change'").c_str(),
+       ":14:8: error: cannot store a 'locked mutable Counts' in parameter 1 of "
+       "'take', a unique reference: a 'locked mutable' cell is stored only "
+       "as 'locked mutable'",
+       ":16:5: error: 'c' is a 'view' local; cannot assign to its field "
+       "'total'",
+       ":17:5: error: 'c' is a 'view' local; cannot assign to its elements",
+       ":19:13: error: 'await' cannot be used in a 'lock' block: the task "
+       "would wait while it holds the lock",
+       ":20:5: error: a 'lock' block cannot hold another 'lock'",
+       ":21:14: error: a 'parallel for' cannot run in a 'lock' block",
+       ":22:5: error: 'return' cannot leave a 'lock' block",
+       ":24:45: error: 'break' cannot leave a 'lock' block",
+       ":25:45: error: 'continue' cannot leave a 'lock' block",
+       (":27:8: error: 'n" + notLocked).c_str(),
+       ":28:3: error: 'locked mutable' holds an object for now, not 'int': "
+       "wrap the value in a class",
+       (":30:8: error: 'o" + notLocked).c_str()});
 }
 
-// The lock buys the writes: `locked T` without `mut` locks an object
+// The lock buys the writes: `locked T` without `mutable` locks an object
 // nothing writes, which `atomic shared T` gives with no lock, so each
 // declaration of one (a variable, a field, a parameter, a result) is a
 // warning, not an error.  Its contents are still read in a `lock ... as v:
 // view` block; a `lock ... as v: inout` block, or a write outside any
-// block, is refused, naming the `locked mut T` to declare; and the two
+// block, is refused, naming the `locked mutable T` to declare; and the two
 // forms of cell convert into neither.
-TEST(Concurrency, ALockedCellWithoutMutWarns) {
+TEST(Concurrency, ALockedCellWithoutMutableWarns) {
   auto r = semaCheck(R"(class Counts { hits: int[16]; total: int; }
 class Holder { cell: locked Counts; }
 fn read(c: locked Counts) -> int { n = 0; lock c as v: view { n = v.total; } return n; }
@@ -2254,9 +2259,9 @@ fn main() -> int {
   lock h.cell as c: inout { c.total = 1; }
   let other = counts;
   lock other as c: inout { }
-  let m: locked mut Counts = Counts([0; 16], 0);
+  let m: locked mutable Counts = Counts([0; 16], 0);
   let k: locked Counts = m;
-  let j: locked mut Counts = counts;
+  let j: locked mutable Counts = counts;
   return read(counts) + read(h.cell);
 })");
   EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
@@ -2271,28 +2276,29 @@ fn main() -> int {
   EXPECT_EQ(countWarnings(r), 5u) << r.Diagnostics;
   const std::string never =
       "' is 'locked Counts', whose contents are never written; declare it "
-      "'locked mut Counts' ";
+      "'locked mutable Counts' ";
   expectErrors(
-      r, {(":7:18: error: 'counts" + never +
-           "for a 'lock ... as c: inout' "
-           "block")
-              .c_str(),
-          (std::string(":8:3: error: 'counts' is 'locked': reach its contents "
-                       "in 'lock counts as c: view { }' (or 'inout')"))
-              .c_str(),
-          (":10:18: error: 'h.cell" + never +
-           "for a 'lock ... as c: inout' "
-           "block")
-              .c_str(),
-          (":12:17: error: 'other" + never +
-           "for a 'lock ... as c: inout' "
-           "block")
-              .c_str(),
-          ":14:3: error: cannot store a 'locked mut Counts' in variable 'k', "
-          "a 'locked' cell: a 'locked mut' cell is stored only as 'locked "
-          "mut'",
-          ":15:3: error: cannot store a 'locked Counts' in variable 'j', a "
-          "'locked mut' cell: a 'locked' cell is stored only as 'locked'"});
+      r,
+      {(":7:18: error: 'counts" + never +
+        "for a 'lock ... as c: inout' "
+        "block")
+           .c_str(),
+       (std::string(":8:3: error: 'counts' is 'locked': reach its contents "
+                    "in 'lock counts as c: view { }' (or 'inout')"))
+           .c_str(),
+       (":10:18: error: 'h.cell" + never +
+        "for a 'lock ... as c: inout' "
+        "block")
+           .c_str(),
+       (":12:17: error: 'other" + never +
+        "for a 'lock ... as c: inout' "
+        "block")
+           .c_str(),
+       ":14:3: error: cannot store a 'locked mutable Counts' in variable 'k', "
+       "a 'locked' cell: a 'locked mutable' cell is stored only as 'locked "
+       "mutable'",
+       ":15:3: error: cannot store a 'locked Counts' in variable 'j', a "
+       "'locked mutable' cell: a 'locked' cell is stored only as 'locked'"});
   expectCleanLines(r, {":16:"});
 }
 
@@ -2441,21 +2447,22 @@ TEST(Concurrency, AFieldIsNotMovedOutThroughAHandle) {
   auto r = semaCheck(R"(
 class N { v: int; }
 class H { n: N; }
-fn f(h: shared mut H) -> N { return move h.n; }
+fn f(h: shared mutable H) -> N { return move h.n; }
 fn main() -> int { return 0; }
 )");
-  expectErrors(r, {":4:37: error: cannot move 'h.n': 'h' is a 'shared mut H', "
-                   "which other references reach; write 'mem::replace(h.n, "
-                   "v)'"});
+  expectErrors(r,
+               {":4:41: error: cannot move 'h.n': 'h' is a 'shared mutable H', "
+                "which other references reach; write 'mem::replace(h.n, "
+                "v)'"});
 }
 
 TEST(Concurrency, APartOfAConditionalIsAPartOfItsBranches) {
   auto r = semaCheck(R"(
 class N { v: int; }
-class W { c: mut N; }
+class W { c: mutable N; }
 impl N { shared view fn share() -> shared N { return self; } }
 fn f(w: inout W) -> inout W { return w; }
-fn copied(a: mut W, b: mut W, p: bool) -> int {
+fn copied(a: mutable W, b: mutable W, p: bool) -> int {
   s = (if p then a else b).c;
   return s.v;
 }
@@ -2463,7 +2470,7 @@ fn fromInout(a: inout W, b: inout W, p: bool) -> int {
   let s = (if p then f(a) else f(b)).c;
   return s.v;
 }
-fn shared1(a: mut W, b: mut W, p: bool) -> int {
+fn shared1(a: mutable W, b: mutable W, p: bool) -> int {
   let s = (if p then a else b).c.share();
   return s.v;
 }
@@ -2521,7 +2528,7 @@ class N { v: int; }
 class K { v: int; }
 impl K { fn t(a: inout N) -> N { return N(1); } }
 fn main() -> int {
-  k: mut K = K(1);
+  k: mutable K = K(1);
   a: N[1] = [N(1)];
   let x = k.t(a[0], 1);
   return 0;
@@ -2534,17 +2541,17 @@ TEST(Concurrency, APartPastATemporaryHandleIsAPlace) {
   auto r = semaCheck(R"(
 class N { v: int; }
 impl N { shared view fn me() -> shared N { return self; } }
-class H { n: mut N; }
+class H { n: mutable N; }
 struct P { n: N; }
 class B { p: P; }
-fn id(h: shared mut H) -> shared mut H { return h; }
+fn id(h: shared mutable H) -> shared mutable H { return h; }
 fn same(b: shared B) -> shared B { return b; }
 fn f(x: P) -> int { return x.n.v; }
-fn copied(h: shared mut H) -> int {
-  x: mut N = id(h).n;
+fn copied(h: shared mutable H) -> int {
+  x: mutable N = id(h).n;
   return x.v;
 }
-fn shared1(h: shared mut H) -> int {
+fn shared1(h: shared mutable H) -> int {
   let s = id(h).n.me();
   return s.v;
 }
@@ -2558,10 +2565,10 @@ fn main() -> int { return 0; }
 TEST(Concurrency, AUniqueTemporarysPartIsNoPlace) {
   auto r = semaCheck(R"(
 class N { v: int; }
-class H { n: mut N; }
+class H { n: mutable N; }
 fn mk() -> H { return H(N(1)); }
 fn g() -> int {
-  x: mut N = mk().n;
+  x: mutable N = mk().n;
   return x.v;
 }
 fn main() -> int { return 0; }
@@ -2623,7 +2630,7 @@ fn main() -> int {
   let n = seen.exchange(True);
   return 0;
 }
-fn f(c: mut C) { c.a = [True; 4]; }
+fn f(c: mutable C) { c.a = [True; 4]; }
 )");
   expectErrors(
       r,
@@ -2637,7 +2644,7 @@ fn f(c: mut C) { c.a = [True; 4]; }
        "no handle to share",
        ":11:11: error: 'atomic bool[4]' has no method 'exchange': an array "
        "is used by element",
-       ":14:18: error: 'c.a' is an 'atomic bool[4]': it is written by "
+       ":14:22: error: 'c.a' is an 'atomic bool[4]': it is written by "
        "element"});
 }
 
@@ -2663,7 +2670,7 @@ fn main() -> int {
   let b = n.compareExchange(1 + 1, 2);
   let k = 1;
   let c = n.compareExchange(k, 2);
-  m: mut B = B(1);
+  m: mutable B = B(1);
   let d = n.compareExchange(m.e, 2);
   e = 1;
   let f = n.compareExchange(e, 2);
@@ -2681,21 +2688,21 @@ fn main() -> int {
 
 TEST(Concurrency, ACellsContentsAreNotBorrowedOrReadPastIt) {
   auto r = semaCheck(R"(class N { v: int; }
-class A { inner: locked mut N; }
-class W { c: locked mut N; }
-fn nested(a: locked mut A) -> int {
+class A { inner: locked mutable N; }
+class W { c: locked mutable N; }
+fn nested(a: locked mutable A) -> int {
   x = 0;
   lock a.inner as v: view { x = v.v; }
   return x;
 }
-fn viewOf(l: locked mut N) -> int { v: view N = l; return v.v; }
-fn inoutOf(l: locked mut N) -> int { v: inout N = l; v.v = 1; return 0; }
+fn viewOf(l: locked mutable N) -> int { v: view N = l; return v.v; }
+fn inoutOf(l: locked mutable N) -> int { v: inout N = l; v.v = 1; return 0; }
 fn result(w: view W) -> view N { return w.c; }
 fn eq(a: locked Str, b: locked Str) -> bool { return a == b; }
 fn add(a: locked Str) -> Str { return a + "x"; }
 fn text(a: locked Str) -> Str { return Str(a); }
 fn none() -> int {
-  o: locked mut N? = None;
+  o: locked mutable N? = None;
   x = 0;
   lock o as v: view { x = 1; }
   return x;
@@ -2703,8 +2710,8 @@ fn none() -> int {
 fn main() -> int { return 0; }
 )");
   expectErrors(
-      r, {":6:8: error: 'a' is 'locked'", ":9:37: error: 'l' is 'locked'",
-          ":10:38: error: 'l' is 'locked'", ":11:34: error: 'w.c' is 'locked'",
+      r, {":6:8: error: 'a' is 'locked'", ":9:41: error: 'l' is 'locked'",
+          ":10:42: error: 'l' is 'locked'", ":11:34: error: 'w.c' is 'locked'",
           ":12:54: error: 'a' is 'locked'", ":13:39: error: 'a' is 'locked'",
           ":14:40: error: 'a' is 'locked'",
           ":18:8: error: 'o' may be None: 'match' it"});
@@ -2712,7 +2719,7 @@ fn main() -> int { return 0; }
 
 TEST(Concurrency, TwoHandlesOfCellsCompareByIdentity) {
   auto r = semaCheck(R"(class N { v: int; }
-fn eq(a: locked mut N, b: locked mut N) -> bool { return a == b; }
+fn eq(a: locked mutable N, b: locked mutable N) -> bool { return a == b; }
 fn main() -> int { return 0; }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -2720,9 +2727,9 @@ fn main() -> int { return 0; }
 
 TEST(Concurrency, ALockOperandIsItselfAndNothingElse) {
   auto r = semaCheck(R"(class N { v: int; }
-fn pick(x: int, a: locked mut N) -> locked mut N { return a; }
+fn pick(x: int, a: locked mutable N) -> locked mutable N { return a; }
 fn main() -> int {
-  c: locked mut N = N(1);
+  c: locked mutable N = N(1);
   let n = N(2);
   lock pick(c.v, c) as v: view { }
   lock (if False then c else n) as w: view { }
@@ -2737,15 +2744,15 @@ TEST(Concurrency, ACellKeepsTheClassItWasMadeWith) {
   auto r = semaCheck(R"(class B { v: int; }
 class D : B { y: int; }
 fn main() -> int {
-  d: locked mut D = D(1, 2);
-  o: locked mut Obj = d;
-  b: locked mut B = d;
+  d: locked mutable D = D(1, 2);
+  o: locked mutable Obj = d;
+  b: locked mutable B = d;
   return 0;
 }
 )");
-  expectErrors(r, {":5:23: error: a 'locked' cell keeps the class it was made "
+  expectErrors(r, {":5:27: error: a 'locked' cell keeps the class it was made "
                    "with: cannot store 'D' in 'Obj'",
-                   ":6:21: error: a 'locked' cell keeps the class"});
+                   ":6:25: error: a 'locked' cell keeps the class"});
 }
 
 TEST(Concurrency, AnAtomicPlaceIsNoExpectedOfCompareExchange) {
@@ -2772,16 +2779,16 @@ fn main() -> int { return 0; }
 
 TEST(Concurrency, AwaitKeepsTheFormOfTheResult) {
   auto r = semaCheck(R"(class R { v: int; }
-async fn cell(x: locked mut R) -> locked mut R { return x; }
+async fn cell(x: locked mutable R) -> locked mutable R { return x; }
 async fn frozen(x: atomic shared R) -> atomic shared R { return x; }
 fn main() -> int {
-  let c: locked mut R = R(1);
+  let c: locked mutable R = R(1);
   let t = cell(c);
   let r = await t;
   let bad = r.v;
   let f: atomic shared R = R(2);
   let u = frozen(f);
-  w: mut R = await u;
+  w: mutable R = await u;
   lock r as v: view { }
   return 0;
 }
@@ -2820,7 +2827,7 @@ fn main() -> int { return 0; }
 TEST(Concurrency, AnAtomicPlaceHasNoAddress) {
   auto r = semaCheck(R"(class C { n: atomic int; }
 fn bump(x: inout int) { x += 1; }
-fn f(c: mut C) {
+fn f(c: mutable C) {
   a: atomic int = 1;
   bump(a);
   bump(c.n);
@@ -2891,20 +2898,20 @@ fn main() -> int { return 0; }
 TEST(Concurrency, AConditionalOfCellsKeepsEachBranchsClass) {
   auto r = semaCheck(R"(class N { v: int; }
 class D : N { s: int; }
-fn f(p: bool, a: locked mut N, d: locked mut D) -> int {
-  let c: locked mut N = if p then a else d;
+fn f(p: bool, a: locked mutable N, d: locked mutable D) -> int {
+  let c: locked mutable N = if p then a else d;
   lock (if p then a else d) as y: inout { }
   return 0;
 }
 fn main() -> int { return 0; }
 )");
   expectErrors(
-      r, {":4:42: error: a 'locked' cell keeps the class", "is not 'locked'"});
+      r, {":4:46: error: a 'locked' cell keeps the class", "is not 'locked'"});
 }
 
 TEST(Concurrency, ATaskHasNoFormUntilItIsAwaited) {
   auto r = semaCheck(R"(class N { v: int; }
-async fn lk() -> locked mut N { return N(2); }
+async fn lk() -> locked mutable N { return N(2); }
 fn main() -> int {
   lock lk() as y: view { }
   return 0;
@@ -2935,7 +2942,7 @@ fn main() -> int {
 TEST(Concurrency, ALoopOrALambdaInsideALockBlockIsTheBlocksOwn) {
   auto r = semaCheck(R"(class N { v: int; }
 fn main() -> int {
-  let c: locked mut N = N(1);
+  let c: locked mutable N = N(1);
   lock c as v: inout {
     for i in 0..3 { if i == 1 { break; } else { continue; } }
     let f = fn() -> int { return 2; };
@@ -3008,23 +3015,23 @@ async fn main() -> int {
 TEST(Concurrency, ALockBlockCallsNothingThatWaits) {
   auto r = semaCheck(R"(import ::io;
 class Counts { total: int; }
-fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
-fn outer(c: locked mut Counts) { bump(c); }
-fn outer2(c: locked mut Counts) { outer(c); }
-fn deep4(c: locked mut Counts) { outer2(c); }
-fn deep5(c: locked mut Counts) { deep4(c); }
-fn deep6(c: locked mut Counts) { deep5(c); }
+fn bump(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
+fn outer(c: locked mutable Counts) { bump(c); }
+fn outer2(c: locked mutable Counts) { outer(c); }
+fn deep4(c: locked mutable Counts) { outer2(c); }
+fn deep5(c: locked mutable Counts) { deep4(c); }
+fn deep6(c: locked mutable Counts) { deep5(c); }
 fn sum(n: int) -> int { t = 0; parallel for i in 0..n { t += i; } return t; }
 async fn work(n: int) -> int { return n + 1; }
 fn waitFor(n: int) -> int { return await work(n); }
 fn ask() -> int { input = io::stdin(); let s = input.readln(); return 1; }
 fn plain(n: int) -> int { return n * 2; }
-fn again(c: locked mut Counts, n: int) -> int {
+fn again(c: locked mutable Counts, n: int) -> int {
   lock c as v: inout { if n > 0 { v.total += again(c, n - 1); } }
   return n;
 }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   r = 0;
   lock counts as c: inout {
     c.total += plain(1);
@@ -3082,14 +3089,14 @@ TEST(Concurrency, ALockBlockCallsOnlyWhatItCanResolve) {
   auto r = semaCheck(R"(class Counts { total: int; }
 class Tool { step: (int) -> int; }
 class Base { n: int; view fn size() -> int { return self.n; } }
-class Wide : Base { c: locked mut Counts; view fn size() -> int { k = 0; lock self.c as v: view { k = v.total; } return k; } }
+class Wide : Base { c: locked mutable Counts; view fn size() -> int { k = 0; lock self.c as v: view { k = v.total; } return k; } }
 final class Leaf { n: int; view fn size() -> int { return self.n; } }
 fn pick() -> (int) -> int { return fn(x: int) -> int { return x; }; }
 fn callIt(f: (int) -> int) -> int { return f(2); }
 fn viaTool(t: view Tool) -> int { return t.step(3); }
 fn twice(f: (int) -> int) -> int { return callIt(f); }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let f = fn(x: int) -> int { return x + 1; };
   let t = Tool(f);
   let b: Base = Base(1);
@@ -3140,7 +3147,7 @@ fn main() -> int {
 class Base { n: int; view fn size() -> int { return self.n; } }
 final class Leaf { n: int; view fn size() -> int { return self.n; } }
 class Box<T> { v: T; view fn get() -> int { return 1; } }
-fn measure(c: locked mut Counts, b: view Base, l: view Leaf, x: view Box<int>) -> int {
+fn measure(c: locked mutable Counts, b: view Base, l: view Leaf, x: view Box<int>) -> int {
   r = 0;
   lock c as v: inout {
     r = b.size();
@@ -3151,7 +3158,7 @@ fn measure(c: locked mut Counts, b: view Base, l: view Leaf, x: view Box<int>) -
   return r;
 }
 fn relay(b: view Base) -> int { return b.size(); }
-fn held(c: locked mut Counts, b: view Base) -> int {
+fn held(c: locked mutable Counts, b: view Base) -> int {
   r = 0;
   lock c as v: inout { r = relay(b); }
   return r;
@@ -3180,7 +3187,7 @@ TEST(Concurrency, ALockBlocksHiddenCallsAreItsCalls) {
   auto r = semaCheck(R"(import ::io;
 class Counts { total: int; }
 class Gate {
-  c: locked mut Counts; n: int;
+  c: locked mutable Counts; n: int;
   view fn equals(other: Obj) -> bool { return self.pass() == 1; }
   view fn toString() -> Str { return Str(self.pass()); }
 }
@@ -3190,22 +3197,22 @@ impl Gate {
   view fn peek() -> int { return self.n; }
 }
 impl Cloneable for Gate { view fn clone() -> Self { let g = Gate(self.pass()); return g; } }
-class Loud { n: int; c: locked mut Counts; }
+class Loud { n: int; c: locked mutable Counts; }
 impl Loud {
   fn __init__(n: int) { self.n = n; self.c = Counts(n); }
   fn __deinit__() { io::println(self.n); }
 }
-struct Meter { c: locked mut Counts; }
+struct Meter { c: locked mutable Counts; }
 impl Meter {
   view fn tick() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
   view fn read() -> int { return 3; }
 }
 class Box<T> { v: T; view fn get() -> int { return 1; } }
-fn fresh<T>(c: locked mut Counts, x: view T) -> int { lock c as v: inout { v.total += 1; } return 1; }
+fn fresh<T>(c: locked mutable Counts, x: view T) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn work(n: int) -> int { return n; }
 fn quiet(n: int) -> int { let k = fn() -> int { return await work(1); }; return n; }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let g = Gate(1);
   let h = Gate(2);
   let m = Meter(Counts(3));
@@ -3270,18 +3277,18 @@ fn main() -> int {
 TEST(Concurrency, ALockBlockStartsNoTaskThatWaits) {
   auto r = semaCheck(R"(import ::io;
 class Counts { total: int; }
-class Job { c: locked mut Counts; n: int; }
+class Job { c: locked mutable Counts; n: int; }
 impl Job {
   async view fn go() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
   async view fn idle() -> int { return self.n; }
 }
 class Base { n: int; async view fn step() -> int { return self.n; } }
-class Slow : Base { c: locked mut Counts; async view fn step() -> int { lock self.c as v: view { } return 2; } }
-async fn bump(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+class Slow : Base { c: locked mutable Counts; async view fn step() -> int { lock self.c as v: view { } return 2; } }
+async fn bump(c: locked mutable Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn quiet(n: int) -> int { return n + 1; }
 async fn relay(n: int) -> int { return await quiet(n); }
 async fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let j: atomic shared = Job(counts, 1);
   let b: atomic shared Base = Base(1);
   t = quiet(0);
@@ -3326,11 +3333,11 @@ async fn main() -> int {
 // through, and is not given for a class the module itself derives from.
 TEST(Concurrency, ALockBlocksErrorNamesItsInstanceAndAdvisesWhatCanBeDone) {
   auto note = semaCheck(R"(class Counts { total: int; }
-final class Gate { c: locked mut Counts; }
+final class Gate { c: locked mutable Counts; }
 impl Hashable for Gate {
   view fn hash() -> int { r = 0; lock self.c as v: inout { r = v.total; } return r; }
 }
-class GBox<T> { v: T; c: locked mut Counts; }
+class GBox<T> { v: T; c: locked mutable Counts; }
 impl GBox<T> {
   view fn via<U: Hashable>(x: view U) -> int {
     r = 0;
@@ -3339,7 +3346,7 @@ impl GBox<T> {
   }
 }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let a = GBox<int>(1, counts);
   let g = Gate(counts);
   r = a.via(2);
@@ -3370,7 +3377,7 @@ final class Square : Shape {
 }
 fn sizeOf(x: view Node) -> int { return x.size(); }
 fn twice(x: view Node) -> int { return sizeOf(x) * 2; }
-fn tally(c: locked mut Counts, x: view Node, s: view Shape) {
+fn tally(c: locked mutable Counts, x: view Node, s: view Shape) {
   lock c as v: inout { v.total += twice(x); }
   lock c as v: inout { v.total += s.area(); }
 }
@@ -3396,13 +3403,13 @@ fn tally(c: locked mut Counts, x: view Node, s: view Shape) {
 TEST(Concurrency, AListIsComparedAndPrintedInALockBlock) {
   auto fake = semaCheck(R"(import ::io;
 class Counts { total: int; }
-class Sneaky { c: locked mut Counts;
+class Sneaky { c: locked mutable Counts;
   view fn equals(o: Obj) -> bool { lock self.c as v: inout { v.total += 1; } return 1 == 1; }
 }
 struct Buffer<T> { __data: Obj; }
 impl Buffer<T> { view fn at(i: unsigned) -> int { return 0; } }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let a = Buffer<int>(Sneaky(counts));
   let b = Buffer<int>(Sneaky(counts));
   lock counts as c: inout {
@@ -3421,7 +3428,7 @@ import ::collections as cl;
 struct Batch { ids: cl::List<int>; }
 class Jobs { done: cl::List<int>; todo: cl::List<int>; last: Batch; }
 fn main() -> int {
-  jobs: locked mut Jobs = Jobs(cl::List<int>(), cl::List<int>(), Batch(cl::List<int>()));
+  jobs: locked mutable Jobs = Jobs(cl::List<int>(), cl::List<int>(), Batch(cl::List<int>()));
   lock jobs as j: view {
     if j.done == j.todo { io::println("nothing left"); }
     io::println(j.todo);
@@ -3441,13 +3448,13 @@ fn main() -> int {
 TEST(Concurrency, ADeinitIsHeldToALockBlocksRule) {
   auto r = semaCheck(R"(import ::io;
 class Counts { total: int; }
-fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
-fn record(c: locked mut Counts) { bump(c); }
+fn bump(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
+fn record(c: locked mutable Counts) { bump(c); }
 fn quiet(n: int) -> int { return n + 1; }
-class A { c: locked mut Counts;
+class A { c: locked mutable Counts;
   fn __deinit__() { lock self.c as v: inout { v.total += 1; } }
 }
-class B { c: locked mut Counts;
+class B { c: locked mutable Counts;
   fn __deinit__() { record(self.c); }
 }
 class C { n: int;
@@ -3459,10 +3466,10 @@ class D { f: (int) -> int;
 class E { n: int;
   fn __deinit__() {
     io::println(quiet(self.n));
-    let g = fn(c: locked mut Counts) { lock c as v: inout { v.total += 1; } };
+    let g = fn(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } };
   }
 }
-struct F { c: locked mut Counts; }
+struct F { c: locked mutable Counts; }
 impl F {
   fn __deinit__() { bump(self.c); }
 }
@@ -3476,15 +3483,15 @@ class Base { n: int;
   view fn size() -> int { return self.n; }
   fn __deinit__() { io::println(self.size()); }
 }
-class Slow : Base { c: locked mut Counts;
+class Slow : Base { c: locked mutable Counts;
   view fn size() -> int { r = 0; lock self.c as v: view { r = v.total; } return r; }
 }
-class GBox<T> { v: T; c: locked mut Counts; }
+class GBox<T> { v: T; c: locked mutable Counts; }
 impl GBox<T> {
   fn __deinit__() { bump(self.c); }
 }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let a = A(counts);
   let b = B(counts);
   let c = C(1);
@@ -3590,7 +3597,7 @@ class Bare { n: int; other: Bare?;
   auto ok = semaCheck(R"(import ::io;
 import ::collections as cl;
 class Counts { total: int; }
-fn __deinit__(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn __deinit__(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
 class Job { done: cl::List<int>; todo: cl::List<int>;
   fn __deinit__() {
     if self.done == self.todo { io::println("nothing left"); }
@@ -3602,14 +3609,14 @@ class Res { name: Str;
 }
 class Slot { held: Res; }
 fn main() -> int {
-  slot: locked mut Slot = Slot(Res("a"));
+  slot: locked mutable Slot = Slot(Res("a"));
   r = Res("b");
   lock slot as s: inout {
     let mine = move r;
     let made = Res("c");
     s.held = Res("d");
   }
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   __deinit__(counts);
   let j = Job(cl::List<int>(), cl::List<int>());
   return 0;

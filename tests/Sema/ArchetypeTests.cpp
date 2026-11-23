@@ -172,7 +172,7 @@ fn main() -> int { return 0; }
 }
 
 // In a template's code a `view` of a type argument's Copyable form is
-// copied as the argument is (#368): T = `shared mut Node` meets
+// copied as the argument is (#368): T = `shared mutable Node` meets
 // `T: Copyable`, and its copy is the same object.
 TEST(Archetype, ACopyableArgumentsFormIsCopiedOutOfABorrow) {
   auto r = semaCheck(R"(class Node { v: int; }
@@ -181,12 +181,12 @@ impl Box<T: Copyable> { fn __init__(v: T) { self.v = move v; } }
 fn first<T: Copyable>(xs: view T[]) -> T { return xs[0]; }
 fn keep<T: Copyable>(x: view T) -> T { let k = x; return k; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  let b = Box<shared mut Node>(s);
+  s: shared mutable Node = Node(1);
+  let b = Box<shared mutable Node>(s);
   let g = b.get();
-  let a: shared mut Node[2] = [s, s];
-  let t = first<shared mut Node>(a);
-  let k = keep<shared mut Node>(s);
+  let a: shared mutable Node[2] = [s, s];
+  let t = first<shared mutable Node>(a);
+  let k = keep<shared mutable Node>(s);
   return g.v + t.v + k.v;
 }
 )");
@@ -324,8 +324,8 @@ fn main() -> int { return 0; }
 class Box<T: Copyable> { v: T; fn get() -> T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  b: mut Box<shared mut Node> = Box<shared mut Node>(s);
+  s: shared mutable Node = Node(1);
+  b: mutable Box<shared mutable Node> = Box<shared mutable Node>(s);
   let g = b.get();
   return g.k - 1;
 }
@@ -340,7 +340,7 @@ fn keep<T: Copyable>(c: bool, x: view T, u: view Node) -> T {
 }
 fn main() -> int {
   s: shared Node = Node(0);
-  n: mut Node = Node(1);
+  n: mutable Node = Node(1);
   let a = keep<shared Node>(True, s, n);
   return a.v;
 }
@@ -445,22 +445,22 @@ fn keep<T: Copyable>(c: bool, x: view T, h: view Holder) -> T? {
   }
 }
 fn main() -> int {
-  s: shared mut Node = Node(0);
+  s: shared mutable Node = Node(0);
   let h = Holder();
-  let a = keep<shared mut Node>(True, s, h);
+  let a = keep<shared mutable Node>(True, s, h);
   return 0;
 }
 )");
   expectErrors(view, {"'k' binds part of a conditional whose branches have "
-                      "two forms, 'shared mut Node' and 'Node'"});
+                      "two forms, 'shared mutable Node' and 'Node'"});
   auto clone = semaCheck(R"(class Node { v: int; }
 fn keep<T: Copyable>(c: bool, x: view T, u: view Node) -> T {
   return (if c then u else x).clone();
 }
 fn main() -> int {
-  s: shared mut Node = Node(0);
+  s: shared mutable Node = Node(0);
   let n = Node(1);
-  let a = keep<shared mut Node>(True, s, n);
+  let a = keep<shared mutable Node>(True, s, n);
   return 0;
 }
 )");
@@ -527,21 +527,21 @@ fn main() -> int { return 0; }
 TEST(Archetype, EachBranchIsItself) {
   auto temps = semaCheck(R"(class Node { v: int; }
 fn main() -> int {
-  s: shared mut Node = Node(1);
+  s: shared mutable Node = Node(1);
   let c = False;
   n: Node = if c then (Node(2), 0).0 else (s, 0).0;
   return n.v;
 }
 )");
-  expectErrors(temps, {"cannot store a 'shared mut Node' in variable 'n'"});
+  expectErrors(temps, {"cannot store a 'shared mutable Node' in variable 'n'"});
   auto forms = semaCheck(R"(class Node { v: int; }
 fn f<T: Copyable, U>(c: bool, t: view T, u: view U) -> T {
   return (if c then t else u).clone();
 }
 fn main() -> int {
-  a: shared mut Node = Node(1);
-  b: mut Node = Node(2);
-  let z = f<shared mut Node, mut Node>(False, a, b);
+  a: shared mutable Node = Node(1);
+  b: mutable Node = Node(2);
+  let z = f<shared mutable Node, mutable Node>(False, a, b);
   return z.v;
 }
 )");
@@ -553,8 +553,8 @@ class Box<T: Copyable> {
 }
 impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  b: mut Box<shared mut Node> = Box<shared mut Node>(s);
+  s: shared mutable Node = Node(1);
+  b: mutable Box<shared mutable Node> = Box<shared mutable Node>(s);
   let g = b.get(False, s);
   return g.k - 1;
 }
@@ -573,25 +573,26 @@ fn pick<T: Copyable>(x: view T, y: view Node) -> view T { return y; }
 class Box<T: Copyable> { v: T; other: Node; view fn peek() -> view T { return self.other; } }
 impl Box<T> { fn __init__(v: T) { self.v = move v; self.other = Node(2); } }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  n: mut Node = Node(2);
-  let a = pick<shared mut Node>(s, n);
-  let b = Box<shared mut Node>(Node(3));
+  s: shared mutable Node = Node(1);
+  n: mutable Node = Node(2);
+  let a = pick<shared mutable Node>(s, n);
+  let b = Box<shared mutable Node>(Node(3));
   return 0;
 }
 )");
-  expectErrors(r, {":2:66: error: a 'view' result of a type argument's form "
-                   "is held as 'shared mut Node', but what it returns is held "
-                   "as 'Node'",
-                   ":3:79: error: a 'view' result of a type argument's form"});
+  expectErrors(r,
+               {":2:66: error: a 'view' result of a type argument's form "
+                "is held as 'shared mutable Node', but what it returns is held "
+                "as 'Node'",
+                ":3:79: error: a 'view' result of a type argument's form"});
   auto fine = semaCheck(R"(class Node { id: int; }
 fn pick<T: Copyable>(x: view T, y: view T) -> view T { return y; }
 class Box<T: Copyable> { v: T; view fn peek() -> view T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn main() -> int {
-  s: shared mut Node = Node(1);
-  let b = Box<shared mut Node>(s);
-  return pick<shared mut Node>(s, s).id + b.peek().id;
+  s: shared mutable Node = Node(1);
+  let b = Box<shared mutable Node>(s);
+  return pick<shared mutable Node>(s, s).id + b.peek().id;
 }
 )");
   EXPECT_TRUE(fine.Ok) << fine.Diagnostics;
@@ -601,8 +602,8 @@ class Node { id: int; }
 class Box<T> { v: T; view fn peek() -> view T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = move v; } }
 fn main() -> int {
-  let b = Box<mut Node>(Node(1));
-  let m = cl::HashMap<Str, mut Node>();
+  let b = Box<mutable Node>(Node(1));
+  let m = cl::HashMap<Str, mutable Node>();
   return b.peek().id;
 }
 )");
@@ -613,13 +614,13 @@ fn main() -> int {
 // two calls of one `inout` result, say the same thing.
 TEST(Archetype, BranchesWithOneErrorReportItOnce) {
   auto r = semaCheck(R"(class Node { v: int; }
-class B { n: mut Node; fn get() -> inout Node { return self.n; } }
+class B { n: mutable Node; fn get() -> inout Node { return self.n; } }
 fn main() -> int {
   let s: shared Node = Node(1);
   let t: shared Node = Node(2);
   c = True;
-  a: mut Node = if c then s else t;
-  b: mut B = B(Node(3));
+  a: mutable Node = if c then s else t;
+  b: mutable B = B(Node(3));
   let k = if c then b.get() else b.get();
   return 0;
 }

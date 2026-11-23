@@ -201,24 +201,24 @@ public:
 // -- Reference qualifiers (docs/design/concurrency.md, "The qualifiers")
 
 /// How a reference is held and shared (the concurrency prototype): unique
-/// (unwritten, immutable), `mut` (written through its owner), `shared`
-/// (aliases on one thread, immutable; `shared mut`, written through any),
+/// (unwritten, immutable), `mutable` (written through its owner), `shared`
+/// (aliases on one thread, immutable; `shared mutable`, written through any),
 /// `atomic shared` (counted atomically, frozen, read by every thread) or
-/// `locked mut` (a cell written in `lock` blocks; `locked` alone locks what
+/// `locked mutable` (a cell written in `lock` blocks; `locked` alone locks what
 /// nothing writes).  The bare type is the cheapest form; every word buys one
 /// thing at one cost.  A qualifier belongs to a place (a variable, parameter,
 /// field or result): the type it qualifies stays the plain type.
 enum class QualForm : uint8_t { Unique, Shared, AtomicShared, Locked };
 
 /// The form of a reference (docs/design/concurrency.md): the bare type is
-/// unique and immutable, the cheapest form; `mut` adds writes through the
-/// owner, `shared` several owners (`shared mut`, writes through any of
-/// them), `atomic shared` an object frozen for every thread, `locked mut`
+/// unique and immutable, the cheapest form; `mutable` adds writes through the
+/// owner, `shared` several owners (`shared mutable`, writes through any of
+/// them), `atomic shared` an object frozen for every thread, `locked mutable`
 /// an object written under a lock (`locked` alone locks what nothing
 /// writes).  A value takes none: `let` decides its storage.
 struct Qualifier {
   QualForm Form = QualForm::Unique;
-  bool Mut = false; // `mut T`, `shared mut T`, `locked mut T`
+  bool Mutable = false; // `mutable T`, `shared mutable T`, `locked mutable T`
   /// Sema's mark on a declaration's qualifier that a template's type
   /// argument gave (#368: a `T` with T = `shared Node`), not one written on
   /// it: a borrow keeps it, and the clone of such a value is its copy (T's
@@ -227,23 +227,23 @@ struct Qualifier {
   bool FromArgument = false;
 
   /// The bare type: unique, immutable.
-  bool isUnique() const { return Form == QualForm::Unique && !Mut; }
-  /// Read-only through this reference: every form without `mut`.
-  bool isConst() const { return !Mut; }
+  bool isUnique() const { return Form == QualForm::Unique && !Mutable; }
+  /// Read-only through this reference: every form without `mutable`.
+  bool isConst() const { return !Mutable; }
   bool operator==(const Qualifier &o) const {
-    return Form == o.Form && Mut == o.Mut;
+    return Form == o.Form && Mutable == o.Mutable;
   }
   /// The form alone, without Sema's mark.
-  Qualifier form() const { return {Form, Mut}; }
-  /// The spelling: "", "mut", "shared", "shared mut", "atomic shared",
-  /// "locked" or "locked mut".
+  Qualifier form() const { return {Form, Mutable}; }
+  /// The spelling: "", "mutable", "shared", "shared mutable", "atomic shared",
+  /// "locked" or "locked mutable".
   const char *spelling() const;
   /// A small number naming the form, for the keys that intern the types a
   /// qualified part belongs to (ASTContext).
   uint8_t code() const {
-    return static_cast<uint8_t>(static_cast<uint8_t>(Form) << 1 | Mut);
+    return static_cast<uint8_t>(static_cast<uint8_t>(Form) << 1 | Mutable);
   }
-  /// `shared`, `shared mut` or `atomic shared`: a reference that several
+  /// `shared`, `shared mutable` or `atomic shared`: a reference that several
   /// owners hold, so its copy is another owner (Copyable).
   bool isSharedForm() const {
     return Form == QualForm::Shared || Form == QualForm::AtomicShared;
@@ -301,15 +301,15 @@ class Expr : public ASTNode {
   bool LeavesTemporary = false;
   // Set by Sema on a unique `Str` (or the `Obj` one is seen as) where it is
   // stored in a place a string may be changed through or several names hold
-  // (#363): a `mut` slot, a field, an element or a payload, what an `inout`
+  // (#363): a `mutable` slot, a field, an element or a payload, what an `inout`
   // binding names, a native function's parameter, a slot of any other form
-  // (`shared`, `shared mut`, `atomic shared`, `locked mut`), and a temporary
-  // that is the receiver of `concat`.  Its value is not a literal's shared
-  // static object there: the lowering makes a literal a new string, and any
-  // other value its own (PaykanString_owned).  A `mut` parameter is not
+  // (`shared`, `shared mutable`, `atomic shared`, `locked mutable`), and a
+  // temporary that is the receiver of `concat`.  Its value is not a literal's
+  // shared static object there: the lowering makes a literal a new string, and
+  // any other value its own (PaykanString_owned).  A `mutable` parameter is not
   // marked by its callers alone: the function makes it its own
   // (ModuleLowering::declareParam), as a function value's type and an
-  // overridden method's signature do not say `mut`.
+  // overridden method's signature do not say `mutable`.
   bool Unshared = false;
 
 public:
@@ -644,7 +644,7 @@ public:
   void setView(bool view) { View = view; }
 
   /// Declared `shared fn` (or `shared view fn`): a method whose `self` is
-  /// `shared mut T` (`shared T`), a Copyable reference it may return, pass
+  /// `shared mutable T` (`shared T`), a Copyable reference it may return, pass
   /// or store; called only on a receiver held that way
   /// (docs/language/05-classes.md, "Methods that hand on self").
   bool isShared() const { return Shared; }
@@ -2218,8 +2218,8 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_TaskType; }
 };
 
-/// A qualified type as written (the concurrency prototype): `mut T`,
-/// `shared T`, `shared mut T`, `atomic shared T`, `locked T`, or, in a
+/// A qualified type as written (the concurrency prototype): `mutable T`,
+/// `shared T`, `shared mutable T`, `atomic shared T`, `locked T`, or, in a
 /// declaration, the qualifier alone (`x: shared = e;`, Inner null).  Sema
 /// resolves it to the inner type and records the qualifier on the place, or
 /// on the part of a type it is (#368: a tuple's element, an array's

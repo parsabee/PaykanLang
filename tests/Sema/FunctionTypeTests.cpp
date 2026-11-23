@@ -226,12 +226,12 @@ TEST(FunctionType, CapturesAreReadOnlyCopies) {
   auto r = semaCheck(R"(
 struct P { x: int; }
 class Node { n: int; }
-struct W { node: shared mut Node; x: int; }
+struct W { node: shared mutable Node; x: int; }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   n = 1;
   p = P(1);
-  node: shared mut = Node(1);
+  node: shared mutable = Node(1);
   xs: int[2] = [1, 2];
   w = fn() { n = 2; };
   u = fn() { bump(n); };
@@ -240,7 +240,7 @@ fn main() -> int {
   w = W(Node(1), 0);
   ok = fn() -> int {
     node.n = 2;
-    w.node.n = w.node.n + 7;           // the object the copy holds: shared mut
+    w.node.n = w.node.n + 7;           // the object the copy holds: shared mutable
     return n + p.x + xs[1] + node.n + w.node.n;
   };
   return ok();
@@ -400,7 +400,7 @@ TEST(FunctionType, OptionalFunctionsUnwrapWithMatch) {
   auto r = semaCheck(R"(import ::io;
 class Button { onClick: ((Str) -> void)?; }
 fn main() -> int {
-  b: mut = Button(None);
+  b: mutable = Button(None);
   b.onClick = fn(s: Str) { io::println(s); };
   match b.onClick {
     f: (Str) -> void { f("hi"); }
@@ -457,7 +457,7 @@ fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
   sq = ops::square;
   t = ops::twice(move sq);
-  b: mut = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  b: mutable = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
   k: (int) -> int = ops::twice(fn(x: int) -> int { return x + 1; });
@@ -542,7 +542,7 @@ fn main() -> int {
   auto bad = semaCheck(R"(
 fn main() -> int {
   let s: shared (int) -> int = fn(x: int) -> int => x;
-  let m: mut = fn(x: int) -> int => x;
+  let m: mutable = fn(x: int) -> int => x;
   return 0;
 }
 )");
@@ -550,7 +550,7 @@ fn main() -> int {
   for (const char *d :
        {":3:3: error: a function value takes no qualifier ('shared (int) -> "
         "int'): it is Copyable, and its copies share its closure",
-        ":4:3: error: a function value takes no qualifier ('mut (int) -> "
+        ":4:3: error: a function value takes no qualifier ('mutable (int) -> "
         "int')"})
     EXPECT_NE(bad.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                           << bad.Diagnostics;

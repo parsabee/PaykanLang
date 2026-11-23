@@ -263,7 +263,7 @@ fn applyOp(op: Op, a: float, b: float) -> float {
 ```
 
 The `Parser` class holds the input and a position in it. Its `env` field is the variable
-store, a `shared mut hashmap::HashMap`: `main` and the parser hold the one map, and both
+store, a `shared mutable hashmap::HashMap`: `main` and the parser hold the one map, and both
 change it ([Concurrency](19-concurrency.md#who-holds-an-object-the-qualifiers)). Its
 `error` field is a `Str?`: optional fields start as `None`, so `__init__` leaves it alone,
 and `fail` keeps only the first error, which it takes by `move`:
@@ -274,7 +274,7 @@ and `fail` keeps only the first error, which it takes by `move`:
 class Parser {
   input: Str;
   pos: int;
-  env: shared mut hashmap::HashMap;
+  env: shared mutable hashmap::HashMap;
   error: Str?;   // the first error, or None
 
   // Record the first error only; later errors are usually cascades.
@@ -282,7 +282,7 @@ class Parser {
 // ...
 
 impl Parser {
-  fn __init__(s: Str, env: shared mut hashmap::HashMap) {
+  fn __init__(s: Str, env: shared mutable hashmap::HashMap) {
     self.input = move s;
     self.pos = 0;
     self.env = env;
@@ -417,7 +417,7 @@ that add to it take it as an `inout` parameter:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  history: mut = Ring(("", 0.0));
+  history: mutable = Ring(("", 0.0));
 ```
 
 ### Evaluating a statement
@@ -425,16 +425,16 @@ that add to it take it as an `inout` parameter:
 `evalStatement` ties the pieces together. It destructures the parser's tuple, checks the
 optional `error` field with a `match`, and then matches on the optional target name to decide
 between printing an assignment and printing an expression's value. It changes the
-environment, which it shares with the parser, so it takes it as a `shared mut` reference,
-and the history in place, an `inout` parameter. The parser it makes is `mut`, since parsing
+environment, which it shares with the parser, so it takes it as a `shared mutable` reference,
+and the history in place, an `inout` parameter. The parser it makes is `mutable`, since parsing
 moves it along its input, and is given a copy of the statement, `src.clone()`, as is the
 history, since `evalStatement` prints `src` too:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-fn evalStatement(src: Str, env: shared mut hashmap::HashMap,
+fn evalStatement(src: Str, env: shared mutable hashmap::HashMap,
                  history: inout Ring<(Str, float)>, quiet: bool) {
-  let p: mut = parser::Parser(src.clone(), env);
+  let p: mutable = parser::Parser(src.clone(), env);
   target, value = p.parseStatement();
 
   match p.error {

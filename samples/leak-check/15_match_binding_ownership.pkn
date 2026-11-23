@@ -33,7 +33,7 @@ fn probe(a: shared A) {
 
 fn main() -> int {
   let o: shared Obj = A();
-  let h: mut = Holder(A());
+  let h: mutable = Holder(A());
   match o {
     b: A {
       probe(b);      // consumed argument: retains the subject's box

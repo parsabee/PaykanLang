@@ -118,17 +118,19 @@ TEST(Lexer, ParamModeAndLetKeywords) {
   EXPECT_EQ(d.Lines[5], "1:30-1:34 IDENT lets");
 }
 
-// The qualifiers of the concurrency prototype are keywords, `mut` among
-// them; a word that starts with one is an identifier, and `const` is one.
+// The qualifiers of the concurrency prototype are keywords, `mutable` among
+// them; a word that starts with one is an identifier, and `mut` and `const`
+// are identifiers.
 TEST(Lexer, QualifierKeywords) {
-  auto d = dump("mut shared locked atomic mutable const");
-  ASSERT_EQ(d.Lines.size(), 7u);
-  EXPECT_EQ(d.Lines[0], "1:1-1:4 KW_MUT mut");
-  EXPECT_EQ(d.Lines[1], "1:5-1:11 KW_SHARED shared");
-  EXPECT_EQ(d.Lines[2], "1:12-1:18 KW_LOCKED locked");
-  EXPECT_EQ(d.Lines[3], "1:19-1:25 KW_ATOMIC atomic");
-  EXPECT_EQ(d.Lines[4], "1:26-1:33 IDENT mutable");
-  EXPECT_EQ(d.Lines[5], "1:34-1:39 IDENT const");
+  auto d = dump("mutable shared locked atomic mutables mut const");
+  ASSERT_EQ(d.Lines.size(), 8u);
+  EXPECT_EQ(d.Lines[0], "1:1-1:8 KW_MUTABLE mutable");
+  EXPECT_EQ(d.Lines[1], "1:9-1:15 KW_SHARED shared");
+  EXPECT_EQ(d.Lines[2], "1:16-1:22 KW_LOCKED locked");
+  EXPECT_EQ(d.Lines[3], "1:23-1:29 KW_ATOMIC atomic");
+  EXPECT_EQ(d.Lines[4], "1:30-1:38 IDENT mutables");
+  EXPECT_EQ(d.Lines[5], "1:39-1:42 IDENT mut");
+  EXPECT_EQ(d.Lines[6], "1:43-1:48 IDENT const");
 }
 
 TEST(Lexer, NumberLiterals) {

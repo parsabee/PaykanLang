@@ -8,7 +8,7 @@
 //            variable held its only reference: a string, an object, a
 //            struct's field, a tuple's and an array's element.  So does
 //            what a function is handed at a variable's last use (`move`),
-//            and what a variable handed on was sharing (a `shared mut Str`;
+//            and what a variable handed on was sharing (a `shared mutable Str`;
 //            docs/language/16-memory.md, "Ownership transfers").
 // expect-stdout: string: first1! other9
 // expect-stdout: assigned: other9!
@@ -55,22 +55,22 @@ fn replArray(a: inout Node[2]) -> Str {
   return "%";
 }
 
-fn take(s: shared mut Str) -> Str {
+fn take(s: shared mutable Str) -> Str {
   return s + ".";
 }
 
 /// Its parameter's only reference may be its own (a variable's last use).
-fn use(p: mut Node) -> Str {
+fn use(p: mutable Node) -> Str {
   return p.name + replNode(p) + " " + p.name;
 }
 
 fn main() -> int {
-  s: mut = "first" + Str(1);
+  s: mutable = "first" + Str(1);
   io::println("string: " + (s + repl(s)) + " " + s);
   s += repl(s);
   io::println("assigned: " + s);
 
-  l: mut = Node("node" + Str(1));
+  l: mutable = Node("node" + Str(1));
   io::println("receiver: " + l.greet(replNode(l)) + " " + l.name);
 
   h = Holder(Node("sn" + Str(1)));
@@ -82,15 +82,15 @@ fn main() -> int {
   arr = [Node("x" + Str(1)), Node("y" + Str(1))];
   io::println("array: " + arr[0].greet(replArray(arr)) + " " + arr[0].name);
 
-  let x: mut = Node("old" + Str(1));
+  let x: mutable = Node("old" + Str(1));
   io::println("handed on: " + use(move x));
 
-  let x2: mut = Node("x" + Str(2));
-  y: mut = move x2;
+  let x2: mutable = Node("x" + Str(2));
+  y: mutable = move x2;
   io::println("moved into: " + y.greet(replNode(y)) + " " + y.name);
 
-  let a: shared mut = "first" + Str(1);
-  s2: shared mut = a;
+  let a: shared mutable = "first" + Str(1);
+  s2: shared mutable = a;
   let t = take(a);
   io::println("shared: " + t + " " + (s2 + repl(s2)) + " " + s2);
   return 0;

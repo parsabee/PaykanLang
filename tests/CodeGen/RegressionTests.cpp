@@ -369,7 +369,7 @@ TEST(Regression, MethodConstructsOwnAndLaterClass) {
     fn main() -> int {
       c = Cell(3);
       d = c.clone();
-      b: mut = c.wrap();
+      b: mutable = c.wrap();
       io::println(Str<int>(d.v) + " " + Str<int>(b.n) + " " + Str<int>(b.cell().v));
       return 0;
     }

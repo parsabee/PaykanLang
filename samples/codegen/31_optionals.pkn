@@ -26,7 +26,7 @@ impl Node {
 // ---- List operations -------------------------------------------------------
 
 fn push_front(head: shared Node?, v: int) -> shared Node {
-  let n: mut = Node(v);
+  let n: mutable = Node(v);
   n.next = head;               // Node? field accepts a Node? value
   return n;
 }

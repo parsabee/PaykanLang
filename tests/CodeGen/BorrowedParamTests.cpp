@@ -11,7 +11,7 @@
 // lending pass lent, how many copies it kept because something between the
 // read and the call may let the object go (the window), and some how many
 // parameters it lent and how many their bodies own from their entry.  The
-// watched nodes are `shared` (`shared mut` where an `inout` parameter
+// watched nodes are `shared` (`shared mutable` where an `inout` parameter
 // replaces one), since a `weak` reference names only a `shared` object.
 
 #include "CodeGenTestUtils.h"
@@ -85,7 +85,7 @@ fn main() -> int {
 
   c: shared = Node("c");
   wc = Watcher(c);
-  h: mut = Holder(None);
+  h: mutable = Holder(None);
   stash(h, move c, wc);
   report(wc, "in main, after stash");
 
@@ -149,7 +149,7 @@ fn report(w: view Watcher, tag: view Str) {
 
 // The callee replaces the field its argument was read from, then reads
 // the argument: the caller must keep the argument alive (a hold).
-fn clearThenRead(s: shared Str, h: shared mut Holder) {
+fn clearThenRead(s: shared Str, h: shared mutable Holder) {
   h.s = "replaced";
   io::println("still have " + s);
 }
@@ -163,7 +163,7 @@ fn nameAndNode(s: shared Str, n: shared Node, w: view Watcher) {
 }
 
 fn main() -> int {
-  h: shared mut = Holder(None, "original " + "string");
+  h: shared mutable = Holder(None, "original " + "string");
   clearThenRead(h.s, h);
 
   x: shared = Node("x" + "name");
@@ -338,7 +338,7 @@ class Node {
 }
 
 class Watch {
-  target: weak mut Node?;
+  target: weak mutable Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -354,7 +354,7 @@ fn f(s: shared Str, n: inout Node, w: view Watch) {
 }
 
 fn main() -> int {
-  x: shared mut = Node("x" + "name");
+  x: shared mutable = Node("x" + "name");
   wx = Watch(x);
   f(x.name, x, wx);
   io::println("after f: " + x.name);
@@ -450,17 +450,17 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn sink(s: shared Str, h: mut Holder, w: view Watch) {
+fn sink(s: shared Str, h: mutable Holder, w: view Watch) {
   h.n = Node("replaced");
   io::println("in sink, old node is " + state(w) + "; s = " + s);
 }
 
-fn cur(h: mut Holder, w: view Watch) {
+fn cur(h: mutable Holder, w: view Watch) {
   sink(h.n.name, move h, w);
 }
 
 fn main() -> int {
-  h: mut = Holder(Node("n" + "ame"));
+  h: mutable = Holder(Node("n" + "ame"));
   w = Watch(h.n);
   cur(move h, w);
   io::println("after cur: old node is " + state(w));
@@ -497,19 +497,19 @@ class Holder {
   n: shared Node;
 }
 
-fn direct(m: shared Node, h: shared mut Holder) {
+fn direct(m: shared Node, h: shared mutable Holder) {
   h.n = Node("z");
   io::println("direct: " + m.name);
 }
 
 class Base {
-  view fn take(m: shared Node, h: shared mut Holder) {
+  view fn take(m: shared Node, h: shared mutable Holder) {
     io::println("base");
   }
 }
 
 class Derived: Base {
-  view fn take(m: shared Node, h: shared mut Holder) {
+  view fn take(m: shared Node, h: shared mutable Holder) {
     h.n = Node("z");
     io::println("vcall: " + m.name);
   }
@@ -520,7 +520,7 @@ class Keeper {
 }
 
 impl Keeper {
-  fn __init__(m: shared Node, h: shared mut Holder) {
+  fn __init__(m: shared Node, h: shared mutable Holder) {
     h.n = Node("z");
     self.m = m;
     io::println("ctor: " + m.name);
@@ -532,7 +532,7 @@ class Parent {
 }
 
 impl Parent {
-  fn __init__(m: shared Node, h: shared mut Holder) {
+  fn __init__(m: shared Node, h: shared mutable Holder) {
     h.n = Node("z");
     self.m = m;
     io::println("super: " + m.name);
@@ -543,7 +543,7 @@ class Child: Parent {
 }
 
 impl Child {
-  fn __init__(h: shared mut Holder) {
+  fn __init__(h: shared mutable Holder) {
     __super__(h.n, h);
   }
 }
@@ -553,19 +553,19 @@ struct S {
 }
 
 impl S {
-  view fn meth(m: shared Node, h: shared mut Holder) {
+  view fn meth(m: shared Node, h: shared mutable Holder) {
     h.n = Node("z");
     io::println("struct method: " + m.name);
   }
 }
 
-fn gen<T>(m: view T, h: shared mut Holder) -> view T {
+fn gen<T>(m: view T, h: shared mutable Holder) -> view T {
   h.n = Node("z");
   return m;
 }
 
 fn main() -> int {
-  h: shared mut = Holder(Node("a" + "1"));
+  h: shared mutable = Holder(Node("a" + "1"));
   direct(h.n, h);
   h.n = Node("a" + "2");
   b: Base = Derived();
@@ -605,7 +605,7 @@ fn main() -> int {
 // Every way a callee can write its box parameter (plan/w1_written), each
 // called with a copy, which is lent (the caller's node stays alive), and at
 // the argument's last use (a move: the old node dies inside, as before).
-// The nodes are `shared mut`, so the caller can keep a copy.
+// The nodes are `shared mutable`, so the caller can keep a copy.
 TEST(BorrowedParams, EveryWayACalleeWritesItsParameter) {
   LeakGuard g;
   pir::Statistics stats;
@@ -616,7 +616,7 @@ class Node {
 }
 
 class Watch {
-  target: weak mut Node?;
+  target: weak mutable Node?;
 }
 
 fn state(w: view Watch) -> Str {
@@ -626,7 +626,7 @@ fn state(w: view Watch) -> Str {
   }
 }
 
-fn assign(n: shared mut Node, w: view Watch) {
+fn assign(n: shared mutable Node, w: view Watch) {
   n = Node("b");
   io::println("  assign: old is " + state(w) + ", n = " + n.name);
 }
@@ -640,14 +640,14 @@ fn bump(n: inout Node) {
   n = Node("c");
 }
 
-fn viaInout(n: shared mut Node, w: view Watch) {
+fn viaInout(n: shared mutable Node, w: view Watch) {
   bump(n);
   io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
 }
 
 fn pair(a: Node) -> (Node, int) { return (move a, 1); }
 
-fn destructure(n: shared mut Node, w: view Watch) {
+fn destructure(n: shared mutable Node, w: view Watch) {
   n, k = pair(Node("m"));
   io::println("  destructure: old is " + state(w) + ", n = " + n.name);
 }
@@ -656,26 +656,26 @@ class Sub: Node {
   extra: int;
 }
 
-fn armInout(n: shared mut Node, w: view Watch) {
+fn armInout(n: shared mutable Node, w: view Watch) {
   match n {
     s: inout Node { s = Node("arm"); }
   }
   io::println("  armInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn inoutLocal(n: shared mut Node, w: view Watch) {
+fn inoutLocal(n: shared mutable Node, w: view Watch) {
   r: inout = n;
   r = Node("loc");
   io::println("  inoutLocal: old is " + state(w) + ", n = " + n.name);
 }
 
-fn toNone(n: shared mut Node?, w: view Watch) {
+fn toNone(n: shared mutable Node?, w: view Watch) {
   n = None;
   io::println("  toNone: old is " + state(w));
 }
 
 fn main() -> int {
-  a: shared mut = Node("a");
+  a: shared mutable = Node("a");
   wa = Watch(a);
   io::println("copies:");
   assign(a, wa);
@@ -687,22 +687,22 @@ fn main() -> int {
   inoutLocal(a, wa);
   io::println("after copies: a is " + state(wa) + ", a = " + a.name);
   io::println("moves:");
-  b: shared mut = Node("b0");
+  b: shared mutable = Node("b0");
   wb = Watch(b);
   assign(b, wb);
-  c: shared mut = Node("c0");
+  c: shared mutable = Node("c0");
   wc = Watch(c);
   viaInout(c, wc);
-  d: shared mut = Node("d0");
+  d: shared mutable = Node("d0");
   wd = Watch(d);
   toNone(d, wd);
-  e: shared mut = Node("e0");
+  e: shared mutable = Node("e0");
   we = Watch(e);
   destructure(e, we);
-  f: shared mut = Node("f0");
+  f: shared mutable = Node("f0");
   wf = Watch(f);
   armInout(f, wf);
-  g: shared mut = Node("g0");
+  g: shared mutable = Node("g0");
   wg = Watch(g);
   inoutLocal(g, wg);
   io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd) + " " + state(we) + " " + state(wf) + " " + state(wg));

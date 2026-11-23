@@ -11,7 +11,7 @@
 
 using namespace paykan::test;
 
-// Copies of a tuple or an array of `shared mut` nodes name the same nodes:
+// Copies of a tuple or an array of `shared mutable` nodes name the same nodes:
 // a write through one copy is seen through the others, and each copy, a
 // destructured element and a weak reference count as they do for a
 // variable.
@@ -20,7 +20,7 @@ TEST(QualifiedPart, CopiesOfElementsNameOneObject) {
   auto r = compileAndRun(R"(import ::io;
     class Node { v: int; }
     fn main() -> int {
-      s: shared mut Node = Node(1);
+      s: shared mutable Node = Node(1);
       t = (10, s);
       u = t;
       u.1.v = 2;
@@ -31,7 +31,7 @@ TEST(QualifiedPart, CopiesOfElementsNameOneObject) {
       ks[2].v += 1;
       n, k = t;
       k.v *= 10;
-      w: weak mut Node? = ys[1];
+      w: weak mutable Node? = ys[1];
       io::println(Str(s.v) + " " + Str(t.1.v) + " " + Str(xs[0].v) + " " +
                   Str(n) + " " + Str(w == None));
       ys = [s, s];
@@ -45,10 +45,10 @@ TEST(QualifiedPart, CopiesOfElementsNameOneObject) {
   g.expectNoLeaks("CopiesOfElementsNameOneObject");
 }
 
-// A container of `shared mut` references: its elements are the program's
+// A container of `shared mutable` references: its elements are the program's
 // objects, read out as copies (`get`, whose clone of a `T` with T =
-// `shared mut Node` is the copy), and the hash table, which chains its
-// entries from a buffer of `shared mut` references, holds them as values.
+// `shared mutable Node` is the copy), and the hash table, which chains its
+// entries from a buffer of `shared mutable` references, holds them as values.
 TEST(QualifiedPart, ContainersHoldSharedReferences) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -56,14 +56,14 @@ TEST(QualifiedPart, ContainersHoldSharedReferences) {
     class Node { v: int; }
     fn twice<T: Copyable>(x: T) -> (T, T) { return (x, x); }
     fn main() -> int {
-      s: shared mut Node = Node(1);
-      l = cl::List<shared mut Node>();
+      s: shared mutable Node = Node(1);
+      l = cl::List<shared mutable Node>();
       l.push(s);
       l.push(Node(7));
       l.get(0).v = 2;
       p = twice(s);
       p.1.v += 1;
-      m = cl::HashMap<Str, shared mut Node>();
+      m = cl::HashMap<Str, shared mutable Node>();
       m.put("a", s);
       m.put("b", l.get(1));
       m.get("b").v = 8;
@@ -79,21 +79,21 @@ TEST(QualifiedPart, ContainersHoldSharedReferences) {
   g.expectNoLeaks("ContainersHoldSharedReferences");
 }
 
-// A function value whose parameter and result are `shared mut`: a call
+// A function value whose parameter and result are `shared mutable`: a call
 // through it passes the program's object and gives one back, and a lambda
 // that captures one keeps it as long as the function value lives.
 TEST(QualifiedPart, FunctionValuesTakeAndGiveSharedReferences) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node { v: int; }
-    fn bump(n: shared mut Node) -> shared mut Node { n.v += 1; return n; }
+    fn bump(n: shared mutable Node) -> shared mutable Node { n.v += 1; return n; }
     fn main() -> int {
-      s: shared mut Node = Node(1);
-      f: (shared mut Node) -> shared mut Node = bump;
-      g = fn(n: shared mut Node) -> shared mut Node { n.v *= 2; return n; };
+      s: shared mutable Node = Node(1);
+      f: (shared mutable Node) -> shared mutable Node = bump;
+      g = fn(n: shared mutable Node) -> shared mutable Node { n.v *= 2; return n; };
       r = g(f(s));
       r.v += 1;
-      h = fn() -> shared mut Node { return s; };
+      h = fn() -> shared mutable Node { return s; };
       io::println(Str(s.v) + " " + Str(h().v));
       return 0;
     }
@@ -114,19 +114,19 @@ TEST(QualifiedPart, EveryContainerTakesASharedTypeArgument) {
     class Node { id: int; }
     enum Opt<T> { Some(v: T), Nada }
     fn main() -> int {
-      s: shared mut Node = Node(1);
-      ll: mut = cl::LinkedList<shared mut Node>();
+      s: shared mutable Node = Node(1);
+      ll: mutable = cl::LinkedList<shared mutable Node>();
       ll.pushBack(s);
       ll.pushFront(Node(2));
       back = ll.popBack();
       back.id = 3;
-      st = cl::Stack<shared mut Node>();
+      st = cl::Stack<shared mutable Node>();
       st.push(s);
-      q = cl::Queue<shared mut Node>();
+      q = cl::Queue<shared mutable Node>();
       q.enqueue(s);
       let front = q.dequeue();
       front.id += 1;
-      l = cl::List<Opt<shared mut Node>>();
+      l = cl::List<Opt<shared mutable Node>>();
       l.push(Opt::Some(s));
       copy = l.clone();
       match copy.get(0) {
@@ -142,7 +142,7 @@ TEST(QualifiedPart, EveryContainerTakesASharedTypeArgument) {
   g.expectNoLeaks("EveryContainerTakesASharedTypeArgument");
 }
 
-// In a template's code a `T` with T = `shared mut Node` clones as its copy
+// In a template's code a `T` with T = `shared mutable Node` clones as its copy
 // however it is reached: a variable, a tuple's element, an array's element,
 // a list made of an array.  The class's own `clone` runs in the program's
 // code, on a variable declared `shared`.
@@ -156,18 +156,18 @@ TEST(QualifiedPart, ATemplatesSharedValuesCloneAsTheirCopy) {
     fn viaTuple<T: Cloneable>(p: (T, int)) -> T { return p.0.clone(); }
     fn viaArray<T: Cloneable>(v: T) -> T { xs: T[2] = [v.clone(), move v]; return xs[1].clone(); }
     fn main() -> int {
-      s: shared mut Node = Node(0);
+      s: shared mutable Node = Node(0);
       viaVar(s).id = 1;
       io::print(Str(s.id));
-      viaTuple<shared mut Node>((s, 0)).id = 2;
+      viaTuple<shared mutable Node>((s, 0)).id = 2;
       io::print(" " + Str(s.id));
       viaArray(s).id = 3;
       io::print(" " + Str(s.id));
-      arr: shared mut Node[2] = [s, s];
-      l = cl::listOf<shared mut Node>(arr);
+      arr: shared mutable Node[2] = [s, s];
+      l = cl::listOf<shared mutable Node>(arr);
       l.get(0).id = 5;
       io::print(" " + Str(s.id));
-      c: mut = s.clone();
+      c: mutable = s.clone();
       c.id = 9;
       io::println(" " + Str(s.id) + " " + Str(c.id));
       return 0;
@@ -193,8 +193,8 @@ TEST(QualifiedPart, AFreshValueTakesTheBorrowsFormAtRunTime) {
       let f = dup<atomic shared Node>(Node(7));
       let t = read(f);
       let u = read(f);
-      s: shared mut Node = Node(1);
-      let c = Cell<shared mut Node>(s);
+      s: shared mutable Node = Node(1);
+      let c = Cell<shared mutable Node>(s);
       let v = take(move c);
       v.id = 9;
       io::println(Str((await t) + (await u)) + " " + Str(s.id));
@@ -205,8 +205,8 @@ TEST(QualifiedPart, AFreshValueTakesTheBorrowsFormAtRunTime) {
   EXPECT_EQ(r.StdOut, "14 9\n");
 }
 
-// A new value assigned to a `locked mut` variable becomes a cell there, as
-// one stored in a field does, and a conditional's None into a `locked mut
+// A new value assigned to a `locked mutable` variable becomes a cell there, as
+// one stored in a field does, and a conditional's None into a `locked mutable
 // Node?` slot stays None, no cell around nothing.  A template's `parallel
 // for` is one in each instance.
 TEST(QualifiedPart, CellsAreMadeWhereValuesBecomeThem) {
@@ -218,12 +218,12 @@ TEST(QualifiedPart, CellsAreMadeWhereValuesBecomeThem) {
       return total;
     }
     fn main() -> int {
-      l: locked mut Node = Node(1);
+      l: locked mutable Node = Node(1);
       l = Node(5);
       lock l as n: inout { n.v += 1; }
       lock l as n: view { io::print(Str(n.v)); }
       let c = False;
-      let o: locked mut Node? = if c then Node(2) else None;
+      let o: locked mutable Node? = if c then Node(2) else None;
       match o { n: Node { io::print(" cell"); } None { io::print(" none"); } }
       io::println(" " + Str(sum<int>([1, 2, 3, 4])));
       return 0;
@@ -234,8 +234,8 @@ TEST(QualifiedPart, CellsAreMadeWhereValuesBecomeThem) {
 }
 
 // A match binding holds its subject's form: an `inout` arm of a `shared
-// mut` optional trades shared references, and in a template's code the
-// clone of a `view T?` subject's binding with T = `shared mut Node` is the
+// mutable` optional trades shared references, and in a template's code the
+// clone of a `view T?` subject's binding with T = `shared mutable Node` is the
 // same object.  An arm over a borrowed subject binds it without counting.
 TEST(QualifiedPart, MatchBindingsHoldTheirSubjectsForm) {
   LeakGuard g;
@@ -250,9 +250,9 @@ TEST(QualifiedPart, MatchBindingsHoldTheirSubjectsForm) {
       match o { n: Node { return n.w; } _ { return 0; } }
     }
     fn main() -> int {
-      s: shared mut Node = Node(1, 2);
-      o: shared mut Node? = s;
-      match first<shared mut Node>(o) { n: Node { n.w = 7; } None { } }
+      s: shared mutable Node = Node(1, 2);
+      o: shared mutable Node? = s;
+      match first<shared mutable Node>(o) { n: Node { n.w = 7; } None { } }
       match o {
         n: inout Node {
           let old = mem::replace(n, Node(0, 9));
@@ -292,12 +292,12 @@ TEST(QualifiedPart, AnUncountedBindingIsCountedWhereItLands) {
       }
     }
     fn main() -> int {
-      l: cl::List<shared mut Node> = cl::List<shared mut Node>();
-      o: shared mut Node? = Node(1, 2);
+      l: cl::List<shared mutable Node> = cl::List<shared mutable Node>();
+      o: shared mutable Node? = Node(1, 2);
       keepAll(o, l);
       keepAll(o, l);
       o = None;
-      let g = grab<shared mut Node>(l.get(0));
+      let g = grab<shared mutable Node>(l.get(0));
       match g { n: Node { n.w = 5; } None { } }
       io::print(Str(l.get(1).w) + " " + Str(l.len()) + " ");
       b: Base = Node(3, 4);
@@ -310,7 +310,7 @@ TEST(QualifiedPart, AnUncountedBindingIsCountedWhereItLands) {
   g.expectNoLeaks("AnUncountedBindingIsCountedWhereItLands");
 }
 
-// A `shared fn`'s `self` is a `shared mut` reference, so a binding of it is
+// A `shared fn`'s `self` is a `shared mutable` reference, so a binding of it is
 // a copy the arm may assign, move or pass `inout`, counted as any copy is;
 // the object `self` names stays as it was.
 TEST(QualifiedPart, ASharedFnsSelfBindingIsACountedCopy) {
@@ -319,7 +319,7 @@ TEST(QualifiedPart, ASharedFnsSelfBindingIsACountedCopy) {
     import ::memory as mem;
     class Base { v: int; }
     class Node : Base { w: int; }
-    fn take(x: shared mut Node) -> int { return x.w; }
+    fn take(x: shared mutable Node) -> int { return x.w; }
     impl Base {
       shared fn swapOut() -> int {
         match self {
@@ -341,7 +341,7 @@ TEST(QualifiedPart, ASharedFnsSelfBindingIsACountedCopy) {
       }
     }
     fn main() -> int {
-      s: shared mut Base = Node(1, 2);
+      s: shared mutable Base = Node(1, 2);
       io::print(Str(s.swapOut()) + " " + Str(s.swapOut()) + " ");
       io::print(Str(s.renew()) + " " + Str(s.hand()) + " ");
       io::println(Str(s.v));
@@ -400,7 +400,7 @@ TEST(QualifiedPart, AnArmInALockBlockReadsTheContents) {
   auto r = compileAndRun(R"(import ::io;
     class Base { v: int; }
     class Dog : Base { w: int; }
-    class H { c: locked mut Base; }
+    class H { c: locked mutable Base; }
     fn show(d: view Dog) -> int { return d.w; }
     fn peek(h: view H) -> int {
       t = 0;
@@ -408,11 +408,11 @@ TEST(QualifiedPart, AnArmInALockBlockReadsTheContents) {
       return t;
     }
     fn main() -> int {
-      let c: locked mut Base = Dog(1, 2);
+      let c: locked mutable Base = Dog(1, 2);
       lock c as v: view {
         match v { d: Dog { io::print("dog " + Str(show(d)) + " "); } _ { } }
       }
-      o: locked mut Base? = Dog(3, 4);
+      o: locked mutable Base? = Dog(3, 4);
       match o {
         b: Base {
           lock b as v: view { match v { d: view Dog { io::print(Str(d.w) + " "); } _ { } } }
@@ -430,7 +430,7 @@ TEST(QualifiedPart, AnArmInALockBlockReadsTheContents) {
 }
 
 // A template's `T: Copyable` copies a `view` of a type argument's form as
-// the argument copies (#368): with T = `shared mut Node`, a `view fn`'s
+// the argument copies (#368): with T = `shared mutable Node`, a `view fn`'s
 // field, a `view` slice's element and a `view` parameter come out as the
 // same object, counted.
 TEST(QualifiedPart, ACopyableArgumentsFormIsCopiedOutOfABorrow) {
@@ -442,13 +442,13 @@ TEST(QualifiedPart, ACopyableArgumentsFormIsCopiedOutOfABorrow) {
     fn first<T: Copyable>(xs: view T[]) -> T { return xs[0]; }
     fn keep<T: Copyable>(x: view T) -> T { let k = x; return k; }
     fn main() -> int {
-      s: shared mut Node = Node(1);
-      let b = Box<shared mut Node>(s);
+      s: shared mutable Node = Node(1);
+      let b = Box<shared mutable Node>(s);
       let g = b.get();
       g.v = 2;
-      let a: shared mut Node[2] = [s, s];
-      let t = first<shared mut Node>(a);
-      let k = keep<shared mut Node>(s);
+      let a: shared mutable Node[2] = [s, s];
+      let t = first<shared mutable Node>(a);
+      let k = keep<shared mutable Node>(s);
       k.v += 1;
       io::println(Str(s.v) + " " + Str(t.v) + " " + Str(b.get().v));
       return 0;

@@ -295,7 +295,7 @@ fn main() -> int {
   l.push(make(5));
   l.push(Shape::Rect(3, 4));
   l.push(Shape::Empty);
-  h: mut = Holder(Shape::Empty);
+  h: mutable = Holder(Shape::Empty);
   h.s = l.removeAt(0);
   f = fn(x: view Slot) => x.s.toString();
   io::println(slot.toString() + " " + t.toString() + " " + o.toString());
@@ -343,7 +343,7 @@ fn main() -> int {
   io::println(unwrapOr(a, "x") + unwrapOr(b, "y"));
   io::println(Str(a == Maybe::Just("a")) + " " + Str(b == Maybe::Nothing));
   c = Cell(Maybe::Just(2), 3);
-  h: mut = Holder(move b);
+  h: mutable = Holder(move b);
   h.m = move a;
   io::println(c.toString() + " " + h.m.toString());
   xs: Maybe<int>[3] = [Maybe::Just(1), Maybe::Nothing, Maybe::Just(3)];

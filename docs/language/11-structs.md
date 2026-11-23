@@ -69,7 +69,7 @@ copied around like a number. A struct can be generic, like a class
 - Construction: `Point(1, 2)` takes the fields in declaration order, or the parameters
   of an `__init__` declared in an `impl` block, which must assign every field.
 - Fields: `p.x` reads a field, `p.x = v` assigns it **in place**, in the variable, field
-  or array element that holds the struct (the field of an object through a `mut` reference
+  or array element that holds the struct (the field of an object through a `mutable` reference
   to it).  Chains work: `line.a.x = 0`, `shape.at.y`, `ps[1].x = 2`.
 - A struct is a **value held in place**, like a tuple: `q = p` copies it, and passing
   or returning one copies it, when its fields are Copyable; one holding a `Str` or a
@@ -209,8 +209,8 @@ fn main() -> int {
   p.x = 5;                         // in place
   l = Line(p, Point(3, 4));
   l.a.y = 0;                       // a field of a field
-  let s: mut = Shape(Point(0, 0));
-  s.at.x = 7;                      // a struct field of a mut object
+  let s: mutable = Shape(Point(0, 0));
+  s.at.x = 7;                      // a struct field of a mutable object
   ps: Point[2] = [p, l.b];
   ps[1].x = 9;                     // an element's field
   let t = (p, "p");
@@ -231,8 +231,8 @@ The field is assigned where the struct is **changeable**:
   'let'; its fields are part of its value and cannot be assigned`), nor in a `let`
   variable's struct field or array element;
 - not in an object the reference to it only reads: a struct field of an object is assigned
-  through a `mut` reference, as `s` is a `mut Shape` above (`'s' is immutable (a 'Shape';
-  write 'mut Shape' to change it); cannot assign to its field 'x'`);
+  through a `mutable` reference, as `s` is a `mutable Shape` above (`'s' is immutable (a 'Shape';
+  write 'mutable Shape' to change it); cannot assign to its field 'x'`);
 - not through a `view` (`'a' is a 'view' parameter; cannot assign to its field 'x'`),
   nor in a `view fn`'s `self` (`'self' is read-only in 'view fn bad'; cannot assign to
   its field 'x'`), nor while a `view` local of the variable is live (`'c' is viewed by
@@ -275,7 +275,7 @@ leaves the original as it was; changing the shared object is seen through both.
 import ::io;
 
 class Node { n: int; view fn toString() -> Str { return "Node" + Str(self.n); } }
-struct Item { name: Str; node: shared mut Node; }
+struct Item { name: Str; node: shared mutable Node; }
 
 fn rename(it: Item) -> Item { it.name = it.name + "'"; return it; }   // its own copy
 
@@ -408,11 +408,11 @@ fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   c = Counter::named("a");         // a static fn
   c.tick();
-  c.tickTwice();                   // a method calling methods on self
-  bump(c.slot());                  // an inout result: c.n
-  let b: mut = Box(c.clone());     // a copy in the field
-  b.c.tick();                      // the field's struct, through a mut Box
-  d = c.clone();                   // a copy
+  c.tickTwice();                       // a method calling methods on self
+  bump(c.slot());                      // an inout result: c.n
+  let b: mutable = Box(c.clone());     // a copy in the field
+  b.c.tick();                          // the field's struct, through a mutable Box
+  d = c.clone();                       // a copy
   d.n = 9;
   v: view = c;
   io::println(Str(c.get()) + " " + Str(b.c.get()) + " " + Str(d.get()) + " " +
@@ -429,7 +429,7 @@ Output:
 ```
 
 The receiver of a method call is any expression of the struct type: a variable, a field (a
-field of an object through a `mut` reference, for a method that changes it: `b.c.tick()`
+field of an object through a `mutable` reference, for a method that changes it: `b.c.tick()`
 above), an array element, a call's result or a temporary (a temporary that a method changes
 is dropped with the statement).  `__init__`, `static fn`s and the method names are the
 struct's; `toString` is built in and cannot be declared (`struct 'A' already has a method
@@ -475,8 +475,8 @@ fn main() -> int {
   }                                      // b's scope ends
   hold(move a);                          // a moves into hold, and ends there
   c = Lock("c");
-  c = Lock("d");                         // the value assigned over
-  let s: mut = Session(move c, "ann");   // d moves into the object
+  c = Lock("d");                             // the value assigned over
+  let s: mutable = Session(move c, "ann");   // d moves into the object
   let old = mem::replace(s.held, Lock("e"));
   io::println("done");
   return 0;                              // old (d), then s and the lock it holds (e)
@@ -605,7 +605,7 @@ A struct with a `__deinit__` implements the built-in trait `Deinitializable`
 - A value has no count. The compiler refuses to replace a value that a `match` binding or
   a `view` argument reads where it can see it (above; a call that reads and writes one
   variable's parts is refused as for any value). It cannot see code that reaches the object
-  holding the value through another `shared mut` reference: such code can replace the value
+  holding the value through another `shared mutable` reference: such code can replace the value
   while it is read, and the reader then reads it after its `__deinit__` ran. What the value
   holds is still alive (the reader's own references keep it), but what the `__deinit__`
   gave up is gone.
@@ -875,7 +875,7 @@ Point(x: 4, y: 2) 6 True
 | A buffer of structs with a `__deinit__` | `mem::Buffer<Lock>`, `cl::List<Lock>`: `a buffer cannot hold a 'Lock' yet` |
 | A method named `destroy` | `fn destroy()` or `static fn destroy()` in an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in struct 'P' (a struct has none)` |
 | `let` field assignment | `let a = A(1); a.x = 2;` |
-| Field of a struct in an object that is not `mut` | `let s = Shape(Point(0, 0)); s.at.x = 7;`: `'s' is immutable (a 'Shape'; write 'mut Shape' to change it); cannot assign to its field 'x'` |
+| Field of a struct in an object that is not `mutable` | `let s = Shape(Point(0, 0)); s.at.x = 7;`: `'s' is immutable (a 'Shape'; write 'mutable Shape' to change it); cannot assign to its field 'x'` |
 | `view` field assignment | `fn f(a: view A) { a.x = 1; }`; in a `view fn` |
 | Field of a struct in a tuple | `t.1.x = 3` |
 | Field of a temporary as `inout` | `bump(mk().x)` |

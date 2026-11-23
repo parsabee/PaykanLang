@@ -200,7 +200,7 @@ class Box<T: ValueType> { ... }
 [`ValueType`](../language/06-traits.md#valuetype) (`int`, `float`, `bool`, `char`, a sized
 number, an enum, a tuple, a struct or a function value) in an object, so the value can be
 shared: `Box` is a class, so a `shared` box is held by several names, and a change through
-a `shared mut` one shows through every other. A box with no qualifier has one owner, as
+a `shared mutable` one shows through every other. A box with no qualifier has one owner, as
 every object does, and moves. A `Str` or a class is not a `ValueType` (`'Str' does not implement
 trait 'ValueType', which 'memory::Box' requires of 'T'`): it is shared by reference already.
 
@@ -214,8 +214,8 @@ trait 'ValueType', which 'memory::Box' requires of 'T'`): it is shared by refere
 `inout` parameter, assign to one of its fields (`pt.get().x = 5` for a struct), or assign
 through an `inout` local, which borrows the box until its last use. The call itself is not
 a place to assign to (`b.get() = 5` is `left-hand side of '=' must be an identifier, field
-access, or subscript`). `get` is not a `view fn`, so it needs a `mut` box: a plain one is
-not read through it (`'b' is immutable (a 'Box<int>'; write 'mut Box<int>' to change it);
+access, or subscript`). `get` is not a `view fn`, so it needs a `mutable` box: a plain one is
+not read through it (`'b' is immutable (a 'Box<int>'; write 'mutable Box<int>' to change it);
 'get' is not a 'view fn'` for `let b = mem::Box(0); b.get()`), nor is a `view` of one or a
 frozen `atomic shared` one. `value()` is a `view fn`, and reads any box: a `view T`, which
 cannot be assigned
@@ -231,12 +231,12 @@ import ::memory;
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let hits: shared mut memory::Box<int> = memory::Box(0);
+  let hits: shared mutable memory::Box<int> = memory::Box(0);
   let alias = hits;                     // the same box, read through value()
   bump(hits.get());
   n: inout int = hits.get();
   n = n * 10;
-  let pair: mut = memory::Box((1, "one"));
+  let pair: mutable = memory::Box((1, "one"));
   p: inout (int, Str) = pair.get();
   p = (2, "two");
   io::println(Str(alias.value()) + " " + pair.get().1);
@@ -284,11 +284,11 @@ class Shelf {
 }
 
 fn main() -> int {
-  let s: mut = Shelf(Node("a"), Node("b"));
+  let s: mutable = Shelf(Node("a"), Node("b"));
   let old = mem::replace(s.top, Node("c"));   // s.top's node; s.top now holds c
   let spare = mem::take(s.spare);             // s.spare's node; s.spare is None
-  x: mut = "x";
-  y: mut = "y";
+  x: mutable = "x";
+  y: mutable = "y";
   mem::swap(x, y);
   io::println(old.name + " " + s.top.name + " " + Str(s.spare == None) + " " + x + y);
   match spare {
@@ -307,8 +307,8 @@ b
 ```
 
 Their places are `inout` parameters, so each is a place an `inout` argument can be: a
-variable that is not `let` (`mut` when it holds an object or a string), or a field of a
-`mut` object (`'s' is immutable (a 'Shelf'; write 'mut Shelf' to change it); it cannot be
+variable that is not `let` (`mutable` when it holds an object or a string), or a field of a
+`mutable` object (`'s' is immutable (a 'Shelf'; write 'mutable Shelf' to change it); it cannot be
 passed to 'inout' parameter 'slot'`), or an element of a fixed-size array that is one
 (`mem::take(xs[i])`), and two arguments of one call share no storage: `mem::swap(xs[0],
 xs[1])` swaps two elements, but two at indexes that are not literals may be one element

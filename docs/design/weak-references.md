@@ -16,11 +16,11 @@ implementation takes.
 
 | Topic | Decision |
 |-------|----------|
-| Syntax | `weak` is a qualifier: `y: weak Point? = x;` declares a local, `parent: weak Node?;` a class field, `prev: weak mut Node?;` one that changes its object; `u: weak = x;` infers `Point?` from `x: shared Point` or `x: shared Point?`; `e: weak Point?;` starts as None.  The spelling before #369's qualifier, `weak y: Point? = x;`, is a syntax error naming the new one |
-| Form | a weak reference is a `shared` reference that owns nothing (the owner's decision, 2026-11-07): `weak T` names a `shared` object, `weak mut T` a `shared mut` one, and its type is that form, marked weak.  A unique object has one reference, its owner's, so it is never weakly referenced: a back link to an object needs the object shared (`shared fn`'s `self`, a `shared mut` node) |
+| Syntax | `weak` is a qualifier: `y: weak Point? = x;` declares a local, `parent: weak Node?;` a class field, `prev: weak mutable Node?;` one that changes its object; `u: weak = x;` infers `Point?` from `x: shared Point` or `x: shared Point?`; `e: weak Point?;` starts as None.  The spelling before #369's qualifier, `weak y: Point? = x;`, is a syntax error naming the new one |
+| Form | a weak reference is a `shared` reference that owns nothing (the owner's decision, 2026-11-07): `weak T` names a `shared` object, `weak mutable T` a `shared mutable` one, and its type is that form, marked weak.  A unique object has one reference, its owner's, so it is never weakly referenced: a back link to an object needs the object shared (`shared fn`'s `self`, a `shared mutable` node) |
 | Type | `T?` of a class `T` (a user class, `Str`, `Obj`), always optional: a weak reference reads as None once its object is destroyed.  Not a plain class, a value, a struct, an enum or a function type |
-| Reading | a `weak` variable or field reads as a `shared T?` (`weak mut`: a `shared mut T?`): a strong reference to the object while it is alive (one the expression owns for its own duration), None otherwise; it goes everywhere such a `T?` goes (`match`, `== None`, an argument, a result, a strong variable or field of that form) |
-| Writing | assigning a `shared T` or `shared T?` (`weak mut`: `shared mut`) to a `weak` variable or field stores a weak reference to its object (none for None) and drops the one it held; the object's strong count is untouched.  Any other form is an error (`cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object`), and so is passing one to a generated `__init__`'s parameter of a weak field |
+| Reading | a `weak` variable or field reads as a `shared T?` (`weak mutable`: a `shared mutable T?`): a strong reference to the object while it is alive (one the expression owns for its own duration), None otherwise; it goes everywhere such a `T?` goes (`match`, `== None`, an argument, a result, a strong variable or field of that form) |
+| Writing | assigning a `shared T` or `shared T?` (`weak mutable`: `shared mutable`) to a `weak` variable or field stores a weak reference to its object (none for None) and drops the one it held; the object's strong count is untouched.  Any other form is an error (`cannot store 'a' (a 'mutable Node') in field 'tail', a 'weak mutable Node?': a 'weak mutable' reference names a 'shared mutable' object`), and so is passing one to a generated `__init__`'s parameter of a weak field |
 | Lifetime | a weak reference never keeps its object alive; the object is destroyed with its last strong reference, and from then on every weak reference to it reads as None |
 | Places | a weak reference is not a place a strong reference could be written to: no `inout` parameter, local or `match` arm names a `weak` variable or field (`view` is fine: it reads a copy) |
 | Lambdas | a lambda captures a `weak` variable weakly: the closure holds a weak reference, and a call reads it as the variable reads (held strongly for the call's duration) |
@@ -32,13 +32,13 @@ implementation takes.
 
 ```
 statement   ::= ... | weakDecl
-weakDecl    ::= IDENT ":" "weak" "mut"? typeAnnotation? ( "=" expression )? ";"
+weakDecl    ::= IDENT ":" "weak" "mutable"? typeAnnotation? ( "=" expression )? ";"
 classMember ::= fieldDecl ";" | funcDecl
-fieldDecl   ::= varDecl | IDENT ":" "weak" "mut"? typeAnnotation
+fieldDecl   ::= varDecl | IDENT ":" "weak" "mutable"? typeAnnotation
 ```
 
-`weak` is a keyword, and a qualifier after the colon: only `mut` follows it
-(`'weak' takes 'mut' or nothing`).  A local needs a type or an initializer
+`weak` is a keyword, and a qualifier after the colon: only `mutable` follows it
+(`'weak' takes 'mutable' or nothing`).  A local needs a type or an initializer
 (both are allowed); it cannot be a borrow (`y: weak view Point? = x` is an
 error) and `let` and `weak` are not combined (`a 'weak' local cannot be
 'let'`: a weak variable is assigned as its object changes).  A struct body rejects `weak` (`a struct

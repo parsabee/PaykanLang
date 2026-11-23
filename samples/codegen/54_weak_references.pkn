@@ -1,9 +1,9 @@
-// 54 — weak references: `weak` and `weak mut` locals and fields
-// Exercises: `y: weak mut Node? = x;` (a local that refers to a `shared mut`
-//            object without keeping it alive, inferred `u: weak mut = x;`,
-//            and one starting as None), `parent: weak mut Node?;` (a class
+// 54 — weak references: `weak` and `weak mutable` locals and fields
+// Exercises: `y: weak mutable Node? = x;` (a local that refers to a `shared mutable`
+//            object without keeping it alive, inferred `u: weak mutable = x;`,
+//            and one starting as None), `parent: weak mutable Node?;` (a class
 //            field: the back link of a tree that breaks the parent <-> child
-//            cycle, stored by a `shared fn`, whose `self` is `shared mut`),
+//            cycle, stored by a `shared fn`, whose `self` is `shared mutable`),
 //            a `weak` local of a `shared` object, whose read is kept as a
 //            `shared` reference, reading a weak reference with `match` and
 //            `== None`, assigning and copying it (a strong copy keeps the
@@ -13,7 +13,7 @@
 // Every object is freed with its last strong reference: the tree, the
 // buttons and the closures all go, so the program leaks nothing.  A weak
 // reference names a shared object (a unique one has one reference, its
-// owner's): the tree's nodes and the buttons are `shared mut`, since a
+// owner's): the tree's nodes and the buttons are `shared mutable`, since a
 // parent and a local of `main` both hold a child and a method stores
 // `self`, the label `shared`; a strong copy taken from a weak reference
 // holds one too.
@@ -22,9 +22,9 @@ import ::io;
 
 class Node {
   name: Str;
-  parent: weak mut Node?;
-  first: shared mut Node?;
-  next: shared mut Node?;
+  parent: weak mutable Node?;
+  first: shared mutable Node?;
+  next: shared mutable Node?;
 }
 
 impl Node {
@@ -34,7 +34,7 @@ impl Node {
     self.first = None;
     self.next = None;
   }
-  shared fn add(child: shared mut Node) {
+  shared fn add(child: shared mutable Node) {
     child.parent = self;
     child.next = self.first;
     self.first = child;
@@ -62,7 +62,7 @@ impl Button {
     };
   }
   shared fn wire() {
-    me: weak mut Button? = self;
+    me: weak mutable Button? = self;
     self.onClick = fn() -> Str {
       match me {
         b: Button {
@@ -88,16 +88,16 @@ fn show(w: view Node?) -> Str {
 
 fn main() -> int {
   // A tree whose children point back at their parent weakly.
-  root: shared mut = Node("root");
-  a: shared mut = Node("a");
-  let b: shared mut = Node("b");
+  root: shared mutable = Node("root");
+  a: shared mutable = Node("a");
+  let b: shared mutable = Node("b");
   root.add(a);
   a.add(b);
   io::println(b.path());
 
   // A weak local reads as the object while something holds it.
-  w: weak mut Node? = root;
-  u: weak mut = a;
+  w: weak mutable Node? = root;
+  u: weak mutable = a;
   e: weak Node?;
   io::println(show(w) + " " + show(u) + " " + show(e) + " " + Str(e == None));
 
@@ -107,7 +107,7 @@ fn main() -> int {
   io::println(b.path() + " " + show(w) + " " + Str(w == None));
 
   // A strong copy taken from a weak reference keeps the object.
-  keep: shared mut Node? = u;
+  keep: shared mutable Node? = u;
   a = Node("c");
   io::println(show(u) + " " + show(keep));
   keep = None;
@@ -127,7 +127,7 @@ fn main() -> int {
 
   // A closure stored in the object it refers to, through a weak capture; it
   // is copied out of the button, which then dies.
-  btn: shared mut = Button("ok");
+  btn: shared mutable = Button("ok");
   io::println(btn.click());
   btn.wire();
   io::println(btn.click());

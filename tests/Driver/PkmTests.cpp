@@ -727,31 +727,34 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
   const fs::path dir =
       fs::temp_directory_path() / ("pkm_slicecopy_" + std::to_string(getpid()));
   fs::remove_all(dir);
-  writeFile(dir / "lib/slices.pkn",
-            "class C { a: int[3]; }\n"
-            "fn reset(c: shared mut C) -> int { c.a = [9, 9, 9]; return 0; }\n"
-            "fn total(xs: view int[], x: int) -> int => xs[0];\n"
-            "fn plain(xs: view int[], c: shared mut C) -> int => total(xs, "
-            "reset(c));\n"
-            "fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
-            "fn generic<T>(xs: view T[], c: shared mut C) -> int => first(xs, "
-            "reset(c));\n");
-  writeFile(dir / "lib/other.pkn", "import lib::slices;\n"
-                                   "fn more(c: shared mut slices::C) -> int => "
-                                   "slices::generic(c.a, c);\n");
+  writeFile(
+      dir / "lib/slices.pkn",
+      "class C { a: int[3]; }\n"
+      "fn reset(c: shared mutable C) -> int { c.a = [9, 9, 9]; return 0; }\n"
+      "fn total(xs: view int[], x: int) -> int => xs[0];\n"
+      "fn plain(xs: view int[], c: shared mutable C) -> int => total(xs, "
+      "reset(c));\n"
+      "fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
+      "fn generic<T>(xs: view T[], c: shared mutable C) -> int => first(xs, "
+      "reset(c));\n");
+  writeFile(dir / "lib/other.pkn",
+            "import lib::slices;\n"
+            "fn more(c: shared mutable slices::C) -> int => "
+            "slices::generic(c.a, c);\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::slices;\nimport lib::other;\n"
             "fn main() -> int {\n"
-            "  let c: shared mut = slices::C([1, 2, 3]);\n"
+            "  let c: shared mutable = slices::C([1, 2, 3]);\n"
             "  let n = slices::plain(c.a, c);\n"
             "  io::println(Str(n) + \" \" + Str(slices::generic(c.a, c) + "
             "other::more(c)));\n"
             "  return 0;\n}\n");
-  writeFile(dir / "plain.pkn", "import ::io;\nimport lib::slices;\n"
-                               "fn main() -> int {\n"
-                               "  let c: shared mut = slices::C([1, 2, 3]);\n"
-                               "  io::println(Str(slices::plain(c.a, c)));\n"
-                               "  return 0;\n}\n");
+  writeFile(dir / "plain.pkn",
+            "import ::io;\nimport lib::slices;\n"
+            "fn main() -> int {\n"
+            "  let c: shared mutable = slices::C([1, 2, 3]);\n"
+            "  io::println(Str(slices::plain(c.a, c)));\n"
+            "  return 0;\n}\n");
   auto in = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
@@ -759,20 +762,22 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
                              "slice 'xs': they are copied to the heap before "
                              "the call to ";
   const std::string plain =
-      "lib/slices.pkn:4:59: warning: 'reset'" + copied +
+      "lib/slices.pkn:4:63: warning: 'reset'" + copied +
       "'total'\n"
       "  3 | fn total(xs: view int[], x: int) -> int => xs[0];\n"
-      "  4 | fn plain(xs: view int[], c: shared mut C) -> int => total(xs, "
+      "  4 | fn plain(xs: view int[], c: shared mutable C) -> int => total(xs, "
       "reset(c));\n"
-      "    |                                                           ^~\n"
+      "    |                                                               ^~\n"
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n";
   const std::string generic =
-      "lib/slices.pkn:6:62: warning: 'reset'" + copied + "'first<int>'\n";
+      "lib/slices.pkn:6:66: warning: 'reset'" + copied + "'first<int>'\n";
   const std::string genericLines =
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
-      "  6 | fn generic<T>(xs: view T[], c: shared mut C) -> int => first(xs, "
+      "  6 | fn generic<T>(xs: view T[], c: shared mutable C) -> int => "
+      "first(xs, "
       "reset(c));\n"
-      "    |                                                              ^~\n";
+      "    |                                                                  "
+      "^~\n";
   // Built from source: both; from the cache entries, the instantiation
   // `main` makes, whose template comes from the entry.
   auto r = in("main.pkn");
@@ -815,23 +820,25 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
   const fs::path dir = fs::temp_directory_path() /
                        ("pkm_slicenames_" + std::to_string(getpid()));
   fs::remove_all(dir);
-  writeFile(dir / "lib/sl/inner.pkn",
-            "class C { a: int[3]; }\n"
-            "fn wipe(c: shared mut C) -> int { c.a = [0, 0, 0]; return 0; }\n"
-            "fn total(xs: view int[], x: int) -> int => xs[0] + x;\n");
-  writeFile(dir / "lib/sl.pkn",
-            "import lib::sl::inner as q;\n"
-            "fn own(xs: view int[], x: int) -> int => xs[0] + x;\n"
-            "fn plain(xs: view int[], c: shared mut q::C) -> int => "
-            "q::total(xs, q::wipe(c));\n"
-            "fn gen<T>(xs: view int[], c: shared mut q::C, t: T) -> int => "
-            "q::total(xs, q::wipe(c));\n"
-            "fn mine<T>(xs: view int[], c: shared mut q::C, t: T) -> int => "
-            "own(xs, q::wipe(c));\n");
+  writeFile(
+      dir / "lib/sl/inner.pkn",
+      "class C { a: int[3]; }\n"
+      "fn wipe(c: shared mutable C) -> int { c.a = [0, 0, 0]; return 0; }\n"
+      "fn total(xs: view int[], x: int) -> int => xs[0] + x;\n");
+  writeFile(
+      dir / "lib/sl.pkn",
+      "import lib::sl::inner as q;\n"
+      "fn own(xs: view int[], x: int) -> int => xs[0] + x;\n"
+      "fn plain(xs: view int[], c: shared mutable q::C) -> int => "
+      "q::total(xs, q::wipe(c));\n"
+      "fn gen<T>(xs: view int[], c: shared mutable q::C, t: T) -> int => "
+      "q::total(xs, q::wipe(c));\n"
+      "fn mine<T>(xs: view int[], c: shared mutable q::C, t: T) -> int => "
+      "own(xs, q::wipe(c));\n");
   writeFile(dir / "main.pkn",
             "import ::io;\nimport lib::sl;\nimport lib::sl::inner;\n"
             "fn main() -> int {\n"
-            "  let c: shared mut = inner::C([1, 2, 3]);\n"
+            "  let c: shared mutable = inner::C([1, 2, 3]);\n"
             "  let a = sl::plain(c.a, c);\n"
             "  c.a = [1, 2, 3];\n"
             "  let b = sl::gen(c.a, c, 1);\n"
@@ -846,26 +853,26 @@ TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
                              "slice 'xs': they are copied to the heap before "
                              "the call to ";
   const std::string line3 =
-      "fn plain(xs: view int[], c: shared mut q::C) -> int => "
+      "fn plain(xs: view int[], c: shared mutable q::C) -> int => "
       "q::total(xs, q::wipe(c));\n";
   const std::string line4 =
-      "fn gen<T>(xs: view int[], c: shared mut q::C, t: T) -> int "
+      "fn gen<T>(xs: view int[], c: shared mutable q::C, t: T) -> int "
       "=> q::total(xs, q::wipe(c));\n";
   const std::string line5 =
-      "fn mine<T>(xs: view int[], c: shared mut q::C, t: T) -> int "
+      "fn mine<T>(xs: view int[], c: shared mutable q::C, t: T) -> int "
       "=> own(xs, q::wipe(c));\n";
   const std::string plain =
-      "lib/sl.pkn:3:65: warning: 'q::wipe'" + copied + "'q::total'\n" +
+      "lib/sl.pkn:3:69: warning: 'q::wipe'" + copied + "'q::total'\n" +
       "  2 | fn own(xs: view int[], x: int) -> int => xs[0] + x;\n" + "  3 | " +
-      line3 + "    | " + std::string(64, ' ') + "^~\n" + "  4 | " + line4;
-  const std::string gen = "lib/sl.pkn:4:72: warning: 'lib::sl::inner::wipe'" +
+      line3 + "    | " + std::string(68, ' ') + "^~\n" + "  4 | " + line4;
+  const std::string gen = "lib/sl.pkn:4:76: warning: 'lib::sl::inner::wipe'" +
                           copied + "'lib::sl::inner::total'\n";
   const std::string genLines = "  3 | " + line3 + "  4 | " + line4 + "    | " +
-                               std::string(71, ' ') + "^~\n" + "  5 | " + line5;
+                               std::string(75, ' ') + "^~\n" + "  5 | " + line5;
   const std::string mine =
-      "lib/sl.pkn:5:68: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
+      "lib/sl.pkn:5:72: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
   const std::string mineLines = "  4 | " + line4 + "  5 | " + line5 + "    | " +
-                                std::string(67, ' ') + "^~\n";
+                                std::string(71, ' ') + "^~\n";
   auto r = in("main.pkn");
   EXPECT_EQ(r.exitCode, 0) << r.out;
   EXPECT_EQ(r.out, plain + gen + genLines + mine + mineLines + "1 1 1\n");
@@ -1728,7 +1735,7 @@ struct ModesProject {
         "impl Fast {\n"
         "  fn __init__(s: view int) { __super__(s); } }\n"
         "fn main() -> int {\n"
-        "  c: mut base::Counter = Fast(1);\n"
+        "  c: mutable base::Counter = Fast(1);\n"
         "  plain = base::Counter(5);\n"
         "  k = 2;\n"
         "  base::bump(k);\n"
@@ -2178,7 +2185,7 @@ TEST(Pkm, AnImportsDroppedImplMethodOfAClassCopy) {
   writeFile(dir / "bumps.pkn", "import gen;\n"
                                "import makes;\n"
                                "fn three(x: int) -> int {\n"
-                               "  b: mut = gen::Box<int>(x);\n"
+                               "  b: mutable = gen::Box<int>(x);\n"
                                "  return b.bump(1) + makes::one(x);\n}\n");
   writeFile(dir / "main.pkn",
             "import ::io;\n"
@@ -2186,7 +2193,7 @@ TEST(Pkm, AnImportsDroppedImplMethodOfAClassCopy) {
             "import makes;\n"
             "import bumps;\n"
             "fn main() -> int {\n"
-            "  b: mut = gen::Box<int>(8);\n"
+            "  b: mutable = gen::Box<int>(8);\n"
             "  let s: atomic shared gen::Box<int> = gen::Box<int>(5);\n"
             "  let sum = b.plain() + makes::one(2) + bumps::three(6) + "
             "b.bump(9);\n"
@@ -2655,15 +2662,16 @@ TEST(Pkm, AGenericMethodsStoresAreItsModulesToCount) {
       "  let n = f();\n"
       "  return s + \" \" + Str(n);\n"
       "}\n");
-  writeFile(dir / "main.pkn",
-            "import ::io;\n"
-            "import c;\n"
-            "fn main() -> int {\n"
-            "  let o: shared mut c::C = c::C(\"the first string, long enough "
-            "for the heap\");\n"
-            "  let out = o.show(fn() -> int { o.swap(12345); return 1; });\n"
-            "  io::println(out);\n"
-            "  return 0;\n}\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io;\n"
+      "import c;\n"
+      "fn main() -> int {\n"
+      "  let o: shared mutable c::C = c::C(\"the first string, long enough "
+      "for the heap\");\n"
+      "  let out = o.show(fn() -> int { o.swap(12345); return 1; });\n"
+      "  io::println(out);\n"
+      "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
                " 2>&1");
@@ -2857,7 +2865,7 @@ TEST(Pkm, TheCOfEmitCLinksNoCompiledTasks) {
 // A module's interface names the classes whose objects its code sends to
 // another thread: an importer's class derived from one crosses with it, so
 // the importer's send check is of that class, as it would be in the module
-// itself.  (A task then read a `shared mut` object on a worker while the
+// itself.  (A task then read a `shared mutable` object on a worker while the
 // program wrote it.)
 TEST(Pkm, AnImportersSubclassOfAClassAModuleSends) {
   REQUIRE_BACKEND();
@@ -2880,15 +2888,15 @@ TEST(Pkm, AnImportersSubclassOfAClassAModuleSends) {
       "import lib;\n"
       "class Cache { name: Str; }\n"
       "class Doubled : lib::Shape {\n"
-      "  cache: shared mut Cache;\n"
+      "  cache: shared mutable Cache;\n"
       "}\n"
       "impl Doubled {\n"
-      "  fn __init__(c: shared mut Cache) { __super__(1); self.cache = c; "
+      "  fn __init__(c: shared mutable Cache) { __super__(1); self.cache = c; "
       "}\n}\n"
-      "class Local : lib::Kept { cache: shared mut Cache; }\n"
+      "class Local : lib::Kept { cache: shared mutable Cache; }\n"
       "class Plain : lib::Shape { extra: int; }\n"
       "fn main() -> int {\n"
-      "  let c: shared mut = Cache(\"c\");\n"
+      "  let c: shared mutable = Cache(\"c\");\n"
       "  return lib::during(Doubled(c));\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
@@ -2896,7 +2904,7 @@ TEST(Pkm, AnImportersSubclassOfAClassAModuleSends) {
   };
   const std::string want =
       "main.pkn:3:1: error: class 'Doubled' extends 'Shape', which is sent to "
-      "another thread: field 'cache' is 'shared mut Cache': a 'shared' "
+      "another thread: field 'cache' is 'shared mutable Cache': a 'shared' "
       "reference is aliased on its own thread";
   // From the source, from the cache entry and from the module file.
   for (const char *flags : {"--no-module-cache", "--rebuild-modules", ""}) {
@@ -3025,17 +3033,18 @@ TEST(Pkm, PureVirtualMethodsAcrossModules) {
             "Str(self.area()); }\n"
             "}\n"
             "class Half : Shape { fn grow() { } }\n");
-  writeFile(dir / "main.pkn", "import ::io; import base;\n"
-                              "class Square : base::Half {\n"
-                              "  side: float;\n"
-                              "  view fn area() -> float {\n"
-                              "    return self.side * self.side; }\n"
-                              "}\n"
-                              "fn main() -> int {\n"
-                              "  s: mut base::Shape = Square(\"sq\", 3.0);\n"
-                              "  s.grow();\n"
-                              "  io::println(s.report());\n"
-                              "  return 0;\n}\n");
+  writeFile(dir / "main.pkn",
+            "import ::io; import base;\n"
+            "class Square : base::Half {\n"
+            "  side: float;\n"
+            "  view fn area() -> float {\n"
+            "    return self.side * self.side; }\n"
+            "}\n"
+            "fn main() -> int {\n"
+            "  s: mutable base::Shape = Square(\"sq\", 3.0);\n"
+            "  s.grow();\n"
+            "  io::println(s.report());\n"
+            "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import base;\n"
                              "fn f(o: Obj) -> int {\n"
                              "  match o { base::Half { return 1; } _ { } }\n"
@@ -3197,7 +3206,7 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
             "  return if a.len() > b.len() then a else b; }\n");
   writeFile(dir / "main.pkn", "import ::io; import base;\n"
                               "fn main() -> int {\n"
-                              "  b: mut = base::Box();\n"
+                              "  b: mutable = base::Box();\n"
                               "  n: inout = b.count();\n"
                               "  n = n + 2;\n"
                               "  k = b.count();\n"
@@ -3243,7 +3252,7 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
                              "  fn x() -> inout int { return self.v.x; } }\n");
   writeFile(dir / "usegen.pkn", "import ::io; import gen;\n"
                                 "fn main() -> int {\n"
-                                "  w: mut = gen::Wrap<gen::P>(gen::P(1));\n"
+                                "  w: mutable = gen::Wrap<gen::P>(gen::P(1));\n"
                                 "  x: inout = w.x();\n"
                                 "  x = x + 4;\n"
                                 "  io::println(Str(w.v.x));\n"
@@ -3564,7 +3573,7 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
             "native fn width(s: view Str) -> int = \"pk_lent_width\";\n"
             "class Node { name: shared Str; }\n"
             "class Holder { n: shared Node?; }\n"
-            "fn stash(h: mut Holder, n: shared Node) { h.n = n; }\n"
+            "fn stash(h: mutable Holder, n: shared Node) { h.n = n; }\n"
             "fn named(n: shared Node) -> shared Str { return n.name; }\n");
   writeFile(dir / "lib.c", "#include <stdint.h>\n"
                            "int64_t pk_lent_width(void *s) { return s ? 7 : 0; "
@@ -3575,7 +3584,7 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
             "fn main() -> int {\n"
             "  s: shared = \"abc\" + \"def\";\n"
             "  n: shared = lib::Node(s);\n"
-            "  h: mut = lib::Holder(None);\n"
+            "  h: mutable = lib::Holder(None);\n"
             "  lib::stash(move h, n);\n"
             "  io::println(Str<int>(lib::width(s)) + \" \" + lib::named(n) + "
             "\" \" + s);\n"
@@ -3686,9 +3695,9 @@ TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
       "fn setsSlot(h: inout Holder) -> Str =>\n"
       "  h.slot.v + Str(h.slot.set(\"other\" + \"?\"));\n"
       "fn main() -> int {\n"
-      "  c: mut = cells::cellOf(\"old\" + \"?\");\n"
+      "  c: mutable = cells::cellOf(\"old\" + \"?\");\n"
       "  io::println(reads(c) + \" \" + replaces(c) + \" \" + reads(c));\n"
-      "  h: mut = Holder(cells::slotOf(\"first\" + \".\"));\n"
+      "  h: mutable = Holder(cells::slotOf(\"first\" + \".\"));\n"
       "  io::println(readsSlot(h) + \" \" + setsSlot(h) + \" \" +\n"
       "              readsSlot(h));\n"
       "  return 0;\n"
@@ -3705,7 +3714,7 @@ TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
             "  return b.s + Str(c.size());\n"
             "}\n"
             "fn stored(b: view Box) -> Str {\n"
-            "  let c: mut = labels::labelled(\"x\");\n"
+            "  let c: mutable = labels::labelled(\"x\");\n"
             "  return b.s + Str(c.put(\"y\"));\n"
             "}\n"
             "fn main() -> int {\n"
@@ -4510,8 +4519,8 @@ TEST(Pkm, StructAndClassInstantiationsOfOneNameConflict) {
 // A `weak` field crosses modules and prebuilt `.pkm` files: the importer
 // stores and reads it as a weak reference (the interface records the flag),
 // so a tree built from another module's class is freed with its root.  The
-// nodes are `shared mut`: the tree and `main` both hold `a`, and the back
-// link is `weak mut`, which `add`, a `shared fn`, stores `self` in.
+// nodes are `shared mutable`: the tree and `main` both hold `a`, and the back
+// link is `weak mutable`, which `add`, a `shared fn`, stores `self` in.
 TEST(Pkm, WeakFieldsAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =
@@ -4520,10 +4529,10 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   writeFile(dir / "tree.pkn",
             "class Node {\n"
             "  name: Str;\n"
-            "  parent: weak mut Node?;\n"
-            "  first: shared mut Node?;\n"
-            "  next: shared mut Node?;\n"
-            "  shared fn add(child: shared mut Node) {\n"
+            "  parent: weak mutable Node?;\n"
+            "  first: shared mutable Node?;\n"
+            "  next: shared mutable Node?;\n"
+            "  shared fn add(child: shared mutable Node) {\n"
             "    child.parent = self; child.next = self.first; self.first = "
             "child; }\n"
             "  view fn path() -> Str {\n"
@@ -4535,11 +4544,11 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   writeFile(dir / "main.pkn",
             "import ::io; import tree;\n"
             "fn main() -> int {\n"
-            "  root: shared mut = tree::Node(\"root\");\n"
-            "  a: shared mut = tree::Node(\"a\");\n"
+            "  root: shared mutable = tree::Node(\"root\");\n"
+            "  a: shared mutable = tree::Node(\"a\");\n"
             "  root.add(a);\n"
             "  a.parent = root;\n"
-            "  w: weak mut = root;\n"
+            "  w: weak mutable = root;\n"
             "  io::print(a.path() + \" \");\n"
             "  root = tree::Node(\"other\");\n"
             "  io::print(a.path() + \" \");\n"
@@ -4562,8 +4571,8 @@ TEST(Pkm, WeakFieldsAcrossModules) {
   EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
   auto dump = paykan("pkm dump --section=iface tree.pkm");
   for (const char *line :
-       {"    field name: Str", "    weak field parent: shared mut Node?",
-        "    field first: shared mut Node?"})
+       {"    field name: Str", "    weak field parent: shared mutable Node?",
+        "    field first: shared mutable Node?"})
     EXPECT_TRUE(contains(dump.out, line)) << line << "\n" << dump.out;
   fs::remove_all(dir);
 }
@@ -5642,15 +5651,15 @@ TEST(Pkm, WhatALockBlockMayCallOnEveryPath) {
   writeFile(p.Dir / "lib" / "gates.pkn",
             R"(class Counts { total: int; }
 final class Meter { n: int; view fn read() -> int { return self.n; } }
-struct Gate { c: locked mut Counts; }
+struct Gate { c: locked mutable Counts; }
 impl Gate {
   view fn pass() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
   view fn peek() -> int { return 2; }
 }
-fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
-fn relay(c: locked mut Counts) { bump(c); }
+fn bump(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
+fn relay(c: locked mutable Counts) { bump(c); }
 fn twice(n: int) -> int { return n * 2; }
-fn guarded<T>(c: locked mut Counts, x: view T) -> int {
+fn guarded<T>(c: locked mutable Counts, x: view T) -> int {
   r = 0;
   lock c as v: inout { r = twice(v.total); bump(c); }
   return r;
@@ -5659,7 +5668,7 @@ fn guarded<T>(c: locked mut Counts, x: view T) -> int {
   writeFile(p.Dir / "main.pkn",
             R"(import lib::gates as g;
 fn main() -> int {
-  counts: locked mut g::Counts = g::Counts(0);
+  counts: locked mutable g::Counts = g::Counts(0);
   let gate = g::Gate(g::Counts(1));
   r = 0;
   lock counts as c: inout {
@@ -5674,7 +5683,7 @@ fn main() -> int {
             R"(import ::io;
 import lib::gates as g;
 fn main() -> int {
-  counts: locked mut g::Counts = g::Counts(0);
+  counts: locked mutable g::Counts = g::Counts(0);
   let gate = g::Gate(g::Counts(1));
   let m = g::Meter(2);
   r = 0;

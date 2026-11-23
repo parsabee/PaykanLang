@@ -43,7 +43,7 @@ TEST(Article, AVowelSoundTakesAn) {
 TEST(Article, AConsonantSoundTakesA) {
   EXPECT_EQ(printed("'x' is a 'Node'"), "'x' is a 'Node'");
   EXPECT_EQ(printed("an 'Node'"), "a 'Node'");
-  EXPECT_EQ(printed("a 'shared mut Node'"), "a 'shared mut Node'");
+  EXPECT_EQ(printed("a 'shared mutable Node'"), "a 'shared mutable Node'");
   EXPECT_EQ(printed("a 'Str?'"), "a 'Str?'");
   EXPECT_EQ(printed("an 'HashMap<int, int>'"), "a 'HashMap<int, int>'");
 }
