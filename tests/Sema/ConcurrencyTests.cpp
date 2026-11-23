@@ -3390,8 +3390,32 @@ fn tally(c: locked mut Counts, x: view Node, s: view Shape) {
 
 // A buffer's one field is the runtime's buffer object, which the buffer's
 // methods alone reach: the `==` and the text of a list, and of a value
-// holding one, run nothing of the program's in a `lock` block.
+// holding one, run nothing of the program's in a `lock` block.  A struct
+// of the program's that has a buffer's name and shape is none: it holds
+// whatever object it is given, whose `equals` may take a lock.
 TEST(Concurrency, AListIsComparedAndPrintedInALockBlock) {
+  auto fake = semaCheck(R"(import ::io;
+class Counts { total: int; }
+class Sneaky { c: locked mut Counts;
+  view fn equals(o: Obj) -> bool { lock self.c as v: inout { v.total += 1; } return 1 == 1; }
+}
+struct Buffer<T> { __data: Obj; }
+impl Buffer<T> { view fn at(i: unsigned) -> int { return 0; } }
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let a = Buffer<int>(Sneaky(counts));
+  let b = Buffer<int>(Sneaky(counts));
+  lock counts as c: inout {
+    if a == b { c.total += 1; }
+  }
+  return 0;
+}
+)");
+  EXPECT_EQ(fake.ErrorCount, 1u) << fake.Diagnostics;
+  expectErrors(fake, {":13:8: error: 'Obj.equals' may run code that takes a "
+                      "lock (a class derived from 'Obj' may override it); a "
+                      "'lock' block calls only functions it can resolve\n"});
+
   auto r = semaCheck(R"(import ::io;
 import ::collections as cl;
 struct Batch { ids: cl::List<int>; }

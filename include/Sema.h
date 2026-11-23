@@ -815,8 +815,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkAtomicElementAssign(ast::SubscriptAssignStmt *node,
                                 ast::FixedArrayType *ft);
   /// `T` when @p ty is the standard library's `mem::Buffer<T>` (a struct of
-  /// one field, `__data`, the runtime's buffer object as an `Obj`); nullptr
-  /// otherwise.
+  /// one field, `__data`, the runtime's buffer object as an `Obj`, declared
+  /// by a `::` module); nullptr otherwise.
   ast::Type *bufferElementType(ast::Type *ty) const;
   /// A method call on a `mem::Buffer<T>` of the enclosing function in a
   /// `parallel for` body: a read (`at`, `get`, `len`), or `set` at the
