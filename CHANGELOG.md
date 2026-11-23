@@ -33,13 +33,27 @@ samples/concurrency/README.md.
   is checked too (`'g::bump' may wait; a 'lock' block cannot call it`). The design's two
   rows for these calls move from "Designed, and not checked yet" to the table of what the
   language has. What a block lets go of is not followed (a value moved into it or last used
-  in it, a field assigned over): a `__deinit__` may take the lock of another cell there,
-  and one that takes the lock of the block's own cell stops the program with `paykan:
-  lock taken twice: code that a 'lock' block ran (a '__deinit__' of what the block let
-  go of) locks the cell the block holds, and would wait for ever`, where it waited for
-  ever. An error in a `lock` block of a generic method's instance, and in a `parallel
+  in it, a field assigned over): a `__deinit__` is held to the rule itself (the next
+  entry). An error in a `lock` block of a generic method's instance, and in a `parallel
   for` body there, now carries the note of that instance (`in instantiation of
   'GBox<int>.via<Gate>' requested here`).
+- A `__deinit__` is held to a `lock` block's rule, of a class and of a struct (#368;
+  docs/language/05-classes.md, "Deinitializers"). It runs where its object is let go of,
+  inside a `lock` block too, by no call the block writes. So it takes no lock (`a
+  '__deinit__' cannot take a lock: it may run in a 'lock' block`), runs no `parallel for`,
+  and calls only what a block may call (`'record' may wait (it takes a lock, through
+  'bump'); a '__deinit__' cannot call it (it may run in a 'lock' block)`; `'self.onClose'
+  may run code that takes a lock; a '__deinit__' calls only functions it can resolve (it
+  may run in a 'lock' block)`). No `lock` block then waits for another lock through what
+  it destroys, which the check of its calls could not see. **Breaking**: a `__deinit__`
+  that took a lock or called a function value compiled, and so did, in a module that
+  others import, one of a class that is not `final` that called a method an importer's
+  class may override: one of the class's body, or `toString` or `equals`, by name or
+  through `Str(self)`, printing or `==`. Count in an `atomic` cell, call a method of an `impl` block, or do the work
+  that waits in a method called before the object is let go of. The runtime keeps a
+  backstop for code the compiler did not check: a thread that takes the lock of a cell it
+  holds stops with `paykan: lock taken twice: code that a 'lock' block ran locks the cell
+  the block holds, and would wait for ever`.
 - Generic methods (#353; docs/language/13-generics.md, "Generic Methods"): a method of an
   `impl` block and a `static fn`, of a class or a struct, generic or not, can have type
   parameters of its own next to its type's: `view fn map<U>(f: (view T) -> U) -> Box<U>`,

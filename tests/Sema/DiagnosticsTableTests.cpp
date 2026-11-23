@@ -1269,6 +1269,61 @@ async fn main() -> int {
   return n;
 }
 )pkn"},
+    {"a `__deinit__` that waits (it takes a lock, it runs a `parallel for`, it calls what may wait, it calls what cannot be resolved)",
+     By::Sema, "error",
+     "a '__deinit__' cannot take a lock: it may run in a 'lock' block",
+     R"pkn(class Counts { total: int; }
+class Session { c: locked mut Counts;
+  fn __deinit__() { lock self.c as v: inout { v.total += 1; } }
+}
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let s = Session(counts);
+  return 0;
+}
+)pkn"},
+    {"a `__deinit__` that waits (it takes a lock, it runs a `parallel for`, it calls what may wait, it calls what cannot be resolved)",
+     By::Sema, "error",
+     "a '__deinit__' cannot run a 'parallel for': it may run in a 'lock' block",
+     R"pkn(import ::io;
+class Batch { n: int;
+  fn __deinit__() {
+    t = 0;
+    parallel for i in 0..self.n { t += i; }
+    io::println(t);
+  }
+}
+fn main() -> int {
+  let b = Batch(4);
+  return 0;
+}
+)pkn"},
+    {"a `__deinit__` that waits (it takes a lock, it runs a `parallel for`, it calls what may wait, it calls what cannot be resolved)",
+     By::Sema, "error",
+     "'record' may wait (it takes a lock, through 'bump'); a '__deinit__' cannot call it (it may run in a 'lock' block)",
+     R"pkn(class Counts { total: int; }
+fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn record(c: locked mut Counts) { bump(c); }
+class Session { c: locked mut Counts;
+  fn __deinit__() { record(self.c); }
+}
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let s = Session(counts);
+  return 0;
+}
+)pkn"},
+    {"a `__deinit__` that waits (it takes a lock, it runs a `parallel for`, it calls what may wait, it calls what cannot be resolved)",
+     By::Sema, "error",
+     "'self.onClose' may run code that takes a lock; a '__deinit__' calls only functions it can resolve (it may run in a 'lock' block)",
+     R"pkn(class Guard { onClose: (int) -> int;
+  fn __deinit__() { let n = self.onClose(1); }
+}
+fn main() -> int {
+  let g = Guard(fn(n: int) -> int { return n; });
+  return 0;
+}
+)pkn"},
     {"making a value `atomic shared` or `locked` (a `shared` field, a nested one, an `Obj`, through a type argument)",
      By::Sema, "error",
      "cannot make 'Settings(...)' (a 'Settings') 'atomic shared': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread",

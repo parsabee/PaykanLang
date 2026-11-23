@@ -2,16 +2,12 @@
 // block calls").  A block calls what waits for nothing: plain functions, the
 // methods of a `final` class, printing.  What may wait, a function that
 // takes a lock or awaits a task, is called before or after the block.  A
-// `__deinit__` may take the lock of another cell while a block holds one:
-// the Session below is moved into the `tally` block and destroyed at its
-// end, where it counts itself closed under the `stats` lock.
+// `__deinit__` is held to the same rule, since it runs where its object is
+// let go of: the Session below is moved into the `tally` block and
+// destroyed at its end, where it counts itself closed in an `atomic` cell.
 // expect-stdout: total 43, closed 1, log 2
 
 import ::io;
-
-class Stats {
-  closed: int;
-}
 
 class Tally {
   total: int;
@@ -24,12 +20,12 @@ final class Scale {
 }
 
 class Session {
-  stats: locked mut Stats;
+  closed: atomic int;
   id: int;
 }
 
 impl Session {
-  fn __deinit__() { lock self.stats as s: inout { s.closed += 1; } }
+  fn __deinit__() { self.closed += 1; }   // no lock: it may run in a block
 }
 
 async fn fetch(n: int) -> int { return n + 1; }
@@ -44,10 +40,10 @@ fn weight(s: view Session) -> int {
 }
 
 async fn main() -> int {
-  let stats: locked mut Stats = Stats(0);
+  closed: atomic int = 0;
   let tally: locked mut Tally = Tally(0, 0);
   let scale = Scale(1);
-  let s = Session(stats, 4);
+  let s = Session(closed, 4);
 
   let fetched = await fetch(2);       // the wait, before the block
   note(tally);
@@ -58,8 +54,6 @@ async fn main() -> int {
   }
   note(tally);                        // and after it
 
-  closed = 0;
-  lock stats as k: view { closed = k.closed; }
   lock tally as t: view {
     io::println("total " + Str(t.total) + ", closed " + Str(closed) + ", log "
         + Str(t.log));

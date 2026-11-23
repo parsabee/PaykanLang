@@ -93,6 +93,8 @@ struct Sema::ParSafety {
     bool Starts = false;
     /// With Starts: the body the task runs, when it is this module's.
     const ast::FuncDecl *Task = nullptr;
+    /// No call: what a `__deinit__` does itself that waits ("take a lock").
+    const char *Does = nullptr;
 
     Use(ast::SourceLocation loc, std::string name, const ast::FuncDecl *fn,
         std::string why)
@@ -149,6 +151,10 @@ struct Sema::ParSafety {
   std::unordered_map<const ast::FuncDecl *, const Use *> Bad;
   /// The `lock` blocks, each with the calls it makes.
   std::deque<ParallelBody> LockBodies;
+  /// The `__deinit__`s, each with the calls it makes: one runs where its
+  /// object is let go of, in a `lock` block too, by no call the block
+  /// writes, so its body is held to a block's rule.
+  std::deque<ParallelBody> DeinitBodies;
   /// The functions that may wait, or that call what cannot be resolved,
   /// each with why.
   std::unordered_map<const ast::FuncDecl *, Wait> Waiting;
@@ -163,6 +169,8 @@ struct Sema::ParSafety {
   bool InLambda = false;
   /// Recording what a call of an `async fn` runs (Use::Starts).
   bool Starting = false;
+  /// Reading a `__deinit__`, whose body LockUses is.
+  bool InDeinit = false;
 
   void index(const ast::FuncDecl *fn, ast::Type *owner,
              const std::string &qualified, const ast::Decl *decl, bool report);
@@ -200,19 +208,27 @@ struct Sema::ParSafety {
     return u.Fn ? Bad.count(u.Fn) != 0 : u.parBad();
   }
   std::string describe(const Use &u, unsigned depth = 0) const;
-  /// The function being read does @p what itself, which waits.
-  void waits(const char *what) {
-    if (!InLambda && Current)
-      Waiting.try_emplace(Current->Fn, Wait{what, nullptr});
+  /// The function being read does @p what itself at @p loc, which waits:
+  /// a `__deinit__` cannot (@p to, what it cannot do).
+  void waits(ast::SourceLocation loc, const char *what, const char *to) {
+    if (InLambda || !Current)
+      return;
+    Waiting.try_emplace(Current->Fn, Wait{what, nullptr});
+    if (InDeinit && LockUses) {
+      Use u{loc, "", nullptr, ""};
+      u.Does = to;
+      LockUses->push_back(std::move(u));
+    }
   }
-  /// Whether a `lock` block cannot make the call @p u.
+  /// Whether a `lock` block, or a `__deinit__`, cannot make the call @p u.
   bool waitsIn(const Use &u) const {
     const ast::FuncDecl *fn = runs(u);
-    return !u.Destroys &&
-           (fn ? Waiting.count(fn) != 0 : u.InLock != Use::Lock::None);
+    return u.Does || (!u.Destroys && (fn ? Waiting.count(fn) != 0
+                                         : u.InLock != Use::Lock::None));
   }
-  /// The error of the call @p u made in a `lock` block.
-  std::string describeLock(const Use &u) const;
+  /// The error of the call @p u made in a `lock` block, or in a
+  /// `__deinit__` (@p deinit).
+  std::string describeLock(const Use &u, bool deinit = false) const;
   /// Whether a class this module has the code of derives from @p base.
   bool extendedHere(const ast::ClassType *base) const;
 
@@ -408,11 +424,23 @@ bool Sema::ParSafety::run(ast::TranslationUnit *tu) {
   for (const Function &f : Functions) {
     Current = &f;
     Uses = &Calls[f.Fn];
+    // (A free function of the name is no deinitializer.)
+    InDeinit = f.Owner && f.Fn->getName() == names::kMethodDeinit;
+    if (InDeinit) {
+      ParallelBody &body = DeinitBodies.emplace_back();
+      body.Source = f.Source;
+      body.Report = f.Report;
+      body.Decl = f.Decl;
+      body.Fn = f.Fn;
+      LockUses = &body.Uses;
+    }
     if (f.Fn->getBody())
       stmt(f.Fn->getBody());
     else if (auto *ct = ast::dyn_cast<ast::ClassType>(f.Owner);
              ct && f.Fn->isDerivedClone())
       derivedClone(ct, f.Fn->getLocation());
+    LockUses = nullptr;
+    InDeinit = false;
   }
   propagate();
   recordVerdicts();
@@ -629,10 +657,18 @@ bool Sema::ParSafety::report() {
   const bool locks = reportBodies(
       LockBodies, [&](const Use &u) { return waitsIn(u); },
       [&](const Use &u) { return describeLock(u); });
-  return parallel && locks;
+  const bool deinits = reportBodies(
+      DeinitBodies, [&](const Use &u) { return waitsIn(u); },
+      [&](const Use &u) { return describeLock(u, true); });
+  return parallel && locks && deinits;
 }
 
-std::string Sema::ParSafety::describeLock(const Use &u) const {
+std::string Sema::ParSafety::describeLock(const Use &u, bool deinit) const {
+  // A `__deinit__` is told why the rule is its own too.
+  const std::string in = deinit ? "a '__deinit__'" : "a 'lock' block";
+  const std::string reason = deinit ? " (it may run in a 'lock' block)" : "";
+  if (u.Does)
+    return in + " cannot " + u.Does + ": it may run in a 'lock' block";
   // From the call, through the functions it reaches, to what waits: a
   // statement of the last function (what), or a call it makes that a `lock`
   // block cannot (last).
@@ -696,11 +732,12 @@ std::string Sema::ParSafety::describeLock(const Use &u) const {
       unresolved ? "may run code that takes a lock" : "may wait";
   const std::string who =
       u.Name.empty() ? std::string("a function value") : "'" + u.Name + "'";
-  return who + " " + verb + why +
-         (unresolved ? "; a 'lock' block calls only functions it can resolve"
-          : u.Starts ? "; a 'lock' block cannot start it (a task may run "
-                       "where it is started)"
-                     : "; a 'lock' block cannot call it");
+  return who + " " + verb + why + "; " + in +
+         (unresolved ? " calls only functions it can resolve" + reason
+          : u.Starts ? deinit ? " cannot start it" + reason
+                              : std::string(" cannot start it (a task may run "
+                                            "where it is started)")
+                     : " cannot call it" + reason);
 }
 
 bool Sema::ParSafety::extendedHere(const ast::ClassType *base) const {
@@ -750,7 +787,7 @@ void Sema::ParSafety::stmt(ast::Stmt *s) {
     // destroy it (an assignment over a part, `mem::swap`), whatever it is.
     if (x->getBinding() && x->getBinding()->getMode() == ast::ParamMode::Inout)
       drops(x->getBinding()->getType(), x->getLocation());
-    waits("takes a lock");
+    waits(x->getLocation(), "takes a lock", "take a lock");
     // The calls of its body are the block's.  (A nested one is an error of
     // its own.)
     if (!LockUses) {
@@ -783,7 +820,7 @@ void Sema::ParSafety::stmt(ast::Stmt *s) {
           drops(field ? field : typeOf(place), place->getLocation());
     };
     if (x->isParallel())
-      waits("runs a 'parallel for'");
+      waits(x->getLocation(), "runs a 'parallel for'", "run a 'parallel for'");
     // A nested one is part of the outermost's body, and reported with it.
     if (x->isParallel() && !ParallelUses) {
       ParallelBody &body = ParallelBodies.emplace_back();
@@ -808,8 +845,9 @@ void Sema::ParSafety::expr(ast::Expr *e) {
     return;
   if (auto *x = ast::dyn_cast<ast::UnaryExpr>(e)) {
     expr(x->getOperand());
+    // (In a `__deinit__` it is an error before this pass.)
     if (x->getOpcode() == ast::UnaryOpcode::Await)
-      waits("awaits a task");
+      waits(x->getLocation(), "awaits a task", "await a task");
   } else if (auto *x = ast::dyn_cast<ast::BinaryExpr>(e)) {
     expr(x->getLHS());
     expr(x->getRHS());

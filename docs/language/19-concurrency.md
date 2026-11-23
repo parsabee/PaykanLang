@@ -1366,18 +1366,17 @@ block what reads and writes the contents.
   may wait (`'bump' may wait (it takes a lock); a 'lock' block cannot start it (a task may
   run where it is started)`). A task whose body waits for nothing is started in a block and
   awaited after it.
-- **What a block lets go of.** The compiler follows the calls a block makes, not the objects
-  it lets go of: a value moved into a block is destroyed at the block's end, a field
-  assigned over at the assignment, and a value that the block hands on at its last use
-  wherever its new holder lets go of it ([Transfers at a last
-  use](16-memory.md#transfers-at-a-last-use)). A `__deinit__`
-  that takes the lock of another cell runs there as anywhere. One that takes the lock of
-  the block's own cell would wait for itself for ever, and the program stops instead:
-  `paykan: lock taken twice: code that a 'lock' block ran (a '__deinit__' of what the block
-  let go of) locks the cell the block holds, and would wait for ever`. Let go of such an
-  object outside the block. A `__deinit__` that waits for another thread which needs the
-  cell (a task it awaits through a function, a `parallel for` whose iteration takes the
-  lock) is not caught: keep a `__deinit__` to work that waits for nothing.
+- **What a block lets go of.** A block destroys objects by no call it writes: a value moved
+  into a block is destroyed at the block's end, a field assigned over at the assignment,
+  and a value that the block hands on at its last use wherever its new holder lets go of it
+  ([Transfers at a last use](16-memory.md#transfers-at-a-last-use)). So the rule is every
+  `__deinit__`'s own, of a class and of a struct, wherever its object ends: it takes no
+  lock, runs no `parallel for`, and calls only what a `lock` block may call
+  ([Deinitializers](05-classes.md#deinitializers)). `a '__deinit__' cannot take a lock: it
+  may run in a 'lock' block`; `'record' may wait (it takes a lock, through 'bump'); a
+  '__deinit__' cannot call it (it may run in a 'lock' block)`. A `__deinit__` that counts
+  does so in an `atomic` cell, and work that waits goes in a method called before the
+  object is let go of.
 
 ## `atomic` cells
 

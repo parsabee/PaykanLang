@@ -521,6 +521,11 @@ Things to know about `__deinit__`:
   methods, and lend `self` to a `view` or `inout` parameter (`registry.note(self)`).
 - What it drops is destroyed where it is dropped, as in any function.
 - It has no `await` in it, and it is never called by name (`c.__deinit__()` is an error).
+- It waits for nothing. An object may be let go of inside a `lock` block, and its
+  `__deinit__` runs there, so it takes no lock, runs no `parallel for`, and calls only
+  functions that do neither and that the compiler can resolve
+  ([What a `lock` block calls](19-concurrency.md#what-a-lock-block-calls)). Count in an
+  `atomic` cell, and do work that waits in a method called before the object goes.
 - A `weak` reference to the object already reads `None` while `__deinit__` runs.
 
 ## `Obj`, `toString` and `equals`
@@ -1167,9 +1172,28 @@ program, as any panic does, and the objects of a leaked reference cycle are neve
 so theirs never runs.
 
 A `__deinit__` is the program's code, and runs as any of it does: the object can be lent
-(to a `view` parameter, to `==`, to `io::println`), and an object the code drops is
-destroyed where it is dropped, not once the object being destroyed is done. A function it
-calls may wait, which blocks the thread as it does in any function that is not `async`.
+(to a `view` parameter, and to `==` and `io::println` where the rule below lets its `equals`
+and `toString` run), and an object the code drops is
+destroyed where it is dropped, not once the object being destroyed is done.
+
+It runs wherever the object's last reference goes, inside a `lock` block too, by no call
+the block writes. So a `__deinit__` is held to a block's rule
+([What a `lock` block calls](19-concurrency.md#what-a-lock-block-calls)): it takes no lock
+(`a '__deinit__' cannot take a lock: it may run in a 'lock' block`), runs no `parallel for`
+(`a '__deinit__' cannot run a 'parallel for': it may run in a 'lock' block`), and calls no
+function that may wait or that the compiler cannot resolve (`'record' may wait (it takes a
+lock, through 'bump'); a '__deinit__' cannot call it (it may run in a 'lock' block)`;
+`'self.onClose' may run code that takes a lock; a '__deinit__' calls only functions it can
+resolve (it may run in a 'lock' block)`).
+
+In a module that others import, an importer's class may override a method of the class's
+body, and `toString` and `equals`, which every class has. The `__deinit__` of a class that
+is not `final` calls none of them on such an object, by name or through `Str(self)`,
+`io::println(self)` or `==`: `'Shape.area' may run code that takes a lock (a class derived
+from 'Shape' may override it; a 'final class Shape' has none)`. A method of an `impl` block
+is called as it is, and in a program's main module so is every method, where the compiler
+follows each override. What a `__deinit__` itself lets go of is held to the same rule, so
+no object's end waits.
 
 The object cannot be kept: `self` is borrowed as in any method that is not a `shared fn`, so
 it is not stored, returned, passed by value or captured, a `shared fn` is not called on it
@@ -1457,7 +1481,7 @@ created for that argument list. See [Generics](13-generics.md).
 | `self` used before every field is assigned | A method called on `self`, `self` passed, stored, returned or captured in `__init__` before every field is assigned, or in `__super__(...)`'s arguments: `'self' is used before every field is assigned: 'start' is not assigned yet` |
 | `__init__` with a result type | `fn __init__() -> Str`: `'__init__' cannot have a result type: it sets up 'self' and returns nothing` |
 | `__deinit__` declared otherwise | One with a parameter, a result type, no body, or declared `static`, `view`, `shared` or `async`; one in a conditional `impl` block of a generic class; a trait's requirement (`a trait cannot require '__deinit__'`): `'__deinit__' takes no parameters ('fn __deinit__() { ... }' runs when the object is destroyed)` (see [Deinitializers](#deinitializers)) |
-| `__deinit__` called or waiting | `x.__deinit__()`: `'__deinit__' cannot be called directly; it runs when the object is destroyed`; an `await` in its body |
+| `__deinit__` called or waiting | `x.__deinit__()`: `'__deinit__' cannot be called directly; it runs when the object is destroyed`; an `await` in its body; a `lock` block, a `parallel for`, or a call that a `lock` block cannot make: `a '__deinit__' cannot take a lock: it may run in a 'lock' block` |
 | A field moved out of an object that runs a `__deinit__` | `move c.name` where `c`'s class, a superclass, or a class the module derives from it declares one: `cannot move 'c.name' out of 'c': a 'C' has a '__deinit__', which runs on the whole object; write 'mem::replace(c.name, v)'` |
 | A field moved out of an object another module may extend | In a module that others import, `move c.name` where `c`'s class is not final: `cannot move 'c.name' out of 'c': a class another module derives from 'Open' may declare a '__deinit__', which runs on the whole object; declare 'Open' a 'final class', or write 'mem::replace(c.name, v)'` |
 | Extending a final class | `class Sub : Token` for a `final class Token`, or `: Str`: `cannot inherit from 'Token': class is final` |

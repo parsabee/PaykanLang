@@ -1,0 +1,46 @@
+// A `__deinit__` is held to a `lock` block's rule: it runs where its object
+// is let go of, inside a `lock` block too, by no call the block writes.  So
+// it takes no lock, runs no `parallel for`, and calls only what waits for
+// nothing and what the compiler can resolve.
+import ::io;
+
+class Registry {
+  open: int;
+}
+
+fn close(r: locked mut Registry) {
+  lock r as v: inout { v.open -= 1; }
+}
+
+class Session {
+  registry: locked mut Registry;
+  fn __deinit__() {
+    lock self.registry as r: inout { r.open -= 1; }   // error: it takes a lock
+  }
+}
+
+class Worker {
+  registry: locked mut Registry;
+  fn __deinit__() { close(self.registry); }           // error: 'close' takes a lock
+}
+
+class Guard {
+  onClose: (int) -> int;
+  fn __deinit__() { let n = self.onClose(1); }        // error: a function value
+}
+
+// What it can do: count in an `atomic` cell, and print.
+class Counted {
+  open: atomic int;
+  fn __deinit__() { self.open -= 1; io::println("closed"); }
+}
+
+fn main() -> int {
+  let registry: locked mut Registry = Registry(3);
+  open: atomic int = 1;
+  let s = Session(registry);
+  let w = Worker(registry);
+  let g = Guard(fn(n: int) -> int { return n; });
+  let c = Counted(open);
+  return 0;
+}

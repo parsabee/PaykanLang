@@ -19,11 +19,12 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
 | `10_buffers.pkn` | heap buffers in a `parallel for`: one of the enclosing function read at any index and written at the loop's variable, and one frozen in a box read by every thread |
-| `13_lock_calls.pkn` | what a `lock` block calls: plain functions, a `final` class's method, printing; the waits before and after it; a `__deinit__` that takes another cell's lock, run at a block's end |
+| `13_lock_calls.pkn` | what a `lock` block calls: plain functions, a `final` class's method, printing; the waits before and after it; a `__deinit__`, held to the same rule, run at a block's end |
 | `errors/err_qualifiers.pkn` | the conversions a qualifier refuses (`shared` into unique, `mut` gained without `move`, `shared mut` into `shared`), writes through an immutable reference and an immutable field, `mut` on a value |
 | `errors/err_strict_copies.pkn` | the copy rule: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
 | `errors/err_lock_calls.pkn` | what a `lock` block cannot call: a function that takes a lock, runs a `parallel for`, awaits or reads input, directly or through what it calls, a task whose body waits, and a function value |
+| `errors/err_deinit_waits.pkn` | a `__deinit__` is held to a `lock` block's rule: no lock, no call of what takes one, no function value; an `atomic` count and printing are fine |
 | `errors/err_atomic_shared.pkn` | writing through a frozen `atomic shared` object, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
 | `errors/err_atomic_spellings.pkn` | the spellings the parser rejects: `const` in any form, `atomic shared mut`, `atomic mut`, `mut shared`, a second qualifier |

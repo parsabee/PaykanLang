@@ -3175,7 +3175,7 @@ fn held(c: locked mut Counts, b: view Base) -> int {
 // a constructor, `==` (an `equals`), a text (a `toString`) and a `clone`.
 // A generic function's block is checked by instance.  What a block lets go
 // of is not followed: an object it makes is no call of its `__deinit__`
-// (it may as well keep the object), which the runtime answers for.
+// (it may as well keep the object), which is held to a block's rule itself.
 TEST(Concurrency, ALockBlocksHiddenCallsAreItsCalls) {
   auto r = semaCheck(R"(import ::io;
 class Counts { total: int; }
@@ -3193,7 +3193,7 @@ impl Cloneable for Gate { view fn clone() -> Self { let g = Gate(self.pass()); r
 class Loud { n: int; c: locked mut Counts; }
 impl Loud {
   fn __init__(n: int) { self.n = n; self.c = Counts(n); }
-  fn __deinit__() { lock self.c as v: inout { v.total = 0; } }
+  fn __deinit__() { io::println(self.n); }
 }
 struct Meter { c: locked mut Counts; }
 impl Meter {
@@ -3257,9 +3257,9 @@ fn main() -> int {
               .c_str(),
           (":47:9: error: 'fresh<int>' may wait (it takes a lock)" + cannot)
               .c_str()});
-  // A method that takes no lock; an object whose `__deinit__` takes one,
-  // made in the block; a function whose lambda awaits, which runs when the
-  // lambda is called.
+  // A method that takes no lock; an object with a `__deinit__`, made in
+  // the block; a function whose lambda awaits, which runs when the lambda
+  // is called.
   expectCleanLines(r, {":37:", ":43:", ":45:", ":46:", ":48:"});
 }
 
@@ -3432,4 +3432,188 @@ fn main() -> int {
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// A `__deinit__` runs where its object is let go of, inside a `lock` block
+// too, by no call the block writes: its body is held to a block's rule.
+// It takes no lock, runs no `parallel for`, and calls only what waits for
+// nothing and what the compiler can resolve; of a class and of a struct.
+TEST(Concurrency, ADeinitIsHeldToALockBlocksRule) {
+  auto r = semaCheck(R"(import ::io;
+class Counts { total: int; }
+fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn record(c: locked mut Counts) { bump(c); }
+fn quiet(n: int) -> int { return n + 1; }
+class A { c: locked mut Counts;
+  fn __deinit__() { lock self.c as v: inout { v.total += 1; } }
+}
+class B { c: locked mut Counts;
+  fn __deinit__() { record(self.c); }
+}
+class C { n: int;
+  fn __deinit__() { t = 0; parallel for i in 0..4 { t += i; } io::println(t); }
+}
+class D { f: (int) -> int;
+  fn __deinit__() { io::println(self.f(1)); }
+}
+class E { n: int;
+  fn __deinit__() {
+    io::println(quiet(self.n));
+    let g = fn(c: locked mut Counts) { lock c as v: inout { v.total += 1; } };
+  }
+}
+struct F { c: locked mut Counts; }
+impl F {
+  fn __deinit__() { bump(self.c); }
+}
+class G { n: atomic int;
+  fn __deinit__() { self.n += 1; }
+}
+class H { n: int;
+  fn __deinit__() { input = io::stdin(); let line = input.readln(); }
+}
+class Base { n: int;
+  view fn size() -> int { return self.n; }
+  fn __deinit__() { io::println(self.size()); }
+}
+class Slow : Base { c: locked mut Counts;
+  view fn size() -> int { r = 0; lock self.c as v: view { r = v.total; } return r; }
+}
+class GBox<T> { v: T; c: locked mut Counts; }
+impl GBox<T> {
+  fn __deinit__() { bump(self.c); }
+}
+fn main() -> int {
+  counts: locked mut Counts = Counts(0);
+  let a = A(counts);
+  let b = B(counts);
+  let c = C(1);
+  let d = D(fn(n: int) -> int { return n; });
+  let e = E(1);
+  let f = F(counts);
+  n: atomic int = 0;
+  let g = G(n);
+  let h = H(1);
+  let s = Slow(1, counts);
+  let x = GBox<int>(1, counts);
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  const std::string may = " (it may run in a 'lock' block)\n";
+  expectErrors(
+      r,
+      {":7:21: error: a '__deinit__' cannot take a lock: it may run in a "
+       "'lock' block\n",
+       (":10:21: error: 'record' may wait (it takes a lock, through 'bump'); "
+        "a '__deinit__' cannot call it" +
+        may)
+           .c_str(),
+       ":13:37: error: a '__deinit__' cannot run a 'parallel for': it may "
+       "run in a 'lock' block\n",
+       (":16:33: error: 'self.f' may run code that takes a lock; a "
+        "'__deinit__' calls only functions it can resolve" +
+        may)
+           .c_str(),
+       (":26:21: error: 'bump' may wait (it takes a lock); a '__deinit__' "
+        "cannot call it" +
+        may)
+           .c_str(),
+       (":32:53: error: 'File.readln' may wait; a '__deinit__' cannot call "
+        "it" +
+        may)
+           .c_str(),
+       // A `Base` being destroyed may be a `Slow`.
+       (":36:33: error: 'Slow.size' may wait (it takes a lock); a "
+        "'__deinit__' cannot call it" +
+        may)
+           .c_str(),
+       // A generic class's, in the instance.
+       (":43:21: error: 'bump' may wait (it takes a lock); a '__deinit__' "
+        "cannot call it" +
+        may)
+           .c_str(),
+       ":57:11: note: in instantiation of 'GBox<int>' requested here\n"});
+  // A lambda that takes a lock, which runs when it is called; an `atomic`
+  // cell's count.
+  expectCleanLines(r, {":19:", ":20:", ":21:", ":29:"});
+
+  // In a module that others import, a class's `__deinit__` calls no method
+  // an importer's class may override, a `toString` or an `equals` it does
+  // not declare too: one of an `impl` block, or of a `final` class.
+  auto lib = semaCheck(R"(import ::io;
+class Shape { n: int;
+  view fn area() -> int { return self.n; }
+  fn __deinit__() { io::println(self.area()); }
+}
+impl Shape { view fn side() -> int { return self.n; } }
+class Plain { n: int;
+  fn __deinit__() { io::println(self.side()); }
+}
+impl Plain { view fn side() -> int { return self.n; } }
+final class Leaf { n: int;
+  view fn area() -> int { return self.n; }
+  fn __deinit__() { io::println(self.area()); io::println(self); }
+}
+class Bare { n: int; other: Bare?;
+  fn __deinit__() {
+    io::println(self);
+    match self.other { o: view Bare { if self == o { io::println("same"); } } None { } }
+  }
+}
+)");
+  EXPECT_EQ(lib.ErrorCount, 3u) << lib.Diagnostics;
+  const std::string only = "; a '__deinit__' calls only functions it can "
+                           "resolve (it may run in a 'lock' block)\n";
+  expectErrors(
+      lib,
+      {(":4:33: error: 'Shape.area' may run code that takes a lock (a class "
+        "derived from 'Shape' may override it; a 'final class Shape' has "
+        "none)" +
+        only)
+           .c_str(),
+       (":17:5: error: '::io::println<Bare>' may run code that takes a lock "
+        "(it calls 'Bare.toString', which a class derived from 'Bare' may "
+        "override; a 'final class Bare' has none)" +
+        only)
+           .c_str(),
+       (":18:42: error: 'Bare.equals' may run code that takes a lock (a class "
+        "derived from 'Bare' may override it; a 'final class Bare' has none)" +
+        only)
+           .c_str()});
+
+  // What a block lets go of then waits for nothing: an object moved into
+  // it, made in it, or assigned over in its cell.  A `__deinit__` compares
+  // and prints a list, whose buffer object is the runtime's.  A free
+  // function of the name is no deinitializer.
+  auto ok = semaCheck(R"(import ::io;
+import ::collections as cl;
+class Counts { total: int; }
+fn __deinit__(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+class Job { done: cl::List<int>; todo: cl::List<int>;
+  fn __deinit__() {
+    if self.done == self.todo { io::println("nothing left"); }
+    io::println(self.todo);
+  }
+}
+class Res { name: Str;
+  fn __deinit__() { io::println("closing " + self.name); }
+}
+class Slot { held: Res; }
+fn main() -> int {
+  slot: locked mut Slot = Slot(Res("a"));
+  r = Res("b");
+  lock slot as s: inout {
+    let mine = move r;
+    let made = Res("c");
+    s.held = Res("d");
+  }
+  counts: locked mut Counts = Counts(0);
+  __deinit__(counts);
+  let j = Job(cl::List<int>(), cl::List<int>());
+  return 0;
+}
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
 }
