@@ -139,6 +139,14 @@ struct SemaContext {
   /// does.  What the lowering derives from "every method of the struct is
   /// here" does not hold for them.
   StringSet GenericMemberTypes;
+  /// The structs that are the standard library's `mem::Buffer<T>` and the
+  /// classes that are its `mem::Box<T>`, by name (Sema::bufferElementType,
+  /// Sema::isMemoryBox).  The lowering reads a buffer's numbers in place,
+  /// through the field of a box too, and has from here which types those
+  /// are: `::memory` declares them, which Sema knows, and a type of the
+  /// name and the shape that another module declares is not one.
+  StringSet BufferTypes;
+  StringSet BoxTypes;
 
   explicit operator bool() const { return Ok; }
 };
@@ -814,10 +822,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                            ast::SourceLocation loc);
   bool checkAtomicElementAssign(ast::SubscriptAssignStmt *node,
                                 ast::FixedArrayType *ft);
+  /// Whether `::memory` declares the class or struct named @p name: the
+  /// origin of the type where it is imported or instantiated from a
+  /// template, the module being checked where it is that module's own.
+  bool isMemoryType(const std::string &name) const;
   /// `T` when @p ty is the standard library's `mem::Buffer<T>` (a struct of
   /// one field, `__data`, the runtime's buffer object as an `Obj`, declared
-  /// by a `::` module); nullptr otherwise.
+  /// by `::memory`); nullptr otherwise.
   ast::Type *bufferElementType(ast::Type *ty) const;
+  /// Whether @p ct is the standard library's `mem::Box<T>` (a class of one
+  /// field, `__data`, the value it holds, declared by `::memory`): its
+  /// `get()` and `value()` are that field.
+  bool isMemoryBox(const ast::ClassType *ct) const;
   /// A method call on a `mem::Buffer<T>` of the enclosing function in a
   /// `parallel for` body: a read (`at`, `get`, `len`), or `set` at the
   /// loop's variable; anything else is an error.
@@ -2042,8 +2058,9 @@ public:
   void setResolver(modules::ModuleResolver *resolver) { Resolver = resolver; }
   /// See OpenWorld.
   void setOpenWorld(bool open) { OpenWorld = open; }
-  /// See SystemModule.
-  void setSystemModule(bool system) { SystemModule = system; }
+  /// The canonical name of the module being checked (`::io`, `a::util`, a
+  /// program's main module's): see SystemModule and MemoryModule.
+  void setModuleName(std::string_view canonical);
 
 private:
   /// Resolve a module path to an absolute file path.
@@ -2940,6 +2957,9 @@ private:
   /// Whether the module being checked is one of the standard library's
   /// (`::name`).
   bool SystemModule = false;
+  /// Whether it is `::memory`, whose `Buffer<T>` and `Box<T>` are the ones
+  /// read in place (isMemoryType).
+  bool MemoryModule = false;
   /// In the archetype check, @p ty does not cross at @p loc because it
   /// holds such an archetype, of a type parameter `T`: recorded as "'T' is
   /// not 'Sendable': declare 'T: Sendable' " + @p what.

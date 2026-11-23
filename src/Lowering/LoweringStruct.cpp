@@ -297,16 +297,10 @@ Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,
 // -- Method calls
 
 ast::Type *ModuleLowering::bufferElementType(ast::StructType *st) {
-  const std::string &n = st->getName();
-  const size_t lt = n.find('<');
-  if (lt == std::string::npos)
-    return nullptr;
-  const std::string base = n.substr(0, lt);
-  const bool named =
-      base == "Buffer" ||
-      (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
-  if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
-      st->getElementTypes()[0] != ASTCtx.getObjTy())
+  // On Sema's word (SemaContext::BufferTypes): which module declares the
+  // struct is its to know, and a struct of a program with the name and the
+  // shape holds whatever object the program gives it.
+  if (!SemaCtx.BufferTypes.count(st->getName()))
     return nullptr;
   const ast::MethodDecl *at = st->findMethod("at");
   return at ? at->getReturnType() : nullptr;

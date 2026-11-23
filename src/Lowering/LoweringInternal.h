@@ -1137,10 +1137,11 @@ private:
     /// into the memory module and no count on the buffer.  nullopt when the
     /// call is another method or another element type.
     /// The box of `bx.value().at(i)`, `bx.get().len()` & co.: the receiver
-    /// of a `value()` or `get()` on a `mem::Box<mem::Buffer<T>>`, when the
-    /// buffer read is one emitBufferRead emits in place (a number's element,
-    /// or the length); nullptr otherwise.  The read takes the box's field
-    /// itself, so the box is the link visited first (visitedFirst).
+    /// of a `value()` or `get()` on a `mem::Box<mem::Buffer<T>>` (the
+    /// standard library's box, SemaContext::BoxTypes), when the buffer read
+    /// is one emitBufferRead emits in place (a number's element, or the
+    /// length); nullptr otherwise.  The read takes the box's field itself,
+    /// so the box is the link visited first (visitedFirst).
     ast::Expr *bufferReadBox(ast::MethodCallExpr *node);
     std::optional<Val> emitBufferRead(ast::MethodCallExpr *node,
                                       ast::Type *elem);
@@ -1334,7 +1335,8 @@ private:
   /// The struct type of @p e's value, canonical in this module, or nullptr.
   ast::StructType *getExprStructType(ast::Expr *e);
   /// `T` when @p st is the standard library's `mem::Buffer<T>` (one field,
-  /// `__data`, the runtime's buffer object as an `Obj`); nullptr otherwise.
+  /// `__data`, the runtime's buffer object as an `Obj`), which Sema says
+  /// (SemaContext::BufferTypes); nullptr otherwise.
   ast::Type *bufferElementType(ast::StructType *st);
   /// Whether @p mc, a call on a `mem::Buffer<T>`, is an element or length
   /// read the lowering emits in place (ExprEmitter::emitBufferRead): `at`

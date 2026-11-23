@@ -1831,9 +1831,13 @@ ModuleLowering::ExprEmitter::bufferReadBox(ast::MethodCallExpr *node) {
   if (!mc || mc->getNumArguments() != 0 ||
       (mc->getMethodName() != "value" && mc->getMethodName() != "get"))
     return nullptr;
+  // The standard library's box (SemaContext::BoxTypes), whose `value()` and
+  // `get()` are its field: a class of a program with a `__data` and methods
+  // of those names returns what it likes.
   ast::ClassType *ct = L.getExprClassType(mc->getReceiver());
-  const auto *fst =
-      ct ? ast::dyn_cast<ast::StructType>(ct->findField("__data")) : nullptr;
+  if (!ct || !L.SemaCtx.BoxTypes.count(ct->getName()))
+    return nullptr;
+  const auto *fst = ast::dyn_cast<ast::StructType>(ct->findField("__data"));
   return fst && fst->getName() == st->getName() ? mc->getReceiver() : nullptr;
 }
 
