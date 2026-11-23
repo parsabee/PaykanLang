@@ -219,6 +219,13 @@ samples/concurrency/README.md.
 
 ### Changed
 
+- A new logo: a slim arrow with a tapered trail, its tip on a small red target dot, beside a
+  `paykan` wordmark. The README and the documentation site use it as SVG (the README picks
+  the light or dark version by the viewer's colour scheme), and the site has a favicon made
+  from it. The files are in docs/assets/images: `paykan-logo.svg` and
+  `paykan-logo-dark.svg` (the wordmark), `paykan-mark.svg` (the arrow alone) and
+  `paykan-icon.svg` (the arrow on a tile, for avatars and icons); `paykan-logo.png` is a
+  raster of the new wordmark.
 - The wording of the ownership and concurrency diagnostics is settled (#368). The table of
   docs/design/concurrency.md, "Diagnostics", is rewritten from what the compiler prints:
   each situation of the design that the language has, with its messages, 176 of them.
