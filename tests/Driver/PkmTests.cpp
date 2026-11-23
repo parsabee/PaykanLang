@@ -2292,14 +2292,129 @@ TEST(Pkm, ADeinitIsInTheModuleFile) {
     EXPECT_EQ(r.exitCode, 0) << r.out;
     EXPECT_EQ(r.out, want);
   }
-  auto par = paykan("--check-only --error-limit=0 --module-path=lib par.pkn");
-  EXPECT_NE(par.exitCode, 0);
-  EXPECT_TRUE(contains(par.out,
-                       ":9:13: error: a 'parallel for' body cannot destroy a "
-                       "'Res': it runs 'Res.__deinit__', which is not "
-                       "par-safe"))
-      << par.out;
-  EXPECT_FALSE(contains(par.out, "par.pkn:5:")) << par.out;
+  auto warm = paykan("--verbose --module-path=lib main.pkn");
+  EXPECT_TRUE(contains(warm.out, "module shapes: cache .paykan_cache/"
+                                 "shapes.pkm usable"))
+      << warm.out;
+  auto checkPar = [&] {
+    auto par = paykan("--check-only --error-limit=0 --module-path=lib par.pkn");
+    EXPECT_NE(par.exitCode, 0);
+    EXPECT_TRUE(contains(par.out,
+                         ":9:13: error: a 'parallel for' body cannot destroy "
+                         "a 'Res': it runs 'Res.__deinit__', which is not "
+                         "par-safe"))
+        << par.out;
+    EXPECT_FALSE(contains(par.out, "par.pkn:5:")) << par.out;
+  };
+  checkPar();
+  // And with the module's file alone, its source and its cache entry gone.
+  fs::remove(dir / "shapes.pkn");
+  fs::remove_all(dir / ".paykan_cache");
+  auto alone = paykan("--verbose --module-path=lib main.pkn");
+  EXPECT_EQ(alone.exitCode, 0) << alone.out;
+  EXPECT_TRUE(contains(alone.out, want)) << alone.out;
+  EXPECT_TRUE(
+      contains(alone.out, "module shapes: prebuilt lib/shapes.pkm usable"))
+      << alone.out;
+  checkPar();
+  fs::remove_all(dir);
+}
+
+// A class's `__deinit__` is a method of its interface with no slot in its
+// vtable, like its `__init__`: the class's `destroy` calls it, and so does
+// the `destroy` of an importer's subclass.  So the module's file is usable
+// with no source beside it, and its cache entry is one the next run reads:
+// for a class with other methods and with none, a subclass in the module
+// and in the importer, and a generic class the module instantiates and the
+// importer does.  (IFACE's count of the slots had the `__deinit__` in it:
+// `its vtable has 5 slots in CODE, 6 in IFACE`, the prebuilt file an error
+// where it was imported and the cache entry rebuilt on every run.)
+TEST(Pkm, AClassWithADeinitIsImportedFromItsModuleFileAlone) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_deinit_alone_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "use");
+  writeFile(dir / "src" / "res.pkn",
+            "import ::io;\n"
+            "class Res {\n"
+            "  n: int;\n"
+            "  view fn size() -> int { return self.n; }\n"
+            "  fn __deinit__() { io::println(\"res \" + Str(self.n)); }\n"
+            "}\n"
+            "class Only {\n"
+            "  n: int;\n"
+            "  fn __deinit__() { io::println(\"only \" + Str(self.n)); }\n"
+            "}\n"
+            "class Sub : Res {\n"
+            "  view fn twice() -> int { return 2 * self.n; }\n"
+            "  fn __deinit__() { io::println(\"sub\"); }\n"
+            "}\n"
+            "class Cell<T> {\n"
+            "  v: T;\n"
+            "  fn __deinit__() { io::println(\"cell\"); }\n"
+            "}\n"
+            "fn cell(n: int) -> Cell<int> { return Cell<int>(n); }\n");
+  writeFile(dir / "use" / "main.pkn",
+            "import res as r;\n"
+            "import ::io;\n"
+            "class Mine : r::Res {\n"
+            "  fn __deinit__() { io::println(\"mine\"); }\n"
+            "}\n"
+            "class Quiet : r::Sub {\n"
+            "  view fn thrice() -> int { return 3 * self.n; }\n"
+            "}\n"
+            "fn main() -> int {\n"
+            "  let x = r::Res(2);\n"
+            "  let o = r::Only(1);\n"
+            "  let m: r::Res = Mine(3);\n"
+            "  let s: r::Res = r::Sub(4);\n"
+            "  let q = Quiet(5);\n"
+            "  let c = r::cell(6);\n"
+            "  let d = r::Cell<Str>(\"d\");\n"
+            "  io::println(\"made \" + Str(o.n + c.v + q.twice() + "
+            "q.thrice()) + d.v);\n"
+            "  return x.size() + m.size() + s.size() - 9;\n}\n");
+  auto paykan = [&](const std::string &where, const std::string &args) {
+    return run("cd " + (dir / where).string() + " && " + paykanCmd() + " " +
+               args + " 2>&1");
+  };
+  const std::string want = "made 32d\ncell\ncell\nsub\nres 5\nsub\nres 4\n"
+                           "mine\nres 3\nonly 1\nres 2\n";
+  // From its source, the second run from the cache entry the first wrote.
+  writeFile(dir / "use" / "res.pkn", slurp(dir / "src" / "res.pkn"));
+  auto cold = paykan("use", "--verbose main.pkn");
+  EXPECT_EQ(cold.exitCode, 0) << cold.out;
+  EXPECT_TRUE(contains(cold.out, want)) << cold.out;
+  auto warm = paykan("use", "--verbose main.pkn");
+  EXPECT_EQ(warm.exitCode, 0) << warm.out;
+  EXPECT_TRUE(contains(warm.out, want)) << warm.out;
+  EXPECT_TRUE(
+      contains(warm.out, "module res: cache .paykan_cache/res.pkm usable"))
+      << warm.out;
+  // From its file alone.
+  fs::remove(dir / "use" / "res.pkn");
+  fs::remove_all(dir / "use" / ".paykan_cache");
+  auto made = paykan("src", "--emit-pkm -o ../use/res.pkm res.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  auto check = paykan("use", "pkm check res.pkm");
+  EXPECT_EQ(check.exitCode, 0) << check.out;
+  EXPECT_EQ(check.out, "res.pkm: usable\n");
+  auto verbose = paykan("use", "--verbose main.pkn");
+  EXPECT_EQ(verbose.exitCode, 0) << verbose.out;
+  EXPECT_TRUE(contains(verbose.out, "module res: prebuilt res.pkm usable"))
+      << verbose.out;
+  for (const char *args :
+       {"--no-module-cache main.pkn", "main.pkn", "-O 2 main.pkn",
+        "build main.pkn -o prog && ./prog"}) {
+    auto r = paykan("use", args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, want) << args;
+  }
+  for (const char *args : {"--check-only main.pkn", "--emit-c main.pkn"}) {
+    auto r = paykan("use", args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+  }
   fs::remove_all(dir);
 }
 

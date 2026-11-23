@@ -285,6 +285,11 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
               i.Classes[0].Methods.push_back({"peek", "int", {}, 0, {}});
             }),
             "class 'Box<int>': its vtable has 1 slots in CODE, 2 in IFACE");
+  // A `__deinit__` has no slot either: the class's `destroy` calls it.
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Classes[0].Methods.push_back({"__deinit__", "void", {}, 0, {}});
+            }),
+            "");
   // A struct's methods take its address first.
   EXPECT_EQ(check([](pkm::Interface &i) {
               i.Structs[0].IsLocal = true;
@@ -396,6 +401,16 @@ TEST(ModuleCode, AnInterfaceDescribesItsTypesConsistently) {
             }),
             "the vtable of class 'Sq' does not start with the slots of its "
             "superclass 'Shape'");
+  // A `__deinit__` is no slot of either: each class's is its own.
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Classes[0].Methods.push_back({"__deinit__", "void", {}, 0, {}});
+            }),
+            "");
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              for (pkm::ClassRec &c : i.Classes)
+                c.Methods.push_back({"__deinit__", "void", {}, 0, {}});
+            }),
+            "");
   EXPECT_EQ(
       check([](pkm::Interface &i) { i.Classes[0].SuperClassName = "Sq"; }),
       "class 'Shape' is its own ancestor");
@@ -441,6 +456,9 @@ fn @Point.norm(%self.1: obj, %p.2: f64) -> f64 {
 fn @Point.__init__(%self.1: obj, %x.2: i64, %name.3: box) -> void {
   ret
 }
+fn @Point.__deinit__(%self.1: obj) -> void {
+  ret
+}
 fn @Point(%x.1: i64, %name.2: box) -> box {
   %o.3 = new Point
   %b.4 = box %o.3
@@ -469,7 +487,8 @@ fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
         point.Methods = {{"destroy", "void", {}, 0, {}},
                          {"equals", "bool", {"Obj"}, pkm::kMethodView, {}},
                          {"norm", "float", {"f32"}, 0, {}},
-                         {"__init__", "void", {"int", "Str"}, 0, {}}};
+                         {"__init__", "void", {"int", "Str"}, 0, {}},
+                         {"__deinit__", "void", {}, 0, {}}};
         iface.Classes = {point};
         pkm::FuncRec ctor;
         ctor.Name = "Point";
@@ -536,6 +555,17 @@ fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
               m.Classes[0].VTable[1].Target.clear();
             }),
             "class 'Point': slot 1 ('equals') of its vtable is empty in CODE");
+  // Its `__deinit__` is a function of the class's with no slot, like its
+  // initializer: the `destroy` of an importer's subclass calls it by name.
+  EXPECT_EQ(check([&](pkm::Interface &, pir::Module &m) {
+              fn(m, "Point.__deinit__").Name = "Point.deinit";
+            }),
+            "method 'Point.__deinit__' is not in CODE");
+  EXPECT_EQ(check([&](pkm::Interface &, pir::Module &m) {
+              fn(m, "Point.__deinit__").Sig.Ret = pir::Type::I64;
+            }),
+            "method 'Point.__deinit__' is (obj) -> i64 in CODE, (obj) -> void "
+            "by its types in IFACE");
   EXPECT_EQ(check([&](pkm::Interface &, pir::Module &m) {
               fn(m, "Point").Sig.Ret = pir::Type::Void;
             }),

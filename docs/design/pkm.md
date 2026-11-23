@@ -1578,10 +1578,11 @@ rebuilt and a prebuilt file is an error at the import, under
   and checked against `IFACE`
   (`modules::checkCodeMatchesInterface`): each class the module defines,
   with its superclass, its own fields in the order an importer lays them
-  out, its vtable's slots, its initializer and its `impl` methods (which an
-  importer calls by their names, a subclass's initializer its
-  superclass's), and its constructor, which takes what its initializer
-  takes after the object and returns its box; each copy of an
+  out, its vtable's slots, its initializer, its `__deinit__` and its `impl`
+  methods (which have no slot and an importer calls by their names: a
+  subclass's initializer its superclass's, a subclass's `destroy` each
+  ancestor's `__deinit__`), and its constructor, which takes what its
+  initializer takes after the object and returns its box; each copy of an
   instantiation the module holds (a `shared class`, whose vtable a program
   may take for its own), for what it has; each method of each of its
   structs; each function, a native one's too (the function that calls C).

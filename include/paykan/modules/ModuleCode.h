@@ -64,8 +64,9 @@ Status checkInterface(const pkm::Interface &iface);
 /// the module's interface @p iface says it defines (docs/design/pkm.md §8.4
 /// step 7), and what an importer finds in it by name: each class of the
 /// module, with its superclass, its own fields in their order, the slots of
-/// its vtable, its initializer, its `impl` methods and its constructor,
-/// which takes what its initializer takes; each copy of an instantiation it
+/// its vtable, its initializer, its `__deinit__` (no slot of the vtable: a
+/// `destroy` calls it), its `impl` methods and its constructor, which
+/// takes what its initializer takes; each copy of an instantiation it
 /// holds (a `shared class`), for what it has; each method of each of its
 /// structs; and each function, a native one's too.  The fields, functions,
 /// methods and slots have the PIR types the interface's types give them
