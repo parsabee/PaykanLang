@@ -71,11 +71,11 @@ Status checkInterface(const pkm::Interface &iface);
 /// structs; and each function, a native one's too.  The fields, functions,
 /// methods and slots have the PIR types the interface's types give them
 /// (every type an interface names has one: a scalar, a reference's `box`, an
-/// optional's, a value held in memory passed by its address, a slice as its
-/// address and length).  And each slot of each class @p code defines names
-/// the function an importer's subclass inherits for it, and a class's
-/// constructor and methods are shared exactly when the class is.  The first
-/// difference when not.
+/// optional's, a cell's handle, a value held in memory passed by its
+/// address, a slice as its address and length).  And each slot of each
+/// class @p code defines names the function an importer's subclass inherits
+/// for it, and a class's constructor and methods are shared exactly when
+/// the class is.  The first difference when not.
 Status checkCodeMatchesInterface(const pir::Module &code,
                                  const pkm::Interface &iface);
 

@@ -297,17 +297,70 @@ struct Held {
   pir::Type Ty = pir::Type::Void; ///< a Value's
 };
 
+/// Whether the IFACE type @p type is a cell and nothing more: `atomic` and
+/// the name of what it holds, then the one length of a cell of an array
+/// (`atomic int`, `atomic int[4]`), behind the qualifiers a template writes
+/// before its type argument, if it has any (`mutable atomic int`, a
+/// `mutable T`; `atomic shared atomic int[2]`, an `atomic shared T`;
+/// `@shared atomic int[2]`, the argument of a `Slot<shared T>`).  `atomic
+/// shared` is a qualifier, and names no cell.  A suffix after a cell is no
+/// part of it: `atomic int?[2]` is an array, of optional handles.
+bool isCell(std::string_view type) {
+  static constexpr std::string_view kQualifiers[] = {
+      "atomic shared ", "shared mutable ", "locked mutable ",
+      "shared ",        "locked ",         "mutable "};
+  for (bool qualified = true; qualified;) {
+    qualified = false;
+    // The `@` of a type argument's own qualifier.
+    if (type.starts_with('@'))
+      type.remove_prefix(1);
+    for (std::string_view q : kQualifiers)
+      if (type.starts_with(q)) {
+        type.remove_prefix(q.size());
+        qualified = true;
+        break;
+      }
+  }
+  static constexpr std::string_view kAtomic = "atomic ";
+  if (!type.starts_with(kAtomic))
+    return false;
+  type.remove_prefix(kAtomic.size());
+  const auto alnum = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) != 0;
+  };
+  const auto digit = [](char c) {
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+  };
+  const size_t name = static_cast<size_t>(
+      std::find_if_not(type.begin(), type.end(), alnum) - type.begin());
+  if (name == 0)
+    return false;
+  type.remove_prefix(name);
+  if (type.empty())
+    return true;
+  // The one length, the cell's own.
+  return type.size() > 2 && type.front() == '[' && type.back() == ']' &&
+         std::all_of(type.begin() + 1, type.end() - 1, digit);
+}
+
 /// How a value of the IFACE type @p type is held (sema::pirType,
 /// ast::isMemType), from its name: an integer type in an `i64`, a
 /// floating-point one in an `f64`, `bool`, `char` and `void` in their own,
 /// `Str`, `Obj` and a class @p types describes in a `box`, an enum without
 /// payloads in an `i64`; a struct, a tagged union, a tuple, a fixed-size
-/// array and a function value in memory; `T[]` as a slice; and the optional
+/// array and a function value in memory; `T[]` as a slice; the optional
 /// of a type held in a `box` or in memory as that type is, of one held in
-/// a scalar in its optional (`opt_i64` ...).  Nothing for a name that is
-/// none of these (one the interface does not describe).
+/// a scalar in its optional (`opt_i64` ...); and a cell (`atomic int`,
+/// `atomic int[4]`, one cell of four elements) by its handle, a `box`, so
+/// its optional is one too, and an array or a slice of those what an array
+/// or a slice is.  Nothing for a name that is none of these (one the
+/// interface does not describe).
 std::optional<Held> heldAs(std::string_view type, const DescribedTypes &types) {
   using pir::Type;
+  // Before the suffixes: the length of `atomic int[4]` is the cell's, and
+  // so is the one of `shared atomic int[4]`, which is no array of anything.
+  if (isCell(type))
+    return Held{Held::Value, Type::Box};
   // A tuple's or a function type's name starts with its parenthesis: what
   // follows the matching one says which (` -> R` a function type's), and
   // whether the name is a slice or an array of it, or its optional.

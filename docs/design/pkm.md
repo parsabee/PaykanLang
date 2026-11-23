@@ -361,6 +361,28 @@ Node>`) is written with a leading `@`, `@shared mutable Node`, and the
 importer reads it back as such (`ast::Qualifier::FromArgument`: a borrow
 keeps it, and the clone of the value is its copy).
 
+A cell (docs/language/19-concurrency.md, "`atomic` cells") is spelled as a
+declaration writes it too: `atomic` and the name of the number type, `bool`
+or `char` it holds, `atomic int`, then one length for a cell of an array,
+`atomic int[4]` (one cell of four elements, no array of four cells: the
+length belongs to the cell, as the source grammar reads it).  The handle
+is the type of a parameter, a result or a class's field, and a part of
+another type where Sema lets it be one: a tuple's element, a function
+type's parameter and result `(atomic int) -> atomic int`, a task's result
+`async Task<atomic int>`, a type argument `Slot<atomic int[3]>`.  A `?`
+after it is the optional handle a template's `T?` makes of a cell, `atomic
+int?`, the only suffix a cell takes (Sema has no array and no slice of
+handles); the optional handle takes the suffixes of any type, `atomic
+int?[2]` for a template's `T?[2]`.  A qualifier before a cell is the one a
+template writes on its type argument, `mutable atomic int` for a `mutable
+T`, `atomic shared atomic int[2]` for an `atomic shared T`, and with the
+`@` of a type argument's own, `@shared atomic int[2]`.  `atomic shared`
+before a type is the qualifier of a frozen object, read first, and never a
+cell.  An importer rebuilds the cell's type from the spelling
+(`Sema::injectModule`), and a file that spells anything else after `atomic`
+(an object, `atomic Str`; a length of zero; a second length) names an
+unknown type.
+
 Parameter modes (`view`, `inout`) are appended to the string-typed records
 written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
 name)[n]` after a `FUNC` record's signature, and one such list per method
@@ -1591,7 +1613,11 @@ rebuilt and a prebuilt file is an error at the import, under
   type is `i64`, a floating-point one `f64`, `bool`, `char` and `void`
   their own, `Str`, `Obj` and a class `box`, an enum without payloads
   `i64`, the optional of a reference `box` and of a scalar or such an enum
-  its optional type (`opt_i64`, ...), a `weak` field `weak`; a struct, a
+  its optional type (`opt_i64`, ...), a `weak` field `weak`, a cell and its
+  optional the `box` of its handle (`atomic int`, and `atomic int[4]`, whose
+  length is the cell's: it is no array held in memory, behind a qualifier
+  either, where an array of optional handles, `atomic int?[2]`, is one); a
+  struct, a
   tagged union, a tuple, a fixed-size array, a function value and the
   optional of one are held in memory, so a parameter of one is its address
   (`ptr`) and a result of one is written where a last `ptr` parameter

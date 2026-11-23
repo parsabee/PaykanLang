@@ -683,6 +683,20 @@ samples/concurrency/README.md.
   a new cell instead of the place's handle, so the callee's change was lost: `bump(n, "x")`
   left `n` as it was where `bump<Str>(n, "x")` changed it. The same holds for a generic
   method and a generic `static fn` (#353).
+- A module whose exports name a cell could not be imported: `import of module 'lib':
+  parameter 1 of function 'bump' has unknown type 'atomic int'`, for a parameter, a result
+  and a class's field alike, though the module compiled on its own. So no module exported a
+  function that takes or returns a handle, or a class that holds a cell, which is what a
+  `__deinit__` counts in now that it takes no lock. The interface spells a cell as a
+  declaration writes it (`atomic int`, `atomic int[4]` for a cell of an array;
+  docs/design/pkm.md §3.2), and an importer reads it back: a handle passed to another
+  module's function or returned by one, a cell in a class of the module and in an
+  importer's subclass of it, a cell of an array, and a template of the module instantiated
+  with a cell (`Slot<atomic int>`), from the module's source, the cache or a prebuilt
+  `.pkm`. The check of a module file against its code reads a cell as its handle: a
+  function of a cached or prebuilt module that took an `atomic int[4]` would have been
+  rejected as taking an array (`is (box) -> i64 in CODE, (ptr) -> i64 by its types in
+  IFACE`).
 - A private `static fn` of a generic class or struct (`Box<int>::__plain()`) was callable
   from outside the type; it is `'__plain' is private to 'Box<int>'`, as one of a type that
   is not generic was.

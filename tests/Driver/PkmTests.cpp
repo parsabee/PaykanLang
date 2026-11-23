@@ -5830,3 +5830,252 @@ fn main() -> int {
   expectOnEveryPath(p);
   fs::remove_all(p.Dir);
 }
+
+// A cell crosses a module boundary (`atomic int`, `atomic int[3]`): a
+// handle goes to another module's function and comes back from one, a
+// class of the module holds cells and an importer's subclass adds one and
+// overrides a method that takes and returns a handle, a cell of an array
+// is changed by element on both sides, and a template of the module is
+// instantiated with a cell by the module, by a second module and by the
+// program.  The program prints what it prints as one file, without a leak,
+// and a wrong argument is refused by the cell's type, whether the modules
+// come from their sources, the cache or prebuilt files.  An importer read
+// no cell's type before (`has unknown type 'atomic int'`), and a module
+// file whose function takes a cell of an array would not have matched its
+// code (the array's length read as an array held in memory).
+TEST(Pkm, AtomicTypesOnEveryPath) {
+  REQUIRE_BACKEND();
+  EveryPathProject p;
+  p.Dir =
+      fs::temp_directory_path() / ("pkm_atomic_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "cells.pkn",
+            R"(fn bump(c: atomic int) { c += 1; }
+fn fresh(v: int) -> atomic int { return v; }
+fn same(c: atomic int) -> atomic int { return c; }
+fn zeros() -> atomic int[3] { return [0; 3]; }
+fn mark(a: atomic int[3], i: int) { a[i] += 1; }
+fn total(a: atomic int[3]) -> int { return a[0] + a[1] + a[2]; }
+fn each(f: (atomic int) -> int, c: atomic int) -> int { return f(c); }
+class Session {
+  closed: atomic int;
+  id: int;
+  fn close(by: atomic int) -> atomic int {
+    self.id += 1;
+    by += self.id;
+    self.closed += 1;
+    return by;
+  }
+}
+class Tally { hits: atomic int[3]; done: atomic bool; level: atomic u8; }
+impl Tally {
+  view fn sum() -> int { return self.hits[0] + self.hits[1] + self.hits[2]; }
+}
+class Slot<T> { v: T; }
+impl Slot<T: Copyable> { view fn get() -> T { return self.v; } }
+class Kept<T> { v: mutable T; }
+fn slot(c: atomic int) -> Slot<atomic int> { return Slot<atomic int>(c); }
+fn kept(v: int) -> Kept<atomic int[2]> { return Kept<atomic int[2]>([v; 2]); }
+)");
+  writeFile(p.Dir / "lib" / "pool.pkn",
+            R"(import lib::cells as c;
+class Pool { slots: c::Slot<atomic int[3]>; n: atomic int; }
+fn pool(n: atomic int) -> Pool {
+  return Pool(c::Slot<atomic int[3]>(c::zeros()), n);
+}
+fn flag() -> c::Slot<atomic bool> { return c::Slot<atomic bool>(True); }
+)");
+  writeFile(p.Dir / "bad.pkn",
+            R"(import lib::cells as c;
+fn main() -> int {
+  n: atomic int = 0;
+  c::bump("s");
+  let i = c::total(n);
+  c::mark(c::fresh(1), 0);
+  return 0;
+}
+)");
+  writeFile(p.Dir / "ok.pkn",
+            R"(import ::io;
+import lib::cells as c;
+import lib::pool;
+
+class Timed : c::Session {
+  ticks: atomic int;
+  fn close(by: atomic int) -> atomic int {
+    self.id += 1;
+    by += 100;
+    self.ticks += 1;
+    return self.ticks;
+  }
+}
+
+fn twice(x: atomic int) -> int { x += x; return x; }
+
+fn main() -> int {
+  n: atomic int = 0;
+  c::bump(n);
+  k = c::fresh(3);
+  k += 1;
+  m = c::same(n);
+  m += 10;
+  io::println(Str(n) + " " + Str(k) + " " + Str(c::each(twice, k)) + " " + Str(k));
+
+  s: mutable c::Session = c::Session(n, 5);
+  r = s.close(k);
+  r += 1;
+  t: atomic int = 0;
+  d: mutable c::Session = Timed(n, 7, t);
+  q = d.close(k);
+  q += 1;
+  d.closed += 1;
+  io::println(Str(n) + " " + Str(k) + " " + Str(t));
+
+  hits = c::zeros();
+  c::mark(hits, 1);
+  c::mark(hits, 1);
+  hits[2] += 4;
+  let tally: atomic shared c::Tally = c::Tally(hits, False, u8(250));
+  tally.hits[0] += 5;
+  tally.done = True;
+  tally.level += 10;
+  parallel for i in 0..40 {
+    if i % 10 == 0 { c::bump(n); c::mark(hits, 0); }
+  }
+  io::println(Str(c::total(hits)) + " " + Str(tally.sum()) + " " + Str(tally.done) + " " + Str(tally.level) + " " + Str(n));
+
+  let sl = c::slot(n);
+  h = sl.get();
+  h += 1;
+  let own = c::Slot<atomic f32>(f32(1.5));
+  o = own.get();
+  o += 0.25;
+  o2 = own.get();
+  let kept = c::kept(4);
+  kept.v[1] += 3;
+  let mine = c::Kept<atomic int>(c::fresh(8));
+  mine.v += 1;
+  let p = pool::pool(n);
+  arr = p.slots.get();
+  arr[2] += 6;
+  p.n += 1;
+  fl = pool::flag().get();
+  io::println(Str(n) + " " + Str(o2) + " " + Str(kept.v[0] + kept.v[1]) + " " + Str(mine.v) + " " + Str(c::total(arr)) + " " + Str(fl));
+  return 0;
+}
+)");
+  p.Libs = {"cells", "pool"};
+  p.Mixed = "cells";
+  p.Rejected = {
+      {"bad.pkn",
+       "bad.pkn:4:11: error: argument 1 of 'c::bump' has type 'Str', expected "
+       "'atomic int'\n"
+       "bad.pkn:5:20: error: argument 1 of 'c::total' has type 'atomic int', "
+       "expected 'atomic int[3]'\n"
+       "bad.pkn:6:11: error: argument 1 of 'c::mark' has type 'atomic int', "
+       "expected 'atomic int[3]'\n"}};
+  p.Ok = "ok.pkn";
+  p.OkOutput = "11 4 8 8\n13 115 2\n15 15 True 4 17\n19 1.75 11 9 6 True\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
+}
+
+// A `__deinit__` takes no lock (it may run in a `lock` block), so what it
+// counts across threads it counts in a cell: a module's class holds the
+// cell and its `__deinit__` adds to it, for an object the importer lets go
+// of, for one a `parallel for` body makes, and after the `__deinit__` of an
+// importer's subclass, which adds to a cell of its own.  On every path the
+// module comes from: its source, the cache entry an earlier run wrote, and
+// a prebuilt file with the source gone.
+TEST(Pkm, ADeinitCountsInACellOfItsModule) {
+  REQUIRE_BACKEND();
+  EveryPathProject p;
+  p.Dir = fs::temp_directory_path() /
+          ("pkm_atomic_deinit_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "sessions.pkn",
+            R"(fn bump(c: atomic int) { c += 1; }
+fn fresh(v: int) -> atomic int { return v; }
+class Session { closed: atomic int; id: int; }
+impl Session { fn __deinit__() { self.closed += 1; } }
+)");
+  writeFile(p.Dir / "main.pkn",
+            R"(import ::io;
+import lib::sessions as x;
+class Logged : x::Session { seen: atomic int; }
+impl Logged { fn __deinit__() { self.seen += self.id; } }
+fn main() -> int {
+  n: atomic int = 0;
+  x::bump(n);
+  { let s = x::Session(n, 4); }
+  io::println(n);
+  seen = x::fresh(0);
+  {
+    let l = Logged(n, 5, seen);
+    let m: x::Session = Logged(n, 6, seen);
+  }
+  parallel for i in 0..8 { let s = x::Session(n, i); }
+  io::println(Str(n) + " " + Str(seen));
+  return 0;
+}
+)");
+  p.Libs = {"sessions"};
+  p.Mixed = "sessions";
+  p.Ok = "main.pkn";
+  p.OkOutput = "2\n12 11\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
+}
+
+// The cell types a template makes cross too, on every path: an array and a
+// slice of optional handles (`T?[2]` and `T?[]` with a cell for `T`, which
+// are `atomic int?[2]` and `atomic int?[]` in the interface: a suffix after
+// the `?` is the optional's), and a cell of an array behind the qualifier a
+// template writes before its argument (`atomic shared T`, and `Slot<shared
+// T>`, whose argument's own has an `@`).  A module's interface describes
+// every instance the module makes, in a function's body too.  (The first
+// two were unknown types to an importer.  The others read as arrays held in
+// memory to the check of a module file's code, so the cache entry was
+// rebuilt on every run and a prebuilt file was refused.)
+TEST(Pkm, ATemplatesCellTypesOnEveryPath) {
+  REQUIRE_BACKEND();
+  EveryPathProject p;
+  p.Dir = fs::temp_directory_path() /
+          ("pkm_atomic_made_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "made.pkn",
+            R"(class K<T> { v: T?[2]; n: int; }
+impl K<T> {
+  view fn count(xs: view T?[]) -> int { return int(xs.len()) + self.n; }
+}
+fn pairs() -> int {
+  let k = K<atomic int>([None, None], 2);
+  return k.count(k.v);
+}
+class F<T> { v: atomic shared T; n: int; }
+fn frozen() -> int {
+  let f = F<atomic int[2]>([1; 2], 2);
+  f.v[0] += 1;
+  return f.v[0] + f.n;
+}
+class Slot<T> { v: T; }
+class H<T> { s: Slot<shared T>?; n: int; }
+fn held() -> H<atomic int[2]> { return H<atomic int[2]>(None, 7); }
+)");
+  writeFile(p.Dir / "ok.pkn",
+            R"(import ::io;
+import lib::made as m;
+fn main() -> int {
+  let h = m::held();
+  let k = m::K<atomic bool>([None, None], 5);
+  io::println(Str(m::pairs()) + " " + Str(m::frozen()) + " " + Str(h.n) + " " + Str(h.s == None) + " " + Str(k.count(k.v)));
+  return 0;
+}
+)");
+  p.Libs = {"made"};
+  p.Mixed = "made";
+  p.Ok = "ok.pkn";
+  p.OkOutput = "4 4 7 True 7\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
+}

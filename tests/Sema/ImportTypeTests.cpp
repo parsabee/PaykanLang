@@ -1409,3 +1409,223 @@ async fn main() -> int {
       << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// ─── `atomic` types in another module's signatures and fields ───────────────
+//
+// A cell's type is spelled `atomic int`, and `atomic int[3]` for a cell of
+// an array (docs/language/19-concurrency.md), and the grammar an importer
+// reads a module's types by had no production for it: every export that
+// named one was `has unknown type 'atomic int'`, so no module could export
+// a function that takes a cell or a class that holds one.
+
+static const char *const kCellsModule = R"(// A module of cells.
+fn bump(c: atomic int) { c += 1; }
+fn fresh(v: int) -> atomic int { return v; }
+fn total(a: atomic int[3]) -> int { return a[0] + a[1] + a[2]; }
+fn pass() -> (atomic int) -> atomic int { return fn(c: atomic int) -> atomic int { return c; }; }
+async fn later(v: int) -> atomic f32 { return f32(v); }
+class Session { closed: atomic int; id: int; }
+impl Session { fn __deinit__() { self.closed += 1; } }
+class Tally { hits: atomic u8[3]; done: atomic bool; }
+class Opt<T> { v: T?; }
+class Kept<T> { v: mutable T; }
+fn empty() -> Opt<atomic char> { return Opt<atomic char>(None); }
+fn kept() -> Kept<atomic int> { return Kept<atomic int>(fresh(1)); }
+)";
+
+// A handle goes to another module's function and comes back from one, an
+// imported class holds cells, the importer's subclass adds one, and a
+// template of the module is instantiated with a cell by either side.
+TEST(Module, AtomicTypesCrossAnImport) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_atomic").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "cells.pkn", kCellsModule);
+  auto main = writeFile(tmp, "main.pkn", R"(import cells as x;
+class Timed : x::Session { ticks: atomic int; }
+async fn main() -> int {
+  n: atomic int = 0;
+  x::bump(n);
+  k = x::fresh(3);
+  k += 1;
+  { let s = x::Session(n, 4); s.closed += 1; }
+  { let d = Timed(n, 5, k); d.ticks += 1; d.closed += 1; }
+  hits: atomic int[3] = [0; 3];
+  hits[1] += x::total(hits);
+  let t = x::Tally([u8(0); 3], False);
+  t.hits[2] += 1;
+  t.done = True;
+  f = x::pass();
+  g = f(n);
+  g += 1;
+  l = x::later(2);
+  w = await l;
+  w += 0.5;
+  let o = x::empty();
+  let kept = x::kept();
+  kept.v += 1;
+  let mine = x::Kept<atomic bool[2]>([False; 2]);
+  mine.v[1] = True;
+  return n;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(diagSummary(r.Diagnostics), "") << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// The types an importer rebuilds are the module's: a cell is no `int`, a
+// cell of an array no cell of a number, and each is named as the module
+// wrote it.  Only a cell of an object that is not `mutable` changes (`c.id`,
+// against `s.closed` above).
+TEST(Module, AnImportedAtomicTypeIsTheModules) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_atomic_types").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "cells.pkn", kCellsModule);
+  auto main = writeFile(tmp, "main.pkn", R"(import cells as x;
+fn main() -> int {
+  n: atomic int = 0;
+  a: atomic int[3] = [0; 3];
+  x::bump("s");
+  x::bump(a);
+  let i = x::total(n);
+  let s: Str = x::fresh(1);
+  let f: Str = x::pass();
+  let t: Str = x::later(1);
+  let h: Str = x::Tally([u8(0); 3], False).hits;
+  let o: Str = x::empty().v;
+  let c = x::Session(n, 1);
+  c.id += 1;
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(
+      diagSummary(r.Diagnostics),
+      "main.pkn:5:11: error: argument 1 of 'x::bump' has type 'Str', "
+      "expected 'atomic int'\n"
+      "main.pkn:6:11: error: argument 1 of 'x::bump' has type 'atomic "
+      "int[3]', expected 'atomic int'\n"
+      "main.pkn:7:20: error: argument 1 of 'x::total' has type 'atomic int', "
+      "expected 'atomic int[3]'\n"
+      "main.pkn:8:3: error: initializer of type 'atomic int' does not match "
+      "declared type 'Str' for variable 's'\n"
+      "main.pkn:9:3: error: initializer of type '(atomic int) -> atomic int' "
+      "does not match declared type 'Str' for variable 'f'\n"
+      "main.pkn:10:3: error: initializer of type 'Task<atomic f32>' does not "
+      "match declared type 'Str' for variable 't'\n"
+      "main.pkn:11:16: error: 'x::Tally(...).hits' is an 'atomic u8[3]': it "
+      "is read by element\n"
+      "main.pkn:12:3: error: initializer of type 'atomic char?' does not "
+      "match declared type 'Str' for variable 'o'\n"
+      "main.pkn:14:3: error: 'c' is immutable (a 'Session'; write 'mutable "
+      "Session' to change it); cannot assign to its field 'id'\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// The spelling of a cell in a module's interface, read back by an importer
+// (injectModule) and checked when a module file is loaded
+// (Sema::checkInterfaceTypes): what a cell holds is a number, a `bool` or a
+// `char`, by name, and its one length makes it a cell of an array; `?`
+// after it is the optional handle of a template's `T?`, which takes the
+// suffixes any type does (`T?[2]`, `T?[]`), and a qualifier before it the
+// one a template's member writes (`mutable T`).  Anything else is no type:
+// an object in a cell, an array or a slice of handles, a length of zero.
+TEST(Module, ACellsExportedSpellingIsReadBack) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_atomic_spelling";
+  std::filesystem::remove_all(tmp);
+  auto libPath =
+      writeFile(tmp.string(), "lib.pkn", "fn real() -> int { return 1; }\n");
+  auto key = std::filesystem::canonical(libPath).string();
+  using paykan::sema::Sema;
+  auto moduleOf = [](const std::vector<std::string> &types) {
+    Sema::ModuleInfo info;
+    for (size_t i = 0; i < types.size(); ++i)
+      info.ExportedFunctions.push_back(
+          {"p" + std::to_string(i), "void", {types[i]}, {}});
+    return info;
+  };
+  // Each function called with a `Str`: the error names the parameter's type.
+  auto check = [&](const std::vector<std::string> &types) {
+    Sema::ModuleCache[key] = moduleOf(types);
+    std::string program = "import lib;\nfn main() -> int {\n";
+    for (size_t i = 0; i < types.size(); ++i)
+      program += "  lib::p" + std::to_string(i) + "(\"s\");\n";
+    auto main =
+        writeFile(tmp.string(), "main.pkn", program + "  return 0;\n}\n");
+    auto r = semaCheckFile(main, tmp.string());
+    Sema::ModuleCache.erase(key);
+    EXPECT_FALSE(r.Ok);
+    return diagSummary(r.Diagnostics);
+  };
+
+  const std::vector<std::string> cells = {"atomic int",
+                                          "atomic u8",
+                                          "atomic f32",
+                                          "atomic bool",
+                                          "atomic char",
+                                          "atomic int[3]",
+                                          "atomic bool[64]",
+                                          "atomic int?",
+                                          "atomic f32[2]?",
+                                          "(atomic int, atomic char[2])",
+                                          "(atomic int) -> atomic int",
+                                          "async Task<atomic int>",
+                                          "mutable atomic int",
+                                          "shared atomic int[2]",
+                                          "atomic int?[2]",
+                                          "atomic int?[]",
+                                          "atomic bool[3]?[2]",
+                                          "atomic shared atomic u8[2]?"};
+  // As typeName names each type; a declaration's qualifier is no part of
+  // it, and a task is a `Task<T>` to a reader.
+  const std::vector<std::string> named = {"atomic int",
+                                          "atomic u8",
+                                          "atomic f32",
+                                          "atomic bool",
+                                          "atomic char",
+                                          "atomic int[3]",
+                                          "atomic bool[64]",
+                                          "atomic int?",
+                                          "atomic f32[2]?",
+                                          "(atomic int, atomic char[2])",
+                                          "(atomic int) -> atomic int",
+                                          "Task<atomic int>",
+                                          "atomic int",
+                                          "atomic int[2]",
+                                          "atomic int?[2]",
+                                          "atomic int?[]",
+                                          "atomic bool[3]?[2]",
+                                          "atomic u8[2]?"};
+  std::string expected;
+  for (size_t i = 0; i < named.size(); ++i) {
+    const std::string n = std::to_string(i);
+    expected += "main.pkn:" + std::to_string(i + 3) + ":" +
+                std::to_string(10 + n.size()) +
+                ": error: argument 1 of 'lib::p" + n +
+                "' has type 'Str', expected '" + named[i] + "'\n";
+  }
+  EXPECT_EQ(check(cells), expected);
+  paykan::Status ok =
+      Sema::checkInterfaceTypes(Sema::toInterface(moduleOf(cells)));
+  EXPECT_TRUE(ok) << ok.message();
+
+  for (const char *bad :
+       {"atomic", "atomic ", "atomic  int", "atomic Str", "atomic Obj",
+        "atomic void", "atomic Cell", "atomic int[]", "atomic int[0]",
+        "atomic int[3", "atomic int[2][3]", "atomic int[2][]", "atomic int?[0]",
+        "atomic (int, int)", "atomic atomic int", "atomic int x"}) {
+    SCOPED_TRACE(bad);
+    const std::string what = "parameter 1 of function 'p0' has unknown type '" +
+                             std::string(bad) + "'";
+    EXPECT_EQ(check({bad}),
+              "main.pkn:1:1: error: import of module 'lib': " + what + "\n");
+    paykan::Status s =
+        Sema::checkInterfaceTypes(Sema::toInterface(moduleOf({bad})));
+    EXPECT_FALSE(s);
+    EXPECT_EQ(s.message(), what);
+  }
+  std::filesystem::remove_all(tmp);
+}

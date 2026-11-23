@@ -1,0 +1,55 @@
+// OK: `atomic` types in another module's signatures and fields
+// (docs/language/19-concurrency.md, "`atomic` cells").  A handle given to
+// the module's function is the caller's cell, and one the module returns is
+// a cell of its own.  The module's class counts the objects let go of in
+// the cell it was given: one session, two of the importer's subclass (whose
+// own `__deinit__` runs first and adds each one's id to another cell), and
+// eight made by the iterations of a `parallel for`.  A cell of an array is
+// changed by element on both sides of the import, and the module's generic
+// class holds a handle the importer gave it.  An importer could read no
+// cell's type from a module's interface: `import of module 'sessions':
+// parameter 1 of function 'bump' has unknown type 'atomic int'`.
+// expect-stdout: 1 4
+// expect-stdout: 12 6
+// expect-stdout: 9 3
+// expect-stdout: 13
+import ::io;
+import sessions as x;
+
+class Logged : x::Session {
+  seen: atomic int;
+}
+
+impl Logged {
+  fn __deinit__() { self.seen += self.id; }
+}
+
+fn main() -> int {
+  n: atomic int = 0;
+  x::bump(n);
+  k = x::fresh(3);
+  k += 1;
+  io::println(Str(n) + " " + Str(k));
+
+  seen = x::fresh(0);
+  {
+    let s = x::Session(n, 4);
+    let l = Logged(n, 5, seen);
+    let m: x::Session = Logged(n, 1, seen);
+  }
+  parallel for i in 0..8 {
+    let s = x::Session(n, i);
+  }
+  io::println(Str(n) + " " + Str(seen));
+
+  hits = x::counters();
+  hits[0] += 2;
+  hits[2] += 7;
+  io::println(Str(x::total(hits)) + " " + Str(hits.len()));
+
+  let slot = x::Slot<atomic int>(n);
+  h = slot.get();
+  h += 1;
+  io::println(n);
+  return 0;
+}
