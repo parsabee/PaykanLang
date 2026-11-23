@@ -3387,3 +3387,25 @@ fn tally(c: locked mut Counts, x: view Node, s: view Shape) {
        "derived from 'Shape' may override it); a 'lock' block calls only "
        "functions it can resolve\n"});
 }
+
+// A buffer's one field is the runtime's buffer object, which the buffer's
+// methods alone reach: the `==` and the text of a list, and of a value
+// holding one, run nothing of the program's in a `lock` block.
+TEST(Concurrency, AListIsComparedAndPrintedInALockBlock) {
+  auto r = semaCheck(R"(import ::io;
+import ::collections as cl;
+struct Batch { ids: cl::List<int>; }
+class Jobs { done: cl::List<int>; todo: cl::List<int>; last: Batch; }
+fn main() -> int {
+  jobs: locked mut Jobs = Jobs(cl::List<int>(), cl::List<int>(), Batch(cl::List<int>()));
+  lock jobs as j: view {
+    if j.done == j.todo { io::println("nothing left"); }
+    io::println(j.todo);
+    io::println(j.last);
+    io::println(j.last == j.last);
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

@@ -1060,6 +1060,11 @@ void Sema::ParSafety::valueMethod(ast::Type *ty, const std::string &name,
           imported(loc, shown, md->isParSafe(), md->waits());
         continue;
       }
+      // A buffer's one field is the runtime's buffer object, which its
+      // methods alone reach: its `==` and its text are the runtime's, and
+      // read no element.
+      if (S.bufferElementType(st))
+        continue;
       for (size_t i = 0; i < st->getNumFields(); ++i)
         work.push_back({st->getElementType(i),
                         st->findFieldQualifier(st->getFieldName(i))});
