@@ -1,0 +1,40 @@
+// Module: sessions — cells in a module's signatures, classes and templates.
+// A cell is changed from any thread with no lock, so it is what a
+// `__deinit__` counts in: a `__deinit__` may run inside a `lock` block, and
+// takes no lock itself.
+class Session {
+  closed: atomic int; // the caller's cell: every session adds to it
+  id: int;
+}
+
+impl Session {
+  fn __deinit__() { self.closed += 1; }
+}
+
+// Adds one to the caller's cell.
+fn bump(c: atomic int) {
+  c += 1;
+}
+
+// A new cell holding `v`.
+fn fresh(v: int) -> atomic int {
+  return v;
+}
+
+// One cell of three counters, and their sum.
+fn counters() -> atomic int[3] {
+  return [0; 3];
+}
+
+fn total(a: atomic int[3]) -> int {
+  return a[0] + a[1] + a[2];
+}
+
+// A template: an importer's `Slot<atomic int>` holds a handle.
+class Slot<T> {
+  v: T;
+}
+
+impl Slot<T: Copyable> {
+  view fn get() -> T { return self.v; }
+}

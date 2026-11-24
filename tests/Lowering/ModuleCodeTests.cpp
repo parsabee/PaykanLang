@@ -644,6 +644,47 @@ fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
         << memory;
   EXPECT_EQ(param("(int, Str)[]"), scale + "(box, ptr, i64, ptr, i64, ptr) "
                                            "-> box by its types in IFACE");
+  // A cell is held by its handle, a box, whatever it holds: the length of
+  // `atomic int[3]` is the cell's, so it is no array held in memory.  So is
+  // its optional, and one behind the qualifier a template's member writes.
+  for (const char *cell : {"atomic int", "atomic f32", "atomic bool",
+                           "atomic int[3]", "atomic char?", "atomic int[3]?",
+                           "mutable atomic int", "shared atomic int[2]"})
+    EXPECT_EQ(param(cell), scale + "(box, box, ptr, i64, ptr) -> box by its "
+                                   "types in IFACE")
+        << cell;
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Fields[0].TypeName = "atomic int[4]";
+            }),
+            "class 'Point': field 'x' is i64 in CODE, box by its type in "
+            "IFACE");
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Fields[1].TypeName = "atomic int[4]";
+              i.Functions[1].ReturnTypeName = "atomic bool[2]";
+            }),
+            "");
+  // Behind every qualifier a template writes before its type argument too
+  // (`atomic shared T`; `Slot<shared T>`, whose argument's own has an `@`).
+  for (const char *cell :
+       {"atomic shared atomic int[2]", "@shared atomic int[2]",
+        "@mutable atomic int[2]", "@atomic shared atomic u8[2]?",
+        "locked mutable atomic bool[3]"})
+    EXPECT_EQ(param(cell), scale + "(box, box, ptr, i64, ptr) -> box by its "
+                                   "types in IFACE")
+        << cell;
+  // A frozen object is no cell: `atomic shared` is a qualifier.
+  EXPECT_EQ(param("atomic shared Point[2]"),
+            scale + "(box, ptr, ptr, i64, ptr) -> box by its types in IFACE");
+  // An array of optional handles is an array, held in memory, and a slice
+  // of them a slice (a template's `T?[2]` and `T?[]`): the suffix after a
+  // cell's `?` is no part of the cell.
+  for (const char *array :
+       {"atomic int?[2]", "atomic bool[3]?[2]", "shared atomic int?[2]"})
+    EXPECT_EQ(param(array), scale + "(box, ptr, ptr, i64, ptr) -> box by its "
+                                    "types in IFACE")
+        << array;
+  EXPECT_EQ(param("atomic int?[]"), scale + "(box, ptr, i64, ptr, i64, ptr) "
+                                            "-> box by its types in IFACE");
   EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
               i.Functions[1].ReturnTypeName = "(int, Str)";
             }),

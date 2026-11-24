@@ -43,6 +43,7 @@ namespace sema {
 ///   qual  := 'mutable ' | 'shared ' | 'shared mutable ' | 'atomic shared '
 ///          | 'locked ' | 'locked mutable '       -- a part's form (#368)
 ///   base  := '(' type (', ' type)+ ')'        -- tuple (arity >= 2)
+///          | 'atomic ' name ('[' INT ']')?    -- a cell, or one of an array
 ///          | name                             -- builtin / class / enum
 ///   suffix := '[]'                            -- slice of the type so far
 ///           | '[' INT ']'+                    -- fixed-size array of it
@@ -50,7 +51,14 @@ namespace sema {
 ///
 /// Suffixes apply left to right, mirroring how ast::typeName spells nesting:
 /// "Str?[]" is a slice of optional strings, "int[2]?" would be an optional
-/// array, and "(Node?, int)[3]" an array of tuples.  A name runs up to the
+/// array, and "(Node?, int)[3]" an array of tuples.  A cell (`atomic int`,
+/// docs/language/19-concurrency.md) holds what Sema::resolveAtomicAnnotation
+/// lets it: a number, a `bool` or a `char`, or a fixed array of them, whose
+/// one length is the cell's own (`atomic int[4]` is one cell of four
+/// elements, as the source grammar reads it).  The only suffix a cell takes
+/// is '?', the optional handle a template's `T?` makes of it: Sema has no
+/// array and no slice of handles.  The optional takes the suffixes of any
+/// type (`atomic int?[2]`, a template's `T?[2]`).  A name runs up to the
 /// next ',' or ')' at this nesting level or the next suffix.  A generic
 /// instantiation's name carries its type arguments (`Pair<Str, int>`,
 /// `Box<Node?>`): everything between its '<' and the matching '>' is part of
@@ -92,6 +100,35 @@ static ast::Qualifier readExportedQualifier(const std::string &text,
   return {};
 }
 
+/// What the name of a cell's type starts with (`atomic int`, `atomic
+/// int[4]`); `atomic shared `, a qualifier, is read before it.
+static constexpr std::string_view kExportedCell = "atomic ";
+
+/// Whether a length, `[4]`, is spelled at @p pos in @p text.
+static bool atExportedLength(const std::string &text, size_t pos) {
+  return pos + 1 < text.size() && text[pos] == '[' &&
+         std::isdigit(static_cast<unsigned char>(text[pos + 1]));
+}
+
+/// The length spelled at @p pos in @p text (atExportedLength), moving
+/// @p pos past it; 0, which no array has, when it is not one: it has no
+/// `]`, a character that is no digit, or more digits than an int64_t
+/// holds.
+static int64_t readExportedLength(const std::string &text, size_t &pos) {
+  const size_t close = text.find(']', pos);
+  if (close == std::string::npos)
+    return 0;
+  int64_t n = 0;
+  for (size_t i = pos + 1; i < close; ++i) {
+    if (!std::isdigit(static_cast<unsigned char>(text[i])) ||
+        n > (INT64_MAX - 9) / 10)
+      return 0;
+    n = n * 10 + (text[i] - '0');
+  }
+  pos = close + 1;
+  return n;
+}
+
 /// As above, a type spelled with the qualifier written before it (#368):
 /// the qualifier is the elements' of the first array suffix when it is
 /// `shared` or `shared mutable` (`shared Node[4]`, four shared references, as
@@ -115,6 +152,33 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     ty = ctx.getTaskType(resultQual.isUnique()
                              ? result
                              : ctx.getQualifiedType(resultQual, result));
+  } else if (text.compare(pos, kExportedCell.size(), kExportedCell) == 0) {
+    // A cell, as typeName spells one: what it holds by name, then the
+    // length of a cell of an array.
+    pos += kExportedCell.size();
+    const size_t start = pos;
+    while (pos < text.size() &&
+           std::isalnum(static_cast<unsigned char>(text[pos])))
+      ++pos;
+    ast::BuiltinType::Kind kind;
+    if (!ast::builtinKindOfName(
+            std::string_view(text).substr(start, pos - start), kind) ||
+        kind == ast::BuiltinType::Void)
+      return nullptr;
+    ast::Type *held = ctx.getBuiltinType(kind);
+    if (atExportedLength(text, pos)) {
+      const int64_t length = readExportedLength(text, pos);
+      if (length < 1)
+        return nullptr;
+      held = ctx.getFixedArrayType(held, length);
+    }
+    ty = ctx.getAtomicType(held);
+    // A handle takes no suffix but `?` (the caller finds another left); the
+    // optional handle takes those of any type, below.
+    if (pos >= text.size() || text[pos] != '?')
+      return ty;
+    ++pos;
+    ty = ctx.getOptionalType(ty);
   } else if (pos < text.size() && text[pos] == '(') {
     // `(T1, T2)`, a tuple type, or `(view T1, T2) -> R`, a function type
     // (`() -> R` takes no parameter), as typeName spells them; a function
@@ -214,27 +278,15 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     if (text.compare(pos, 2, "[]") == 0) {
       pos += 2;
       ty = ctx.getSliceType(ty, elements());
-    } else if (pos + 1 < text.size() && text[pos] == '[' &&
-               std::isdigit(static_cast<unsigned char>(text[pos + 1]))) {
+    } else if (atExportedLength(text, pos)) {
       // A run of lengths, first index first, as typeName writes it: two
       // `int[3]`s are `int[2][3]`.
       std::vector<int64_t> lengths;
-      while (pos + 1 < text.size() && text[pos] == '[' &&
-             std::isdigit(static_cast<unsigned char>(text[pos + 1]))) {
-        size_t close = text.find(']', pos);
-        if (close == std::string::npos)
-          return nullptr;
-        int64_t n = 0;
-        for (size_t i = pos + 1; i < close; ++i) {
-          if (!std::isdigit(static_cast<unsigned char>(text[i])) ||
-              n > (INT64_MAX - 9) / 10)
-            return nullptr;
-          n = n * 10 + (text[i] - '0');
-        }
+      while (atExportedLength(text, pos)) {
+        const int64_t n = readExportedLength(text, pos);
         if (n < 1)
           return nullptr;
         lengths.push_back(n);
-        pos = close + 1;
       }
       const ast::Qualifier elemQual = elements();
       for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
@@ -733,8 +785,8 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
   // signature (injectModule): every type an export names is a builtin or
   // one the interface describes.  A builtin's name or a record's (an
   // instantiation's too) is looked up as it is; only a type built of others
-  // (`T[]`, `T?`, a tuple, a function type) is parsed, each once, in a
-  // context that knows the interface's types, made for the first one (most
+  // (`T[]`, `T?`, a tuple, a function type, a cell) is parsed, each once, in
+  // a context that knows the interface's types, made for the first one (most
   // interfaces have none).  A module's interface spells its imports' types
   // again and again, and a diagnostic's text is made only for the one that
   // does not resolve.
@@ -794,7 +846,7 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
         type == names::kString)
       return false;
     if (type.find_first_of("[?(") == std::string::npos &&
-        type.rfind("async Task<", 0) != 0)
+        type.rfind("async Task<", 0) != 0 && !type.starts_with(kExportedCell))
       return true;
     if (composite.count(type))
       return false;
