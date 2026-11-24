@@ -296,9 +296,9 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
   expectErrors(
-      r, {":12:16: error: 'a' may have been moved (by the 'loop' at 8:3, at "
+      r, {":12:16: error: 'a' may have been moved (by the loop at 8:3, at "
           "9:10); it cannot be used after a move",
-          ":20:16: error: 'b' may have been moved (by the 'loop' at 16:3, at "
+          ":20:16: error: 'b' may have been moved (by the loop at 16:3, at "
           "17:22); it cannot be used after a move",
           ":29:22: error: 'd' is moved in the loop at 27:3 and not assigned "
           "again before the next iteration (the 'continue' at 29:31)"});
@@ -381,18 +381,20 @@ fn keep2() -> Job { return Job("k"); })");
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   expectErrors(
       r, {":3:32: error: cannot move 'self': a method borrows its receiver",
-          ":7:45: error: cannot move 'j': it is a 'view', a borrow",
-          ":8:44: error: cannot move 'j': it is an 'inout' parameter, the "
-          "caller's storage",
+          ":7:45: error: cannot move 'j': it is a 'view' borrow, and what it "
+          "names stays with its owner",
+          ":8:44: error: cannot move 'j': it is an 'inout' borrow, and what it "
+          "names stays with its owner",
           ":13:16: error: cannot move 'w': a 'weak' variable holds no strong "
           "reference",
           ":14:57: error: cannot move 'a': the function captures it by copy",
           ":18:16: error: 'b' is viewed by 'view' local 'v' until 'v' is last "
           "used; it cannot be moved",
           ":21:16: error: cannot move 'xs[0]': an element leaves by "
-          "'mem::replace' or 'mem::take'",
-          ":23:16: error: cannot move 't.0': an element leaves by "
-          "'mem::replace' or 'mem::take'"});
+          "'mem::replace' (or 'mem::take', where it is optional)",
+          // (A tuple's element is no place to exchange.)
+          ":23:16: error: cannot move 't.0': an element leaves its tuple only "
+          "with the others; destructure it ('a, b = move t;')"});
   for (const char *line : {":24:", ":25:", ":26:"})
     EXPECT_EQ(r.Diagnostics.find(std::string(".pkn") + line), std::string::npos)
         << line << "\n"
@@ -586,15 +588,17 @@ fn main() -> int {
   return n + keep(move make().job);
 })");
   EXPECT_EQ(r.ErrorCount, 12u) << r.Diagnostics;
-  const std::string kNotOwned =
-      "' is not an owned variable (a borrow, a capture or a 'weak' "
-      "reference); write 'mem::replace(";
   for (const std::string &diag :
        {std::string(":15:34: error: cannot move 'self.job': 'move' takes a "
                     "variable, or a field of one it owns; write "
                     "'mem::replace(self.job, v)'"),
-        ":24:50: error: cannot move 'h.job': 'h" + kNotOwned + "h.job, v)'",
-        ":25:52: error: cannot move 'h.job': 'h" + kNotOwned + "h.job, v)'",
+        // What the root is decides the advice: only an 'inout' borrow is
+        // changed through.
+        std::string(":24:50: error: cannot move 'h.job': 'h' is a 'view' "
+                    "borrow, which changes nothing\n"),
+        std::string(":25:52: error: cannot move 'h.job': 'h' is an 'inout' "
+                    "borrow, and what it names stays whole; write "
+                    "'mem::replace(h.job, v)'"),
         std::string(":30:11: error: 'a' was moved at 29:16; it cannot be used "
                     "after the move"),
         std::string(":32:16: error: cannot move 'b.other': it is 'shared "
@@ -607,8 +611,10 @@ fn main() -> int {
                     "'shared Job', not a unique part of 'f'"),
         std::string(":45:16: error: 'g' is viewed by 'view' local 'v' until "
                     "'v' is last used; it cannot be moved out of"),
-        ":48:48: error: cannot move 'h.job': 'h" + kNotOwned + "h.job, v)'",
-        ":51:16: error: cannot move 'w.job': 'w" + kNotOwned + "w.job, v)'",
+        std::string(":48:48: error: cannot move 'h.job': 'h' is not an "
+                    "owned variable of this function\n"),
+        std::string(":51:16: error: cannot move 'w.job': 'w' is a 'weak' "
+                    "reference, which owns nothing\n"),
         std::string(":52:19: error: cannot move 'make().job': 'move' takes a "
                     "variable, or a field of one it owns")})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
@@ -685,4 +691,70 @@ fn main() -> int {
           "move",
           ":42:18: error: 'f' is moved in the loop at 41:3 and not assigned "
           "again before the next iteration"});
+}
+
+// `mem::replace(x.f, v)` is advised only where it compiles as written: for
+// a field of the borrow or the handle itself, not along a longer path (which
+// may cross a link nothing is written through), and not of a `view fn`'s
+// `self`.  A tuple's element is no place to exchange: it leaves with the
+// others.
+TEST(Move, TheAdviceOfARefusedPartialMoveCompiles) {
+  auto r = semaCheck(R"(class Node { key: int; }
+class Inner { n: Node; }
+class Holder { f: Node; sh: shared Inner; t: (Node, int); }
+impl Holder {
+  fn take() -> int { return keep(move self.f); }
+  view fn peek() -> int { return keep(move self.f); }
+  fn deep() -> int { return keep(move self.sh.n); }
+}
+fn keep(n: Node) -> int { return n.key; }
+fn a(h: inout Holder) -> int { return keep(move h.f); }
+fn b(h: inout Holder) -> int { return keep(move h.sh.n); }
+fn c(h: shared mut Holder) -> int { return keep(move h.f); }
+fn d(h: shared mut Holder) -> int { return keep(move h.sh.n); }
+fn e(h: inout Holder) -> int { return keep(move h.t.0); }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  const std::string self = ": error: cannot move 'self.f': 'move' takes a "
+                           "variable, or a field of one it owns";
+  for (const std::string &diag :
+       {":5:34" + self + "; write 'mem::replace(self.f, v)'\n",
+        ":6:39" + self + "\n",
+        std::string(":7:34: error: cannot move 'self.sh.n': 'move' takes a "
+                    "variable, or a field of one it owns\n"),
+        std::string(":10:44: error: cannot move 'h.f': 'h' is an 'inout' "
+                    "borrow, and what it names stays whole; write "
+                    "'mem::replace(h.f, v)'\n"),
+        std::string(":11:44: error: cannot move 'h.sh.n': 'h' is an 'inout' "
+                    "borrow, and what it names stays whole\n"),
+        std::string(":12:49: error: cannot move 'h.f': 'h' is a 'shared mut "
+                    "Holder', which other references reach; write "
+                    "'mem::replace(h.f, v)'\n"),
+        std::string(":13:49: error: cannot move 'h.sh.n': 'h' is a 'shared "
+                    "mut Holder', which other references reach\n"),
+        std::string(":14:44: error: cannot move 'h.t.0': an element leaves "
+                    "its tuple only with the others; destructure it ('a, b = "
+                    "move h.t;')\n")})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  // What the messages advise is accepted.
+  auto ok = semaCheck(R"(import ::memory as mem;
+class Node { key: int; }
+class Holder { f: Node; t: (Node, int); }
+impl Holder {
+  fn take() -> int { return keep(mem::replace(self.f, Node(0))); }
+}
+fn keep(n: Node) -> int { return n.key; }
+fn a(h: inout Holder) -> int { return keep(mem::replace(h.f, Node(0))); }
+fn c(h: shared mut Holder) -> int { return keep(mem::replace(h.f, Node(0))); }
+fn main() -> int {
+  t = (Node(1), 2);
+  n, k = move t;
+  let h = Holder(Node(3), (Node(4), 5));
+  return keep(move n) + k + keep(move h.f);
+}
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
 }

@@ -90,7 +90,7 @@ fn main() -> int {
       r,
       {":8:1: error: 'Sendable' is built in: a type is Sendable by what it "
        "holds, and cannot be implemented (a class whose 'shared' links stay "
-       "inside it waits for #377)",
+       "inside it cannot say so yet)",
        ":9:1: error: only the standard library opts a type out of "
        "'Sendable': struct 'Mine' is Sendable by what it holds",
        ":10:1: error: 'impl !Hashable for': only 'Sendable' is opted out of "
@@ -101,16 +101,16 @@ fn main() -> int {
        ":20:11: error: 'Job' does not implement trait 'Sendable', which "
        "'need' requires of 'T': field 'cache' is 'shared Cache': a 'shared' "
        "reference is aliased on its own thread",
-       ":21:11: error: '() -> int' does not implement trait 'Sendable', "
-       "which 'need' requires of 'T': is a function value, whose captures "
-       "are not known",
-       ":22:11: error: 'Obj' does not implement trait 'Sendable', which "
-       "'need' requires of 'T': is an 'Obj', which may be any class",
+       ":21:11: error: '() -> int' does not implement trait 'Sendable', which "
+       "'need' requires of 'T': it is a function value, whose captures are not "
+       "known",
+       ":22:11: error: 'Obj' does not implement trait 'Sendable', which 'need' "
+       "requires of 'T': it is an 'Obj', which may be any class",
        ":23:11: error: 'List<shared Node>' does not implement trait "
-       "'Sendable', which 'need' requires of 'T': field '__items' is 'shared "
-       "Node'",
+       "'Sendable', which 'need' requires of 'T': field '__items' holds "
+       "'shared Node'",
        ":24:11: error: '(int, shared Node)' does not implement trait "
-       "'Sendable', which 'need' requires of 'T': field '.1' is 'shared "
+       "'Sendable', which 'need' requires of 'T': element '.1' is 'shared "
        "Node'"});
 }
 
@@ -177,10 +177,10 @@ fn main() -> int {
   EXPECT_EQ(bad.ErrorCount, 1) << bad.Diagnostics;
   expectAll(bad,
             {":4:3: error: the result of 'async fn' 'later' (a 'shared Node') "
-             "cannot cross to the task's awaiter: is 'shared Node': a 'shared' "
-             "reference is aliased on its own thread; put the method in an "
-             "'impl Cell<...>' block that bounds the parameter 'Sendable', "
-             "which only the instances that meet the bound have"});
+             "cannot cross to the task's awaiter: a 'shared' reference is "
+             "aliased on its own thread; put the method in an 'impl Cell<...>' "
+             "block that bounds the parameter 'Sendable', which only the "
+             "instances that meet the bound have"});
   auto good = semaCheck(R"(class Node { id: int; }
 class Cell<T: Copyable> {
   v: T;
@@ -216,16 +216,15 @@ class Late { c: Cell<int>?; w: Wrap<shared Node>?; }
 fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 3) << r.Diagnostics;
-  expectAll(r,
-            {":2:19: error: the result of 'async fn' 'mk' (a 'Job') cannot "
-             "cross to the task's awaiter: field 's' is 'shared Node'",
-             ":5:26: error: the result of 'async fn' 'bad' (a 'Obj?') cannot "
-             "cross to the task's awaiter: is an 'Obj', which may be any "
-             "class\n",
-             ":7:16: error: the result of 'async fn' 'get' (a 'shared Node') "
-             "cannot cross to the task's awaiter: is 'shared Node': a "
-             "'shared' reference is aliased on its own thread; put the "
-             "method in an 'impl Wrap<...>' block"});
+  expectAll(
+      r,
+      {":2:19: error: the result of 'async fn' 'mk' (a 'Job') cannot "
+       "cross to the task's awaiter: field 's' is 'shared Node'",
+       ":5:26: error: the result of 'async fn' 'bad' (an 'Obj?') cannot cross "
+       "to the task's awaiter: it is an 'Obj', which may be any class\n",
+       ":7:16: error: the result of 'async fn' 'get' (a 'shared Node') cannot "
+       "cross to the task's awaiter: a 'shared' reference is aliased on its "
+       "own thread; put the method in an 'impl Wrap<...>' block"});
 }
 
 // Asking whether a type is Sendable sends nothing: a class a bound was

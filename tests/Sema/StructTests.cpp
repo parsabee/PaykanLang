@@ -253,7 +253,7 @@ TEST(Struct, HoldingItselfTwiceIsReportedOnce) {
         semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }\n");
     EXPECT_FALSE(r.Ok) << decl;
     EXPECT_EQ(r.ErrorCount, 1u) << decl << ": " << r.Diagnostics;
-    expectAll(r, {"struct 'S' contains itself: a field holds a 'S'"});
+    expectAll(r, {"struct 'S' contains itself: a field holds an 'S'"});
   }
 }
 
@@ -268,8 +268,8 @@ TEST(Struct, HoldingItselfTwiceThroughAGenericStructIsReportedOnce) {
                        "\nfn main() -> int { return 0; }\n");
     EXPECT_FALSE(r.Ok) << decl;
     EXPECT_EQ(r.ErrorCount, 1u) << decl << ": " << r.Diagnostics;
-    expectAll(r, {"2:12: error: struct 'S' contains itself: field 'a' holds a "
-                  "'S'"});
+    expectAll(
+        r, {"2:12: error: struct 'S' contains itself: field 'a' holds an 'S'"});
   }
 }
 

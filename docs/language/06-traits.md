@@ -406,8 +406,8 @@ Error:
 
 ```
 'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented
-'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
-'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
+'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a unique reference, a 'Str' or a task is move-only
+'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a unique reference, a 'Str' or a task is move-only
 ```
 
 A qualifier is part of a type argument ([Qualifiers in a
@@ -634,7 +634,7 @@ for one. The standard library says so with `impl !Sendable for T {}`, the one tr
 one place a type is opted out: in any other module it is an error (`only the standard
 library opts a type out of 'Sendable': struct 'Mine' is Sendable by what it holds`). The
 opt-out is in the module's interface, so an importer's send check refuses the type, and what
-holds it (`cannot send 'h' (a 'Handle'): is 'Handle', which its module keeps on the thread
+holds it (`cannot send 'h' (a 'Handle'): it is 'Handle', which its module keeps on the thread
 that made it ('impl !Sendable')`); a `parallel for` body, which runs on the pool's threads,
 reads no such value of the enclosing function either. `impl Sendable for C` is an error too: a class whose
 `shared` links stay inside it would cross safely, which the compiler cannot check yet

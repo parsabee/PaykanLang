@@ -44,19 +44,47 @@ bool isUniqueForm(const std::string &ty) {
          ty.rfind("locked ", 0) != 0;
 }
 
+/// `a 'NAME'`, or `an 'NAME'` for a name that starts with a vowel, as the
+/// diagnostics print it (enough for the names of this file's programs).
+std::string article(const std::string &s) {
+  const bool vowel =
+      !s.empty() && std::string("AEIOaeio").find(s[0]) != std::string::npos;
+  return std::string(vowel ? "an '" : "a '") + s + "'";
+}
+
+/// The qualifier of the written type @p ty: `shared mut` of `shared mut
+/// Node`, `` of `Node`.
+std::string formOf(const std::string &ty) {
+  std::string form;
+  size_t at = 0;
+  for (;;) {
+    const size_t end = ty.find(' ', at);
+    const std::string word = ty.substr(at, end - at);
+    if (end == std::string::npos || (word != "shared" && word != "mut" &&
+                                     word != "atomic" && word != "locked"))
+      return form;
+    form += (form.empty() ? "" : " ") + word;
+    at = end + 1;
+  }
+}
+
 /// The one message of a refused conversion: `cannot store a 'FROM' in
-/// WHERE, a 'INTO'` and its reason, whatever the slot: a unique reference
-/// gains `mut` only by `move`; every other form converts only as it is.
+/// WHERE`, the slot by its form (`a 'mut' reference`, `a unique reference`)
+/// and the reason, whatever the slot: a unique reference gains `mut` only by
+/// `move`; every other form is stored only as it is.
 std::string cannotStore(const std::string &from, const std::string &where,
                         const std::string &into) {
-  auto article = [](const std::string &s) {
-    return std::string(!s.empty() && s[0] == 'a' ? "an '" : "a '") + s + "'";
+  const std::string src = formOf(from), dst = formOf(into);
+  // A `locked` form is a cell's.
+  auto noun = [](const std::string &form) {
+    return form.rfind("locked", 0) == 0 ? " cell" : " reference";
   };
   return "error: cannot store " + article(from) + " in " + where + ", " +
-         article(into) + ": " +
-         (isUniqueForm(from) ? "a reference gains 'mut' only by 'move'"
-                             : "a 'shared' reference, a frozen object and a "
-                               "cell convert only as they are");
+         (dst.empty() ? "a unique reference" : article(dst) + noun(dst)) +
+         ": " +
+         (isUniqueForm(from)
+              ? "a reference gains 'mut' only by 'move'"
+              : article(src) + noun(src) + " is stored only as '" + src + "'");
 }
 
 /// The head of a refused write through @p what (`'x'`, `field 'f'`), an
@@ -65,7 +93,7 @@ std::string cannotStore(const std::string &from, const std::string &where,
 std::string immutable(const std::string &what, const std::string &ty) {
   const bool shared = ty.rfind("shared ", 0) == 0;
   const std::string bare = shared ? ty.substr(7) : ty;
-  return "error: " + what + " is immutable (a '" + ty + "'; write '" +
+  return "error: " + what + " is immutable (" + article(ty) + "; write '" +
          (shared ? "shared mut " : "mut ") + bare + "' to change it)";
 }
 
@@ -84,8 +112,8 @@ std::string noQualifierOnBorrow(const std::string &what,
   return "error: " + what + " is '" + written +
          "': a borrow carries no qualifier; a 'view' takes every form of the "
          "object (read-only through it) and an 'inout' a 'mut' or 'shared mut' "
-         "one, with no retain or release; write '" +
-         mode + " T'";
+         "one; write it without '" +
+         written.substr(mode.size() + 1) + "'";
 }
 
 } // namespace
@@ -599,41 +627,39 @@ fn main() -> int {
   const std::string kShared = "error: 'shared' qualifies a reference; '";
   const std::string kSharedMut = "error: 'shared mut' qualifies a reference; '";
   const std::string kAtomic = "error: 'atomic shared' qualifies a reference; '";
-  const std::string kLocked =
-      "error: 'locked' holds an object in the prototype, not a '";
+  const std::string kLocked = "error: 'locked' holds an object for now, not '";
   const std::string kLockedMut =
-      "error: 'locked mut' holds an object in the prototype, not a '";
+      "error: 'locked mut' holds an object for now, not '";
   expectErrors(
-      r, {(":4:11: " + kMut + "int" + kLet).c_str(),
-          (":4:23: " + kShared + "(int, int)' is a value").c_str(),
-          (":5:6: " + kShared + "P' is a value").c_str(),
-          (":6:6: " + kMut + "int" + kLet).c_str(),
-          (":7:1: " + kShared + "int' is a value").c_str(),
-          (":9:3: " + kMut + "int" + kLet).c_str(),
-          (":10:3: " + kShared + "int' is a value").c_str(),
-          (":11:3: " + kShared + "bool' is a value").c_str(),
-          (":12:3: " + kAtomic + "int' is a value").c_str(),
-          (":13:3: " + kAtomic + "P' is a value").c_str(),
-          (":14:3: " + kShared + "P' is a value").c_str(),
-          (":15:3: " + kMut + "P" + kLet).c_str(),
-          (":16:3: " + kShared + "(int, int)' is a value").c_str(),
-          (":17:3: " + kAtomic + "(int, int)' is a value").c_str(),
-          (":18:3: " + kMut + "int[2]" + kLet).c_str(),
-          (":19:3: " + kAtomic + "int[2]' is a value").c_str(),
-          (":20:3: " + kLocked + "int' (wrap the value in a class)").c_str(),
-          (":21:3: " + kLockedMut + "P' (wrap the value in a class)").c_str(),
-          (":22:3: " + kLocked + "(int, int)' (wrap the value in a class)")
-              .c_str(),
-          (":23:3: " + kAtomic +
-           "Pair' is a value: box it ('mem::Box<Pair>') to share what it "
-           "holds")
-              .c_str(),
-          (":24:3: " + kMut + "(int, Node)" + kLet).c_str(),
-          (":25:3: " + kSharedMut + "P' is a value").c_str(),
-          (":26:3: " + kAtomic +
-           "Node[2]' is a value: box it ('mem::Box<Node[2]>') to share what "
-           "it holds")
-              .c_str()});
+      r,
+      {(":4:11: " + kMut + "int" + kLet).c_str(),
+       (":4:23: " + kShared + "(int, int)' is a value").c_str(),
+       (":5:6: " + kShared + "P' is a value").c_str(),
+       (":6:6: " + kMut + "int" + kLet).c_str(),
+       (":7:1: " + kShared + "int' is a value").c_str(),
+       (":9:3: " + kMut + "int" + kLet).c_str(),
+       (":10:3: " + kShared + "int' is a value").c_str(),
+       (":11:3: " + kShared + "bool' is a value").c_str(),
+       (":12:3: " + kAtomic + "int' is a value").c_str(),
+       (":13:3: " + kAtomic + "P' is a value").c_str(),
+       (":14:3: " + kShared + "P' is a value").c_str(),
+       (":15:3: " + kMut + "P" + kLet).c_str(),
+       (":16:3: " + kShared + "(int, int)' is a value").c_str(),
+       (":17:3: " + kAtomic + "(int, int)' is a value").c_str(),
+       (":18:3: " + kMut + "int[2]" + kLet).c_str(),
+       (":19:3: " + kAtomic + "int[2]' is a value").c_str(),
+       (":20:3: " + kLocked + "int': wrap the value in a class").c_str(),
+       (":21:3: " + kLockedMut + "P': wrap the value in a class").c_str(),
+       (":22:3: " + kLocked + "(int, int)': wrap the value in a class").c_str(),
+       (":23:3: " + kAtomic +
+        "Pair' is a value: box it ('mem::Box<Pair>') to share what it "
+        "holds")
+           .c_str(),
+       (":24:3: " + kMut + "(int, Node)" + kLet).c_str(),
+       (":25:3: " + kSharedMut + "P' is a value").c_str(),
+       (":26:3: " + kAtomic +
+        "Node[2]' is a value: hold it in a class to share what it holds")
+           .c_str()});
 
   auto ok = semaCheck(R"(import ::memory as mem;
 class Node { id: int; }
@@ -891,11 +917,17 @@ fn main() -> int {
   const std::string field = "; cannot assign to its field 'id'";
   const std::string tick = "; 'tick' is not a 'view fn'";
   const std::string fieldS = immutable("field 's'", "shared Node");
+  // A field of a variable that owns its object leaves by `move`; of a
+  // handle, in exchange.
   auto copied = [](const std::string &place, const std::string &ty) {
-    return "error: cannot copy '" + place + "' (a unique '" + ty +
-           "'); a field leaves by 'mem::replace' or 'mem::take', or is "
-           "declared 'shared " +
-           ty + "'";
+    const std::string root = place.substr(0, place.find('.'));
+    // (Nothing is written through the frozen `ac`.)
+    return "error: cannot copy '" + place + "' (a unique '" + ty + "'); " +
+           (root == "ac"
+                ? std::string()
+                : "write 'move " + place + "' to take it (which ends '" + root +
+                      "'), or ") +
+           "declare the field 'shared " + ty + "'\n";
   };
   expectErrors(
       r,
@@ -1148,7 +1180,8 @@ fn main() -> int {
 // The copy rule: a move-only value read from a place (a unique
 // reference, `mut` or not, or a struct holding one) flows into an owning
 // slot (a variable, a parameter, the result) only by `move`, and `[v; n]`
-// copies it; a field leaves by `mem::replace` or `mem::take`.  A `shared`
+// copies it; a field leaves by `mem::replace` (or `mem::take`, where it
+// is optional).  A `shared`
 // reference, a handle, a value of Copyable parts, a temporary, a `view`
 // argument and a returned local (a `return` moves it) are fine.
 TEST(Qualifier, CopyRule) {
@@ -1226,8 +1259,9 @@ fn main() -> int {
           (":9:12: " + std::string(kUnique)).c_str(),
           ":11:3: error: cannot copy 'h': 'Holder' holds unique field 'n' "
           "('Node'); write 'move h' to transfer it",
-          ":12:3: error: cannot copy 'h.n' (a unique 'Node'); a field leaves "
-          "by 'mem::replace' or 'mem::take', or is declared 'shared Node'",
+          ":12:3: error: cannot copy 'h.n' (a unique 'Node'); write 'move "
+          "h.n' to take it (which ends 'h'), or declare the field 'shared "
+          "Node'",
           (":15:3: " + std::string(kMut)).c_str(),
           (":16:3: " + std::string(kMut)).c_str(),
           (":17:3: " + std::string(kUnique)).c_str()});

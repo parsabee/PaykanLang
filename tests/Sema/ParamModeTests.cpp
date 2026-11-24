@@ -1276,7 +1276,7 @@ fn main() -> int {
       "error: 'c' is viewed by 'view' local 'v' until 'v' is last used; ";
   for (const std::string &diag :
        {std::string(":15:7: error: 'k' is borrowed by 'inout' local 'x' until "
-                    "'x' is last used"),
+                    "'x' is last used; it cannot be used before then"),
         ":20:3: " + kViewed + "'tick' is not a 'view fn'",
         ":21:3: " + kViewed + "cannot assign to its field 'n'",
         ":22:3: " + kViewed + "it cannot be assigned",
@@ -1286,9 +1286,9 @@ fn main() -> int {
         std::string(":29:3: error: 'm' is viewed by 'view' local 'w' until "
                     "'w' is last used; it cannot be assigned"),
         std::string(":35:21: error: 'a' is borrowed by 'inout' local 'ai' "
-                    "until 'ai' is last used"),
-        std::string(":39:3: error: 'p' is borrowed by 'inout' local 'pj' "
-                    "until 'pj' is last used")})
+                    "until 'ai' is last used; it cannot be used before then"),
+        std::string(":39:3: error: 'p' is borrowed by 'inout' local 'pj' until "
+                    "'pj' is last used; it cannot be used before then")})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
@@ -1346,7 +1346,7 @@ fn main() -> int {
   expectErrors(r, {":7:3: error: 'f' is viewed by 'view' local 'v' until 'v' "
                    "is last used; it cannot be assigned",
                    ":11:3: error: 'g' is borrowed by 'inout' local 's' until "
-                   "'s' is last used"});
+                   "'s' is last used; it cannot be used before then"});
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
@@ -1454,8 +1454,9 @@ fn main() -> int {
   // one: in a lambda, a loop's range or body, another arm, a declaration's
   // initializer, an inner block before its declaration, and a destructuring
   // target without a type, which assigns the borrow.
-  const char *const kBorrowed = ":7:19: error: 'k' is borrowed by 'inout' "
-                                "local 'r' until 'r' is last used";
+  const char *const kBorrowed =
+      ":7:19: error: 'k' is borrowed by 'inout' local 'r' until 'r' is last "
+      "used; it cannot be used before then";
   for (const char *later :
        {"{ io::println(Str(r)); r: int = 7; }",
         "{ r: int = r + 1; io::println(Str(r)); }",
@@ -1592,7 +1593,7 @@ fn main() -> int {
        ":29:9: error: 'inout' arm 'k' cannot change the 'int' inside an "
        "optional yet",
        ":33:7: error: 'a' is borrowed by 'inout' local 'd' until 'd' is last "
-       "used",
+       "used; it cannot be used before then",
        ":34:7: error: cannot assign value of type 'Animal' to variable 'd' of "
        "type 'Dog'"});
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;

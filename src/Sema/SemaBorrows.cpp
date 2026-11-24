@@ -783,7 +783,8 @@ bool Sema::checkNotBorrowed(const std::string &name, ast::SourceLocation loc) {
   // One error for each line that uses it (`a = a + 1` reads and writes).
   if (BorrowedUsesReported.insert({name, loc.getLineStart()}).second)
     error(loc, "'" + name + "' is borrowed by 'inout' local '" + b->By +
-                   "' until '" + b->By + "' is last used");
+                   "' until '" + b->By +
+                   "' is last used; it cannot be used before then");
   return false;
 }
 

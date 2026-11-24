@@ -94,8 +94,10 @@ None
     `HashSet`. These copying methods are in `impl X<T: Cloneable>` blocks, so they exist
     only where the elements are Cloneable (a Copyable type is): a `List<int>` or a
     `List<Str>` has `get`, and a `List<Node>` of a class `Node` that is not Cloneable has
-    none (`no method 'get' on type 'List<Node>'`). It lends with `at` and moves out with
-    `pop`, or the class opts in with `impl Cloneable for Node {}` where cloning fits.
+    none (`no method 'get' on type 'List<Node>': 'get' is in 'impl List<T: Cloneable>', and
+    'Node' is not 'Cloneable'`). It lends with `at` and
+    moves out with `pop`, or the class opts in with `impl Cloneable for Node {}` where
+    cloning fits.
 - **Elements are compared with `==`**, so a class compares by its `equals` (the
   identity, unless it overrides `equals`).
 - **Every index and size is an `unsigned`**: `len()` returns one, `at(i)`, `get(i)`, `set(i, v)`,
@@ -164,7 +166,7 @@ fn main() -> int {
 Error:
 
 ```
-no method 'get' on type 'List<Node>'
+no method 'get' on type 'List<Node>': 'get' is in 'impl List<T: Cloneable>', and 'Node' is not 'Cloneable'
 'List<Node>' is not Cloneable: its field '__items' ('Buffer<Node>') is not Cloneable
 ```
 

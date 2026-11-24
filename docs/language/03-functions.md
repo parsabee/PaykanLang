@@ -155,8 +155,8 @@ the caller keeps it. A plain `p: P` parameter reads it: no field can be assigned
 cannot assign to its field 'x'`), and a `P` or a `mut P` argument fits it. A `p: mut P`
 parameter may change the object, and a field it assigns or a method that changes the
 object is seen by the caller; its argument is a `mut P` too, or a temporary such as `P()`
-(`cannot store a 'P' in parameter 3 of 'f', a 'mut P': a reference gains 'mut' only by
-'move'`; [Variables](02-basics.md#variables--declarations)). A caller that keeps a
+(`cannot store a 'P' in parameter 3 of 'f', a 'mut' reference: a reference gains 'mut'
+only by 'move'`; [Variables](02-basics.md#variables--declarations)). A caller that keeps a
 `shared` object alive for the whole call lends it, and the function changes no reference
 count unless it keeps the object (see [Borrowed parameters](16-memory.md#borrowed-parameters)).
 Assigning to the parameter makes it refer to another object; the caller's variable is
@@ -361,8 +361,7 @@ right left
 
 A string is move-only, so it leaves the caller's storage only in exchange for another:
 `mem::replace(a, v)` returns what `a` held and stores `v` there, and `let t = a;` is an
-error (`cannot copy 'a' (a unique 'mut Str'); it is an 'inout' borrow of the caller's
-storage: write 'a.clone()' to copy it`). The standard library's `mem::swap` does what this
+error (`cannot copy 'a' (a unique 'mut Str'); it is an 'inout' borrow, and what it names stays with its owner: write 'a.clone()' to copy it`). The standard library's `mem::swap` does what this
 `swap` does, for any type ([::memory](../stdlib/memory.md)).
 
 The argument must be one of:
@@ -791,8 +790,8 @@ Output:
 - The caller binds it to an `inout` local, passes it on to an `inout` parameter, calls a
   method on it or reads it (`y = b.num() + 1;` copies). It borrows the receiver and the
   arguments to the call's `inout` parameters, as an `inout` local of them would: while a
-  local of it is live, they cannot be used (`'b' is borrowed by 'inout' local 'x' until 'x'
-  is last used`).
+  local of it is live, they cannot be used (`'b' is borrowed by 'inout' local 'x' until 'x' is last used; it cannot be used before
+  then`).
 - The receiver of a method returning `inout` is a variable or a field, which outlives the
   call: `Box().num()` is an error (`the receiver of 'num' must be a variable or a field:
   its 'inout' result is part of it`). The method is not a `view fn`, so the receiver is a

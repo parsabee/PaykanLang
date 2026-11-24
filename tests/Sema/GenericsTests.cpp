@@ -1288,6 +1288,196 @@ fn main() -> int {
       << no.Diagnostics;
 }
 
+// A method or a `static fn` an instance lacks because its block's bound is
+// not met says so: the block as it is written, and the argument that does
+// not meet its bound.  A name no block has, and a method called as a
+// `static fn` (or the other way round), get no such reason.
+TEST(Generics, AMissingMethodOfABoundedBlockSaysWhichBound) {
+  auto r = semaCheck(R"(import ::collections as cl;
+class Node { key: int; }
+struct Box<T> { v: T; }
+impl Box<T: Hashable> {
+  view fn h() -> int { return self.v.hash(); }
+  static fn zero() -> int { return 0; }
+  static fn pick<U>(u: U) -> int { return 0; }
+  view fn dup<U>(u: view U) -> int { return 1; }
+}
+class Pair<A, B> { a: A; b: B; }
+impl Pair<A: Copyable, B: Copyable> {
+  view fn both() -> (A, B) { return (self.a, self.b); }
+}
+impl Pair<A, B: Hashable> { view fn hb() -> int { return self.b.hash(); } }
+fn main() -> int {
+  let b = Box<Node>(Node(1));
+  let h = b.h();
+  let d = b.dup(1);
+  let z = Box<Node>::zero();
+  let k = Box<Node>::pick(1);
+  let p = Pair<int, Node>(1, Node(2));
+  let q = p.both();
+  let o = Pair<Node?, int>(None, 2);
+  let u = o.both();
+  let v = o.hb();
+  let w = p.hb();
+  let l = cl::List<Node>();
+  let g = l.get(0);
+  let n1 = b.nope();
+  let n2 = b.zero();
+  let n3 = Box<Node>::h();
+  let n4 = Box<Node>::nope();
+  let k2 = Box<Node>::pick<int>(1);
+  let d2 = b.dup<int>(1);
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 14u) << r.Diagnostics;
+  const std::string box =
+      "' is in 'impl Box<T: Hashable>', and 'Node' is not 'Hashable'\n";
+  for (const std::string &want : {
+           ":17:11: error: no method 'h' on type 'Box<Node>': 'h" + box,
+           ":18:11: error: no method 'dup' on type 'Box<Node>': 'dup" + box,
+           ":19:11: error: 'Box<Node>' has no static function 'zero': 'zero" +
+               box,
+           ":20:11: error: 'Box<Node>' has no static function 'pick': 'pick" +
+               box,
+           // The first bound that is not met, of the second parameter here.
+           std::string(
+               ":22:11: error: no method 'both' on type 'Pair<int, Node>': "
+               "'both' is in 'impl Pair<A: Copyable, B: Copyable>', and "
+               "'Node' is not 'Copyable'\n"),
+           std::string(
+               ":24:11: error: no method 'both' on type 'Pair<Node?, int>': "
+               "'both' is in 'impl Pair<A: Copyable, B: Copyable>', and "
+               "'Node?' is not 'Copyable'\n"),
+           std::string(":26:11: error: no method 'hb' on type 'Pair<int, "
+                       "Node>': 'hb' is in 'impl Pair<A, B: Hashable>', and "
+                       "'Node' is not 'Hashable'\n"),
+           // A template of another module.
+           std::string(
+               ":28:11: error: no method 'get' on type 'List<Node>': 'get' "
+               "is in 'impl List<T: Cloneable>', and 'Node' is not "
+               "'Cloneable'\n"),
+           std::string(":29:12: error: no method 'nope' on type 'Box<Node>'\n"),
+           std::string(":30:12: error: no method 'zero' on type 'Box<Node>'\n"),
+           std::string(
+               ":31:12: error: 'Box<Node>' has no static function 'h'\n"),
+           std::string(
+               ":32:12: error: 'Box<Node>' has no static function 'nope'\n"),
+           // Written type arguments do not make it "not generic".
+           ":33:12: error: 'Box<Node>' has no static function 'pick': 'pick" +
+               box,
+           ":34:12: error: no method 'dup' on type 'Box<Node>': 'dup" + box,
+       })
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+}
+
+// Every block that has the member is named when none is the instance's; a
+// block of a trait too; and where one of them is the instance's, the member
+// is missing for another reason and none is given.
+TEST(Generics, AMissingMethodOfSeveralBoundedBlocks) {
+  auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
+class Node { key: int; }
+class Job { n: shared Node; }
+class List<T> { v: T; }
+impl List<T: Copyable> { view fn get() -> int { return 1; } }
+impl List<T: Sendable> { view fn get() -> int { return 2; } }
+impl Named for List<T: Copyable> { view fn name() -> Str { return "list"; } }
+impl List<T> { view fn size() -> int { return 1; } }
+impl List<T: Copyable> { static fn size() -> int { return 2; } }
+impl Cloneable for List<T: Cloneable> {}
+fn main() -> int {
+  let l = List<Node>(Node(1));
+  let j = List<Job>(Job(Node(3)));
+  let a = l.get();
+  let b = j.get();
+  let c = j.name();
+  let d = List<Job>::size();
+  let e = j.size<int>();
+  let f = j.clone();
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  for (const char *want : {
+           ":15:11: error: no method 'get' on type 'List<Job>': 'get' is in "
+           "'impl List<T: Copyable>', and 'Job' is not 'Copyable'; and in "
+           "'impl List<T: Sendable>', and 'Job' is not 'Sendable'\n",
+           ":16:11: error: no method 'name' on type 'List<Job>': 'name' is in "
+           "'impl Named for List<T: Copyable>', and 'Job' is not 'Copyable'\n",
+           ":17:11: error: 'List<Job>' has no static function 'size': 'size' "
+           "is in 'impl List<T: Copyable>', and 'Job' is not 'Copyable'\n",
+           ":18:11: error: method 'size' of 'List<Job>' is not generic and "
+           "takes no type arguments\n",
+           // A block of a trait that is derived: no `impl Cloneable for` to
+           // write for the instance.
+           ":19:11: error: no method 'clone' on type 'List<Job>': 'clone' is "
+           "in 'impl Cloneable for List<T: Cloneable>', and 'Job' is not "
+           "'Cloneable'\n",
+       })
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+}
+
+// Asking why a member is missing makes no instance and reports nothing of
+// its own: a trait block's type arguments are not resolved under the
+// instance's, and a requirement the block does not write is not in it.
+TEST(Generics, AMissingMethodsReasonHasNoEffectOfItsOwn) {
+  auto r = semaCheck(R"(class Node { key: int; }
+class Wrap<T> { v: T; }
+impl Wrap<T> { view fn show() -> Str { return self.v.nothing(); } }
+trait Conv<U> { view fn conv() -> int; }
+trait Named { view fn name() -> Str; view fn other() -> int; }
+class Box<T> { v: T; }
+impl Conv<Wrap<T>> for Box<T: Copyable> { view fn conv() -> int { return 1; } }
+impl Conv<Box<Box<T>>> for Box<T: Hashable> { view fn conv() -> int { return 2; } }
+impl Named for Box<T: Copyable> { view fn name() -> Str { return "b"; } }
+impl Box<T> { view fn call() -> int { return self.nosuch(); } }
+fn main() -> int {
+  let b = Box<Node>(Node(1));
+  let o = b.other();
+  return b.call();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  // `Wrap<Node>` and `Box<Box<Node>>` are never made: their bodies' errors
+  // would be here.
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  for (const char *want :
+       {":13:11: error: no method 'other' on type 'Box<Node>'\n",
+        ":10:46: error: no method 'nosuch' on type 'Box<Node>'\n",
+        ":12:11: note: in instantiation of 'Box<Node>' requested here"})
+    EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
+                                                           << r.Diagnostics;
+}
+
+// A bound that names no trait is reported with its block, once: asking why
+// a method of that block is missing reports nothing more.
+TEST(Generics, AMissingMethodOfABlockWithABadBoundIsNotExplained) {
+  for (const char *program : {R"(class Box<T> { v: T; }
+impl Box<T: Copyable<int>> { view fn get() -> int { return 1; } }
+fn main() -> int {
+  let b = Box<int>(1);
+  return b.get();
+}
+)",
+                              R"(class Box<T> { v: T; }
+impl Box<T: Sendable<int>> { static fn of() -> int { return 1; } }
+fn main() -> int {
+  return Box<int>::of();
+}
+)"}) {
+    auto r = semaCheck(program);
+    EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find(":2:1: error: trait '"), std::string::npos)
+        << r.Diagnostics;
+    EXPECT_EQ(r.Diagnostics.find(" is in 'impl "), std::string::npos)
+        << r.Diagnostics;
+  }
+}
+
 // Instantiation names are global (OD-9 b): a program's own `_Heap<int>`
 // clashes with the one `::collections` makes of its private `_Heap<T>`, and
 // its own `Result<Str, Error>` with the one `::io` brings in.  The clash is

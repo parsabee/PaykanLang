@@ -49,10 +49,12 @@ bool Sema::checkViewFnDecl(const ast::FuncDecl *method,
   if (base && base->isShared() != method->isShared()) {
     error(method->getLocation(),
           "override of '" + method->getName() + "' " +
-              (base->isShared() ? "must be a 'shared fn'"
-                                : "cannot be a 'shared fn'") +
-              ", like the method it overrides: a call of either takes its "
-              "receiver as the overridden method says");
+              (base->isShared() ? "must be a 'shared fn', like the method it "
+                                  "overrides"
+                                : "cannot be a 'shared fn': the method it "
+                                  "overrides is not") +
+              " (a call of either takes its receiver as the overridden "
+              "method says)");
     return false;
   }
   if (!base || base->isView() == method->isView())

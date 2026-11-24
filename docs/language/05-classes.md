@@ -150,7 +150,7 @@ error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
 ```
 
 So is `deposit` on an `Account` that is not `mut`: with `let a = Account(10);` in `main`,
-`a.deposit(5)` is `'a' is immutable (a 'Account'; write 'mut Account' to change it);
+`a.deposit(5)` is `'a' is immutable (an 'Account'; write 'mut Account' to change it);
 'deposit' is not a 'view fn'`.
 
 The compiler warns about a method that never changes its object but is not a `view fn`,

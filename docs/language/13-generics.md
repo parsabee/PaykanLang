@@ -187,6 +187,11 @@ Fix it where the value goes:
 - declare `T: Copyable` where it is copied;
 - or put a copying method in a conditional `impl Box<T: Copyable>` block, which only the
   instances meeting the bound have (`..., or put the method in 'impl Box<T: Copyable>'`).
+  A call of it on another instance says which bound is not met: `no method 'get' on type
+  'Box<Node>': 'get' is in 'impl Box<T: Copyable>', and 'Node' is not 'Copyable'`, and for a
+  `static fn`, `'Box<Node>' has no static function 'of': 'of' is in 'impl Box<T:
+  Copyable>', ...`. A method that several conditional blocks have names each of them, and
+  so does one of a trait's block (`... is in 'impl Named for Box<T: Copyable>', ...`).
 
 The message names the parameter as the code does, an `impl R<U>` block's `U` included.
 
@@ -969,6 +974,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | A generic method's name | declared again, generic or not, in the type or a class derived from it: `class 'Square' already has a method 'measured' (from 'Shape')`; in a subclass's body: `method 'measured' of 'Shape' is declared in an 'impl' block and cannot be overridden` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
+| A conditional block's method on another instance | a method or `static fn` of an `impl Box<T: Copyable>` block, called on a `Box<Node>`: `no method 'get' on type 'Box<Node>': 'get' is in 'impl Box<T: Copyable>', and 'Node' is not 'Copyable'` |
 | Copy of a parameter without bounds | a template's copy of an unbounded `T`, used or not: `'T' is not 'Copyable': declare 'T: Copyable' to copy it` ([The archetype check](#the-archetype-check)) |
 | Send of a parameter without bounds | a template's send of a `T` not bounded `Sendable`, used or not: `'T' is not 'Sendable': declare 'T: Sendable' to send it to a task` ([The archetype check](#the-archetype-check)) |
 | Inference failure / ambiguity | see [Inference](#inference) |

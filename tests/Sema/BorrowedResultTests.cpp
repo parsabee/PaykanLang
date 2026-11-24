@@ -377,7 +377,7 @@ fn main() -> int {
        ":23:3: error: the receiver of 'fine' must be a variable or a field: "
        "its 'inout' result is part of it",
        ":26:3: error: 'b' is borrowed by 'inout' local 'x' until 'x' is last "
-       "used",
+       "used; it cannot be used before then",
        ":28:18: error: 'b' is passed to two 'inout' parameters ('a' and "
        "'b')"});
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;

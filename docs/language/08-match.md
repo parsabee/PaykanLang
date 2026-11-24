@@ -542,7 +542,7 @@ Error:
 
 ```
 'd' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mut Dog'
-'d' binds part of a 'Animal': its type is 'Dog', not 'mut Dog'
+'d' binds part of an 'Animal': its type is 'Dog', not 'mut Dog'
 ```
 
 A [borrowing](#borrowing-the-subject) binding is in the subject's form too:
@@ -631,7 +631,7 @@ Output:
   `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), holding a `mut`
   object when it holds one (`a: mut Animal` above), not another expression (`'inout' arm
   'd' needs a variable or a field to match on`), `self`, a `let` local, an object that is
-  not `mut` (`'a' is immutable (a 'Animal'; write 'mut Animal' to change it); it cannot be
+  not `mut` (`'a' is immutable (an 'Animal'; write 'mut Animal' to change it); it cannot be
   bound by 'inout' arm 'd'`) or a `view` (`'v' is a 'view' parameter; it cannot be bound by
   'inout' arm 'd'`).
   While the binding is live, what the call borrowed (its receiver, its `inout` arguments)
@@ -643,8 +643,8 @@ Output:
 - What is assigned to the binding has its type, `Dog`, which the subject's storage can
   hold: `d = Animal(1)` is an error.
 - While the binding is live, from the start of the arm to its last use there, the variable
-  the subject starts from cannot be used except through it (`'a' is borrowed by 'inout'
-  local 'd' until 'd' is last used`).
+  the subject starts from cannot be used except through it (`'a' is borrowed by 'inout' local 'd' until 'd' is last used; it cannot be used before
+  then`).
 - Another reference to the subject's object can still reach it: `g` after `g = h` in an arm
   of `match h.s`, a parameter that is the same object as `self`, or a variable `h` passed
   next to `h.s` to a function whose `inout` parameter is matched. What it writes there

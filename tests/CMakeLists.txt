@@ -68,6 +68,7 @@ if(PAYKAN_TEST_SUITE_sema)
 add_executable(sema_tests
     Sema/ArithTests.cpp
     Sema/ConcurrencyTests.cpp
+    Sema/DiagnosticsTableTests.cpp
     Sema/MoveTests.cpp
     Sema/QualifierTests.cpp
     Sema/QualifiedPartTests.cpp
@@ -107,6 +108,11 @@ add_executable(sema_tests
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+# The table Sema/DiagnosticsTableTests.cpp is checked against
+# (docs/design/concurrency.md, "Diagnostics").
+target_compile_definitions(sema_tests
+    PRIVATE PAYKAN_DESIGN_DOCS_DIR="${CMAKE_SOURCE_DIR}/docs/design"
 )
 target_link_libraries(sema_tests
     PRIVATE gtest_main
@@ -721,6 +727,7 @@ add_executable(frontend_tests
     Frontend/LexerTests.cpp
     Frontend/RecoveryTests.cpp
     Frontend/SnippetTests.cpp
+    Frontend/ArticleTests.cpp
     Frontend/FuzzSmokeTests.cpp
     Frontend/DifferentialTests.cpp
 )

@@ -286,10 +286,11 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"struct 'Node<int>' contains itself: field 'next' holds a "
-                "'Node<int>'; a struct is held in place, so it cannot hold "
-                "one of its own (hold it in a class instead)",
-                "struct 'A<int>' contains itself: field 'b' holds a 'A<int>'"});
+  expectAll(r,
+            {"struct 'Node<int>' contains itself: field 'next' holds a "
+             "'Node<int>'; a struct is held in place, so it cannot hold "
+             "one of its own (hold it in a class instead)",
+             "struct 'A<int>' contains itself: field 'b' holds an 'A<int>'"});
 }
 
 TEST(GenericStruct, InstantiationDepthGuard) {

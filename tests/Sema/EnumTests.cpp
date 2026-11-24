@@ -306,12 +306,12 @@ fn mk() -> E { return E::A; }
   )"));
   for (
       const char *diag :
-      {":20:47: error: 'k' is borrowed by 'inout' local 'b' until 'b' is "
-       "last used",
+      {":20:47: error: 'k' is borrowed by 'inout' local 'b' until 'b' is last "
+       "used; it cannot be used before then",
        ":21:11: error: 'inout' arm 'b' needs a variable or a field to match on",
        ":22:11: error: 'inout' arm 'b' needs a variable or a field to match on",
-       ":25:43: error: 'y' is borrowed by 'inout' local 'b' until 'b' is "
-       "last used"})
+       ":25:43: error: 'y' is borrowed by 'inout' local 'b' until 'b' is last "
+       "used; it cannot be used before then"})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;

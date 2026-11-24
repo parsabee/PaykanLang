@@ -87,9 +87,9 @@ fn main() -> int {
 Error:
 
 ```
-cannot store a 'shared Node' in variable 'u', a 'Node': a 'shared' reference, a frozen object and a cell convert only as they are
-cannot store a 'Node' in variable 'm', a 'mut Node': a reference gains 'mut' only by 'move'
-cannot store a 'shared mut Node' in variable 'r', a 'shared Node': a 'shared' reference, a frozen object and a cell convert only as they are
+cannot store a 'shared Node' in variable 'u', a unique reference: a 'shared' reference is stored only as 'shared'
+cannot store a 'Node' in variable 'm', a 'mut' reference: a reference gains 'mut' only by 'move'
+cannot store a 'shared mut Node' in variable 'r', a 'shared' reference: a 'shared mut' reference is stored only as 'shared mut'
 'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes
 ```
 
@@ -145,8 +145,8 @@ u! #4 4
 
 `view mut Node`, `inout shared Node` and the like are errors: `parameter 'n' is 'inout
 shared': a borrow carries no qualifier; a 'view' takes every form of the object (read-only
-through it) and an 'inout' a 'mut' or 'shared mut' one, with no retain or release; write 'inout
-T'`. An immutable reference is not passed to an `inout` parameter: `mark(c)` with `c` a
+through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'shared'`. An
+immutable reference is not passed to an `inout` parameter: `mark(c)` with `c` a
 `Node` is `'c' is immutable (a 'Node'; write 'mut Node' to change it); it cannot be passed to
 'inout' parameter 'n'` ([below](#the-bare-type-is-immutable-mut-for-the-writes)), and a
 `let` variable, `mut` or not, is still `'c' is declared with 'let' and cannot be passed to
@@ -455,7 +455,7 @@ Error:
 
 ```
 element 'xs[0]' is immutable (a 'shared Node'; write 'shared mut Node' to change it); cannot assign to 'xs[0].id'
-cannot store a 'shared Node' in an element of the tuple, a 'Node': a 'shared' reference, a frozen object and a cell convert only as they are
+cannot store a 'shared Node' in an element of the tuple, a unique reference: a 'shared' reference is stored only as 'shared'
 ```
 
 ## `move`: an explicit transfer
@@ -746,8 +746,8 @@ Error:
 
 ```
 't' was awaited at 10:11; a task handle is spent by its 'await'
-task 't' may not be awaited before this 'return': it is spent on some paths only (by the 'if' at 16:3, at 16:18); every path awaits it, or moves it
-task 't' is not awaited before this 'return': a task handle is spent by 'await' (or 'move') on every path before its scope ends; the prototype has no 'join', 'cancel' or 'detach'
+task 't' is not awaited on every path before this 'return': it is spent on some paths only (by the 'if' at 16:3, at 16:18); every path awaits it, or moves it
+task 't' is not awaited before this 'return': a task handle is spent by 'await' (or 'move') on every path before its scope ends
 ```
 
 ### Borrows across an `await`
@@ -878,7 +878,7 @@ cannot send 'j' (a 'Job'): field 'cache' is 'shared Cache': a 'shared' reference
 
 A deeper part is named by its path (`field 'job.cache' is 'shared Cache'`). A struct, a tuple
 or an array goes to a task as a number does, by value, under the same check, and a function
-value cannot (`cannot send ... : is a function value, whose captures are not known`). A
+value cannot (`cannot send ... : it is a function value, whose captures are not known`). A
 `shared` result cannot come back either (`the result of 'async fn' 'give' (a 'shared Node')
 cannot cross to the task's awaiter`).
 
@@ -1060,7 +1060,7 @@ An atomic add costs far more than a reduction, because every add moves the cell'
 between cores, so a cell changed on *every* iteration is reported:
 
 ```text
-warning: 'hits' changes on every iteration of the 'parallel for': each atomic operation moves its cache line between cores, a thousand times a reduction's cost on 16 threads (benchmarks/README.md); count in a reduction (a plain variable of the enclosing function, '+='), or change it less often
+warning: 'hits' changes on every iteration of the 'parallel for': each atomic operation moves its cache line between cores, at many times a reduction's cost; count in a reduction (a plain variable of the enclosing function, '+='), or change it less often
 ```
 
 Starting the threads has a cost of its own, so a light body (no call and no loop of its own)
@@ -1288,9 +1288,9 @@ Error:
 ```
 'counts' is 'locked': reach its contents in 'lock counts as c: view { }' (or 'inout')
 'c' is a 'view' local; cannot assign to its field 'total'
-'await' cannot be used in a 'lock' block: a wait holding a lock
+'await' cannot be used in a 'lock' block: the task would wait while it holds the lock
 a 'lock' block cannot hold another 'lock'
-'locked' holds an object in the prototype, not a 'int' (wrap the value in a class)
+'locked' holds an object for now, not 'int': wrap the value in a class
 'ro' is 'locked Counts', whose contents are never written; declare it 'locked mut Counts' for a 'lock ... as e: inout' block
 ```
 
@@ -1379,8 +1379,7 @@ that would read the cell and write it separately is an error: a read of the plac
 right of an assignment to it, and every compound operator but `+=` and `-=`. A cell takes no
 `mut`, since its operations are its writes (`atomic mut int` is a syntax error,
 [below](#atomic-shared-frozen-objects)). `atomic` of an object is an error that names the
-two forms an object crosses in, the prototype has no atomic arrays, and a struct cannot hold
-a cell:
+two forms an object crosses in, and a struct cannot hold a cell yet:
 
 ```pkn
 struct P {
@@ -1400,7 +1399,7 @@ fn main() -> int {
 Error:
 
 ```
-field 'c' in struct 'P' has type 'atomic int': a struct cannot hold an 'atomic' field in the prototype (hold the cell in a class)
+field 'c' in struct 'P' has type 'atomic int': a struct cannot hold an 'atomic' field yet (hold the cell in a class)
 'hits' is 'atomic': 'hits = ...' reads and writes it separately; write 'hits += e', or use 'exchange' or 'compareExchange'
 'hits' is 'atomic': this operator reads and writes it separately; its atomic operations are '+=', '-=', 'exchange' and 'compareExchange'
 'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Str': an object crosses threads as 'atomic shared Str' (frozen) or 'locked mut Str'
@@ -1540,7 +1539,7 @@ class Limits {
 class Config {
   name: Str;
   limits: Limits;
-  fn rename(n: Str) { self.name = n; }
+  fn rename(n: Str) { self.name = move n; }
 }
 
 class Holder {
@@ -1562,7 +1561,7 @@ Error:
 ```
 'cfg' is frozen (an 'atomic shared Config'); cannot assign to 'cfg.limits.hi'
 'cfg' is frozen (an 'atomic shared Config'); 'rename' is not a 'view fn'
-cannot store an 'atomic shared Config' in variable 'u', a 'Config': a 'shared' reference, a frozen object and a cell convert only as they are
+cannot store an 'atomic shared Config' in variable 'u', a unique reference: an 'atomic shared' reference is stored only as 'atomic shared'
 cannot make 'Holder(...)' (a 'Holder') 'atomic shared': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread
 ```
 
@@ -1621,7 +1620,7 @@ Error:
 
 ```
 'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked mut Node'
-cannot store a 'shared Node' in variable 'f', an 'atomic shared Node': a 'shared' reference, a frozen object and a cell convert only as they are
+cannot store a 'shared Node' in variable 'f', an 'atomic shared' reference: a 'shared' reference is stored only as 'shared'
 ```
 
 ## `Copyable`
@@ -1690,8 +1689,8 @@ Error:
 
 ```
 'Copyable' is built in: a type is Copyable by what it holds, and cannot be implemented
-'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
-'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a reference, a 'Str' or a task is move-only
+'Node' does not implement trait 'Copyable', which 'twice' requires of 'T': a unique reference, a 'Str' or a task is move-only
+'Str' does not implement trait 'Copyable', which 'twice' requires of 'T': a unique reference, a 'Str' or a task is move-only
 ```
 
 A qualifier is part of a type argument ([Qualifiers in a type](#qualifiers-in-a-type)), so
@@ -1834,10 +1833,10 @@ temporary. A `T` or a `mut T` read from a place (a variable, a parameter, a fiel
 `move` converts into nothing: it would be a second owner of the object, which is the copy
 rule's error (`cannot copy 'a' (a unique 'Node'); write 'move a' to transfer it, or declare
 it 'shared Node'`, [Ownership transfers](16-memory.md#ownership-transfers)), and into a
-`mut` slot `cannot store a 'Node' in variable 'm', a 'mut Node': a reference gains 'mut'
-only by 'move'`. Everything else converts only as it is: `cannot store a 'shared mut Node'
-in variable 'r', a 'shared Node': a 'shared' reference, a frozen object and a cell convert
-only as they are`, and the same for a `shared Node` into a `Node` or an `atomic shared
+`mut` slot `cannot store a 'Node' in variable 'm', a 'mut' reference: a reference gains
+'mut' only by 'move'`. Every other form is stored only as it is: `cannot store a 'shared mut
+Node' in variable 'r', a 'shared' reference: a 'shared mut' reference is stored only as
+'shared mut'`, and the same for a `shared Node` into a `Node` or an `atomic shared
 Node`, an `atomic shared Config` into a `Config`, a `locked Node` into a `locked mut Node`.
 A `view T` parameter takes every form of `T`; an `inout T` takes a `mut` or `shared mut`
 one.
@@ -1889,7 +1888,7 @@ one.
   `await h` spends the handle: `h` cannot be used again (`'t' was awaited at 10:11; a task
   handle is spent by its 'await'`), and every task handle is spent, by `await` or by `move`,
   on every path before its scope ends (`task 't' is not awaited before this 'return': ...`,
-  `task 't' may not be awaited when its scope ends: it is spent on some paths only ...`), and
+  `task 't' is not awaited on every path before its scope ends: it is spent on some paths only ...`), and
   before its variable takes another (`task 't' is replaced before it is awaited: await it (or
   move it) first`). A `while` loop's condition runs before every iteration, so a task awaited
   there is awaited in the loop (`'t' is awaited in the loop at 7:3 and not assigned again
@@ -1930,7 +1929,9 @@ one.
 - A variable of the enclosing function changes only by a reduction, `s += e`, `s -= e` or
   `s *= e`, or, if `atomic`, by its operations (`cannot assign to 'mx' in a 'parallel for'
   body: a variable of the enclosing function changes only by a reduction ('mx += e', 'mx -=
-  e', 'mx *= e') or, if 'atomic', by its operations`). A reduction is mentioned nowhere else
+  e', 'mx *= e') or, if 'atomic', by its operations`; for a variable that is no number,
+  `... is not changed by an iteration (a number changes by a reduction, an 'atomic'
+  variable by its operations)`). A reduction is mentioned nowhere else
   in the body (`'s' is a reduction of this 'parallel for' and cannot be read in its body: an
   iteration sees only part of it`), in a nested loop too.
 - What the enclosing function holds changes in no other way. An array, of a value or an `inout`
@@ -1975,17 +1976,16 @@ one.
   `locked` variable, field or parameter (`'n' is not 'locked': a 'lock' block takes a
   'locked' variable, field or parameter`). Outside a block the contents cannot be reached
   (`'counts' is 'locked': reach its contents in 'lock counts as c: view { }' (or 'inout')`),
-  and inside one `await` (`'await' cannot be used in a 'lock' block: a wait holding a
-  lock`), another `lock` (`a 'lock' block cannot hold another 'lock'`), a `parallel for`,
+  and inside one `await` (`'await' cannot be used in a 'lock' block: the task would wait while it holds the lock`), another `lock` (`a 'lock' block cannot hold another 'lock'`), a `parallel for`,
   `return`, `break` and `continue` are errors. `locked T` without `mut` is a cell nothing
   writes: its declaration is a warning (`'locked Counts' locks an object nothing writes;
   'atomic shared Counts' is read from every thread with no lock`), it takes `view` blocks
   only, and an `inout` block on it is an error (`'c' is 'locked Counts', whose contents are
   never written; declare it 'locked mut Counts' for a 'lock ... as v: inout' block`).
-- **`atomic T`.** `T` is a number type, `bool` or `char` (`'atomic' holds a number, a 'bool'
-  or a 'char', not 'int?' (the prototype has no atomic arrays)`; for a class, `'atomic' holds
-  a number, a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic shared
-  N' (frozen) or 'locked mut N'`). A cell takes no `mut` (`atomic mut int` is a syntax
+- **`atomic T`.** `T` is a number type, `bool`, `char` or a fixed array of them (`'atomic'
+  holds a number, a 'bool', a 'char' or a fixed array of them, not 'int?'`; for a class,
+  `'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'N': an object
+  crosses threads as 'atomic shared N' (frozen) or 'locked mut N'`). A cell takes no `mut` (`atomic mut int` is a syntax
   error, [The qualifiers](#the-qualifiers)). A read is an atomic load, `=` an atomic store,
   `+=` and `-=` one atomic operation (integers wrap; `f32` and `f16` round on every store;
   narrow integers wrap on reads); `x.exchange(v)` returns the value found;
