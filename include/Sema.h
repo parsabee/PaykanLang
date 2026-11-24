@@ -2849,9 +2849,6 @@ private:
   /// The type whose implementation of @p tr @p ty has (itself or, for a
   /// class, a superclass); nullptr if it does not implement it.
   const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
-  /// Whether the type arguments @p args of an instance meet the bounds of
-  /// its template's `impl` block @p im (`impl List<T: Cloneable>`), which
-  /// is part of the instance only then.
   /// What an `impl TRAIT for` block may say whatever its type is: only
   /// `Sendable` is opted out of (`impl !Sendable for T {}`), by the standard
   /// library and with no methods, and neither `Copyable` nor `Sendable` is
@@ -2859,6 +2856,20 @@ private:
   /// is a built-in one, and @p what the type ("struct 'Handle'").
   bool checkImplForm(const ast::ImplDecl *im, const std::string &trait,
                      bool builtin, const std::string &what);
+  /// Check the bounds of @p im, an `impl` block of a template
+  /// (`impl List<T: Cloneable>`): each is a built-in trait, as that trait is
+  /// written.  No instance changes what a bound names, so one that names
+  /// nothing is reported here, once, however many instances there are; its
+  /// block is no part of the template, and joins none of them.
+  bool checkImplBounds(const ast::ImplDecl *im);
+  /// The built-in trait that @p b, a bound of an `impl` block, names;
+  /// nullopt for any other annotation, which checkImplBounds reports.
+  /// Reports nothing.
+  std::optional<TraitRef> implBound(const ast::Type *b) const;
+  /// Whether the type arguments @p args of an instance meet the bounds of
+  /// its template's `impl` block @p im (`impl List<T: Cloneable>`), which
+  /// is part of the instance only then.  Reports nothing: it is asked once
+  /// for each instance.
   bool implBoundsHold(const ast::ImplDecl *im,
                       const std::vector<ast::Type *> &args);
   /// Whether @p ty has a text: implements the builtin `Showable`, whose

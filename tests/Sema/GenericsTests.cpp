@@ -1115,6 +1115,183 @@ fn main() -> int { b = Box<int>(1); return 0; }
   std::filesystem::remove_all(dir);
 }
 
+namespace {
+size_t countOf(const std::string &haystack, const std::string &needle) {
+  size_t n = 0;
+  for (size_t at = haystack.find(needle); at != std::string::npos;
+       at = haystack.find(needle, at + needle.size()))
+    ++n;
+  return n;
+}
+} // namespace
+
+// What a bound of an `impl` block names is the block's to get right, not an
+// instance's: one that names no trait (`Copyable<int>`, of a trait that
+// takes no type arguments) is one error, where it is written, whether the
+// template has no instance, one, or several, made at once or joined later.
+// Base looked the bound up each time an instance asked whether it met it:
+// a template without instances was accepted, and one with two reported the
+// bound twice, at the block (which the double-report guard aborts on,
+// unless the instances' notes differ).
+TEST(Generics, ABadBoundOfABlockIsReportedOnceAtTheBlock) {
+  struct Block {
+    const char *Text;  // line 2 of the program
+    const char *Bound; // the bound in it that is reported
+    const char *Error;
+  };
+  const std::vector<Block> blocks = {
+      {"impl Box<T: Copyable<int>> { view fn get() -> int { return 1; } }",
+       "Copyable<int>", "trait 'Copyable' expects 0 type argument(s), got 1"},
+      {"impl Box<T: Sendable + Cloneable<int, Str>> "
+       "{ static fn of() -> int { return 1; } }",
+       "Cloneable<int, Str>",
+       "trait 'Cloneable' expects 0 type argument(s), got 2"},
+      {"impl Named for Box<T: Copyable<int>> "
+       "{ view fn name() -> Str { return \"b\"; } }",
+       "Copyable<int>", "trait 'Copyable' expects 0 type argument(s), got 1"},
+      {"impl Hashable for Box<T: Hashable<T>> "
+       "{ view fn hash() -> int { return 1; } }",
+       "Hashable<T>", "trait 'Hashable' expects 0 type argument(s), got 1"},
+      // A trait of the module's own, which no block's bound names.
+      {"impl Box<T: Named> { view fn get() -> int { return 1; } }", "Named",
+       "the bounds of an 'impl' block name built-in traits ('Cloneable', "
+       "'Copyable', ...), not 'Named'"},
+  };
+  struct Use {
+    const char *Decls;
+    const char *Body;
+  };
+  const std::vector<Use> uses = {
+      {"", ""},
+      {"", "let a = Box<int>(1);"},
+      {"", "let a = Box<int>(1); let b = Box<bool>(True);"},
+      // Named before their arguments are whole: the blocks join them later.
+      {"class Holder { a: Box<Key>?; b: Box<Tree>?; }\n"
+       "class Key { n: int; }\n"
+       "class Tree { k: Key; }\n",
+       ""},
+  };
+  for (const char *kind : {"class", "struct"})
+    for (const Block &block : blocks)
+      for (const Use &use : uses) {
+        const std::string program =
+            std::string(kind) + " Box<T> { v: T; }\n" + block.Text +
+            "\ntrait Named { view fn name() -> Str; }\n" + use.Decls +
+            "fn main() -> int { " + use.Body + " return 0; }\n";
+        auto r = semaCheck(program);
+        EXPECT_FALSE(r.Ok) << program;
+        EXPECT_EQ(r.ErrorCount, 1u) << program << r.Diagnostics;
+        const size_t column = std::string(block.Text).find(block.Bound) + 1;
+        EXPECT_EQ(countOf(r.Diagnostics, ":2:" + std::to_string(column) +
+                                             ": error: " + block.Error + "\n"),
+                  1u)
+            << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 1u)
+            << program << r.Diagnostics;
+      }
+}
+
+// A bound that is a type and no name (a built-in type's, an optional) is
+// named as it is written.  A built-in type's name has no place of its own
+// in the source, so it is reported at its block: once, where two bounds of
+// the block read the same.  (Each was `not ''`, and two of them one
+// diagnostic said twice, which the double-report guard aborts on.)
+TEST(Generics, ABoundThatIsATypeIsReportedOnceAsItIsWritten) {
+  struct Bound {
+    const char *At;
+    const char *Name;
+  };
+  struct Case {
+    const char *Bounds;
+    std::vector<Bound> Reported;
+  };
+  const std::vector<Case> cases = {
+      {"A: int, B: bool", {{"2:1", "int"}, {"2:1", "bool"}}},
+      {"A: int, B: int", {{"2:1", "int"}}},
+      {"A: Obj + Obj, B", {{"2:1", "Obj"}}},
+      {"A: Str, B: Str + void", {{"2:1", "Str"}, {"2:1", "void"}}},
+      {"A: Copyable?, B: Copyable?",
+       {{"2:14", "Copyable?"}, {"2:28", "Copyable?"}}},
+      {"A: Copyable[4], B: (Copyable, int)",
+       {{"2:14", "Copyable[4]"}, {"2:30", "(Copyable, int)"}}},
+  };
+  for (const Case &c : cases) {
+    const std::string program =
+        std::string("class Pair<A, B> { a: A; b: B; }\nimpl Pair<") + c.Bounds +
+        "> { view fn get() -> int { return 1; } }\n"
+        "fn main() -> int { return 0; }\n";
+    auto r = semaCheck(program);
+    EXPECT_FALSE(r.Ok) << program;
+    EXPECT_EQ(r.ErrorCount, c.Reported.size()) << program << r.Diagnostics;
+    for (const Bound &b : c.Reported)
+      EXPECT_EQ(countOf(r.Diagnostics,
+                        std::string(":") + b.At +
+                            ": error: the bounds of an 'impl' block name "
+                            "built-in traits ('Cloneable', 'Copyable', ...), "
+                            "not '" +
+                            b.Name + "'\n"),
+                1u)
+          << program << r.Diagnostics;
+  }
+}
+
+// Each bad bound of a block is its own error, and each block's are its own.
+TEST(Generics, EachBadBoundOfABlockIsReportedOnce) {
+  auto r = semaCheck(R"(class Pair<A, B> { a: A; b: B; }
+impl Pair<A: Copyable<int>, B: Hashable + Sendable<A, B>> { view fn one() -> int { return 1; } }
+impl Pair<A: Copyable<int>, B> { view fn two() -> int { return 2; } }
+impl Pair<A: Copyable, B: Hashable> { view fn three() -> int { return 3; } }
+fn main() -> int {
+  let p = Pair<int, int>(1, 2);
+  let q = Pair<bool, Str>(True, "s");
+  return p.three();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  for (const char *want :
+       {":2:14: error: trait 'Copyable' expects 0 type argument(s), got 1\n",
+        ":2:43: error: trait 'Sendable' expects 0 type argument(s), got 2\n",
+        ":3:14: error: trait 'Copyable' expects 0 type argument(s), got 1\n"})
+    EXPECT_EQ(countOf(r.Diagnostics, want), 1u) << want << "\n"
+                                                << r.Diagnostics;
+}
+
+// The block of another module's template is that module's: its bad bound is
+// reported in its file, once, however many instances the importer makes.
+// (Base accepted the module, and reported the bound in the importer's file,
+// at the block's line there, once per instance.)
+TEST(Generics, ABadBoundOfAnImportedTemplatesBlockIsItsModules) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_bound";
+  for (const char *kind : {"class", "struct"})
+    for (const char *body :
+         {"", "let a = gen::Box<int>(1);",
+          "let a = gen::Box<int>(1); let b = gen::Box<bool>(True);"}) {
+      std::filesystem::remove_all(dir);
+      writeProjectFile(dir, "lib/gen.pkn",
+                       std::string(kind) +
+                           " Box<T> { v: T; }\n"
+                           "impl Box<T: Copyable<int>> { view fn get() -> int "
+                           "{ return 1; } }\n");
+      auto r = semaCheckFile(writeProjectFile(
+          dir, "main.pkn",
+          std::string("import lib::gen;\nfn main() -> int { ") + body +
+              " return 0; }\n"));
+      EXPECT_FALSE(r.Ok) << kind << ": " << body;
+      EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+      EXPECT_EQ(countOf(r.Diagnostics,
+                        "lib/gen.pkn:2:13: error: trait 'Copyable' expects 0 "
+                        "type argument(s), got 1\n"),
+                1u)
+          << r.Diagnostics;
+      EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 1u) << r.Diagnostics;
+      EXPECT_TRUE(has(r.Diagnostics,
+                      "main.pkn:1:1: note: in module 'lib::gen' imported here"))
+          << r.Diagnostics;
+    }
+  std::filesystem::remove_all(dir);
+}
+
 // A conditional block joins the instances whose arguments meet its
 // bounds, whatever the order of the declarations: an argument declared
 // after the instance is first named, or one that holds the instance, is
@@ -1454,8 +1631,9 @@ fn main() -> int {
                                                            << r.Diagnostics;
 }
 
-// A bound that names no trait is reported with its block, once: asking why
-// a method of that block is missing reports nothing more.
+// A bound that names no trait is reported with its block, once, where it is
+// written: asking why a method of that block is missing reports nothing
+// more.
 TEST(Generics, AMissingMethodOfABlockWithABadBoundIsNotExplained) {
   for (const char *program : {R"(class Box<T> { v: T; }
 impl Box<T: Copyable<int>> { view fn get() -> int { return 1; } }
@@ -1472,7 +1650,7 @@ fn main() -> int {
 )"}) {
     auto r = semaCheck(program);
     EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
-    EXPECT_NE(r.Diagnostics.find(":2:1: error: trait '"), std::string::npos)
+    EXPECT_NE(r.Diagnostics.find(":2:13: error: trait '"), std::string::npos)
         << r.Diagnostics;
     EXPECT_EQ(r.Diagnostics.find(" is in 'impl "), std::string::npos)
         << r.Diagnostics;
