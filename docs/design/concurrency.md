@@ -1383,17 +1383,21 @@ a task may run where it is started (the C backend runs it so), and its body
 is then the block's (`'bump' may wait (it takes a lock); a 'lock' block
 cannot start it (a task may run where it is started)`).  What a block lets go
 of is not followed: a value moved into it or last used in it, a field it
-assigns over, each of which may run a `__deinit__`.  A `__deinit__` may
-take the lock of another cell while a block holds one; of the block's own
-cell it would wait for itself for ever, and that is caught as it happens,
-the run-time backstop's nested acquire narrowed to the one certain wait:
-`lock taken twice: code that a 'lock' block ran (...) locks the cell the
-block holds, and would wait for ever` (src/Runtime/Locked.c).  Still open:
-a `__deinit__` that waits through another thread while a block holds a
-cell, by a `parallel for` whose iteration takes the lock or a task it
-awaits through a function, waits for ever; whether a `__deinit__` should
-be held to a `lock` block's rule, which would close it, is the owner's to
-say.  `join` and an inline `parallel_for` wait for the runtime of #362.)
+assigns over, each of which may run a `__deinit__`.  A `__deinit__` is
+held to a block's rule instead, of a class and of a struct (owner
+2026-11-23): its body takes no lock, runs no `parallel for` and makes only
+the calls a block may make (`a '__deinit__' cannot take a lock: it may run
+in a 'lock' block`; `'record' may wait (it takes a lock, through 'bump'); a
+'__deinit__' cannot call it (it may run in a 'lock' block)`).  What a block
+destroys then waits for nothing, and neither does what a `__deinit__`
+destroys.  In a module that others import, the `__deinit__` of a class that
+is not `final` calls no method an importer's class may override (one of
+the class's body, `toString`, `equals`).  The run-time backstop's nested acquire is kept for the one
+certain wait, a thread that takes the lock of a cell it holds, in code the
+compiler did not check (a native's, an older module's): `lock taken twice:
+code that a 'lock' block ran locks the cell the block holds, and would wait
+for ever` (src/Runtime/Locked.c).  `join` and an inline `parallel_for`
+wait for the runtime of #362.)
 
 No thread waits, while holding a cell's mutex, for anything that may wait
 for one, so `lock`, `join` and `parallel` cannot deadlock.  Other waits
@@ -2502,6 +2506,7 @@ checks of the language chapters, docs/language/, with tests of their own.
 | a call in a `lock` block of what may wait (it takes a lock, through another function, it runs a `parallel for`, it awaits a task, another module's function) | `'bump' may wait (it takes a lock); a 'lock' block cannot call it`; `'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it`; `'sum' may wait (it runs a 'parallel for'); a 'lock' block cannot call it`; `'waitFor' may wait (it awaits a task); a 'lock' block cannot call it`; `'File.readln' may wait; a 'lock' block cannot call it` |
 | a call in a `lock` block that cannot be resolved (a function value, through a function, a method another module may override) | `'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve`; `'callIt' may run code that takes a lock (it calls 'f', a function value); a 'lock' block calls only functions it can resolve`; `'Base.size' may run code that takes a lock (a class derived from 'Base' may override it; a 'final class Base' has none); a 'lock' block calls only functions it can resolve` |
 | a task started in a `lock` block whose body may wait | `'bump' may wait (it takes a lock); a 'lock' block cannot start it (a task may run where it is started)` |
+| a `__deinit__` that waits (it takes a lock, it runs a `parallel for`, it calls what may wait, it calls what cannot be resolved) | `a '__deinit__' cannot take a lock: it may run in a 'lock' block`; `a '__deinit__' cannot run a 'parallel for': it may run in a 'lock' block`; `'record' may wait (it takes a lock, through 'bump'); a '__deinit__' cannot call it (it may run in a 'lock' block)`; `'self.onClose' may run code that takes a lock; a '__deinit__' calls only functions it can resolve (it may run in a 'lock' block)` |
 
 **Freezing and sending**
 
@@ -2558,9 +2563,9 @@ checks of the language chapters, docs/language/, with tests of their own.
 | virtual call another module may override | `a 'parallel for' body cannot call 'Shape.area', which a class derived from 'Shape' may override` |
 
 Run-time panics, printed after `paykan: `: `a value moved out of 'q.jobs'
-is still borrowed`, `a value made 'atomic shared' is still borrowed`, and `lock taken twice: code that a 'lock' block ran (a '__deinit__' of what
-the block let go of) locks the cell the block holds, and would wait for
-ever`.
+is still borrowed`, `a value made 'atomic shared' is still borrowed`, and `lock taken twice: code that a 'lock' block ran locks the cell the block
+holds, and would wait for ever` (a backstop: the compiler lets no block run
+such code).
 
 ### With the async runtime (v0.5)
 

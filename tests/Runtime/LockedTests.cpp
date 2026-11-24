@@ -276,9 +276,9 @@ TEST(LockedCell, IncrementsUnderTheLockFromThreadsAreAllKept) {
 // -- A cell is locked once by a thread
 
 // A thread that takes the lock of a cell it holds already would wait for
-// itself for ever: a panic.  It is what a `lock` block does when code it
-// ran without calling it, a `__deinit__` of what it let go of, locks the
-// block's own cell.  The lock of another cell is taken as any is.
+// itself for ever: a panic.  The compiler lets no `lock` block run code
+// that takes a lock; this is the backstop for code it did not check.  The
+// lock of another cell is taken as any is.
 TEST(LockedCellDeathTest, ACellLockedAgainByItsHolderIsAPanic) {
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   PaykanShared *a = PaykanLocked_new(counter(1));

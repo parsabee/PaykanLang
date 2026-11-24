@@ -2209,9 +2209,10 @@ TEST(Pkm, AnImportsDroppedImplMethodOfAClassCopy) {
 }
 
 // A class's `__deinit__` is in its module's interface: an importer's class
-// derived from it runs its own and then the module's, a class that
-// declares none runs the module's, and the par-safe check reads its
-// verdict.
+// derived from it runs its own and then the module's (which sees what the
+// importer's left: a module's `__deinit__` calls no method an importer may
+// override), a class that declares none runs the module's, and the
+// par-safe check reads its verdict.
 TEST(Pkm, ADeinitIsInTheModuleFile) {
   REQUIRE_BACKEND();
   auto dir =
@@ -2226,10 +2227,11 @@ TEST(Pkm, ADeinitIsInTheModuleFile) {
             "}\n"
             "class Shape {\n"
             "  r: Res;\n"
+            "  size: int;\n"
             "  fn area() -> int;\n"
             "  fn __deinit__() {\n"
             "    io::println(\"shape \" + self.r.name + \" \" +\n"
-            "                Str(self.area()));\n"
+            "                Str(self.size));\n"
             "  }\n"
             "}\n"
             "class Quiet { n: int; fn __deinit__() { self.n = 0; } }\n"
@@ -2244,13 +2246,14 @@ TEST(Pkm, ADeinitIsInTheModuleFile) {
             "  fn __deinit__() {\n"
             "    io::println(\"sq \" + Str(self.s));\n"
             "    self.s = self.s + 1;\n"
+            "    self.size = self.area();\n"
             "  }\n"
             "}\n"
             "class Plain : shapes::Shape { fn area() -> int { return 7; } }\n"
             "fn main() -> int {\n"
-            "  let a: shapes::Shape = Sq(shapes::Res(\"a\"), 3);\n"
-            "  let p = Plain(shapes::Res(\"p\"));\n"
-            "  let b = shapes::Box<Sq>(Sq(shapes::Res(\"in\"), 2));\n"
+            "  let a: shapes::Shape = Sq(shapes::Res(\"a\"), 0, 3);\n"
+            "  let p = Plain(shapes::Res(\"p\"), 7);\n"
+            "  let b = shapes::Box<Sq>(Sq(shapes::Res(\"in\"), 0, 2));\n"
             "  io::println(\"made\");\n"
             "  return 0;\n}\n");
   writeFile(dir / "par.pkn", "import shapes;\n"

@@ -449,7 +449,9 @@ method that changes `self` needs a receiver it can change, like any method.
 A struct that has something to do when a value of it goes away, such as giving back what it
 took, declares `fn __deinit__()` in an `impl` block. It takes nothing and returns nothing,
 as a class's does ([Classes](05-classes.md#deinitializers)), and runs once for each value,
-where the value's storage ends, while its fields are still alive.
+where the value's storage ends, while its fields are still alive. Like a class's it waits
+for nothing: it takes no lock, runs no `parallel for`, and calls only what a `lock` block
+may call, since a value may end inside one.
 
 ```pkn
 import ::io;

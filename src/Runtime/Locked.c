@@ -56,13 +56,13 @@ PaykanShared *PaykanLocked_new(PaykanShared *payload) {
 }
 
 // The cells whose mutex this thread holds, innermost last.  A `lock` block
-// takes no other lock, and the compiler checks that of what the block calls
-// (Sema's par-safe pass).  What it does not follow may still take one: a
-// `__deinit__`, run where the block lets go of an object.  Of another cell,
-// the lock is taken as any is.  Of a cell the thread holds already, it
-// would wait for ever for itself: that is a panic, where the program
-// stopped answering.  (The cells past the first kHeldCells are held without
-// being remembered: a block eight deep in other blocks' destructors.)
+// takes no other lock: the compiler checks that of what the block calls
+// and of every `__deinit__`, which runs where a block lets go of an object
+// (Sema's par-safe pass).  This is the backstop for code it did not check,
+// a native's or an older module's.  Of another cell, the lock is taken as
+// any is.  Of a cell the thread holds already, it would wait for ever for
+// itself: that is a panic, where the program stopped answering.  (The cells
+// past the first kHeldCells are held without being remembered.)
 enum { kHeldCells = 8 };
 static _Thread_local PaykanLocked *g_held[kHeldCells];
 static _Thread_local int g_held_count;
@@ -72,7 +72,6 @@ void *PaykanLocked_lock(PaykanObject *cell) {
   for (int i = 0; i < g_held_count && i < kHeldCells; ++i)
     if (g_held[i] == c)
       Paykan_runtime_panic("lock taken twice: code that a 'lock' block ran "
-                           "(a '__deinit__' of what the block let go of) "
                            "locks the cell the block holds, and would wait "
                            "for ever");
   if (pthread_mutex_lock(&c->mutex) != 0)
