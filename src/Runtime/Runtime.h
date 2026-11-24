@@ -796,7 +796,8 @@ int64_t PaykanAtomicArray_fcompare_exchange(PaykanObject *array, int64_t i,
 /// A new cell holding @p payload (an owned box the cell takes), as an
 /// owned box.
 PaykanShared *PaykanLocked_new(PaykanShared *payload);
-/// Takes the cell's mutex; the address of its payload slot (a box).
+/// Takes the cell's mutex; the address of its payload slot (a box).  Panics
+/// ("lock taken twice") when the thread holds this cell's mutex already.
 void *PaykanLocked_lock(PaykanObject *cell);
 /// Releases the cell's mutex.
 void PaykanLocked_unlock(PaykanObject *cell);

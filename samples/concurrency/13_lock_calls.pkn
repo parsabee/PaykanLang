@@ -1,0 +1,68 @@
+// What a `lock` block calls (docs/language/19-concurrency.md, "What a `lock`
+// block calls").  A block calls what waits for nothing: plain functions, the
+// methods of a `final` class, printing.  What may wait, a function that
+// takes a lock or awaits a task, is called before or after the block.  A
+// `__deinit__` may take the lock of another cell while a block holds one:
+// the Session below is moved into the `tally` block and destroyed at its
+// end, where it counts itself closed under the `stats` lock.
+// expect-stdout: total 43, closed 1, log 2
+
+import ::io;
+
+class Stats {
+  closed: int;
+}
+
+class Tally {
+  total: int;
+  log: int;
+}
+
+final class Scale {
+  by: int;
+  view fn apply(n: int) -> int { return n * self.by; }
+}
+
+class Session {
+  stats: locked mut Stats;
+  id: int;
+}
+
+impl Session {
+  fn __deinit__() { lock self.stats as s: inout { s.closed += 1; } }
+}
+
+async fn fetch(n: int) -> int { return n + 1; }
+
+// It takes a lock: a `lock` block does not call it.
+fn note(tally: locked mut Tally) {
+  lock tally as t: inout { t.log += 1; }
+}
+
+fn weight(s: view Session) -> int {
+  return s.id * 10;
+}
+
+async fn main() -> int {
+  let stats: locked mut Stats = Stats(0);
+  let tally: locked mut Tally = Tally(0, 0);
+  let scale = Scale(1);
+  let s = Session(stats, 4);
+
+  let fetched = await fetch(2);       // the wait, before the block
+  note(tally);
+  lock tally as t: inout {
+    let mine = move s;                // let go of at the block's end
+    t.total += scale.apply(fetched);  // a `final` class's method
+    t.total += weight(mine);
+  }
+  note(tally);                        // and after it
+
+  closed = 0;
+  lock stats as k: view { closed = k.closed; }
+  lock tally as t: view {
+    io::println("total " + Str(t.total) + ", closed " + Str(closed) + ", log "
+        + Str(t.log));
+  }
+  return 0;
+}

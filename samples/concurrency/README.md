@@ -19,9 +19,11 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
 | `10_buffers.pkn` | heap buffers in a `parallel for`: one of the enclosing function read at any index and written at the loop's variable, and one frozen in a box read by every thread |
+| `13_lock_calls.pkn` | what a `lock` block calls: plain functions, a `final` class's method, printing; the waits before and after it; a `__deinit__` that takes another cell's lock, run at a block's end |
 | `errors/err_qualifiers.pkn` | the conversions a qualifier refuses (`shared` into unique, `mut` gained without `move`, `shared mut` into `shared`), writes through an immutable reference and an immutable field, `mut` on a value |
 | `errors/err_strict_copies.pkn` | the copy rule: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
+| `errors/err_lock_calls.pkn` | what a `lock` block cannot call: a function that takes a lock, runs a `parallel for`, awaits or reads input, directly or through what it calls, a task whose body waits, and a function value |
 | `errors/err_atomic_shared.pkn` | writing through a frozen `atomic shared` object, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
 | `errors/err_atomic_spellings.pkn` | the spellings the parser rejects: `const` in any form, `atomic shared mut`, `atomic mut`, `mut shared`, a second qualifier |
@@ -72,7 +74,11 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   unique value flows into a `locked mut` slot; its handle copies into tasks
   and parallel bodies; its contents are reached only in a `lock` block,
   which may not `await`, `return`, `break`, `continue`, nest another
-  `lock` or run a `parallel for`.  `locked T` alone is read in `: view`
+  `lock` or run a `parallel for`, nor call a function that does any of
+  the waiting ones (`'record' may wait (it takes a lock, through 'bump');
+  a 'lock' block cannot call it`) or that the compiler cannot resolve, a
+  function value or a method another module may override.  The verdict on
+  each function is in its module's interface.  `locked T` alone is read in `: view`
   blocks only, with the warning `'locked T' locks an object nothing
   writes; 'atomic shared T' is read from every thread with no lock`; a
   `: inout` block on it is an error that says to declare it `locked mut T`.

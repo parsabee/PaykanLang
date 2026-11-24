@@ -1298,6 +1298,87 @@ a 'lock' block cannot hold another 'lock'
 field or parameter. A handle may also be used in a `parallel for` body, where each iteration
 takes the lock for its own block.
 
+### What a `lock` block calls
+
+The rule holds through calls. A `lock` block calls no function that may wait: one that takes
+a lock, runs a `parallel for`, awaits a task or reads input, itself or through the functions
+it calls. The lock need not be this cell's: a mutex is not taken twice by its holder, and two
+cells taken in two orders by two threads wait for each other. And a block calls only what the
+compiler can resolve: no function value, which may run anything, and no method that a class
+the compiler does not know may override.
+
+```pkn
+import ::io;
+
+class Counts {
+  total: int;
+}
+
+fn bump(c: locked mut Counts) {
+  lock c as v: inout { v.total += 1; }
+}
+
+fn record(c: locked mut Counts) { bump(c); }
+
+fn double(n: int) -> int { return n * 2; }
+
+fn main() -> int {
+  let counts: locked mut Counts = Counts(0);
+  let f = fn(n: int) -> int { return n + 1; };
+  lock counts as c: inout {
+    c.total = double(c.total);    // fine: `double` waits for nothing
+    io::println(c.total);         // fine: printing waits for no other thread
+    record(counts);               // it would take the lock this block holds
+    c.total = f(c.total);         // a function value may run anything
+  }
+  return 0;
+}
+```
+
+Error:
+
+```
+'record' may wait (it takes a lock, through 'bump'); a 'lock' block cannot call it
+'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve
+```
+
+Without the check, `record(counts)` would never return: `bump` waits for the lock that the
+block calling it holds. Do the work that waits before or after the block, and keep in the
+block what reads and writes the contents.
+
+- **What waits.** A `lock` block, a `parallel for` and an `await` in the function called, or
+  in one it calls (`'sum' may wait (it runs a 'parallel for')`, `'waitFor' may wait (it
+  awaits a task)`), and a read of a file or of the standard input (`'ask' may wait (it calls
+  'File.readln', which may wait)`). Printing and writing a file are no wait.
+- **What is resolved.** A function, a method of an `impl` block or of a struct, and a method
+  of a class body where the object's class is known: a `final` class, an instance of a
+  generic class, and, in a program's main module, any of its classes (the compiler follows
+  each override the program has). In a module that others import, a class may be extended by
+  an importer, so a call of its method is `'Base.size' may run code that takes a lock (a
+  class derived from 'Base' may override it; a 'final class Base' has none)`: declare the
+  class `final`.
+- **What runs without a call.** A constructor, `==` on objects (their `equals`), a text
+  (`toString`) and a `clone` count as the calls they are.
+- **Another module's functions.** What each does is in its module's interface, and the
+  message says no more than that: `'g::bump' may wait; a 'lock' block cannot call it`.
+- **A task started in a block.** A call of an `async fn` starts a task, and a task may run
+  where it is started: its body is then the block's own. A block starts no task whose body
+  may wait (`'bump' may wait (it takes a lock); a 'lock' block cannot start it (a task may
+  run where it is started)`). A task whose body waits for nothing is started in a block and
+  awaited after it.
+- **What a block lets go of.** The compiler follows the calls a block makes, not the objects
+  it lets go of: a value moved into a block is destroyed at the block's end, a field
+  assigned over at the assignment, and a value that the block hands on at its last use
+  wherever its new holder lets go of it ([Transfers at a last
+  use](16-memory.md#transfers-at-a-last-use)). A `__deinit__`
+  that takes the lock of another cell runs there as anywhere. One that takes the lock of
+  the block's own cell would wait for itself for ever, and the program stops instead:
+  `paykan: lock taken twice: code that a 'lock' block ran (a '__deinit__' of what the block
+  let go of) locks the cell the block holds, and would wait for ever`. Let go of such an
+  object outside the block. A `__deinit__` that waits for another thread which needs the
+  cell (a task it awaits through a function, a `parallel for` whose iteration takes the
+  lock) is not caught: keep a `__deinit__` to work that waits for nothing.
+
 ## `atomic` cells
 
 `atomic T` is a cell holding one number, `bool` or `char` that any thread may change with
@@ -1977,7 +2058,9 @@ one.
   'locked' variable, field or parameter`). Outside a block the contents cannot be reached
   (`'counts' is 'locked': reach its contents in 'lock counts as c: view { }' (or 'inout')`),
   and inside one `await` (`'await' cannot be used in a 'lock' block: the task would wait while it holds the lock`), another `lock` (`a 'lock' block cannot hold another 'lock'`), a `parallel for`,
-  `return`, `break` and `continue` are errors. `locked T` without `mut` is a cell nothing
+  `return`, `break` and `continue` are errors, and so is a call of what may wait or of what
+  the compiler cannot resolve ([What a `lock` block calls](#what-a-lock-block-calls)).
+  `locked T` without `mut` is a cell nothing
   writes: its declaration is a warning (`'locked Counts' locks an object nothing writes;
   'atomic shared Counts' is read from every thread with no lock`), it takes `view` blocks
   only, and an `inout` block on it is an error (`'c' is 'locked Counts', whose contents are
@@ -2063,5 +2146,6 @@ one.
 | Buffer in a `parallel for` body | `ys.set(unsigned(i + 1), v)` with `ys` a `mem::Buffer<float>` of the enclosing function; `ys.reserve(32)` or `ys.grow(1)` in the body |
 | Atomic read and write | `hits = hits * 2 + 1`, `hits *= 2`, `hits.load()`, `atomic Str`, an `atomic` field in a struct, `hits += 1.5` on an `atomic int` |
 | Locked contents | `counts.total` outside a `lock`; `await` or a `lock` in a `lock` block; `lock n` of what is not `locked`; `locked int` |
+| Calls in a `lock` block | `record(counts)` where `record` takes a lock, runs a `parallel for`, awaits or reads input, itself or through its calls; `f(1)` with `f` a function value; `b.size()` on a class another module may extend |
 | `Copyable` | `impl Copyable for X`; `twice(Node(2))` with `twice<T: Copyable>` |
 | Copy rule ([Ownership transfers](16-memory.md#ownership-transfers)) | `let b = a` with `a` a unique `Node`; `take(a)`; `let s: shared Node = a`; `[Node(1); 3]` |

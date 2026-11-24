@@ -199,15 +199,17 @@ void dumpIface(const File &f, std::ostream &os) {
     for (const ClassRec::Method &m : c.Methods)
       os << "    method " << m.Name << "(" << params(m.ParamTypeNames, m.Modes)
          << ") -> " << result(m.Modes) << m.ReturnTypeName << " flags "
-         << detail::hex(m.Flags & ~kMethodParSafe)
-         << ((m.Flags & kMethodParSafe) ? " par-safe" : "") << "\n";
+         << detail::hex(m.Flags & ~(kMethodParSafe | kMethodWaits))
+         << ((m.Flags & kMethodParSafe) ? " par-safe" : "")
+         << ((m.Flags & kMethodWaits) ? " waits" : "") << "\n";
   }
   for (const ImplRec &im : i.Impls)
     os << "  impl " << im.Trait << " for " << im.TypeName << "\n";
   for (const FuncRec &fn : i.Functions)
     os << "  " << (fn.Native ? "native " : "") << "func " << fn.Name << "("
        << params(fn.ParamTypeNames, fn.Modes) << ") -> " << result(fn.Modes)
-       << fn.ReturnTypeName << (fn.ParSafe ? " par-safe" : "") << "\n";
+       << fn.ReturnTypeName << (fn.ParSafe ? " par-safe" : "")
+       << (fn.Waits ? " waits" : "") << "\n";
   for (const StructRec &s : i.Structs) {
     os << "  struct " << s.Name << " [" << origin(s.IsLocal, s.OriginModule)
        << "]\n";
@@ -216,8 +218,9 @@ void dumpIface(const File &f, std::ostream &os) {
     for (const ClassRec::Method &m : s.Methods)
       os << "    method " << m.Name << "(" << params(m.ParamTypeNames, m.Modes)
          << ") -> " << result(m.Modes) << m.ReturnTypeName << " flags "
-         << detail::hex(m.Flags & ~kMethodParSafe)
-         << ((m.Flags & kMethodParSafe) ? " par-safe" : "") << "\n";
+         << detail::hex(m.Flags & ~(kMethodParSafe | kMethodWaits))
+         << ((m.Flags & kMethodParSafe) ? " par-safe" : "")
+         << ((m.Flags & kMethodWaits) ? " waits" : "") << "\n";
   }
 }
 

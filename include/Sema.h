@@ -62,6 +62,9 @@ viewHoldEnds(const std::vector<ast::Stmt *> &stmts);
 /// a `parallel for` body: `::math`, and the Str, Buffer and cell runtime
 /// (docs/design/concurrency.md, "Calls, control and nesting").
 bool isParSafeNative(const std::string &symbol);
+/// Whether the C function @p symbol blocks until there is input: a `lock`
+/// block does not call it.
+bool isInputNative(const std::string &symbol);
 
 struct SemaContext {
   /// For imported modules: owns the ParserDriver (and thus its ASTContext).
@@ -812,8 +815,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkAtomicElementAssign(ast::SubscriptAssignStmt *node,
                                 ast::FixedArrayType *ft);
   /// `T` when @p ty is the standard library's `mem::Buffer<T>` (a struct of
-  /// one field, `__data`, the runtime's buffer object as an `Obj`); nullptr
-  /// otherwise.
+  /// one field, `__data`, the runtime's buffer object as an `Obj`, declared
+  /// by a `::` module); nullptr otherwise.
   ast::Type *bufferElementType(ast::Type *ty) const;
   /// A method call on a `mem::Buffer<T>` of the enclosing function in a
   /// `parallel for` body: a read (`at`, `get`, `len`), or `set` at the
@@ -933,6 +936,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// A `parallel for` body may call it (SemaParSafe.cpp); for an import,
     /// what its module's interface says.
     bool ParSafe = false;
+    /// A `lock` block cannot call it: it may wait (it takes a lock, runs a
+    /// `parallel for`, awaits a task or blocks on input, itself or through
+    /// its calls), or calls what the compiler cannot resolve.
+    bool Waits = false;
     /// The parameters' and the result's qualifiers (the prototype).
     std::vector<ast::Qualifier> ParamQuals;
     ast::Qualifier ResultQual;
@@ -1846,6 +1853,8 @@ public:
       bool ParSafe = false;
       /// FunctionSig::Async.
       bool Async = false;
+      /// FunctionSig::Waits.
+      bool Waits = false;
       bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -3179,6 +3188,9 @@ private:
     ast::ClassDecl *Class = nullptr; // exactly one of Class / Func / Struct
     ast::FuncDecl *Func = nullptr;
     ast::StructDecl *Struct = nullptr;
+    /// A generic method's instance, which Class or Struct holds alone: what
+    /// is reported of its body later is found under it (InstanceFrames).
+    ast::FuncDecl *Member = nullptr;
     /// How many instantiations deep the request was made (instantiationDepth
     /// there), so that a body instantiating a template with an ever-growing
     /// argument (`Deep<Deep<T>>`) is stopped as a field doing it is.

@@ -84,9 +84,12 @@ inline constexpr uint8_t kMethodPure = 1 << 4;
 inline constexpr uint8_t kMethodParSafe = 1 << 5;
 /// An `async fn` (ast::MethodDecl::Async): its return type is the task's.
 inline constexpr uint8_t kMethodAsync = 1 << 6;
+/// A `lock` block cannot call it (ast::MethodDecl::Waits): it may wait, or
+/// runs what its module could not resolve.
+inline constexpr uint8_t kMethodWaits = 1 << 7;
 inline constexpr uint8_t kMethodKnownFlags =
     kMethodPrivate | kMethodView | kMethodImpl | kMethodShared | kMethodPure |
-    kMethodParSafe | kMethodAsync;
+    kMethodParSafe | kMethodAsync | kMethodWaits;
 
 /// The modes of a signature's parameters (ast::ParamModes): one per
 /// parameter with its name, or none when every parameter is by value, and
@@ -108,8 +111,10 @@ inline constexpr uint8_t kFuncNative = 1 << 0;
 inline constexpr uint8_t kFuncParSafe = 1 << 1;
 /// Bit 2: an `async fn`: its result type is the task's.
 inline constexpr uint8_t kFuncAsync = 1 << 2;
+/// Bit 3: a `lock` block cannot call it (FunctionSig::Waits).
+inline constexpr uint8_t kFuncWaits = 1 << 3;
 inline constexpr uint8_t kFuncKnownFlags =
-    kFuncNative | kFuncParSafe | kFuncAsync;
+    kFuncNative | kFuncParSafe | kFuncAsync | kFuncWaits;
 
 /// ModuleInfo::FunctionInfo.
 struct FuncRec {
@@ -120,6 +125,7 @@ struct FuncRec {
   bool Native = false;  ///< kFuncNative
   bool ParSafe = false; ///< kFuncParSafe
   bool Async = false;   ///< kFuncAsync
+  bool Waits = false;   ///< kFuncWaits
   bool operator==(const FuncRec &) const = default;
 };
 

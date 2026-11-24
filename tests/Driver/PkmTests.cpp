@@ -5624,3 +5624,82 @@ async fn main() -> int {
   expectOnEveryPath(p);
   fs::remove_all(p.Dir);
 }
+
+// What a `lock` block may call of another module's functions and methods
+// is in the module's interface (the "waits" marks), whether the module
+// comes from its source, the cache or a prebuilt file: a function that
+// takes a lock is refused with the same error on each, and a program that
+// calls only what waits for nothing in its blocks runs on each.
+TEST(Pkm, WhatALockBlockMayCallOnEveryPath) {
+  REQUIRE_BACKEND();
+  EveryPathProject p;
+  p.Dir = fs::temp_directory_path() /
+          ("pkm_lock_calls_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "gates.pkn",
+            R"(class Counts { total: int; }
+final class Meter { n: int; view fn read() -> int { return self.n; } }
+struct Gate { c: locked mut Counts; }
+impl Gate {
+  view fn pass() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
+  view fn peek() -> int { return 2; }
+}
+fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn relay(c: locked mut Counts) { bump(c); }
+fn twice(n: int) -> int { return n * 2; }
+fn guarded<T>(c: locked mut Counts, x: view T) -> int {
+  r = 0;
+  lock c as v: inout { r = twice(v.total); bump(c); }
+  return r;
+}
+)");
+  writeFile(p.Dir / "main.pkn",
+            R"(import lib::gates as g;
+fn main() -> int {
+  counts: locked mut g::Counts = g::Counts(0);
+  let gate = g::Gate(g::Counts(1));
+  r = 0;
+  lock counts as c: inout {
+    r = g::twice(2);
+    g::relay(counts);
+    r = gate.pass();
+  }
+  return r + g::guarded(counts, 1);
+}
+)");
+  writeFile(p.Dir / "ok.pkn",
+            R"(import ::io;
+import lib::gates as g;
+fn main() -> int {
+  counts: locked mut g::Counts = g::Counts(0);
+  let gate = g::Gate(g::Counts(1));
+  let m = g::Meter(2);
+  r = 0;
+  lock counts as c: inout {
+    c.total = g::twice(2) + gate.peek() + m.read();
+    r = c.total;
+  }
+  g::bump(counts);
+  g::relay(counts);
+  lock counts as c: view { r = r + c.total; }
+  io::println(r + gate.pass());
+  return 0;
+}
+)");
+  p.Libs = {"gates"};
+  p.Mixed = "gates";
+  p.Rejected = {
+      {"main.pkn",
+       "main.pkn:8:5: error: 'g::relay' may wait; a 'lock' block cannot call "
+       "it\n"
+       "main.pkn:9:9: error: 'Gate.pass' may wait; a 'lock' block cannot "
+       "call it\n"
+       "lib/gates.pkn:13:44: error: 'lib::gates::bump' may wait; a 'lock' "
+       "block cannot call it\n"
+       "main.pkn:11:14: note: in instantiation of 'lib::gates::guarded<int>' "
+       "requested here\n"}};
+  p.Ok = "ok.pkn";
+  p.OkOutput = "19\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
+}

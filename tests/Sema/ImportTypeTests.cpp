@@ -1308,3 +1308,104 @@ fn main() -> int {
       << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// What a `lock` block may call of another module is in that module's
+// interface: a function, a struct's method and a class's that may wait are
+// refused, the others are called.  A class the importer could derive from
+// may have its method overridden by a class neither module knows, and a
+// `final` one cannot.  A `lock` block of the module's template is checked
+// in each instance an importer makes.
+TEST(Module, ALockBlockReadsWhatAnotherModulesFunctionsDo) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_lock_calls").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "gates.pkn", R"(// A module with cells.
+class Counts { total: int; }
+final class Meter { n: int; view fn read() -> int { return self.n; } }
+class Shape { n: int; view fn area() -> int { return self.n; } }
+struct Gate { c: locked mut Counts; }
+impl Gate {
+  view fn pass() -> int { lock self.c as v: inout { v.total += 1; } return 1; }
+  view fn peek() -> int { return 2; }
+}
+fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn relay(c: locked mut Counts) { bump(c); }
+fn twice(n: int) -> int { return n * 2; }
+fn apply(f: (int) -> int) -> int { return f(1); }
+fn guarded<T>(c: locked mut Counts, x: view T) -> int {
+  r = 0;
+  lock c as v: inout { r = twice(v.total); bump(c); }
+  return r;
+}
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(import gates as g;
+fn main() -> int {
+  counts: locked mut g::Counts = g::Counts(0);
+  let gate = g::Gate(g::Counts(1));
+  let m = g::Meter(2);
+  let s = g::Shape(3);
+  r = 0;
+  lock counts as c: inout {
+    r = g::twice(2);
+    g::bump(counts);
+    g::relay(counts);
+    r = g::apply(g::twice);
+    r = gate.pass();
+    r = gate.peek();
+    r = m.read();
+    r = s.area();
+  }
+  return r + g::guarded(counts, 1);
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:10:5: error: 'g::bump' may wait; a 'lock' block cannot "
+            "call it\n"
+            "main.pkn:11:5: error: 'g::relay' may wait; a 'lock' block cannot "
+            "call it\n"
+            "main.pkn:12:9: error: 'g::apply' may wait; a 'lock' block cannot "
+            "call it\n"
+            "main.pkn:13:9: error: 'Gate.pass' may wait; a 'lock' block cannot "
+            "call it\n"
+            "main.pkn:16:9: error: 'Shape.area' may run code that takes a lock "
+            "(a class derived from 'Shape' may override it); a 'lock' block "
+            "calls only functions it can resolve\n"
+            "gates.pkn:16:44: error: 'gates::bump' may wait; a 'lock' block "
+            "cannot call it\n"
+            "main.pkn:18:14: note: in instantiation of 'gates::guarded<int>' "
+            "requested here\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A task of another module's `async fn` or async method is started in a
+// `lock` block when its module's interface says its body waits for
+// nothing.
+TEST(Module, ALockBlockStartsAnotherModulesTaskThatWaitsForNothing) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_lock_tasks").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "jobs.pkn", R"(class Counts { total: int; }
+async fn bump(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn quiet(n: int) -> int { return n + 1; }
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(import jobs as j;
+async fn main() -> int {
+  counts: locked mut j::Counts = j::Counts(0);
+  t = j::quiet(0);
+  n = await t;
+  lock counts as c: inout { t = j::bump(counts); }
+  n += await t;
+  lock counts as c: inout { t = j::quiet(1); }
+  n += await t;
+  return n;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:6:33: error: 'j::bump' may wait; a 'lock' block cannot "
+            "start it (a task may run where it is started)\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

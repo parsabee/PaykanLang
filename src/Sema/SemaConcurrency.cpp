@@ -4,6 +4,7 @@
 // `parallel for` body may read and write, what an async call takes across
 // to its task (the send check), and assignments to `atomic` variables.
 
+#include "ModuleName.h"
 #include "Names.h"
 #include "NativeABI.h"
 #include "Sema.h"
@@ -988,6 +989,14 @@ ast::Type *Sema::bufferElementType(ast::Type *ty) const {
       (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
   if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
       st->getElementTypes()[0] != Ctx.getObjTy())
+    return nullptr;
+  // The standard library's, whose `__data` its methods alone reach: a
+  // struct of a program that has the name and the shape holds whatever
+  // object the program gives it.
+  const auto origin = ImportedTypeOrigins.find(n);
+  if (origin == ImportedTypeOrigins.end()
+          ? !SystemModule
+          : !origin->second.starts_with(module_name::kSep))
     return nullptr;
   // `view fn at(i: unsigned) -> view T`: its result is `T`, qualified as
   // T's argument is (#368).

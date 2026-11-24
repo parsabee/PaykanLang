@@ -362,6 +362,32 @@ TEST(Interface, ParSafeFunctionsAndMethods) {
   EXPECT_TRUE((*back).Classes[0].Methods[1].Flags & kMethodParSafe);
 }
 
+// A function's and a method's "waits" bits round-trip and change the
+// bytes: an importer's `lock` block does not call what has one.
+TEST(Interface, WaitingFunctionsAndMethods) {
+  Interface i = sortedSample();
+  Interface waits = i;
+  waits.Functions[2].Waits = true;
+  waits.Classes[0].Methods[1].Flags |= kMethodWaits;
+  EXPECT_NE(writeInterface(waits), writeInterface(i));
+  StatusOr<Interface> back =
+      readInterface(writeInterface(waits), "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, waits);
+  EXPECT_TRUE((*back).Functions[2].Waits);
+  EXPECT_FALSE((*back).Functions[2].ParSafe);
+  EXPECT_FALSE((*back).Functions[0].Waits);
+  EXPECT_TRUE((*back).Classes[0].Methods[1].Flags & kMethodWaits);
+  EXPECT_FALSE((*back).Classes[0].Methods[0].Flags & kMethodWaits);
+  // Each mark is its own bit.
+  Interface both = waits;
+  both.Functions[2].ParSafe = true;
+  both.Classes[0].Methods[1].Flags |= kMethodParSafe;
+  back = readInterface(writeInterface(both), "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, both);
+}
+
 // An `async fn` and an async method keep their marks (kFuncAsync,
 // kMethodAsync), which change the bytes: an importer starts a task where
 // it calls one, and checks what crosses to it.
@@ -422,11 +448,8 @@ TEST(Interface, PureVirtualMethods) {
               std::string::npos)
         << slotless;
   }
-  bad = i;
-  bad.Classes[0].Methods[1].Flags = 0x80;
-  EXPECT_NE(readError(writeInterface(bad), "shapes")
-                .find("method 'kind' has unknown flags 0x80"),
-            std::string::npos);
+  // (Every bit of a method's flags byte has a meaning: none is unknown.)
+  static_assert(kMethodKnownFlags == 0xff);
   // A `shared fn` is a class's method other than its initializer and its
   // destroy (Sema rejects the others).
   for (const char *notShared : {"__init__", "___init__", "destroy"}) {
