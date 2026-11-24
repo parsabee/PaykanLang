@@ -132,7 +132,7 @@ fn main() -> int {
   // Assigned to a field at its last use: the field holds the node now.
   let hn: shared = Node("h");
   let wh = Watch(hn);
-  holder: mut = Holder((Pair(Node("z"), 0), 0));
+  holder: mutable = Holder((Pair(Node("z"), 0), 0));
   let held = (Pair(hn, 0), 1);
   holder.held = held;
   io::print(" | field: " + state(wh));

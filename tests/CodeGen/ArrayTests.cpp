@@ -238,7 +238,7 @@ fn stash(st: inout Store) {
   st.keep(move nm.name);   // member access as class arg; nm dies at return
 }
 fn main() -> int {
-  st: mut Store = Store();
+  st: mutable Store = Store();
   stash(st);
   stash(st);                 // second call would crash if the first over-freed
   io::println(st.get());         // "hello"
@@ -266,7 +266,7 @@ impl Box {
   fn __init__(){ self.items = [Foo(1), Foo(2)]; }
 }
 fn main() -> int {
-  b: mut Box = Box();
+  b: mutable Box = Box();
   b.set1(Foo(99));
   io::println(Str<int>(b.get1()));   // 99
   return 0;

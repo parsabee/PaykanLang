@@ -40,8 +40,8 @@ namespace sema {
 /// past it.  Grammar (the output language of ast::typeName):
 ///
 ///   type  := qual? base suffix*
-///   qual  := 'mut ' | 'shared ' | 'shared mut ' | 'atomic shared '
-///          | 'locked ' | 'locked mut '       -- a part's form (#368)
+///   qual  := 'mutable ' | 'shared ' | 'shared mutable ' | 'atomic shared '
+///          | 'locked ' | 'locked mutable '       -- a part's form (#368)
 ///   base  := '(' type (', ' type)+ ')'        -- tuple (arity >= 2)
 ///          | name                             -- builtin / class / enum
 ///   suffix := '[]'                            -- slice of the type so far
@@ -57,7 +57,7 @@ namespace sema {
 /// the name, which is registered under exactly that spelling.  Returns nullptr
 /// (leaving @p pos wherever it stopped) if the text is malformed or a base
 /// name is unknown in @p ctx.
-/// The qualifier spelled at @p pos in @p text (`shared mut `, ...), moving
+/// The qualifier spelled at @p pos in @p text (`shared mutable `, ...), moving
 /// @p pos past it; the bare form, and @p pos unmoved, when none is.
 static ast::Qualifier readExportedQualifier(const std::string &text,
                                             size_t &pos) {
@@ -72,11 +72,11 @@ static ast::Qualifier readExportedQualifier(const std::string &text,
   };
   static const Spelled kQualifiers[] = {
       {"atomic shared ", {ast::QualForm::AtomicShared, false}},
-      {"shared mut ", {ast::QualForm::Shared, true}},
-      {"locked mut ", {ast::QualForm::Locked, true}},
+      {"shared mutable ", {ast::QualForm::Shared, true}},
+      {"locked mutable ", {ast::QualForm::Locked, true}},
       {"shared ", {ast::QualForm::Shared, false}},
       {"locked ", {ast::QualForm::Locked, false}},
-      {"mut ", {ast::QualForm::Unique, true}},
+      {"mutable ", {ast::QualForm::Unique, true}},
   };
   for (const Spelled &sp : kQualifiers) {
     const std::string_view prefix(sp.Prefix);
@@ -94,7 +94,7 @@ static ast::Qualifier readExportedQualifier(const std::string &text,
 
 /// As above, a type spelled with the qualifier written before it (#368):
 /// the qualifier is the elements' of the first array suffix when it is
-/// `shared` or `shared mut` (`shared Node[4]`, four shared references, as
+/// `shared` or `shared mutable` (`shared Node[4]`, four shared references, as
 /// the source grammar reads it), else it is left in @p qual for the slot
 /// the type fills (a tuple's element, a function type's parameter or
 /// result, a type argument, or the declaration itself).
@@ -273,7 +273,7 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
 }
 
 /// The name a declaration's type is exported under: its qualifier's
-/// spelling, then the type's (`mut Node?`, `shared mut Node`), or the
+/// spelling, then the type's (`mutable Node?`, `shared mutable Node`), or the
 /// type's alone for the bare form.  The qualifier is part of the type of a
 /// parameter, a field or a result (docs/language/19-concurrency.md), so an
 /// importer reads it back (splitExportedQualifier).

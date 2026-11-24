@@ -345,19 +345,19 @@ IfaceBlob
 
 A qualifier (docs/language/19-concurrency.md) is part of the type of a
 parameter, a field or a result, and a string-typed record spells it before
-the type's name, as a declaration writes it: `mut Cell`, `shared mut
+the type's name, as a declaration writes it: `mutable Cell`, `shared mutable
 Node?`, `atomic shared Config` (the bare form spells none).  An importer
 reads it back as the declaration's qualifier (`Sema::injectModule`), so a
-call of `fn make() -> mut Cell` writes through its result there as in the
+call of `fn make() -> mutable Cell` writes through its result there as in the
 module.  A part of a type takes a qualifier too (#368), which the string
 spells before the part as `ast::typeName` does: a tuple's element `(int,
-shared Node)`, a type argument `List<shared mut Node>`, a function type's
-parameter and result `(shared Node) -> mut Node`, and an array's
-elements, whose `shared` or `shared mut` is written before the type
+shared Node)`, a type argument `List<shared mutable Node>`, a function type's
+parameter and result `(shared Node) -> mutable Node`, and an array's
+elements, whose `shared` or `shared mutable` is written before the type
 (`shared Node[4]`, four shared references), as the source grammar reads
 it.  A declaration's qualifier that a template's type argument gave a
-member of an instance (the `T` result of `get` in `List<shared mut
-Node>`) is written with a leading `@`, `@shared mut Node`, and the
+member of an instance (the `T` result of `get` in `List<shared mutable
+Node>`) is written with a leading `@`, `@shared mutable Node`, and the
 importer reads it back as such (`ast::Qualifier::FromArgument`: a borrow
 keeps it, and the clone of the value is its copy).
 
@@ -667,7 +667,7 @@ module-qualified, nested applications likewise:
 program-wide (`match`, `equals`, assignment all agree); `Sema::instantiationName`
 produces it once `typeName` spells imported classes canonically. Today's
 spelling has a space after commas (`Pair<Str, int>`), and a qualified
-argument is part of the name with its spaces (`List<shared mut Node>`, a
+argument is part of the name with its spaces (`List<shared mutable Node>`, a
 separate instance from `List<Node>`, #368); **open question 3.**
 
 ### 4.5 Hybrid erasure and the `INST` part (#160)

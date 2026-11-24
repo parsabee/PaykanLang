@@ -123,7 +123,7 @@ impl Wrap {
 )");
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
 import mid;
-fn main() -> int { w: mut mid::Wrap = mid::Wrap(); t = w.get(); return t.twice(); }
+fn main() -> int { w: mutable mid::Wrap = mid::Wrap(); t = w.get(); return t.twice(); }
 )");
 
   auto r = compileAndRunFile(mainPath);

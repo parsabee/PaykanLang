@@ -4,7 +4,7 @@
 //            References"): the innermost reads the object while it is
 //            alive and None once it is gone, however late it was made; an
 //            outer lambda that reads the capture itself too; and a
-//            `shared fn`'s `me: weak mut = self` captured two lambdas deep
+//            `shared fn`'s `me: weak mutable = self` captured two lambdas deep
 //            in a closure stored in the object, which forms no cycle.  Each
 //            inner closure held the object strongly: it read as alive
 //            after its last owner let go of it, and the stored closure
@@ -21,7 +21,7 @@ class B {
   f: (() -> Str)?;
 
   shared fn wire() {
-    me: weak mut = self;
+    me: weak mutable = self;
     let mk = fn() -> () -> Str {
       return fn() -> Str {
         match me {
@@ -57,9 +57,9 @@ fn main() -> int {
   // A closure made once the object is gone captures None, weakly.
   let late = three()();
   io::println(late());
-  // A `shared fn`'s `me: weak mut = self`, captured two lambdas deep, in
+  // A `shared fn`'s `me: weak mutable = self`, captured two lambdas deep, in
   // self.
-  let c: shared mut = B(7, None);
+  let c: shared mutable = B(7, None);
   c.wire();
   match c.f {
     g: () -> Str { io::println(g()); }

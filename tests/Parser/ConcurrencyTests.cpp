@@ -3,8 +3,8 @@
 // Parser tests: the syntax of the concurrency prototype
 // (docs/design/concurrency.md, samples/concurrency/README.md): `async fn`,
 // `await` and `move`, `parallel for`, the `lock` block, and the qualifiers
-// in a type annotation (`mut`, `shared`, `shared mut`, `atomic shared`,
-// `locked`, `locked mut`).  What the forms mean is
+// in a type annotation (`mutable`, `shared`, `shared mutable`, `atomic shared`,
+// `locked`, `locked mutable`).  What the forms mean is
 // Sema's (tests/Sema); here is what the parser takes, the AST it builds
 // and the error it gives.
 
@@ -351,44 +351,44 @@ TEST(Lock, Errors) {
 // -- Qualifiers
 
 // A qualifier goes after the colon (or the arrow), before the type, and
-// covers the whole type: `mut`, `shared`, `shared mut`, `atomic shared`,
-// `locked` and `locked mut` make a QualifiedType around it, `atomic T` an
-// AtomicType; the bare type, unique and immutable, has none.
-// In a local declaration the qualifier may stand alone, with the type
-// inferred.  The parser records the qualifier in the type only; Sema moves
-// it to the place (Param::Qual, VarDecl's and FuncDecl's qualifier).
+// covers the whole type: `mutable`, `shared`, `shared mutable`, `atomic
+// shared`, `locked` and `locked mutable` make a QualifiedType around it,
+// `atomic T` an AtomicType; the bare type, unique and immutable, has none. In a
+// local declaration the qualifier may stand alone, with the type inferred.  The
+// parser records the qualifier in the type only; Sema moves it to the place
+// (Param::Qual, VarDecl's and FuncDecl's qualifier).
 TEST(Qualifiers, OnFieldsParametersLocalsAndResults) {
   auto [ok, driver] = parse(R"(class Node {
   id: int;
   right: shared Node;
-  left: mut Node;
-  both: shared mut Node;
+  left: mutable Node;
+  both: shared mutable Node;
   cfg: atomic shared Node;
-  counts: locked mut Node;
+  counts: locked mutable Node;
   cold: locked Node;
   hits: atomic int;
 }
 struct Pair {
   left: shared Node;
 }
-fn f(a: mut Node, b: shared Node, c: shared mut Node,
-     d: atomic shared Node, e: locked mut Node, h: atomic float, n: int)
-    -> locked mut Node { return e; }
+fn f(a: mutable Node, b: shared Node, c: shared mutable Node,
+     d: atomic shared Node, e: locked mutable Node, h: atomic float, n: int)
+    -> locked mutable Node { return e; }
 fn g() -> shared Node { return a; }
 fn h() -> atomic int { return 1; }
 fn main() -> int {
-  let a: mut Node = Node();
+  let a: mutable Node = Node();
   b: shared = a;
-  c: shared mut = a;
+  c: shared mutable = a;
   let d: locked = a;
   e: atomic shared = a;
-  f: mut = a;
+  f: mutable = a;
   let g: atomic int = 1;
   h: shared Node[] = a;
-  i: mut Node? = None;
+  i: mutable Node? = None;
   let k: List<shared Node> = a;
   l: (shared Node, int) = b;
-  m: locked mut = a;
+  m: locked mutable = a;
   return 0;
 })");
   ASSERT_TRUE(ok);
@@ -397,34 +397,35 @@ fn main() -> int {
        {// fields
         "VarDecl <3:3-3:21> 'right' type\n",
         "QualifiedType <3:10-3:21> 'shared'\n",
-        "ClassType <3:17-3:21> 'Node'\n", "QualifiedType <4:9-4:17> 'mut'\n",
-        "QualifiedType <5:9-5:24> 'shared mut'\n",
+        "ClassType <3:17-3:21> 'Node'\n",
+        "QualifiedType <4:9-4:21> 'mutable'\n",
+        "QualifiedType <5:9-5:28> 'shared mutable'\n",
         "QualifiedType <6:8-6:26> 'atomic shared'\n",
-        "QualifiedType <7:11-7:26> 'locked mut'\n",
+        "QualifiedType <7:11-7:30> 'locked mutable'\n",
         "QualifiedType <8:9-8:20> 'locked'\n",
         "VarDecl <9:3-9:19> 'hits' type\n", "AtomicType <9:9-9:19>\n",
         "QualifiedType <12:9-12:20> 'shared'\n",
         // results
-        "QualifiedType <16:8-16:23> 'locked mut'\n",
+        "QualifiedType <16:8-16:27> 'locked mutable'\n",
         "QualifiedType <17:11-17:22> 'shared'\n", "AtomicType <18:11-18:21>\n",
         // locals, with the type written
-        "VarDecl <20:3-20:27> 'a' let type\n",
-        "QualifiedType <20:10-20:18> 'mut'\n",
+        "VarDecl <20:3-20:31> 'a' let type\n",
+        "QualifiedType <20:10-20:22> 'mutable'\n",
         "VarDecl <26:3-26:24> 'g' let type\n", "AtomicType <26:10-26:20>\n",
         // ... and inferred: the QualifiedType has no inner type
         "VarDecl <21:3-21:16> 'b' type\n",
         "QualifiedType <21:6-21:12> 'shared'\n",
-        "QualifiedType <22:6-22:16> 'shared mut'\n",
+        "QualifiedType <22:6-22:20> 'shared mutable'\n",
         "VarDecl <23:3-23:20> 'd' let type\n",
         "QualifiedType <23:10-23:16> 'locked'\n",
         "QualifiedType <24:6-24:19> 'atomic shared'\n",
-        "QualifiedType <25:6-25:9> 'mut'\n",
-        "QualifiedType <31:6-31:16> 'locked mut'\n",
+        "QualifiedType <25:6-25:13> 'mutable'\n",
+        "QualifiedType <31:6-31:20> 'locked mutable'\n",
         // the qualifier covers an array, an optional, and goes inside a
         // generic's argument or a tuple's element
         "QualifiedType <27:6-27:19> 'shared'\n", "ArrayType <27:13-27:19>\n",
-        "QualifiedType <28:6-28:15> 'mut'\n", "OptionalType <28:10-28:15>\n",
-        "GenericType <29:10-29:27> 'List'\n",
+        "QualifiedType <28:6-28:19> 'mutable'\n",
+        "OptionalType <28:14-28:19>\n", "GenericType <29:10-29:27> 'List'\n",
         "QualifiedType <29:15-29:26> 'shared'\n",
         "TupleType <30:6-30:24> 2 elements\n",
         "QualifiedType <30:7-30:18> 'shared'\n"})
@@ -435,18 +436,18 @@ fn main() -> int {
   ASSERT_EQ(fns.size(), 4u);
   const auto &params = fns[0]->getParams();
   ASSERT_EQ(params.size(), 7u);
-  EXPECT_STREQ(qualifierOf(params[0].ParamType), "mut");
+  EXPECT_STREQ(qualifierOf(params[0].ParamType), "mutable");
   EXPECT_STREQ(qualifierOf(params[1].ParamType), "shared");
-  EXPECT_STREQ(qualifierOf(params[2].ParamType), "shared mut");
+  EXPECT_STREQ(qualifierOf(params[2].ParamType), "shared mutable");
   EXPECT_STREQ(qualifierOf(params[3].ParamType), "atomic shared");
-  EXPECT_STREQ(qualifierOf(params[4].ParamType), "locked mut");
+  EXPECT_STREQ(qualifierOf(params[4].ParamType), "locked mutable");
   EXPECT_TRUE(ast::isa<ast::AtomicType>(params[5].ParamType));
   EXPECT_EQ(qualifierOf(params[6].ParamType), nullptr);
   for (const ast::Param &p : params) {
     EXPECT_EQ(p.Mode, ast::ParamMode::Value) << p.getName();
     EXPECT_TRUE(p.Qual.isUnique()) << p.getName(); // Sema fills it in
   }
-  // Each form is its own Form, with `mut` on top of it.
+  // Each form is its own Form, with `mutable` on top of it.
   auto qualifier = [&](size_t i) {
     return ast::cast<ast::QualifiedType>(params[i].ParamType)->getQualifier();
   };
@@ -458,7 +459,7 @@ fn main() -> int {
   EXPECT_EQ(qualifier(2), (ast::Qualifier{ast::QualForm::Shared, true}));
   EXPECT_EQ(qualifier(3), (ast::Qualifier{ast::QualForm::AtomicShared, false}));
   EXPECT_EQ(qualifier(4), (ast::Qualifier{ast::QualForm::Locked, true}));
-  EXPECT_STREQ(qualifierOf(fns[0]->getReturnType()), "locked mut");
+  EXPECT_STREQ(qualifierOf(fns[0]->getReturnType()), "locked mutable");
   EXPECT_EQ(fns[0]->getResultMode(), ast::ParamMode::Value);
   EXPECT_TRUE(fns[0]->getResultQual().isUnique()); // Sema fills it in
   EXPECT_STREQ(qualifierOf(fns[1]->getReturnType()), "shared");
@@ -500,12 +501,12 @@ fn main() -> int {
 // type), and on a `match` arm's binding or a destructuring target.
 TEST(Qualifiers, FormsSemaJudges) {
   auto [ok, driver] = parse(R"(class C { n: shared; }
-fn f(x: view shared C, y: inout mut C, z: shared, w: mut, v: int)
+fn f(x: view shared C, y: inout mutable C, z: shared, w: mutable, v: int)
     -> view shared C { return x; }
 fn main() -> int {
   j: view shared C = a;
-  k: inout mut = a;
-  match a { n: shared C { } m: view mut C { } _ { } }
+  k: inout mutable = a;
+  match a { n: shared C { } m: view mutable C { } _ { } }
   p: shared C, q = (1, 2);
   return 0;
 })");
@@ -515,11 +516,11 @@ fn main() -> int {
   EXPECT_EQ(params[0].Mode, ast::ParamMode::View);
   EXPECT_STREQ(qualifierOf(params[0].ParamType), "shared");
   EXPECT_EQ(params[1].Mode, ast::ParamMode::Inout);
-  EXPECT_STREQ(qualifierOf(params[1].ParamType), "mut");
+  EXPECT_STREQ(qualifierOf(params[1].ParamType), "mutable");
   EXPECT_STREQ(qualifierOf(params[2].ParamType), "shared");
   EXPECT_EQ(ast::cast<ast::QualifiedType>(params[2].ParamType)->getInnerType(),
             nullptr);
-  EXPECT_STREQ(qualifierOf(params[3].ParamType), "mut");
+  EXPECT_STREQ(qualifierOf(params[3].ParamType), "mutable");
   EXPECT_EQ(ast::cast<ast::QualifiedType>(params[3].ParamType)->getInnerType(),
             nullptr);
   const auto *fn = driver->getRoot()->getFuncDecls()[0];
@@ -534,37 +535,38 @@ fn main() -> int {
        {"'f' view 'x' inout 'y' -> view\n",
         "VarDecl <5:3-5:23> 'j' view type\n",
         "QualifiedType <5:11-5:19> 'shared'\n",
-        "VarDecl <6:3-6:19> 'k' inout type\n",
-        "QualifiedType <6:12-6:15> 'mut'\n", "MatchArm binding='n'\n",
+        "VarDecl <6:3-6:23> 'k' inout type\n",
+        "QualifiedType <6:12-6:19> 'mutable'\n", "MatchArm binding='n'\n",
         "QualifiedType <7:16-7:24> 'shared'\n", "MatchArm binding='m' view\n",
-        "QualifiedType <7:37-7:42> 'mut'\n"})
+        "QualifiedType <7:37-7:46> 'mutable'\n"})
     EXPECT_NE(dump.find(line), std::string::npos) << line << "\n" << dump;
 }
 
-// A type takes one qualifier, written before it: `mut` is part of `shared
-// mut` and `locked mut`, not a qualifier of its own after another, and no
-// word repeats; the qualifier alone is a local declaration's, and needs
-// the initializer; `atomic` alone names no type; a qualifier is not an
-// operator or a prefix of a name.
+// A type takes one qualifier, written before it: `mutable` is part of `shared
+// mutable` and `locked mutable`, not a qualifier of its own after another, and
+// no word repeats; the qualifier alone is a local declaration's, and needs the
+// initializer; `atomic` alone names no type; a qualifier is not an operator or
+// a prefix of a name.
 TEST(Qualifiers, OneQualifierBeforeTheType) {
   const char *const cases[][2] = {
       {"x: shared shared Node = a;",
        "a type takes one qualifier: 'shared shared' is two"},
-      {"x: mut mut Node = a;", "a type takes one qualifier: 'mut mut' is two"},
-      {"x: shared mut shared Node = a;",
-       "a type takes one qualifier: 'shared mut shared' is two"},
-      {"x: shared mut mut Node = a;",
-       "a type takes one qualifier: 'shared mut mut' is two"},
-      {"x: locked mut mut Node = a;",
-       "a type takes one qualifier: 'locked mut mut' is two"},
-      {"x: locked mut locked Node = a;",
-       "a type takes one qualifier: 'locked mut locked' is two"},
+      {"x: mutable mutable Node = a;",
+       "a type takes one qualifier: 'mutable mutable' is two"},
+      {"x: shared mutable shared Node = a;",
+       "a type takes one qualifier: 'shared mutable shared' is two"},
+      {"x: shared mutable mutable Node = a;",
+       "a type takes one qualifier: 'shared mutable mutable' is two"},
+      {"x: locked mutable mutable Node = a;",
+       "a type takes one qualifier: 'locked mutable mutable' is two"},
+      {"x: locked mutable locked Node = a;",
+       "a type takes one qualifier: 'locked mutable locked' is two"},
       {"x: locked atomic int = a;",
        "a type takes one qualifier: 'locked atomic' is two"},
       {"x: shared atomic int = a;",
        "a type takes one qualifier: 'shared atomic' is two"},
-      {"x: locked mut atomic int = a;",
-       "a type takes one qualifier: 'locked mut atomic' is two"},
+      {"x: locked mutable atomic int = a;",
+       "a type takes one qualifier: 'locked mutable atomic' is two"},
       {"x: atomic shared shared Node = a;",
        "a type takes one qualifier: 'atomic shared shared' is two"},
       {"x: atomic shared locked Node = a;",
@@ -574,63 +576,67 @@ TEST(Qualifiers, OneQualifierBeforeTheType) {
       {"x: atomic = 1;", "unexpected '='; expected a type"},
       {"x: shared;", "unexpected ';'; expected '=' (a variable declaration "
                      "needs an initial value)"},
-      {"x: mut;", "unexpected ';'; expected '=' (a variable declaration "
-                  "needs an initial value)"},
-      {"x: shared mut;", "unexpected ';'; expected '=' (a variable "
-                         "declaration needs an initial value)"},
+      {"x: mutable;", "unexpected ';'; expected '=' (a variable declaration "
+                      "needs an initial value)"},
+      {"x: shared mutable;", "unexpected ';'; expected '=' (a variable "
+                             "declaration needs an initial value)"},
       {"x: locked = ;", "unexpected ';'; expected an expression"},
       {"x: shared = a, b;", "unexpected ','; expected ';' after the "
                             "declaration"},
       {"shared x = a;", "unexpected 'shared'; expected an expression"},
-      {"mut x = a;", "unexpected 'mut'; expected an expression"},
+      {"mutable x = a;", "unexpected 'mutable'; expected an expression"},
       {"let shared x = a;",
        "unexpected 'shared'; expected a variable name after 'let'"},
-      {"let mut x = a;",
-       "unexpected 'mut'; expected a variable name after 'let'"},
+      {"let mutable x = a;",
+       "unexpected 'mutable'; expected a variable name after 'let'"},
       {"x = C() as shared;", "unexpected 'as'; expected ';' after the "
                              "assignment"},
       {"x = shared C();", "unexpected 'shared'; expected an expression"},
-      {"x = mut C();", "unexpected 'mut'; expected an expression"},
+      {"x = mutable C();", "unexpected 'mutable'; expected an expression"},
   };
   for (const auto &c : cases)
     expectRejected(inMain(c[0]), c[1]);
   const char *const topLevel[][2] = {
       {"fn f(shared x: Node) { }",
        "unexpected 'shared'; expected a parameter name"},
-      {"fn f(mut x: Node) { }", "unexpected 'mut'; expected a parameter name"},
+      {"fn f(mutable x: Node) { }",
+       "unexpected 'mutable'; expected a parameter name"},
       {"class C { shared n: Node; }",
        "unexpected 'shared'; expected a field ('name: Type;') or a method "
        "('fn') in the class body"},
-      {"class C { mut n: Node; }",
-       "unexpected 'mut'; expected a field ('name: Type;') or a method "
+      {"class C { mutable n: Node; }",
+       "unexpected 'mutable'; expected a field ('name: Type;') or a method "
        "('fn') in the class body"},
       {"fn f() -> shared { }", "unexpected '{'; expected a type"},
-      {"fn f() -> mut { }", "unexpected '{'; expected a type"},
+      {"fn f() -> mutable { }", "unexpected '{'; expected a type"},
       {"fn f() -> atomic { }", "unexpected '{'; expected a type"},
   };
   for (const auto &c : topLevel)
     expectRejected(atTopLevel(c[0]), c[1]);
 }
 
-// `mut` comes after the form it adds writes to: `shared mut`, `locked
-// mut`.  Written first, it is rejected at `mut` with the spelling to
+// `mutable` comes after the form it adds writes to: `shared mutable`, `locked
+// mutable`.  Written first, it is rejected at `mutable` with the spelling to
 // write, wherever the type is written.
-TEST(Qualifiers, MutFollowsTheForm) {
-  const char *const kMutShared =
-      "'mut shared' is spelled 'shared mut': the form first, then the writes";
-  const char *const kMutLocked =
-      "'mut locked' is spelled 'locked mut': the form first, then the writes";
+TEST(Qualifiers, MutableFollowsTheForm) {
+  const char *const kMutableShared =
+      "'mutable shared' is spelled 'shared mutable': the form first, then the "
+      "writes";
+  const char *const kMutableLocked =
+      "'mutable locked' is spelled 'locked mutable': the form first, then the "
+      "writes";
   for (const char *stmt :
-       {"x: mut shared Node = a;", "let x: mut shared Node = a;",
-        "x: mut shared = a;", "x: mut shared mut Node = a;"})
-    expectRejected(inMain(stmt), kMutShared);
-  for (const char *stmt : {"x: mut locked Node = a;",
-                           "let x: mut locked Node = a;", "x: mut locked = a;"})
-    expectRejected(inMain(stmt), kMutLocked);
+       {"x: mutable shared Node = a;", "let x: mutable shared Node = a;",
+        "x: mutable shared = a;", "x: mutable shared mutable Node = a;"})
+    expectRejected(inMain(stmt), kMutableShared);
+  for (const char *stmt :
+       {"x: mutable locked Node = a;", "let x: mutable locked Node = a;",
+        "x: mutable locked = a;"})
+    expectRejected(inMain(stmt), kMutableLocked);
   const char *const topLevel[][2] = {
-      {"fn f(x: mut shared Node) { }", kMutShared},
-      {"fn f() -> mut locked Node { }", kMutLocked},
-      {"class C { n: mut shared Node; }", kMutShared},
+      {"fn f(x: mutable shared Node) { }", kMutableShared},
+      {"fn f() -> mutable locked Node { }", kMutableLocked},
+      {"class C { n: mutable shared Node; }", kMutableShared},
   };
   for (const auto &c : topLevel)
     expectRejected(atTopLevel(c[0]), c[1]);
@@ -638,9 +644,9 @@ TEST(Qualifiers, MutFollowsTheForm) {
 
 // The frozen, thread-crossing object is `atomic shared T`: `atomic`, the
 // reference crosses threads; `shared`, it has several owners; and nothing
-// writes it, so `mut` is rejected at `mut`, wherever the type is written,
-// with the forms that exist.  A cell, `atomic T`, takes no `mut` either:
-// it changes by its operations.
+// writes it, so `mutable` is rejected at `mutable`, wherever the type is
+// written, with the forms that exist.  A cell, `atomic T`, takes no `mutable`
+// either: it changes by its operations.
 TEST(Qualifiers, AtomicSharedIsFrozen) {
   auto [ok, driver] = parse(R"(class Node { id: int; }
 fn f(n: atomic shared Node) -> atomic shared Node { return n; }
@@ -656,7 +662,7 @@ fn main() -> int {
     const auto *q = ast::dyn_cast<ast::QualifiedType>(ty);
     ASSERT_NE(q, nullptr);
     EXPECT_EQ(q->getQualifier().Form, ast::QualForm::AtomicShared);
-    EXPECT_FALSE(q->getQualifier().Mut);
+    EXPECT_FALSE(q->getQualifier().Mutable);
     EXPECT_STREQ(q->getQualifier().spelling(), "atomic shared");
     if (inferred)
       EXPECT_EQ(q->getInnerType(), nullptr);
@@ -686,28 +692,29 @@ fn main() -> int {
         "QualifiedType <5:6-5:19> 'atomic shared'\n"})
     EXPECT_NE(dump.find(line), std::string::npos) << line << "\n" << dump;
 
-  const char *const kAtomicSharedMut =
-      "'atomic shared mut T' would be written from several threads with no "
-      "lock; write 'atomic shared T' to freeze it, or 'locked mut T' to "
+  const char *const kAtomicSharedMutable =
+      "'atomic shared mutable T' would be written from several threads with no "
+      "lock; write 'atomic shared T' to freeze it, or 'locked mutable T' to "
       "change it under a lock";
   const char *const kCell =
-      "an 'atomic' cell takes no 'mut': it changes by its operations; an "
-      "object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'";
+      "an 'atomic' cell takes no 'mutable': it changes by its operations; an "
+      "object crosses threads as 'atomic shared T' (frozen) or 'locked mutable "
+      "T'";
+  for (const char *stmt : {"x: atomic shared mutable Node = a;",
+                           "let x: atomic shared mutable Node = a;",
+                           "x: atomic shared mutable = a;"})
+    expectRejected(inMain(stmt), kAtomicSharedMutable);
   for (const char *stmt :
-       {"x: atomic shared mut Node = a;", "let x: atomic shared mut Node = a;",
-        "x: atomic shared mut = a;"})
-    expectRejected(inMain(stmt), kAtomicSharedMut);
-  for (const char *stmt :
-       {"x: atomic mut int = 1;", "let x: atomic mut int = 1;",
-        "x: mut atomic int = 1;", "x: atomic mut = 1;"})
+       {"x: atomic mutable int = 1;", "let x: atomic mutable int = 1;",
+        "x: mutable atomic int = 1;", "x: atomic mutable = 1;"})
     expectRejected(inMain(stmt), kCell);
   const char *const topLevel[][2] = {
-      {"fn f(x: atomic shared mut Node) { }", kAtomicSharedMut},
-      {"fn f() -> atomic shared mut Node { }", kAtomicSharedMut},
-      {"class C { n: atomic shared mut Node; }", kAtomicSharedMut},
-      {"fn f(x: atomic mut int) { }", kCell},
-      {"fn f() -> mut atomic int { }", kCell},
-      {"class C { n: atomic mut int; }", kCell},
+      {"fn f(x: atomic shared mutable Node) { }", kAtomicSharedMutable},
+      {"fn f() -> atomic shared mutable Node { }", kAtomicSharedMutable},
+      {"class C { n: atomic shared mutable Node; }", kAtomicSharedMutable},
+      {"fn f(x: atomic mutable int) { }", kCell},
+      {"fn f() -> mutable atomic int { }", kCell},
+      {"class C { n: atomic mutable int; }", kCell},
   };
   for (const auto &c : topLevel)
     expectRejected(atTopLevel(c[0]), c[1]);
@@ -715,13 +722,13 @@ fn main() -> int {
 
 // -- The keywords
 
-// `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `mut`,
+// `move`, `async`, `await`, `parallel`, `atomic`, `shared`, `mutable`,
 // `locked` and `lock` are reserved: none names a variable, a function, a
 // parameter, a field, a class or a type.
 TEST(ConcurrencyKeywords, AreNotIdentifiers) {
   const char *const keywords[] = {"move",     "async",  "await",
                                   "parallel", "atomic", "shared",
-                                  "mut",      "locked", "lock"};
+                                  "mutable",  "locked", "lock"};
   for (const char *kw : keywords) {
     const std::string k(kw);
     const std::string cases[] = {
@@ -748,19 +755,19 @@ TEST(ConcurrencyKeywords, AreNotIdentifiers) {
   const char *const cases[][2] = {
       {"fn main() -> int { shared = 1; return 0; }",
        "unexpected 'shared'; expected an expression"},
-      {"fn main() -> int { x = 1 + mut; return 0; }",
-       "unexpected 'mut'; expected an expression"},
+      {"fn main() -> int { x = 1 + mutable; return 0; }",
+       "unexpected 'mutable'; expected an expression"},
       {"fn move() { }\nfn main() -> int { return 0; }",
        "unexpected 'move'; expected a function name after 'fn'"},
-      {"fn mut() { }\nfn main() -> int { return 0; }",
-       "unexpected 'mut'; expected a function name after 'fn'"},
+      {"fn mutable() { }\nfn main() -> int { return 0; }",
+       "unexpected 'mutable'; expected a function name after 'fn'"},
       {"fn f(await: int) { }\nfn main() -> int { return 0; }",
        "unexpected 'await'; expected a parameter name"},
       {"class C { atomic: int; }\nfn main() -> int { return 0; }",
        "unexpected 'atomic'; expected a field ('name: Type;') or a method "
        "('fn') in the class body"},
-      {"class C { mut: int; }\nfn main() -> int { return 0; }",
-       "unexpected 'mut'; expected a field ('name: Type;') or a method "
+      {"class C { mutable: int; }\nfn main() -> int { return 0; }",
+       "unexpected 'mutable'; expected a field ('name: Type;') or a method "
        "('fn') in the class body"},
       {"class locked { n: int; }\nfn main() -> int { return 0; }",
        "unexpected 'locked'; expected a class name after 'class'"},
@@ -777,4 +784,17 @@ TEST(ConcurrencyKeywords, AreNotIdentifiers) {
   };
   for (const auto &c : cases)
     expectRejected(c[0], c[1]);
+}
+
+// `mut` is an identifier: before a type's name it is a second name, which
+// nothing takes there.  `mutable` is the keyword, and names nothing.
+TEST(Qualifiers, MutIsNoQualifier) {
+  expectRejected("class Node { n: int; }\n"
+                 "fn f(a: shared mut Node) { }\n"
+                 "fn main() -> int { return 0; }\n",
+                 "2:20: error: unexpected identifier 'Node'; expected ')' to "
+                 "close the parameter list");
+  expectRejected("fn main() -> int {\n  let mutable = 2;\n  return 0;\n}\n",
+                 "2:7: error: unexpected 'mutable'; expected a variable name "
+                 "after 'let'");
 }

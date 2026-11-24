@@ -219,7 +219,7 @@ impl Task {
 
 fn main() -> int {
   let a = Task("water the plants", parsePriority("low"));
-  let b: mut = Task("fix the leak", parsePriority("!"));
+  let b: mutable = Task("fix the leak", parsePriority("!"));
   let c = Task("read a book", parsePriority("whenever"));
   b.complete();
   io::println(a);
@@ -389,7 +389,7 @@ What a binding may do with what it names depends on what is matched:
   [Cloneable](06-traits.md#cloneable).
 - `match move x` binds owned parts instead: `x` is moved at the `match`, as by `move x`,
   and the arm owns what it binds, which it may store, return or hand on with `move d`;
-  under a `mut` subject the binding writes the object too.
+  under a `mutable` subject the binding writes the object too.
 - On a temporary (a call's result, a constructor), the binding owns what it binds, as a
   local does.
 - A Copyable part (a number, a `bool`, an enum of such fields) is copied into the
@@ -397,8 +397,8 @@ What a binding may do with what it names depends on what is matched:
 
 An owned binding is in the subject's form ([A qualified subject](#a-qualified-subject)):
 under a bare subject it reads the object and calls its `view fn` methods (`'d' is immutable
-(a 'Dog'; write 'mut Dog' to change it); cannot assign to its field 'n'`). To change the
-subject's object in place, match on a `mut` variable or field with an `inout` binding
+(a 'Dog'; write 'mutable Dog' to change it); cannot assign to its field 'n'`). To change the
+subject's object in place, match on a `mutable` variable or field with an `inout` binding
 ([Borrowing the subject](#borrowing-the-subject)).
 
 ```pkn
@@ -411,7 +411,7 @@ fn keep(d: Dog) -> int { return d.n; }
 fn show(d: view Dog) -> int { return d.n; }
 
 fn main() -> int {
-  let a: mut Animal = Dog(1);
+  let a: mutable Animal = Dog(1);
   match a {
     d: Dog { io::println(show(d)); }               // a borrow: a keeps the Dog
     _ { }
@@ -438,7 +438,7 @@ class Dog : Animal { }
 fn keep(d: Dog) -> int { return d.n; }
 
 fn main() -> int {
-  let a: mut Animal = Dog(1);
+  let a: mutable Animal = Dog(1);
   match a {
     d: Dog {
       d.n = 2;
@@ -480,10 +480,10 @@ variant without fields and `_` do not bind.
 A binding holds its subject's [form](19-concurrency.md#who-holds-an-object-the-qualifiers),
 as a part of it does. A downcast of a `shared Animal` binds a `shared Dog`: like any
 `shared` reference it is Copyable, so the arm may store it or hand it on, and it reads the
-object. On a `shared mut Animal`, the binding writes the object too.
+object. On a `shared mutable Animal`, the binding writes the object too.
 
-You may write the form on the arm, `d: shared Dog`. It must then be the subject's, `mut`
-included: `d: mut Dog` takes a `mut` subject, such as a `mut` variable or a call's `inout`
+You may write the form on the arm, `d: shared Dog`. It must then be the subject's, `mutable`
+included: `d: mutable Dog` takes a `mutable` subject, such as a `mutable` variable or a call's `inout`
 result. An arm with no binding follows the same rule
 (`the arm matches part of a 'shared Animal': its type is 'shared Dog', not 'atomic shared
 Dog'`).
@@ -496,14 +496,14 @@ class Dog : Animal { }
 
 fn main() -> int {
   let s: shared Animal = Dog(1);
-  let m: shared mut Animal = Dog(2);
+  let m: shared mutable Animal = Dog(2);
   kept: shared Dog? = None;
   match s {
     d: Dog { kept = d; }             // a 'shared Dog', copied out
     _ { }
   }
   match m {
-    d: shared mut Dog { d.n = 3; }   // the form, written
+    d: shared mutable Dog { d.n = 3; }   // the form, written
     _ { }
   }
   match kept { d: Dog { io::println(Str(d.n)); } None { } }
@@ -526,12 +526,12 @@ class Dog : Animal { }
 fn main() -> int {
   let s: shared Animal = Dog(1);
   match s {
-    d: shared mut Dog { }
+    d: shared mutable Dog { }
     _ { }
   }
   let a: Animal = Dog(2);
   match a {
-    d: mut Dog { }
+    d: mutable Dog { }
     _ { }
   }
   return 0;
@@ -541,33 +541,33 @@ fn main() -> int {
 Error:
 
 ```
-'d' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mut Dog'
-'d' binds part of an 'Animal': its type is 'Dog', not 'mut Dog'
+'d' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mutable Dog'
+'d' binds part of an 'Animal': its type is 'Dog', not 'mutable Dog'
 ```
 
 A [borrowing](#borrowing-the-subject) binding is in the subject's form too:
 - A `view` arm reads the subject in its form.
-- An `inout` arm of a `shared mut` subject names `shared mut` storage, so what
-  `mem::replace` takes out through it is a `shared mut` reference, never a unique one.
+- An `inout` arm of a `shared mutable` subject names `shared mutable` storage, so what
+  `mem::replace` takes out through it is a `shared mutable` reference, never a unique one.
 
 A borrowing arm takes no written qualifier: `'view' arm 'd' takes no qualifier ('shared
-mut'): a borrow binds the subject whatever its form`. In a template's code, a binding keeps
+mutable'): a borrow binds the subject whatever its form`. In a template's code, a binding keeps
 the form a type argument gave. For example, `v: T` on a `view T?` subject, with T =
-`shared mut Node`, is a `shared mut Node`, and its `clone()` is a copy of the reference
+`shared mutable Node`, is a `shared mutable Node`, and its `clone()` is a copy of the reference
 ([Qualifiers in a type](19-concurrency.md#qualifiers-in-a-type)).
 
 A conditional subject is held in one form, so each of its branches must have it. A
 `None` branch is allowed, and so is a new object becoming `shared`:
 
 ```
-'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one
+'n' binds part of a conditional whose branches have two forms, 'shared mutable Base' and 'atomic shared Base': a binding holds one
 ```
 
 A `locked` subject's class is its contents' class, and only a `lock` block reaches the
-contents ([`locked mut` cells](19-concurrency.md#locked-mut-cells-and-lock-blocks)). So a
+contents ([`locked mutable` cells](19-concurrency.md#locked-mutable-cells-and-lock-blocks)). So a
 type arm on a cell is an error, and so is a value-mode `match` on a `locked Str`: `'c' is
 'locked': reach its contents in 'lock c as c: view { }' (or 'inout')`. Match the block's binding instead, `lock c as v: view { match v { … }
-}`. On an optional cell, `locked mut Node?`, the arm naming `Node` binds the cell, a handle
+}`. On an optional cell, `locked mutable Node?`, the arm naming `Node` binds the cell, a handle
 that a `lock` block opens.
 
 ### Borrowing the subject
@@ -611,7 +611,7 @@ class Dog : Animal {}
 impl Dog { fn __init__(n: int) { __super__(n); } }
 
 fn main() -> int {
-  a: mut Animal = Dog(1);
+  a: mutable Animal = Dog(1);
   match a {
     d: inout Dog { d = Dog(d.n + 1); }   // a now holds the new Dog
     _ { }
@@ -628,10 +628,10 @@ Output:
 ```
 
 - The subject must be a place an `inout` argument could be: a variable, a field or a call's
-  `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), holding a `mut`
-  object when it holds one (`a: mut Animal` above), not another expression (`'inout' arm
+  `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), holding a `mutable`
+  object when it holds one (`a: mutable Animal` above), not another expression (`'inout' arm
   'd' needs a variable or a field to match on`), `self`, a `let` local, an object that is
-  not `mut` (`'a' is immutable (an 'Animal'; write 'mut Animal' to change it); it cannot be
+  not `mutable` (`'a' is immutable (an 'Animal'; write 'mutable Animal' to change it); it cannot be
   bound by 'inout' arm 'd'`) or a `view` (`'v' is a 'view' parameter; it cannot be bound by
   'inout' arm 'd'`).
   While the binding is live, what the call borrowed (its receiver, its `inout` arguments)
@@ -937,9 +937,9 @@ match f.readln() {
 | Binding redeclaration | An arm body redeclares the arm's binding name |
 | Binding named `self` | In a method's body, an arm's binding is named `self`, which names the method's object or receiver (`'self' cannot be used as a variable name in method 'm' of class 'C'; it is the implicit receiver`) |
 | `view` binding changed or passed on | A `name: view T` binding is assigned, written through, passed to a parameter that is not `view`, or stored; or the subject's variable changes while it is live |
-| Arm qualifier not the subject's form | A qualifier written on a type arm, with a binding or without, is not the subject's form, `mut` included (`'d' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mut Dog'`, `the arm matches part of ...`) |
-| Qualifier on a borrowing arm | A `view` or `inout` arm is written with a qualifier (`'view' arm 'd' takes no qualifier ('shared mut'): a borrow binds the subject whatever its form`) |
-| Conditional subject of two forms | A binding's subject is a conditional whose branches are held in two forms (`'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one`) |
+| Arm qualifier not the subject's form | A qualifier written on a type arm, with a binding or without, is not the subject's form, `mutable` included (`'d' binds part of a 'shared Animal': its type is 'shared Dog', not 'shared mutable Dog'`, `the arm matches part of ...`) |
+| Qualifier on a borrowing arm | A `view` or `inout` arm is written with a qualifier (`'view' arm 'd' takes no qualifier ('shared mutable'): a borrow binds the subject whatever its form`) |
+| Conditional subject of two forms | A binding's subject is a conditional whose branches are held in two forms (`'n' binds part of a conditional whose branches have two forms, 'shared mutable Base' and 'atomic shared Base': a binding holds one`) |
 | Cell's contents outside a `lock` | A type arm tests the class of a `locked` subject, or a value-mode `match` compares one (`'c' is 'locked': reach its contents in 'lock c as c: view { }' (or 'inout')`) |
 | `inout` binding of something else | A `name: inout T` arm's subject is not a variable, a field or a call's `inout` result, is `self`, a `let` local, a `view` or a `weak` reference, or is an optional primitive or enum; or the subject's variable is used while the binding is live |
 | Arm body type error | Any type error inside an arm body |

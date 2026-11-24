@@ -39,10 +39,10 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
       view fn volume() -> int { return self.x * self.y * self.z; }
     }
     fn main() -> int {
-      p: mut = Point::origin();
+      p: mutable = Point::origin();
       p.shift(2);
       io::println(p.label("p=") + " " + Str(p.sum()));
-      q: mut = Point3::unit();
+      q: mutable = Point3::unit();
       q.shift(1);
       base: view Point = q;
       io::println(base.label("q=") + " " + Str(q.volume()) + " " +
@@ -79,9 +79,9 @@ TEST(Impl, GenericBlocks) {
     class Holder { b: Box<Str>; }
     impl Holder { fn __init__() { self.b = Box("s"); } }
     fn main() -> int {
-      b: mut = Box(1);
+      b: mutable = Box(1);
       b.set(b.get() + 1);
-      h: mut = Holder();
+      h: mutable = Holder();
       h.b.set("t");
       io::println(label(b) + " " + label(h.b));
       return 0;
@@ -112,7 +112,7 @@ impl Bag {
     self.n = 0;
   }
   static fn of(a: Str, b: Str) -> Bag {
-    bag: mut = Bag();
+    bag: mutable = Bag();
     bag.add(move a);
     bag.add(move b);
     return bag;
@@ -129,9 +129,9 @@ import shapes;
 class Tagged : shapes::Bag {}
 impl Tagged { fn __init__() { __super__(); } }
 fn main() -> int {
-  b: mut = shapes::Bag::of("a", "b");
+  b: mutable = shapes::Bag::of("a", "b");
   b.add("c");
-  t: mut = Tagged();
+  t: mutable = Tagged();
   t.add("x");
   io::println(b.first() + " " + Str(b.size()) + " " + t.first());
   return 0;
@@ -164,9 +164,9 @@ fn mk() -> Box<int> { return Box<int>(41); }
   std::ofstream(dir / "main.pkn") << R"(import ::io;
 import gen;
 fn main() -> int {
-  s: mut = gen::Box("s");
+  s: mutable = gen::Box("s");
   s.set("t");
-  n: mut = gen::mk();
+  n: mutable = gen::mk();
   n.set(n.get() + 1);
   io::println(s.get() + " " + Str(n.get()));
   return 0;

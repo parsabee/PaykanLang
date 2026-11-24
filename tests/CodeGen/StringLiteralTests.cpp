@@ -57,7 +57,7 @@ fn @main() -> i64 {
 
 // A change in place is its owner's alone, through every kind of place a
 // `Str` is held in: the literal reads the same at its next evaluation (each
-// is evaluated twice here), because a string that gains `mut` by `move`, or
+// is evaluated twice here), because a string that gains `mutable` by `move`, or
 // is stored in a field or an element, is one of its own from there on.
 TEST(StringLiterals, AChangeInPlaceIsItsOwnersAlone) {
   LeakGuard g;
@@ -66,36 +66,36 @@ struct P { name: Str; n: int; }
 class C { name: Str; }
 class D { p: P; t: (Str, int); }
 fn lit() -> Str { return "lit"; }
-fn litMut() -> mut Str { let a = "tmp"; return move a; }
+fn litMutable() -> mutable Str { let a = "tmp"; return move a; }
 fn grow(s: inout Str) { s.concat("+"); }
-fn own(s: mut Str) -> Str { s.concat("~"); return move s; }
+fn own(s: mutable Str) -> Str { s.concat("~"); return move s; }
 fn main() -> int {
   for round in 0..2 {
     let a = "abc";
-    b: mut = move a;              // gains mut by move
+    b: mutable = move a;              // gains mutable by move
     b.concat("!");
     u = ("tup", 1);               // an element is written as its variable is
     u.0.concat("?");
     p = P("pp", 1);
     p.name.concat("#");
-    c: mut = C(lit());            // a unique field, as its object is
+    c: mutable = C(lit());            // a unique field, as its object is
     c.name.concat("$");
-    d: mut = D(P("dp", 2), ("dt", 3));
+    d: mutable = D(P("dp", 2), ("dt", 3));
     d.p.name.concat("%");
     d.t.0.concat("^");
-    x: mut Str = lit();
+    x: mutable Str = lit();
     x.concat("&");
     grow(x);
     arr = ["e1", "e2"];
     arr[round].concat("*");
     let y = own("own");
-    z: mut = litMut();
+    z: mutable = litMutable();
     z.concat("@");
-    fresh: mut Str = "new";       // a literal in a `mut` slot is a new string
+    fresh: mutable Str = "new";       // a literal in a `mutable` slot is a new string
     fresh.concat(".");
     io::println(b + " " + u.0 + " " + p.name + " " + c.name + " " + d.p.name + " " + d.t.0 + " " + x + " " + arr[0] + arr[1] + " " + y + " " + z + " " + fresh);
   }
-  io::println(lit() + " " + litMut() + " " + Str(litMut().len()));
+  io::println(lit() + " " + litMutable() + " " + Str(litMutable().len()));
   return 0;
 }
 )pkn");
@@ -115,30 +115,30 @@ TEST(StringLiterals, ASharedStringIsItsHoldersOwn) {
   auto r = compileAndRun(R"pkn(import ::io;
 class Box<T> { v: T; }
 impl Box<T> { fn __init__(v: T) { self.v = move v; } }
-class K { name: shared mut Str; }
-struct S { name: shared mut Str; n: int; }
+class K { name: shared mutable Str; }
+struct S { name: shared mutable Str; n: int; }
 fn lit() -> Str { return "lit"; }
-fn made() -> shared mut Str { return "ret"; }
-fn madeVia() -> shared mut Str { let a = "via"; return move a; }
-fn take(s: shared mut Str) -> shared mut Str { s.concat("+"); return s; }
+fn made() -> shared mutable Str { return "ret"; }
+fn madeVia() -> shared mutable Str { let a = "via"; return move a; }
+fn take(s: shared mutable Str) -> shared mutable Str { s.concat("+"); return s; }
 fn pick(c: bool) -> Str { return if c then "yes" else "no"; }
 fn main() -> int {
   for round in 0..2 {
-    let t1: (shared mut Str, int) = ("tup", 1);
+    let t1: (shared mutable Str, int) = ("tup", 1);
     let u1 = t1; t1.0.concat("!");
-    let a1: shared mut Str[2] = ["e0", "e1"];
+    let a1: shared mutable Str[2] = ["e0", "e1"];
     let b1 = a1; a1[0].concat("!");
     let k = K("field"); let kn = k.name; k.name.concat("!");
     let s = S("sfield", 1); let s2 = s; s.name.concat("!");
-    let o: shared mut Str? = "opt";
+    let o: shared mutable Str? = "opt";
     let o2 = o;
     match o { x: Str { x.concat("!"); } _ {} }
-    let g = Box<shared mut Str>("gen"); let gv = g.v; g.v.concat("!");
+    let g = Box<shared mutable Str>("gen"); let gv = g.v; g.v.concat("!");
     let r = made(); let r2 = r; r.concat("!");
     let v = madeVia(); let v2 = v; v.concat("!");
     let p = take("arg");
-    let q: shared mut Str = pick(round == 0); let q2 = q; q.concat("!");
-    w: shared mut Str = "first"; let w2 = w; w = "second"; let w3 = w; w.concat("!");
+    let q: shared mutable Str = pick(round == 0); let q2 = q; q.concat("!");
+    w: shared mutable Str = "first"; let w2 = w; w = "second"; let w3 = w; w.concat("!");
     io::println(u1.0 + " " + b1[0] + " " + kn + " " + s2.name + " " + o2.toString() + " " + gv + " " + r2 + " " + v2 + " " + p + " " + q2 + " " + w2 + " " + w3);
   }
   io::println(lit() + " " + pick(True) + " " + pick(False));
@@ -164,7 +164,7 @@ TEST(StringLiterals, AWeakReferenceSeesASharedStringGo) {
 class Holder { s: shared Str?; }
 fn name() -> Str { return "named"; }
 fn main() -> int {
-  h: mut = Holder("held");
+  h: mutable = Holder("held");
   w: weak = h.s;
   let before = if w == None then "gone" else "there";
   h.s = None;
@@ -209,18 +209,18 @@ fn next(n: inout int) -> int { n = n + 1; return 0; }
 fn main() -> int {
   for round in 0..2 {
     // an earlier read of a place names the string a later change is made to
-    s: mut Str = lit();
+    s: mutable Str = lit();
     io::println(s + grow(s));
-    c: mut = C(lit());
+    c: mutable = C(lit());
     io::println(c.name + c.bang());
     // an argument that replaces the receiver's place
     c.name.concat(c.reset());
     io::println(c.name);
-    r: mut Str = lit();
+    r: mutable Str = lit();
     r.concat(repl(r));
     io::println(r);
     // through chains, and a tuple lent to an argument
-    d: mut = D(C(lit()));
+    d: mutable = D(C(lit()));
     d.c.name.concat("+a");
     objs = [C(lit()), C(lit())];
     n = 0;
@@ -238,17 +238,17 @@ fn main() -> int {
     (if round == 0 then s else r).concat("~");
     io::println(objs[0].name + " " + s + " " + r + " " + Str(n));
     // through natives, an `inout` binding and a payload
-    x: mut Str = lit();
+    x: mutable Str = lit();
     let old = mem::replace(x, "new");
     x.concat("!");
-    y: mut Str = lit();
+    y: mutable Str = lit();
     mem::swap(x, y);
     y.concat("#");
     set(x, "set");
     x.concat("$");
     m = Maybe::Just("just");
     match m { j: inout Just { j.text.concat("%"); } _ {} }
-    shown: mut Str = "nothing";
+    shown: mutable Str = "nothing";
     match m { j: Just { shown = j.text.clone(); } _ {} }
     io::println(old + " " + x + " " + y + " " + shown);
   }
@@ -267,53 +267,53 @@ fn main() -> int {
   g.expectNoLeaks("NothingTellsALiteralsStringFromAnother");
 }
 
-// A `mut` parameter is the function's own string whoever calls it (#363):
+// A `mutable` parameter is the function's own string whoever calls it (#363):
 // a function value's type and an overridden method's signature do not say
-// `mut`, and a method named `equals` is lent its argument, so the callers
+// `mutable`, and a method named `equals` is lent its argument, so the callers
 // cannot all make it one.  The second review's findings.
-TEST(StringLiterals, AMutParameterIsItsFunctionsOwn) {
+TEST(StringLiterals, AMutableParameterIsItsFunctionsOwn) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
 struct S { n: int; }
 impl S {
-  view fn equals(s: mut Str) -> bool { s.concat("!"); io::println(s); return True; }
-  view fn same(s: shared mut Str) -> bool { s.concat("="); io::println(s); return True; }
+  view fn equals(s: mutable Str) -> bool { s.concat("!"); io::println(s); return True; }
+  view fn same(s: shared mutable Str) -> bool { s.concat("="); io::println(s); return True; }
 }
 class K {
   n: int;
-  view fn equals(other: mut Obj) -> bool {
+  view fn equals(other: mutable Obj) -> bool {
     match other { s: inout Str { s.concat("!"); io::println(s); } _ {} }
     return True;
   }
 }
 class B { view fn take(s: Str) -> Str { return s; } }
-class D : B { view fn take(s: mut Str) -> Str { s.concat("!"); return move s; } }
+class D : B { view fn take(s: mutable Str) -> Str { s.concat("!"); return move s; } }
 class C { name: Str; }
-impl C { static fn make(s: mut Str) -> Str { s.concat("s"); return move s; } }
+impl C { static fn make(s: mutable Str) -> Str { s.concat("s"); return move s; } }
 struct Ops { f: (Str) -> Str; }
 fn lit() -> Str { return "lit"; }
-fn app(s: mut Str) -> Str { s.concat("!"); return move s; }
-fn apply(f: (mut Str) -> Str, s: Str) -> Str { return f(move s); }
+fn app(s: mutable Str) -> Str { s.concat("!"); return move s; }
+fn apply(f: (mutable Str) -> Str, s: Str) -> Str { return f(move s); }
 fn twice<T>(f: (T) -> T, x: T) -> T { return f(f(move x)); }
-fn opt(o: mut Obj?) -> Str {
+fn opt(o: mutable Obj?) -> Str {
   match o { s: inout Str { s.concat("?"); return s.clone(); } _ {} }
   return "none";
 }
-async fn later(s: mut Str) -> Str { s.concat("@"); return move s; }
+async fn later(s: mutable Str) -> Str { s.concat("@"); return move s; }
 fn main() -> int {
   for round in 0..2 {
     // a function value: a named function's, a lambda, a parameter, a field,
     // an element, a static fn's, a generic function's parameter
     let f = app;
-    let g = fn(s: mut Str) -> Str { s.concat("~"); return move s; };
+    let g = fn(s: mutable Str) -> Str { s.concat("~"); return move s; };
     let o = Ops(app);
     let fs = [app, app];
     let m = C::make;
     io::println(f("f") + f(lit()) + g("g") + g(lit()) + apply(app, "p") +
                 apply(g, lit()) + o.f("o") + fs[round]("e") + m("m") +
                 twice(app, "t"));
-    // an override that adds `mut`, called through its base
-    b: mut B = D();
+    // an override that adds `mutable`, called through its base
+    b: mutable B = D();
     io::println(b.take("b") + b.take(lit()));
     // a method named `equals` is lent its argument, as `==` lends it
     let v = S(1);
@@ -359,7 +359,7 @@ fn main() -> int {
                       "x?nonenonelit?\n"
                       "a@lit@\n"
                       "litfgpoemtbvwkxa\n");
-  g.expectNoLeaks("AMutParameterIsItsFunctionsOwn");
+  g.expectNoLeaks("AMutableParameterIsItsFunctionsOwn");
 }
 
 // A `Str` held as an `Obj` is stored as a `Str` is (#363): a `match` gives
@@ -373,27 +373,27 @@ fn lit() -> Str { return "lit"; }
 fn objOf() -> Obj { return "obj"; }
 fn st(w: bool) -> Str { return if w then "gone" else "there"; }
 fn g(o: Obj) -> Str {
-  p: mut Obj = move o;
+  p: mutable Obj = move o;
   match p { s: inout Str { s.concat("?"); return s.clone(); } _ {} }
   return "d";
 }
 fn main() -> int {
   for round in 0..2 {
     let o: Obj = "lit";
-    p: mut Obj = move o;
+    p: mutable Obj = move o;
     match p { s: inout Str { s.concat("!"); } _ {} }
-    q: mut Obj = objOf();
+    q: mutable Obj = objOf();
     match q { s: inout Str { s.concat("1"); } _ {} }
     let o2: Obj = lit();
-    h: mut = H(move o2);
+    h: mutable = H(move o2);
     match h.o { s: inout Str { s.concat("2"); } _ {} }
     let o3: Obj = lit();
-    let a: shared mut Obj = move o3;
+    let a: shared mutable Obj = move o3;
     let b = a;
     match a { s: Str { s.concat("3"); } _ {} }
     l = cl::List<Obj>();
     l.push("lo");
-    e: mut = l.pop();
+    e: mutable = l.pop();
     match e { s: inout Str { s.concat("4"); } _ {} }
     io::println(p.toString() + " " + q.toString() + " " + h.o.toString() + " " +
                 b.toString() + " " + e.toString() + " " + g("arg") + g(lit()));
@@ -419,26 +419,27 @@ fn main() -> int {
 }
 
 // A variable returned into a result of another form, `shared`, `shared
-// mut`, `locked mut` or `atomic shared`, is a string of its own from there
+// mutable`, `locked mutable` or `atomic shared`, is a string of its own from
+// there
 // (#363): its box is taken without the dispatch's hook (emitAsSharedRaw).
 TEST(StringLiterals, AReturnedVariableIsUnsharedForItsResult) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
 fn lit() -> Str { return "lit"; }
 fn st(w: bool) -> Str { return if w then "gone" else "there"; }
-fn sh(s: Str) -> shared mut Str { return s; }
-fn arrow(s: Str) -> shared mut Str => s;
-fn loc() -> shared mut Str { let t = lit(); return t; }
-fn pick(c: bool, s: Str, t: Str) -> shared mut Str { return if c then s else t; }
-fn un(o: Str?) -> shared mut Str {
+fn sh(s: Str) -> shared mutable Str { return s; }
+fn arrow(s: Str) -> shared mutable Str => s;
+fn loc() -> shared mutable Str { let t = lit(); return t; }
+fn pick(c: bool, s: Str, t: Str) -> shared mutable Str { return if c then s else t; }
+fn un(o: Str?) -> shared mutable Str {
   match move o { s: Str { return s; } _ {} }
   return "none";
 }
-fn opt(o: Str?) -> shared mut Str? { return o; }
-fn lk(s: Str) -> locked mut Str { return s; }
+fn opt(o: Str?) -> shared mutable Str? { return o; }
+fn lk(s: Str) -> locked mutable Str { return s; }
 fn fr(s: Str) -> atomic shared Str { return s; }
 fn weakly(s: Str) -> shared Str? { return s; }
-fn mutOf(s: Str) -> mut Str { return s; }
+fn mutableOf(s: Str) -> mutable Str { return s; }
 fn main() -> int {
   for round in 0..2 {
     let a = sh("a");
@@ -459,7 +460,7 @@ fn main() -> int {
     let f = opt("f");
     let f2 = f;
     match f { z: Str { z.concat("6"); } _ {} }
-    let h = fn(s: Str) -> shared mut Str => s;
+    let h = fn(s: Str) -> shared mutable Str => s;
     let i = h("i");
     let i2 = i;
     i.concat("7");
@@ -468,8 +469,8 @@ fn main() -> int {
     lock cell as v: inout { v.concat("!"); io::println(v); }
     let fz = fr("frozen");
     let fz2 = fz;
-    mutOf("m").concat("8");
-    m: mut = mutOf("m");
+    mutableOf("m").concat("8");
+    m: mutable = mutableOf("m");
     m.concat("9");
     io::println(fz + fz2 + m);
     x: shared Str? = weakly("w");
@@ -503,12 +504,12 @@ TEST(StringLiterals, AStringTemporaryIsMoved) {
 fn lit() -> Str { return "lit"; }
 fn main() -> int {
   for r in 0..2 {
-    x: mut Str = move "lit";
+    x: mutable Str = move "lit";
     x.concat("!");
-    y: mut Str = move ("a" + Str(r));
+    y: mutable Str = move ("a" + Str(r));
     y.concat("?");
     let z: Str = move "bare";
-    w: mut = move lit();
+    w: mutable = move lit();
     w.concat("#");
     io::println(x + y + z + w + " " + lit() + "lit" + "bare");
   }

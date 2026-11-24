@@ -355,9 +355,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// @p stored: the slot is one a string may be changed in place through
   /// whatever its own qualifier says: a field, an element or a payload
   /// (written as what holds it is), what an `inout` binding names, or a
-  /// native function's parameter (#363, Expr::isUnshared).  A `mut`
+  /// native function's parameter (#363, Expr::isUnshared).  A `mutable`
   /// parameter is the callee's to make its own (the lowering's
-  /// declareParam): not every caller sees that it is `mut`.
+  /// declareParam): not every caller sees that it is `mutable`.
   bool checkQualifiedFlow(ast::Qualifier dst, ast::Expr *src,
                           const std::string &what, ast::SourceLocation loc,
                           bool implicitMove = false, bool materialize = true,
@@ -411,7 +411,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   std::string constPlace(const ast::Expr *e);
   /// Whether the objects a value at @p e holds may be written: the value's
   /// variable is not `let` (nor a borrow, a loop's copy or a capture), or
-  /// the object it is part of is `mut`.
+  /// the object it is part of is `mutable`.
   bool valueRootWritable(const ast::Expr *e);
   /// Whether a value of @p ty read from a place is copied (the design's
   /// Copyable): a number, bool, char, an enum of Copyable payloads, a
@@ -420,7 +420,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// When not, @p why (if given) names the move-only part.
   bool isCopyable(ast::Type *ty, std::string *why = nullptr);
   /// isCopyable of a part held with qualifier @p q: a `shared` reference
-  /// or a handle copies, a unique one (`mut` or not) does not.
+  /// or a handle copies, a unique one (`mutable` or not) does not.
   bool isCopyablePart(ast::Type *ty, ast::Qualifier q,
                       std::string *why = nullptr);
   /// Whether a value of @p ty has a `clone()` (the built-in `Cloneable`,
@@ -466,8 +466,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// and no borrow reaches a `locked` cell.
   /// A store of @p src into @p what, a weak reference of type @p slotTy in
   /// form @p want: a `weak` one (`shared`) names a `shared` object and a
-  /// `weak mut` one (`shared mut`) a `shared mut` object, so @p src is held
-  /// in that form (or it is None).
+  /// `weak mutable` one (`shared mutable`) a `shared mutable` object, so @p src
+  /// is held in that form (or it is None).
   bool checkWeakStore(const ast::Expr *src, ast::Qualifier want,
                       ast::Type *slotTy, const std::string &what,
                       ast::SourceLocation loc);
@@ -1197,7 +1197,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   enum class PartKind {
     TypeArgument, // `List<shared Node>`
     Element,      // `(int, shared Node)`, `shared Node[4]`, `shared Node[]`
-    FunctionPart, // `(shared Node) -> shared mut Node`
+    FunctionPart, // `(shared Node) -> shared mutable Node`
   };
   /// One part being resolved: its kind, and the qualifier written (or
   /// substituted) on it.
@@ -1509,7 +1509,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
                    ast::Type *bindTy, ast::Qualifier written = {});
   /// Whether a qualifier @p written on a type arm of type @p bindTy is the
-  /// form of @p subject (#368), `mut` included, else an error at @p loc
+  /// form of @p subject (#368), `mutable` included, else an error at @p loc
   /// that @p who ("'n' binds", "the arm matches") part of the subject.
   bool checkArmForm(const ast::Expr *subject, ast::Type *bindTy,
                     ast::Qualifier written, const std::string &who,
@@ -2129,7 +2129,7 @@ private:
                        ast::SourceLocation loc);
   /// A call of @p method, a `shared fn`, on the receiver of @p call: the
   /// method hands its `self` on, so the receiver is held in that shared
-  /// form (`shared mut T`, `shared T` for a `shared view fn`), or is a
+  /// form (`shared mutable T`, `shared T` for a `shared view fn`), or is a
   /// temporary nothing else holds.  True for any other method.
   bool checkSharedReceiver(const ast::MethodCallExpr *call,
                            const ast::MethodDecl *method,
@@ -2336,8 +2336,8 @@ private:
   std::vector<std::pair<const std::vector<ast::Stmt *> *, size_t>> StmtCursor;
   /// How the storage @p place names is reached when the function's frame
   /// does not own it (docs/design/concurrency.md, "Borrows across a wait"):
-  /// `through 'self'`, `through 'shared mut' reference 's'`, `through 'view'
-  /// parameter 'h'`; "" for an owned path, the frame's own `inout`
+  /// `through 'self'`, `through 'shared mutable' reference 's'`, `through
+  /// 'view' parameter 'h'`; "" for an owned path, the frame's own `inout`
   /// parameter (which its caller checked) and a struct method's `self`,
   /// followed by unique fields and elements.  The slot a place names is
   /// where the place is, whatever reference it holds; a part of what a

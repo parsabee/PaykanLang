@@ -162,7 +162,7 @@ impl Counter {
     }
     return self.n;
   }
-  static fn twice(c: mut Counter) -> int { return c.run(2); }
+  static fn twice(c: mutable Counter) -> int { return c.run(2); }
 }
 class ByTwo : Counter {
   fn step() -> int { return 2; }
@@ -171,8 +171,8 @@ class ByTen : Counter {
   fn step() -> int { return 10; }
 }
 fn main() -> int {
-  a: mut Counter = ByTwo();
-  b: mut Counter = ByTen();
+  a: mutable Counter = ByTwo();
+  b: mutable Counter = ByTen();
   io::println(Str(a.run(3)) + " " + Str(Counter::twice(move b)));
   return 0;
 }
@@ -236,27 +236,28 @@ TEST(PureVirtual, AnInitCannotGiveSelfAway) {
 class Panel { kid: weak Widget?; }
 class Widget { id: int; }
 impl Widget {
-  fn __init__(p: shared mut Panel) { self.id = 1; p.kid = self; }
+  fn __init__(p: shared mutable Panel) { self.id = 1; p.kid = self; }
 }
-fn main() -> int { p: shared mut = Panel(None); w = Widget(p); return 0; }
+fn main() -> int { p: shared mutable = Panel(None); w = Widget(p); return 0; }
 )");
   EXPECT_FALSE(weak.CompileOk);
-  EXPECT_NE(weak.StdErr.find("cannot store 'self' (a 'mut Widget') in field "
-                             "'kid', a 'weak Widget?': a 'weak' reference "
-                             "names a 'shared' object"),
-            std::string::npos)
+  EXPECT_NE(
+      weak.StdErr.find("cannot store 'self' (a 'mutable Widget') in field "
+                       "'kid', a 'weak Widget?': a 'weak' reference "
+                       "names a 'shared' object"),
+      std::string::npos)
       << weak.StdErr;
   auto r = compileAndRun(R"(
 class Panel { kid: Widget?; }
 impl Panel { fn add(w: Widget) { self.kid = move w; } }
 class Widget { id: int; }
 impl Widget {
-  fn __init__(p: shared mut Panel) { self.id = 1; p.add(self); }
+  fn __init__(p: shared mutable Panel) { self.id = 1; p.add(self); }
 }
-fn main() -> int { p: shared mut = Panel(None); w = Widget(p); return 0; }
+fn main() -> int { p: shared mutable = Panel(None); w = Widget(p); return 0; }
 )");
   EXPECT_FALSE(r.CompileOk);
-  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mut Widget'); a "
+  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mutable Widget'); a "
                           "method borrows its receiver (a 'shared fn' hands "
                           "on a shared one)"),
             std::string::npos)
@@ -310,12 +311,12 @@ class Shape {
   view fn sides() -> int;
 }
 impl Shape {
-  fn __init__(b: shared mut Board) { self.n = 0; b.s = self; }
+  fn __init__(b: shared mutable Board) { self.n = 0; b.s = self; }
 }
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.CompileOk);
-  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mut Shape'); a "
+  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mutable Shape'); a "
                           "method borrows its receiver (a 'shared fn' hands "
                           "on a shared one)"),
             std::string::npos)
@@ -341,13 +342,13 @@ fn describe(o: view Obj) -> Str {
   }
 }
 fn main() -> int {
-  scene: mut = Scene(Rect("r", 1.0, 2.0), None);
+  scene: mutable = Scene(Rect("r", 1.0, 2.0), None);
   scene.extra = Square("s", 3.0);
   match scene.extra {
     e: Shape { io::println(e.report()); }
     None { io::println("none"); }
   }
-  box: mut = Box<Shape>(mem::replace<Shape>(scene.main, Square("m", 1.0)));
+  box: mutable = Box<Shape>(mem::replace<Shape>(scene.main, Square("m", 1.0)));
   pair: (Shape, int) = (mem::replace<Shape>(box.item, Square("i", 1.0)), 2);
   o: Obj = Square("t", 1.0);
   io::println(describe(pair.0) + ", " + describe(o) + ", " + describe(box));

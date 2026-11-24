@@ -2623,7 +2623,7 @@ class Towers {
   moves: int;
 }
 impl Towers {
-  fn pushDisk(disk: mut Disk, pile: int) {
+  fn pushDisk(disk: mutable Disk, pile: int) {
     let top = mem::take(self.piles[pile]);
     disk.next = move top;
     self.piles[pile] = move disk;
@@ -2632,7 +2632,7 @@ impl Towers {
     let top = mem::take(self.piles[pile]);
     match move top {
       d: Disk {
-        out: mut = move d;
+        out: mutable = move d;
         self.piles[pile] = mem::take(out.next);
         return move out;
       }
@@ -2669,7 +2669,7 @@ fn show(s: view Shape) -> Str {
 }
 fn main() -> int {
   // the Towers shape: a disk leaves a pile and joins another by moves
-  t: mut = Towers([None, None, None], 0);
+  t: mutable = Towers([None, None, None], 0);
   i = 7;
   while i > 0 {
     t.pushDisk(Disk(i, None), 0);
@@ -2678,11 +2678,11 @@ fn main() -> int {
   t.moveDisks(7, 0, 1);
   io::println(Str(t.moves) + " " + Str(t.height(0)) + " " + Str(t.height(1)));
   // objects and strings
-  a: mut Str = "a" + Str(1);
-  b: mut Str = "b";
+  a: mutable Str = "a" + Str(1);
+  b: mutable Str = "b";
   mem::swap(a, b);
   let was = mem::replace(a, "c");
-  o: mut Disk? = Disk(5, None);
+  o: mutable Disk? = Disk(5, None);
   let got = mem::take(o);
   match got {
     d: Disk { io::println(a + b + was + " " + Str(d.size) + " " + Str(o == None)); }
@@ -2709,7 +2709,7 @@ fn main() -> int {
   mem::swap(fa, fb);
   io::println(Str(x) + Str(y) + " " + Str(g) + Str(f) + " " + p.name + Str(p.disk.size) + q.name + Str(q.disk.size) + r.name + Str(r.disk.size) + " " + u.0 + Str(v.1) + " " + show(s1) + ", " + show(s2) + " " + Str(fa(3)) + " " + Str(fb(3)));
   // a container's value moved out of its node
-  l: mut = cl::LinkedList<Pair>();
+  l: mutable = cl::LinkedList<Pair>();
   l.pushBack(Pair("first", Disk(8, None)));
   l.pushBack(Pair("second", Disk(9, None)));
   let front = l.popFront();
@@ -5029,7 +5029,7 @@ TEST(Driver, ABorrowALaterArgumentWritesIsASemaError) {
 // `--emit-*` options that print code; `--check-only`, `--emit-ast` and
 // `--dump-ast` compile nothing and warn of nothing; at -O0 and at -O2 alike.
 // The program reads the elements as they were passed, run and built.  `c`
-// is `shared mut`: `sum` is passed both a slice of its field and `c`.
+// is `shared mutable`: `sum` is passed both a slice of its field and `c`.
 TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
   REQUIRE_BACKEND();
   auto dir = freshDir("slice_copy_warning");
@@ -5044,28 +5044,30 @@ TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
          "fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + "
          "x;\n"
          "\n"
-         "fn reset(c: shared mut Counts) -> int {\n"
+         "fn reset(c: shared mutable Counts) -> int {\n"
          "  c.xs = [0, 0, 0];\n"
          "  return 0;\n"
          "}\n"
          "\n"
-         "fn sum(xs: view int[], c: shared mut Counts) -> int => total(xs, "
+         "fn sum(xs: view int[], c: shared mutable Counts) -> int => total(xs, "
          "reset(c)); // xs as passed\n"
          "\n"
          "fn main() -> int {\n"
-         "  let c: shared mut = Counts([1, 2, 3]);\n"
+         "  let c: shared mutable = Counts([1, 2, 3]);\n"
          "  io::println(Str(sum(c.xs, c)) + \" \" + Str(sum(c.xs, c)));\n"
          "  return 0;\n"
          "}\n";
   const std::string warning =
       src +
-      ":14:62: warning: 'reset' in a later argument may write the elements "
+      ":14:66: warning: 'reset' in a later argument may write the elements "
       "of slice 'xs': they are copied to the heap before the call to "
       "'total'\n"
       " 13 | \n"
-      " 14 | fn sum(xs: view int[], c: shared mut Counts) -> int => total(xs, "
+      " 14 | fn sum(xs: view int[], c: shared mutable Counts) -> int => "
+      "total(xs, "
       "reset(c)); // xs as passed\n"
-      "    |                                                              ^~\n"
+      "    |                                                                  "
+      "^~\n"
       " 15 | \n";
   const std::string exe = (dir / "counts").string();
   const std::string pkm = (dir / "counts.pkm").string();

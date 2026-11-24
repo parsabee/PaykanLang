@@ -142,7 +142,7 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
     break;
   }
   // An immutable reference, or an immutable link on the way, never changes
-  // (the bare type is immutable; `mut` is written for the writes); a copy
+  // (the bare type is immutable; `mutable` is written for the writes); a copy
   // of what it names may still be taken.
   if (!copy)
     if (std::string why = constPlace(e); !why.empty())

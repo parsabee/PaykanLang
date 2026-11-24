@@ -32,11 +32,11 @@ class Holder {
   n: shared Node?;
 }
 
-fn keep(h: shared mut Holder, n: shared Node) {
+fn keep(h: shared mutable Holder, n: shared Node) {
   h.n = n;
 }
 
-fn handOn(h: shared mut Holder, n: shared Node) {
+fn handOn(h: shared mutable Holder, n: shared Node) {
   keep(h, n);
 }
 
@@ -56,7 +56,7 @@ fn name(h: view Holder) -> Str {
 }
 
 fn main() -> int {
-  let h: shared mut = Holder(None);
+  let h: shared mutable = Holder(None);
   let a: shared = Node("a");
   keep(h, a);
   io::println("kept: " + a.name + " " + name(h));

@@ -228,7 +228,7 @@ public:
   /// modes and result type (each canonical), creating it on first use.
   /// @p paramQuals and @p resultQual are the parts' qualifiers (#368):
   /// only a by-value parameter's and the result's shared forms are kept,
-  /// `mut` and a borrow's being the function's own business; all unique is
+  /// `mutable` and a borrow's being the function's own business; all unique is
   /// the same as none.
   FunctionType *getFunctionType(std::vector<Type *> paramTys,
                                 std::vector<ParamMode> modes, Type *retTy,

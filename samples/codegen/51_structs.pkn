@@ -3,7 +3,7 @@
 //            fields in order, or an `__init__` from an `impl` block), field
 //            reads `p.x` and assignments `p.x = 5` in place, copies (`q = p`
 //            copies the fields; `item.clone()` copies a struct holding a
-//            `Str`, and the clone's `shared mut` field names the same
+//            `Str`, and the clone's `shared mutable` field names the same
 //            object), structs as fields / parameters / results /
 //            array elements / tuple elements / type arguments, `impl` blocks
 //            (methods whose `self` is the receiver's storage, `view fn`,
@@ -45,7 +45,7 @@ class Node {
 // fields in order.
 struct Item {
   name: Str;
-  node: shared mut Node;
+  node: shared mutable Node;
   pos: (int, int);
 }
 
@@ -126,7 +126,7 @@ fn main() -> int {
   l.a.y = 0;                               // a field of a field
   io::println(show(l) + " " + Str(l.length2()));
 
-  let s: mut = Shape(Point::origin());
+  let s: mutable = Shape(Point::origin());
   s.at.shift(3, 4);
   io::println(s.at.moved(1, 1));
 

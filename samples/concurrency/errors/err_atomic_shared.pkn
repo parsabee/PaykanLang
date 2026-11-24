@@ -19,7 +19,7 @@ fn main() -> int {
   cfg.name = "x";                    // error: frozen
   cfg.rename("y");                   // error: `rename` is not a `view fn`
   let u: Config = cfg;               // error: none back
-  let m: mut Config = cfg;           // error: not into `mut` either
+  let m: mutable Config = cfg;       // error: not into `mutable` either
   let k: atomic shared int = 1;      // error: qualifies a reference
   return 0;
 }

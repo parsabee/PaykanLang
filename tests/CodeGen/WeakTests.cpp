@@ -4,7 +4,7 @@
 // references"): `weak` locals and fields read as None once their object is
 // gone, break reference cycles, and are released like any reference.  A
 // weak reference is a `shared` reference that owns nothing: `weak` names a
-// `shared` object, `weak mut` a `shared mut` one.
+// `shared` object, `weak mutable` a `shared mutable` one.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -54,23 +54,23 @@ TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
 
 // A `weak` field is the back link of a tree: the children hold their parent
 // weakly, so the tree is freed when its root is dropped, and a child whose
-// parent is gone sees None.  The nodes are `shared mut`: the tree and the
-// locals both hold them, the back link is `weak mut`, and `add`, which
-// stores `self` there, is a `shared fn` (its `self` is `shared mut`).
+// parent is gone sees None.  The nodes are `shared mutable`: the tree and the
+// locals both hold them, the back link is `weak mutable`, and `add`, which
+// stores `self` there, is a `shared fn` (its `self` is `shared mutable`).
 TEST(Weak, FieldsBreakCycles) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Node {
       name: Str;
-      parent: weak mut Node?;
-      first: shared mut Node?;
-      next: shared mut Node?;
+      parent: weak mutable Node?;
+      first: shared mutable Node?;
+      next: shared mutable Node?;
     }
     impl Node {
       fn __init__(name: Str) {
         self.name = move name; self.parent = None; self.first = None; self.next = None;
       }
-      shared fn add(child: shared mut Node) {
+      shared fn add(child: shared mutable Node) {
         child.parent = self;
         child.next = self.first;
         self.first = child;
@@ -83,13 +83,13 @@ TEST(Weak, FieldsBreakCycles) {
       }
     }
     fn main() -> int {
-      root: shared mut = Node("root");
-      a: shared mut = Node("a");
-      b: shared mut = Node("b");
+      root: shared mutable = Node("root");
+      a: shared mutable = Node("a");
+      b: shared mutable = Node("b");
       root.add(a);
       a.add(b);
       io::println(b.path());
-      w: weak mut = root;
+      w: weak mutable = root;
       root = Node("other");
       io::println(b.path());
       match w { n: Node { io::println(n.name); } None { io::println("root gone"); } }
@@ -103,8 +103,8 @@ TEST(Weak, FieldsBreakCycles) {
 
 // A lambda captures a `weak` variable weakly: a closure stored in the object
 // it refers to forms no cycle, and a call after the object is gone sees
-// None.  The button is `shared mut` and `wire` a `shared fn`, so `self` can
-// be named by a `weak mut` local.  The closure is taken out of the button
+// None.  The button is `shared mutable` and `wire` a `shared fn`, so `self` can
+// be named by a `weak mutable` local.  The closure is taken out of the button
 // (`mem::replace`) before the button goes.
 TEST(Weak, LambdasCaptureWeakly) {
   LeakGuard g;
@@ -120,7 +120,7 @@ TEST(Weak, LambdasCaptureWeakly) {
         self.onClick = fn() -> Str { return "unwired"; };
       }
       shared fn wire() {
-        me: weak mut Button? = self;
+        me: weak mutable Button? = self;
         self.onClick = fn() -> Str {
           match me {
             b: Button { return "clicked " + b.label; }
@@ -131,7 +131,7 @@ TEST(Weak, LambdasCaptureWeakly) {
       view fn click() -> Str { return self.onClick(); }
     }
     fn main() -> int {
-      b: shared mut = Button("ok");
+      b: shared mutable = Button("ok");
       io::println(b.click());
       b.wire();
       io::println(b.click());
@@ -148,17 +148,17 @@ TEST(Weak, LambdasCaptureWeakly) {
 
 // A lambda inside a lambda captures a `weak` variable weakly too, however
 // deep it is: the closure an outer one returns sees None once the object is
-// gone, and one stored in the object (a `shared mut` one, named by a `weak
-// mut` local) forms no cycle.  (Each inner closure held the object strongly:
-// `alive`, and two blocks leaked.)
+// gone, and one stored in the object (a `shared mutable` one, named by a `weak
+// mutable` local) forms no cycle.  (Each inner closure held the object
+// strongly: `alive`, and two blocks leaked.)
 TEST(Weak, NestedLambdasCaptureWeakly) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class B { n: int; f: (() -> Str)?; }
     fn state(w: view B?) -> Str => if w == None then "gone" else "alive";
     fn main() -> int {
-      b: shared mut = B(1, None);
-      me: weak mut = b;
+      b: shared mutable = B(1, None);
+      me: weak mutable = b;
       let outer = fn() -> () -> Str { return fn() -> Str => state(me); };
       let three = fn() -> () -> () -> Str {
         return fn() -> () -> Str { return fn() -> Str => state(me); };
@@ -195,10 +195,10 @@ TEST(Weak, PassedReturnedAndStored) {
     fn main() -> int {
       x: shared = P(5);
       w: weak = x;
-      h: mut = Holder();
+      h: mutable = Holder();
       h.item = w;
       h.peek = x;
-      h2: mut = Holder();
+      h2: mutable = Holder();
       h2.peek = h.peek;
       io::println(take(w) + " " + look(w) + " " + take(pass(w)) + " " + take(h.item) +
               " " + take(h.peek) + " " + take(h2.peek));
@@ -229,13 +229,13 @@ TEST(Weak, InheritedAndGenericFields) {
     class Cell<T> { value: T; next: weak Cell<T>?; }
     impl Cell<T> { fn __init__(v: T) { self.value = move v; self.next = None; } }
     fn main() -> int {
-      d: mut = Derived("d");
+      d: mutable = Derived("d");
       e: shared = Derived("e");
       d.owner = e;
       match d.owner { o: Derived { io::println(o.tag); } _ { io::println("other"); } }
       e = Derived("f");
       match d.owner { o: Base { io::println("alive"); } None { io::println("gone"); } }
-      c1: mut = Cell<int>(1);
+      c1: mutable = Cell<int>(1);
       c2: shared = Cell<int>(2);
       c1.next = c2;
       match c1.next { n: Cell<int> { io::println(Str(n.value)); } None { io::println("none"); } }
@@ -326,7 +326,7 @@ TEST(Weak, CursorInAViewMethod) {
       }
     }
     fn main() -> int {
-      c: mut = Chain();
+      c: mutable = Chain();
       io::println(show(c));
       c.push(1);
       c.push(2);

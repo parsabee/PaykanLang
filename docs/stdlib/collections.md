@@ -66,8 +66,8 @@ None
   its value cannot change, and 'push' is not a 'view fn'`), and an `inout` parameter
   changes the caller's in place; a `view` of one calls only its `view fn`s; and it is not
   an `Obj`: where one is needed, put the container in a
-  [`Box`](memory.md) (with `import ::memory as mem;`, `let b: mut = mem::Box(move xs);`), an
-  object whose `get()`, through a `mut` box, is the container itself (`b.get().push(1);`),
+  [`Box`](memory.md) (with `import ::memory as mem;`, `let b: mutable = mem::Box(move xs);`), an
+  object whose `get()`, through a `mutable` box, is the container itself (`b.get().push(1);`),
   and its own `toString()` is a struct's, which shows its private field. `listToString`
   prints a list's elements. A `LinkedList` is a class, with a class's rules.
 - **An element goes in by a move.** Every method that stores one takes it by value, and
@@ -232,8 +232,8 @@ linear in its length: a list of 400,000 ints takes a tenth of a second.
 
 A doubly linked list: both ends are O(1) to reach, add to and remove from. `contains` and
 `remove` walk the list. Its nodes are objects of its own, each owning the next one and
-reaching the one before it by a `weak mut` reference, as the list reaches its last node; a
-node is `shared mut`, so it is changed through either link. So a `LinkedList` has `shared`
+reaching the one before it by a `weak mutable` reference, as the list reaches its last node; a
+node is `shared mutable`, so it is changed through either link. So a `LinkedList` has `shared`
 and `weak` parts, and is not one of the values that cross to another task
 ([Concurrency](../language/19-concurrency.md)).
 
@@ -257,9 +257,9 @@ and `weak` parts, and is not one of the values that cross to another task
 | `view fn clone() -> LinkedList<T>` | A new list of clones of the elements (Cloneable `T` only) | |
 
 Every node and element is the list's alone: the list owns the first node and each node the
-next, and only `weak mut` references, which own nothing, lead back, so two neighbours form
-no reference cycle and dropping the list drops every node and element. A `weak mut`
-reference names a `shared mut` node and changes it ([Weak
+next, and only `weak mutable` references, which own nothing, lead back, so two neighbours form
+no reference cycle and dropping the list drops every node and element. A `weak mutable`
+reference names a `shared mutable` node and changes it ([Weak
 references](../language/16-memory.md#weak-references)), so the list adds and removes at its
 back through its link to the last node as it does at its front. Taking an element out, at
 an end or by `remove`, unlinks its node from both of its neighbours and moves the element
@@ -292,7 +292,7 @@ table keeps at most three entries for every four buckets, and doubles when it wo
 more. The order of `keys()` is the table's, not the insertion order.
 
 The table chains its entries: each bucket holds the first entry of its chain, and each
-entry its key, its value, its key's hash and the next entry. The entries are `shared mut`
+entry its key, its value, its key's hash and the next entry. The entries are `shared mutable`
 objects of the table's own, each owning the next as a `LinkedList`'s nodes do (with no link
 back), so a lookup changes the entry it reaches; every key and value is still the table's
 alone. A rehash links the
@@ -399,7 +399,7 @@ an `unsigned`, and a character outside ASCII is more than one (`"é"` is two).
 feed (`char(11)`, `char(12)`). Each takes its strings as `view`s, so a variable, a field
 or an element read with `at` is passed as it is, and returns new ones: a result is a
 string of its own, or a `List<Str>` of them, never one of the arguments, so a `concat` on
-it (held in a `mut Str`) changes nothing else.
+it (held in a `mutable Str`) changes nothing else.
 
 ```pkn
 import ::io;

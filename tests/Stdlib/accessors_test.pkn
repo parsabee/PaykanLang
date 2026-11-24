@@ -44,7 +44,7 @@ fn main() -> int {
   dogs.push(Dog("fido"));
   // A clone of an object is a new one, the caller's own: renaming it leaves
   // the list's dog as it was, and it outlives the list's.
-  d: mut = dogs.get(0);
+  d: mutable = dogs.get(0);
   d.rename("max");
   io::println(dogs.at(0).name + " " + d.name);
   dogs.clear();
@@ -68,7 +68,7 @@ fn main() -> int {
 
   m = c::HashMap<Str, Dog>();
   m.put("a", Dog("ann"));
-  a: mut = m.get("a");
+  a: mutable = m.get("a");
   a.rename("amy");
   zed = m.getOr("z", Dog("zed"));
   io::println(m.at("a").name + " " + zed.name + " "
@@ -76,7 +76,7 @@ fn main() -> int {
   m.remove("a");
   io::println(a.name + " " + Str(m.containsKey("a")));
 
-  l: mut = c::LinkedList<Dog>();
+  l: mutable = c::LinkedList<Dog>();
   l.pushBack(Dog("head"));
   l.pushBack(Dog("tail"));
   h = l.getFront();

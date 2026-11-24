@@ -342,18 +342,18 @@ same text when the given one is the static object).  A `Str` held as an
 `Str` is, and `PaykanString_owned` leaves any object that is no static
 string as it is.  Those stores are:
 
-- a `mut` slot (a variable, a result), where the string may be appended to;
-- a `mut` parameter, which the function makes its own as it starts
+- a `mutable` slot (a variable, a result), where the string may be appended to;
+- a `mutable` parameter, which the function makes its own as it starts
   (`declareParam`: `%s.str = call @$rt.PaykanString_owned(%s)`), whatever
   its caller passed: a function value's type and an overridden method's
-  signature do not say `mut`, and a method named `equals` is lent its
+  signature do not say `mutable`, and a method named `equals` is lent its
   argument, so the callers cannot all know;
 - a field, an element or a payload, which is written as what holds it is: a
-  holder gains `mut` by `move` with no flow of the string itself;
+  holder gains `mutable` by `move` with no flow of the string itself;
 - what an `inout` binding names, and a native function's by-value parameter,
   which is stored wherever the native stores it;
-- a slot of any other form (`shared`, `shared mut`, `atomic shared`, `locked
-  mut`): several names hold the string, a change shows through all of them,
+- a slot of any other form (`shared`, `shared mutable`, `atomic shared`, `locked
+  mutable`): several names hold the string, a change shows through all of them,
   and a `weak` reference sees it go;
 - a temporary that is the receiver of `concat` (a result, `move s`, a
   literal).

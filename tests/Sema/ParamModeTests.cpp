@@ -64,7 +64,7 @@ TEST(ParamMode, ViewParameters) {
     fn main() -> int {
       let k = 2;
       t = twice(k);
-      c: mut = Counter(k);
+      c: mutable = Counter(k);
       c.add(c.n + 1, Color::Red);
       return pass(k) + pass(3);
     }
@@ -102,13 +102,13 @@ fn swap<T>(a: inout T, b: inout T) { t = a.clone(); a = b.clone(); b = move t; }
 class Box<T> { n: int; }
 impl Box<T> { fn __init__(v: view T) { self.n = 1; } }
 fn main() -> int {
-  c: mut = Counter("ab");
-  s: mut = "x";
+  c: mutable = Counter("ab");
+  s: mutable = "x";
   xs: int[1] = [1];
   reset(c, s);
   f(None, xs, (1, 2), c);
-  a: mut = "a";
-  b: mut = "b";
+  a: mutable = "a";
+  b: mutable = "b";
   swap(a, b);
   i = 1;
   j = 2;
@@ -165,7 +165,7 @@ fn main() -> int { return 0; })");
 // which copies) is not stored, passed to a parameter that is not `view` or
 // returned where a `view`'s could not be.  It used to change the object the
 // `view` holds.  Where both branches can change, it can, through a captured
-// copy's (`shared mut`) object as well; and a method that changes `self` so
+// copy's (`shared mutable`) object as well; and a method that changes `self` so
 // is not told to be a `view fn`.
 TEST(ParamMode, AConditionalsObjectIsEachBranchs) {
   auto r = semaCheck(R"(class Node {
@@ -173,17 +173,17 @@ TEST(ParamMode, AConditionalsObjectIsEachBranchs) {
   next: shared Node?;
   fn inc() { self.n = self.n + 1; }
   view fn peek(o: Node, k: int) -> int { (if k == 0 then self else o).n = 9; return self.n; }
-  fn setBoth(o: mut Node, k: int) { (if k == 0 then self else o).n = 1; }
+  fn setBoth(o: mutable Node, k: int) { (if k == 0 then self else o).n = 1; }
 }
-struct S { o: shared mut Node; }
+struct S { o: shared mutable Node; }
 fn bump(x: inout int) { x = x + 1; }
 fn keep(x: shared Node?) -> int { return 0; }
-fn out(a: view Node, b: mut Node, k: int) -> shared Node? {
+fn out(a: view Node, b: mutable Node, k: int) -> shared Node? {
   b.next = (if k == 0 then a else b).next;
   keep((if k == 0 then b else a).next);
   return (if k == 0 then a else b).next;
 }
-fn f(a: view Node, b: mut Node, k: int) {
+fn f(a: view Node, b: mutable Node, k: int) {
   (if k == 0 then a else b).n = 7;
   (if k == 0 then b else a).n += 1;
   bump((if k == 0 then a else a).n);
@@ -192,7 +192,7 @@ fn f(a: view Node, b: mut Node, k: int) {
   v: view = b;
   (if k == 0 then v else b).n = 2;
 }
-fn g(a: mut Node, b: mut Node, s: S, t: S, k: int) {
+fn g(a: mutable Node, b: mutable Node, s: S, t: S, k: int) {
   (if k == 0 then a else b).n = 7;
   (if k == 0 then a else b).n += 1;
   bump((if k == 0 then a else b).n);
@@ -245,14 +245,14 @@ class Holder { c: Counter; }
 impl Holder { fn __init__() { self.c = Counter(); } }
 fn reset(c: inout Counter) { c = Counter(); }
 fn main() -> int {
-  let k: mut Counter = Counter();
+  let k: mutable Counter = Counter();
   k.n = 3;
   reset(k);
-  let h: mut Holder = Holder();
+  let h: mutable Holder = Holder();
   reset(h.c);
   f = Fast();
   reset(f);
-  g: mut Counter = Fast();
+  g: mutable Counter = Fast();
   reset(g);
   return 0;
 })");
@@ -302,7 +302,7 @@ fn put(c: inout char) { }
 fn take(v: view int, p: int, q: inout int) {
   let k = 1;
   x = 2;
-  c: mut = C(x);
+  c: mutable = C(x);
   bump(v);
   bump(k);
   bump(3);
@@ -346,13 +346,13 @@ fn main() -> int { return 0; })");
 
 // Exclusivity: one call cannot pass the same variable, or the same chain of
 // fields on one, to two `inout` parameters.  Other places, which might be the
-// same storage at run time (two `shared mut` references to one object), are
+// same storage at run time (two `shared mutable` references to one object), are
 // accepted.
 TEST(ParamMode, InoutArgumentsAreExclusive) {
   auto r = semaCheck(R"(class P {
   x: int; y: int; next: P?;
   fn same() { swap(self.x, self.x); }
-  fn other(q: mut P) { swap(self.x, q.x); }
+  fn other(q: mutable P) { swap(self.x, q.x); }
 }
 
 impl P {
@@ -367,9 +367,9 @@ fn main() -> int {
   j = 2;
   swap(k, k);
   three(k, j, k);
-  p: shared mut = P();
-  q: shared mut = p;
-  b: mut = Box();
+  p: shared mutable = P();
+  q: shared mutable = p;
+  b: mutable = Box();
   swap(p.x, p.x);
   swap(b.p.x, b.p.x);
   swap(p.x, p.y);
@@ -414,8 +414,8 @@ fn rev(a: inout int, b: view P) { }
 fn elem(a: view int, b: inout int[]) { }
 fn main() -> int {
   k = 1;
-  p: mut = P();
-  q: mut = Q();
+  p: mutable = P();
+  q: mutable = Q();
   xs: int[1] = [1];
   both(k, k);
   whole(p, p.x);
@@ -484,8 +484,8 @@ fn main() -> int {
   arr = [1, 2, 3];
   p = P(1);
   h = H(P(1));
-  c: mut = C(P(1));
-  k: mut = K(1);
+  c: mutable = C(P(1));
+  k: mutable = K(1);
   n = sum(arr, bump(arr));
   n = look(p, bumpP(p));
   n = p.show(bumpP(p));
@@ -659,7 +659,7 @@ fn two(p: inout P, n: inout int) -> int => 0;
 fn main() -> int {
   p = P(1);
   h = H(P(1), P(2));
-  k: mut = K(P(1));
+  k: mutable = K(P(1));
   n = look(p, two(p, p.a));
   n = look(h.p, bump(h.slotP()));
   n = look(h.p, bumpN(h.slotP().a));
@@ -694,7 +694,7 @@ fn main() -> int {
 
 // What the rule does not see stays accepted, the caller copying what a later
 // argument may write (docs/language/02-basics.md, "Evaluation order"): a
-// plain parameter, a write through a `shared mut` object (by a function, a
+// plain parameter, a write through a `shared mutable` object (by a function, a
 // function value, a virtual method) or by a lambda's body, a borrow after
 // the write or in a call that has returned, another variable or another
 // field, and `==`'s operands.
@@ -703,10 +703,10 @@ TEST(ParamMode, ALaterArgumentMayWriteWhatNoBorrowNames) {
 impl P { view fn show(x: int) -> int => self.a; }
 struct Two { x: P; y: P; }
 class C { p: P; xs: int[3]; }
-class V { n: int; view fn write(c: shared mut C) -> int => 0; }
+class V { n: int; view fn write(c: shared mutable C) -> int => 0; }
 class W : V {
   n2: int;
-  view fn write(c: shared mut C) -> int { c.xs = [9, 9, 9]; return 0; }
+  view fn write(c: shared mutable C) -> int { c.xs = [9, 9, 9]; return 0; }
 }
 fn sum(xs: view int[], k: int) -> int => xs[0] + k;
 fn bumpP(p: inout P) -> int { p = P(9); return 0; }
@@ -714,16 +714,16 @@ fn look(p: view P, x: int) -> int => p.a;
 fn look2(x: int, p: view P) -> int => p.a;
 fn first(p: P, x: int) -> int => p.a;
 fn add(a: int, b: int) -> int => a + b;
-fn resetC(c: shared mut C) -> int { c.p = P(9); c.xs = [9, 9, 9]; return 0; }
+fn resetC(c: shared mutable C) -> int { c.p = P(9); c.xs = [9, 9, 9]; return 0; }
 fn applyP(f: (inout P) -> int) -> int { q = P(0); return f(q); }
 fn gs(xs: view int[], f: () -> int) -> int => sum(xs, f());
-fn gv(p: view P, c: shared mut C) -> int => look(p, resetC(c));
-fn gw(xs: view int[], v: V, c: shared mut C) -> int => sum(xs, v.write(c));
+fn gv(p: view P, c: shared mutable C) -> int => look(p, resetC(c));
+fn gw(xs: view int[], v: V, c: shared mutable C) -> int => sum(xs, v.write(c));
 fn main() -> int {
   p = P(1);
   q = P(2);
   two = Two(P(1), P(2));
-  c: shared mut = C(P(1), [1, 2, 3]);
+  c: shared mutable = C(P(1), [1, 2, 3]);
   f = fn() -> int => resetC(c);
   n = first(p, bumpP(p));
   n = first(c.p, resetC(c));
@@ -868,7 +868,7 @@ class Other : lib::Box {
 fn main() -> int {
   let k = 1;
   lib::bump(k);
-  b: mut = lib::Box(2);
+  b: mutable = lib::Box(2);
   b.put(b.v + 1);
   x = 1;
   lib::bump(x);
@@ -883,7 +883,7 @@ fn main() -> int {
           ":5:3: error: override of 'put' must keep 'inout' on parameter 'n'",
           ":9:13: error: 'k' is declared with 'let' and cannot be passed to "
           "'inout' parameter 'n'",
-          ":10:21: error: argument 1 of 'lib::Box' must be a variable or a "
+          ":10:25: error: argument 1 of 'lib::Box' must be a variable or a "
           "field: parameter 'n' is 'inout'",
           ":11:9: error: argument 1 of 'put' must be a variable or a field: "
           "parameter 'n' is 'inout'"});
@@ -957,7 +957,7 @@ fn main() -> int {
   f: inout float = k;
   fast = Fast();
   g: inout Counter = fast;
-  let lc: mut Counter = Counter();
+  let lc: mutable Counter = Counter();
   h: inout = lc.n;
   i: inout int = k;
   i = 3;
@@ -1055,7 +1055,7 @@ fn main() -> int {
   t = (v, 1);
   ys: Counter[1] = [Counter()];
   ys[0] = v;
-  h: mut = Holder(v);
+  h: mutable = Holder(v);
   h.c = v;
   flag = True;
   f = if flag then v else Counter();
@@ -1081,7 +1081,7 @@ fn main() -> int {
         ":16:7: error: " + kStore, ":17:16: error: " + kStore,
         ":18:9: error: " + kStore, ":19:8: error: " + kStore,
         ":21:11: error: " + kStore,
-        ":22:19: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
+        ":22:23: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
         ":23:9: error: " + kStore, ":25:7: error: " + kStore})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
@@ -1236,7 +1236,7 @@ impl Counter {
   fn __init__() { self.n = 0; }
 }
 fn twice(n: int) -> int { return 2 * n; }
-fn report(c: shared mut Counter) { }
+fn report(c: shared mutable Counter) { }
 fn main() -> int {
   k = 1;
   x: inout = k;
@@ -1244,7 +1244,7 @@ fn main() -> int {
   y = k;
   x = 3;
   z = k;
-  c: shared mut = Counter();
+  c: shared mutable = Counter();
   v: view = c;
   c.tick();
   c.n = 4;
@@ -1321,7 +1321,7 @@ fn main() -> int {
   y = 6;
   k = 7;
   io::println(Str(double(k)) + Str(fs[0](k)));
-  c: mut = Counter();
+  c: mutable = Counter();
   v: view = c;
   io::println(Str(v.n));
   c.tick();
@@ -1427,7 +1427,7 @@ fn main() -> int {
   io::println(v);
   s = "changed";
   g = fn(v: int) => v + 1;
-  b: mut = B(E::R(1));
+  b: mutable = B(E::R(1));
   match b.e {
     r: inout R {
       r.w += 100;
@@ -1499,7 +1499,7 @@ impl Dog { fn __init__() { __super__(); } }
 fn keep(a: Animal) { }
 fn show(a: view Animal) { }
 fn main() -> int {
-  a: mut Animal = Dog();
+  a: mutable Animal = Dog();
   match a {
     d: view Dog {
       d.tick();
@@ -1567,7 +1567,7 @@ fn main() -> int {
   match fixed { d: inout Dog { } _ { } }
   n: int? = 4;
   match n { k: inout int { k = 5; } None { } }
-  a: mut Animal = Dog(5);
+  a: mutable Animal = Dog(5);
   match a {
     d: inout Dog {
       a.tick();

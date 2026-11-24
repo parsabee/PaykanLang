@@ -12,12 +12,12 @@ class H {
   p: P;
 }
 
-fn g(h: shared mut H, n: view Node) -> int {
+fn g(h: shared mutable H, n: view Node) -> int {
   let x = mem::replace(h.p, P(Node(9), 1));
   return x.n.v + n.v;
 }
 
 fn main() -> int {
-  h: shared mut H = H(P(Node(1), 2));
+  h: shared mutable H = H(P(Node(1), 2));
   return g(h, h.p.n);
 }

@@ -12,22 +12,22 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 | `11_async_methods.pkn` | `async` methods, virtual and on a handle; a tuple or struct going to a task and coming back |
 | `12_generic_async_methods.pkn` | a generic method that is `async`: each instantiation is a task of its own, and its own type parameter is what it bounds `Sendable` |
 | `err_03_first_checks.pkn` | the first checks: copying a unique reference into a task, use after `move`, sending a `shared` reference, writing anything but a reduction in a parallel body |
-| `04_qualifiers.pkn` | the qualifiers on places: the bare type (unique, immutable), `mut`, `shared`, `shared mut`; the conversions between them; a `view` parameter taking every form |
-| `05_locked.pkn` | a `locked mut` cell shared by tasks, written in `lock c as v: inout { }` and read in `: view` blocks |
+| `04_qualifiers.pkn` | the qualifiers on places: the bare type (unique, immutable), `mutable`, `shared`, `shared mutable`; the conversions between them; a `view` parameter taking every form |
+| `05_locked.pkn` | a `locked mutable` cell shared by tasks, written in `lock c as v: inout { }` and read in `: view` blocks |
 | `06_atomic_shared.pkn` | an `atomic shared` object frozen with everything it holds, read by every task without a count |
 | `07_atomic.pkn` | `atomic` on every number type, `bool` and `char`; `atomic` fields of a class; `exchange` and `compareExchange`; handles |
 | `08_moves.pkn` | precise moves: a move on one path, revival by assignment, moves in loops, `break`, a partial move `move h.job` |
 | `09_send.pkn` | the send check on what a task takes and returns; `Copyable` as a generic bound; a `view` taking every form |
 | `10_buffers.pkn` | heap buffers in a `parallel for`: one of the enclosing function read at any index and written at the loop's variable, and one frozen in a box read by every thread |
 | `13_lock_calls.pkn` | what a `lock` block calls: plain functions, a `final` class's method, printing; the waits before and after it; a `__deinit__`, held to the same rule, run at a block's end |
-| `errors/err_qualifiers.pkn` | the conversions a qualifier refuses (`shared` into unique, `mut` gained without `move`, `shared mut` into `shared`), writes through an immutable reference and an immutable field, `mut` on a value |
+| `errors/err_qualifiers.pkn` | the conversions a qualifier refuses (`shared` into unique, `mutable` gained without `move`, `shared mutable` into `shared`), writes through an immutable reference and an immutable field, `mutable` on a value |
 | `errors/err_strict_copies.pkn` | the copy rule: a unique value read from a place moves, `[v; n]` copies |
 | `errors/err_locked.pkn` | reaching a `locked` cell outside a `lock` block, `await` and nested `lock` inside one |
 | `errors/err_lock_calls.pkn` | what a `lock` block cannot call: a function that takes a lock, runs a `parallel for`, awaits or reads input, directly or through what it calls, a task whose body waits, and a function value |
 | `errors/err_deinit_waits.pkn` | a `__deinit__` is held to a `lock` block's rule: no lock, no call of what takes one, no function value; an `atomic` count and printing are fine |
 | `errors/err_atomic_shared.pkn` | writing through a frozen `atomic shared` object, converting it back, qualifying a value |
 | `errors/err_atomic.pkn` | operations that would read and write a cell separately, `atomic` of a `Str`, a cell in a struct |
-| `errors/err_atomic_spellings.pkn` | the spellings the parser rejects: `const` in any form, `atomic shared mut`, `atomic mut`, `mut shared`, a second qualifier |
+| `errors/err_atomic_spellings.pkn` | the spellings the parser rejects: `const` in any form, `atomic shared mutable`, `atomic mutable`, `mutable shared`, a second qualifier |
 | `errors/err_moves.pkn` | "may have been moved" after an `if` or `match`, a loop that does not assign again, moving a viewed variable, a move beside a borrow in one call, a partial move of a `shared` field |
 | `errors/err_buffers.pkn` | a buffer written at another index than the loop's variable, or reshaped, in a parallel body |
 | `errors/err_parsafe.pkn` | what a `parallel for` body cannot call, directly or through what it calls |
@@ -36,43 +36,43 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 ## What is in the prototype
 
 * **Syntax**: keywords `move`, `async`, `await`, `parallel`, `atomic`,
-  `shared`, `mut`, `locked` and `lock`.  `async fn f(...) -> T`, `await
+  `shared`, `mutable`, `locked` and `lock`.  `async fn f(...) -> T`, `await
   e`, `move x`, `move x.f`, `parallel for i in a..b { }`, the qualifiers
-  on any place's type (`let m: mut Node`, `p: shared mut Node` as a
+  on any place's type (`let m: mutable Node`, `p: shared mutable Node` as a
   parameter, `hits: atomic int` or `cfg: atomic shared Config` as a
-  field, `-> locked mut Counts` as a result; `n: mut = e` and `x: shared
+  field, `-> locked mutable Counts` as a result; `n: mutable = e` and `x: shared
   = e` with the type inferred), and `lock cell as c: inout|view { }`.
-* **Qualifiers** (Sema): the bare type (unique, immutable), `mut`,
-  `shared`, `shared mut`, `atomic`, `atomic shared` and `locked mut` on
+* **Qualifiers** (Sema): the bare type (unique, immutable), `mutable`,
+  `shared`, `shared mutable`, `atomic`, `atomic shared` and `locked mutable` on
   variables, parameters, fields and results, and on the parts of a type
   (#368: `List<shared Node>`, `(int, shared Node)`, `shared Node[3]`,
   `(shared Node) -> int`); `locked` alone is accepted
   with a warning, as it locks what nothing writes.  Every word added buys
   one thing, and the bare type costs nothing: a reference is immutable
-  unless written `mut`, so through it there is no field assignment, no
+  unless written `mutable`, so through it there is no field assignment, no
   method that is not a `view fn` and no passing to `inout`, and what it
   holds reads immutable (a unique field follows its root and is never
-  written `mut`; a `shared mut` field keeps its writes through any root).
+  written `mutable`; a `shared mutable` field keeps its writes through any root).
   `self` is mutable in every method but a `view fn`; a `match` binding of
   a place is a borrow of it (a `view`, or an `inout` arm), and `match move
   x` owns the parts; an object held in a struct,
-  tuple or array follows the variable's `let`.  `mut T` flows into `T`;
-  `T` gains `mut` only by `move` or straight from a temporary; `T` or
-  `mut T` moves into `atomic shared T`, frozen then; `shared` and `shared
-  mut`, a frozen object and a cell convert only as they are.  `const` is
-  gone, and `mut` goes on no value (`let` alone decides whether a number,
+  tuple or array follows the variable's `let`.  `mutable T` flows into `T`;
+  `T` gains `mutable` only by `move` or straight from a temporary; `T` or
+  `mutable T` moves into `atomic shared T`, frozen then; `shared` and `shared
+  mutable`, a frozen object and a cell convert only as they are.  `const` is
+  gone, and `mutable` goes on no value (`let` alone decides whether a number,
   struct, tuple or array is rewritten), no borrow, no cell and no frozen
   object.
   A borrow is written with no qualifier: a `view` parameter takes every
-  form of the object, an `inout` a `mut` or `shared mut` one, neither
+  form of the object, an `inout` a `mutable` or `shared mutable` one, neither
   counting it, and no borrow reaches a `locked`
   cell.  The copy rule holds: a move-only value read from a place (a
   unique reference, a `Str`, a container, or a struct, tuple or array
   holding one) flows into an owning slot only by `move` (or as a
   `.clone()`); a `shared` reference, a handle and a value of such parts
   are Copyable.
-* **`locked mut T`**: a cell holding an object behind a mutex, made where a
-  unique value flows into a `locked mut` slot; its handle copies into tasks
+* **`locked mutable T`**: a cell holding an object behind a mutex, made where a
+  unique value flows into a `locked mutable` slot; its handle copies into tasks
   and parallel bodies; its contents are reached only in a `lock` block,
   which may not `await`, `return`, `break`, `continue`, nest another
   `lock` or run a `parallel for`, nor call a function that does any of
@@ -82,7 +82,7 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   each function is in its module's interface.  `locked T` alone is read in `: view`
   blocks only, with the warning `'locked T' locks an object nothing
   writes; 'atomic shared T' is read from every thread with no lock`; a
-  `: inout` block on it is an error that says to declare it `locked mut T`.
+  `: inout` block on it is an error that says to declare it `locked mutable T`.
 * **`atomic shared T`**: a unique value flowing into such a slot is
   frozen with everything it holds (a vtable walk, `__walk`, visits every
   class's reference fields and every buffer's elements), after the send
@@ -90,15 +90,15 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
   inside count nothing.  An `atomic` field of a frozen object still
   changes.  Each word says one thing: `atomic`, the reference crosses
   threads; `shared`, the object has several owners, one on each thread at
-  least; and the bare type, that nothing writes it.  `atomic shared mut
-  N` is the parse error `'atomic shared mut T' would be written from
+  least; and the bare type, that nothing writes it.  `atomic shared mutable
+  N` is the parse error `'atomic shared mutable T' would be written from
   several threads with no lock; write 'atomic shared T' to freeze it, or
-  'locked mut T' to change it under a lock`, `atomic mut N` is `an
-  'atomic' cell takes no 'mut': it changes by its operations; an object
-  crosses threads as 'atomic shared T' (frozen) or 'locked mut T'`, and
+  'locked mutable T' to change it under a lock`, `atomic mutable N` is `an
+  'atomic' cell takes no 'mutable': it changes by its operations; an object
+  crosses threads as 'atomic shared T' (frozen) or 'locked mutable T'`, and
   `atomic N` of a class is Sema's `'atomic' holds a number,
   a 'bool' or a 'char', not 'N': an object crosses threads as 'atomic
-  shared N' (frozen) or 'locked mut N'`.
+  shared N' (frozen) or 'locked mutable N'`.
   A struct, a tuple or an array is a value wherever it is and
   takes no qualifier of its own (`shared Node[3]` is three shared
   references, its elements' form); to freeze one, box it: `let xs:
@@ -153,11 +153,11 @@ ones in `errors/` show what Sema rejects (each line marked `error`).
 * **The send check**: at an async call's arguments, at the declaration of
   an `async fn`'s result, and at every conversion to `atomic shared` or
   `locked`.  A number, a `Str`, a cell, a handle and a unique class, bare
-  or `mut`, whose fields (own and inherited, through structs, tuples, arrays,
+  or `mutable`, whose fields (own and inherited, through structs, tuples, arrays,
   optionals and enum payloads) are all crossable cross; a `shared` or
   `weak` part, a function value and an `Obj` do not, and the error names
   the field (`field 'job.cache' is 'shared Cache'`).  A unique reference,
-  bare or `mut`, crosses by `move` or as a temporary; a value holding a
+  bare or `mutable`, crosses by `move` or as a temporary; a value holding a
   unique part moves too, one of `shared` parts and handles copies.
 * **`Copyable`**: a built-in, structural trait: numbers, `bool`, `char`,
   `shared` references (a `T` whose argument is `shared Node` too),

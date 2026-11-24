@@ -267,7 +267,7 @@ fn longer(a: view Str, b: view Str) -> view Str {
   return if a.len() > b.len() then a else b;
 }
 fn main() -> int {
-  b: mut = Box();
+  b: mutable = Box();
   v: view = b.peek();
   b.c = Counter();
   io::println(Str(v.get()));
@@ -350,11 +350,11 @@ impl Box {
 class Look { a: Animal; view fn look() -> inout Animal { return self.a; } }
 impl Look { fn __init__() { self.a = Dog(1); } }
 fn fromView(v: view Animal) -> inout int { return v.n; }
-fn fromCopy(c: mut Animal) -> inout int { return c.n; }
+fn fromCopy(c: mutable Animal) -> inout int { return c.n; }
 fn twice(a: inout int, b: inout int) { }
 fn main() -> int {
   Box().fine();
-  b: mut = Box();
+  b: mutable = Box();
   x: inout = b.fine();
   b.d = Dog(5);
   x.n = 2;
@@ -372,7 +372,7 @@ fn main() -> int {
        "change 'self'",
        ":19:51: error: 'v' is a 'view' parameter; it cannot be returned "
        "'inout'",
-       ":20:50: error: 'c' is a copy: an 'inout' result must be part of 'self' "
+       ":20:54: error: 'c' is a copy: an 'inout' result must be part of 'self' "
        "or of an 'inout' parameter",
        ":23:3: error: the receiver of 'fine' must be a variable or a field: "
        "its 'inout' result is part of it",
@@ -561,9 +561,9 @@ class H {
   fn half(o: inout K, c: bool) -> inout int { return (if c then o else self.k1).n; }
 }
 struct P { x: int; s: Str; }
-fn copy(a: mut K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
+fn copy(a: mutable K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
 fn loc(b: inout K, c: bool) -> inout int {
-  k: mut = K(1, "");
+  k: mutable = K(1, "");
   return (if c then b else k).n;
 }
 fn vf(a: view K, b: inout K, c: bool) -> inout int { return (if c then b else a).n; }
@@ -585,7 +585,7 @@ fn main() -> int { return 0; }
   for (const std::string &diag :
        {into(":4:41:", "far", "(if ... then self.k1 else self.k2)"),
         into(":5:54:", "half", "(if ... then o else self.k1)"),
-        std::string(":8:62: error: 'a' is a copy: an 'inout' result must be "
+        std::string(":8:66: error: 'a' is a copy: an 'inout' result must be "
                     "part of 'self' or of an 'inout' parameter"),
         std::string(":11:10: error: 'k' is a local: an 'inout' result must be "
                     "part of 'self' or of an 'inout' parameter"),
@@ -746,7 +746,7 @@ fn main() -> int {
   p = Pair<int>(C("a"), 1);
   d = Wrap<D>(D(1));
   s = Wrap<P>(P(2));
-  n: mut = Node(C("b"));
+  n: mutable = Node(C("b"));
   x: inout = deep(n);
   t = Two<Holder>(Holder(C("c")));
   return 0;
@@ -898,7 +898,7 @@ fn key(s: inout S) -> inout Str { return s.ref().k; }
 fn inner(s: inout S) -> inout Str { return s.me().c.k; }
 fn next(s: inout SL) -> inout Str { return s.ref().k; }
 fn main() -> int {
-  n: mut = Node(C("a", 1));
+  n: mutable = Node(C("a", 1));
   x: inout = outer(n);
   return 0;
 }

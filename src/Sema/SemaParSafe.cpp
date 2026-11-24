@@ -296,7 +296,7 @@ struct Sema::ParSafety {
   /// Destroying an object runs its `__deinit__`s (#378).  An object dies in
   /// the code that made it or in what that code hands it to, so the ones a
   /// function may destroy are the ones it makes (makes), and what it can
-  /// write that was made anywhere (drops): the contents of a `locked mut`
+  /// write that was made anywhere (drops): the contents of a `locked mutable`
   /// cell it has `inout`, and what a `parallel for` body writes of the
   /// enclosing function.
   ///

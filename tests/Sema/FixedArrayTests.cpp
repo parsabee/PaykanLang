@@ -162,7 +162,7 @@ TEST(FixedArray, Fields) {
     class Box<T> { xs: T[2]; }
     fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
     fn main() -> int {
-      g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
+      g: mutable = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
       g.cells[0] = [7, 8, 9];
       g.tags = [g.tags[1].clone(), "c"];
       b = Box<int>([1, 2]);
@@ -312,7 +312,7 @@ fn main() -> int {
   mem::swap(ss[0], ss[1]);
   e: inout Str = ss[1];
   e = "r";
-  b: mut = Bag();
+  b: mutable = Bag();
   mem::swap(b.items[0], b.items[1]);
   r: inout = b.at(0);
   r = "c";
@@ -552,10 +552,10 @@ TEST(FixedArray, RepeatLiterals) {
                   "and 's' (a 'Str') is not Copyable: write a value made for "
                   "each, such as '[s.clone(); 2]'");
   // A `shared` variable copies, and the array holds its form (#368): `[k;
-  // 3]` is a `shared mut Node[3]`, evaluated once and copied, so it copies
+  // 3]` is a `shared mutable Node[3]`, evaluated once and copied, so it copies
   // in turn; a unique element would need `move`.
   auto shared = semaCheck("class Node { v: int; }\n"
-                          "fn main() -> int { k: shared mut = Node(2); "
+                          "fn main() -> int { k: shared mutable = Node(2); "
                           "ks = [k; 3]; c = ks; c[1].v = 3; "
                           "u: Node[2] = [Node(1); 2]; d = move u; "
                           "return ks[0].v; }");

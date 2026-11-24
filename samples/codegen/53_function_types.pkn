@@ -63,7 +63,7 @@ class Button {
 
 class Counter {
   n: int;
-  // In a `shared fn`, `self` is a `shared mut Counter`, which a lambda can
+  // In a `shared fn`, `self` is a `shared mutable Counter`, which a lambda can
   // capture: each closure shares the object.
   shared fn make() -> () -> int      { return fn() -> int { return self.n; }; }
   shared fn adder() -> (int) -> void { return fn(d: int) { self.n += d; }; }
@@ -111,7 +111,7 @@ fn main() -> int {
       + Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
 
   // A `shared fn`'s lambda shares its object, so the receiver is shared too.
-  let c: shared mut = Counter(1);
+  let c: shared mutable = Counter(1);
   let get = c.make();
   let add = c.adder();
   add(41);

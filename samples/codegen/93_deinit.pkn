@@ -46,12 +46,12 @@ class Tag {
 }
 
 class Seen {
-  back: weak mut Node?;
+  back: weak mutable Node?;
 }
 
 class Node {
   id: int;
-  seen: shared mut Seen;
+  seen: shared mutable Seen;
 
   fn __deinit__() {
     io::println("gone " + Str(self.id) + " " + Str(self.seen.back == None));
@@ -68,18 +68,18 @@ impl Cell<T> {
 
 fn main() -> int {
   {
-    let w: mut Writer = Buffered(Handle("log"), 0, 64);
+    let w: mutable Writer = Buffered(Handle("log"), 0, 64);
     io::println("open " + w.out.name);
     w.write();
     w.write();
   }
-  t: mut = Tag("first");
+  t: mutable = Tag("first");
   let c = Cell<int>(1);
   io::println("swap");
   t = Tag("second");
-  let seen: shared mut = Seen(None);
+  let seen: shared mutable = Seen(None);
   {
-    let n: shared mut = Node(7, seen);
+    let n: shared mutable = Node(7, seen);
     seen.back = n;
   }
   io::println("end");

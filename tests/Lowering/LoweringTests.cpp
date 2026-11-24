@@ -278,11 +278,11 @@ class C {
 }
 
 class H {
-  c: shared mut C;
+  c: shared mutable C;
   o: shared C?;
 }
 
-fn set(h: mut H) -> int {
+fn set(h: mutable H) -> int {
   d = h.c;
   d.p = P(7);
   e = h.o;
@@ -291,7 +291,7 @@ fn set(h: mut H) -> int {
 }
 
 fn main() -> int {
-  h: mut = H(C(P(1)), None);
+  h: mutable = H(C(P(1)), None);
   return set(move h);
 }
 )");
@@ -321,7 +321,7 @@ class C {
 }
 
 class H {
-  c: shared mut C;
+  c: shared mutable C;
   o: shared C?;
 }
 
@@ -329,7 +329,7 @@ fn held(h: inout H) -> inout C {
   return h.c;
 }
 
-fn copy(c: shared mut C, o: shared C?, h: mut H) -> int {
+fn copy(c: shared mutable C, o: shared C?, h: mutable H) -> int {
   d = c;
   e = o;
   f = d;
@@ -342,7 +342,7 @@ fn copy(c: shared mut C, o: shared C?, h: mut H) -> int {
 }
 
 fn main() -> int {
-  c: shared mut C = C(P(1));
+  c: shared mutable C = C(P(1));
   return copy(c, None, H(c, None));
 }
 )");
@@ -950,9 +950,9 @@ TEST(Lowering, InoutFieldIsPassedByAddress) {
     impl Holder { fn __init__() { self.inner = Inner(); } }
     fn bump(n: inout int) { n = n + 1; }
     fn main() -> int {
-      i: mut = Inner();
+      i: mutable = Inner();
       bump(i.n);
-      h: mut = Holder();
+      h: mutable = Holder();
       bump(h.inner.n);
       return 0;
     }
@@ -984,10 +984,10 @@ TEST(Lowering, AReadACallMayReplaceHasAReferenceOfItsOwn) {
     impl H { fn reset() -> Str { self.n = Node("r"); return "!"; } }
     fn repl(x: inout Str) -> Str { x = "b"; return "!"; }
     fn replNode(x: inout Node) -> Str { x = Node("c"); return "?"; }
-    fn joined(s: mut Str) -> Str { return s + repl(s); }
-    fn receiver(l: mut Node) -> Str { return l.greet(replNode(l)); }
+    fn joined(s: mutable Str) -> Str { return s + repl(s); }
+    fn receiver(l: mutable Node) -> Str { return l.greet(replNode(l)); }
     fn field(h: H) -> Str { return h.n.greet(h.reset()); }
-    fn other(s: mut Str, l: Node) -> Str { return l.greet(repl(s)); }
+    fn other(s: mutable Str, l: Node) -> Str { return l.greet(repl(s)); }
     fn main() -> int {
       return joined("a").len() + receiver(Node("n")).len() +
              field(H(Node("m"))).len() + other("o", Node("p")).len();
@@ -1026,27 +1026,27 @@ TEST(Lowering, AReadACallMayReplaceHasAReferenceOfItsOwn) {
 // of `+` and of `==`, the object a field assignment writes to (twice for
 // `+=`).  A call given nothing that reaches an object replaces nothing, so
 // the reads around it stay in place (docs/pir.md §7, "Reads a call may
-// replace").  The `H` a call is given is a `shared mut` alias of the one
+// replace").  The `H` a call is given is a `shared mutable` alias of the one
 // read, or a `view` of it.
 TEST(Lowering, AReadThroughAnObjectACallMayReplaceIsHeld) {
   auto l = lower(R"(
     class B { s: Str; a: int[3]; view fn m(h: view H) -> Str { return self.s.clone(); } }
     class H { b: B; fn drop() -> Str { return self.b.m(self); } }
-    fn g(h: shared mut H) -> Str {
+    fn g(h: shared mutable H) -> Str {
       h.b = B("y", [4, 5, 6]);
       return "!";
     }
-    fn gi(h: shared mut H) -> int {
+    fn gi(h: shared mutable H) -> int {
       h.b = B("y", [4, 5, 6]);
       return 1;
     }
     fn shout(s: Str) -> Str { return s + "!"; }
-    fn receiver(h: shared mut H) -> Str { return h.b.m(h); }
-    fn operand(h: shared mut H) -> Str { return h.b.s + g(h); }
-    fn equal(h: shared mut H) -> bool { return h.b.s == g(h); }
-    fn target(h: shared mut H) { h.b.s = g(h); }
-    fn compound(h: shared mut H) { h.b.s += g(h); }
-    fn inPlace(h: shared mut H) -> Str { return h.b.s + shout("x") + Str(h.b.a[0] + gi(h)); }
+    fn receiver(h: shared mutable H) -> Str { return h.b.m(h); }
+    fn operand(h: shared mutable H) -> Str { return h.b.s + g(h); }
+    fn equal(h: shared mutable H) -> bool { return h.b.s == g(h); }
+    fn target(h: shared mutable H) { h.b.s = g(h); }
+    fn compound(h: shared mutable H) { h.b.s += g(h); }
+    fn inPlace(h: shared mutable H) -> Str { return h.b.s + shout("x") + Str(h.b.a[0] + gi(h)); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1107,20 +1107,20 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
         self.s = "r";
         return 0;
       }
-      fn viaFree(h: shared mut H) -> int { return clear(h); }
-      fn ping(k: int, h: shared mut H) -> int {
+      fn viaFree(h: shared mutable H) -> int { return clear(h); }
+      fn ping(k: int, h: shared mutable H) -> int {
         if k == 0 {
           return clear(h);
         }
         return self.pong(k - 1, h);
       }
-      fn pong(k: int, h: shared mut H) -> int { return self.ping(k, h); }
+      fn pong(k: int, h: shared mutable H) -> int { return self.ping(k, h); }
       fn setIt(x: inout Str) -> int {
         x = "x";
         return 0;
       }
       fn viaVirt() -> int { return self.virt(); }
-      fn viaObj(o: shared mut Obj) -> int { return o.toString().len(); }
+      fn viaObj(o: shared mutable Obj) -> int { return o.toString().len(); }
     }
     struct S { b: B; }
     impl S {
@@ -1135,7 +1135,7 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
       s: S;
       o: B?;
     }
-    fn clear(h: shared mut H) -> int {
+    fn clear(h: shared mutable H) -> int {
       h.b = B("c", 0);
       return 0;
     }
@@ -1143,19 +1143,19 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
       x = None;
       return 0;
     }
-    fn peek(h: shared mut H) -> Str { return "!" + Str(h.b.count()); }
-    fn byCount(h: shared mut H) -> int { return h.b.count(); }
-    fn byBump(h: shared mut H) -> int { return h.b.bump(); }
-    fn byDown(h: shared mut H) -> int { return h.b.down(3); }
-    fn byReset(h: shared mut H) -> int { return h.b.reset(); }
-    fn byFree(h: shared mut H) -> int { return h.b.viaFree(h); }
-    fn byPing(h: shared mut H) -> int { return h.b.ping(2, h); }
-    fn byVirt(h: shared mut H) -> int { return h.b.viaVirt(); }
-    fn byObj(h: shared mut H) -> int { return h.b.viaObj(h); }
-    fn bySet(h: shared mut H) -> Str { return h.b.s + Str(h.c.setIt(h.b.s)); }
-    fn byStruct(h: shared mut H) -> Str { return h.s.b.s + Str(h.s.reset()); }
-    fn byDrop(h: shared mut H) -> Str { return h.b.s + Str(drop(h.o)); }
-    fn operand(h: shared mut H) -> Str { return h.b.s + peek(h); }
+    fn peek(h: shared mutable H) -> Str { return "!" + Str(h.b.count()); }
+    fn byCount(h: shared mutable H) -> int { return h.b.count(); }
+    fn byBump(h: shared mutable H) -> int { return h.b.bump(); }
+    fn byDown(h: shared mutable H) -> int { return h.b.down(3); }
+    fn byReset(h: shared mutable H) -> int { return h.b.reset(); }
+    fn byFree(h: shared mutable H) -> int { return h.b.viaFree(h); }
+    fn byPing(h: shared mutable H) -> int { return h.b.ping(2, h); }
+    fn byVirt(h: shared mutable H) -> int { return h.b.viaVirt(); }
+    fn byObj(h: shared mutable H) -> int { return h.b.viaObj(h); }
+    fn bySet(h: shared mutable H) -> Str { return h.b.s + Str(h.c.setIt(h.b.s)); }
+    fn byStruct(h: shared mutable H) -> Str { return h.s.b.s + Str(h.s.reset()); }
+    fn byDrop(h: shared mutable H) -> Str { return h.b.s + Str(drop(h.o)); }
+    fn operand(h: shared mutable H) -> Str { return h.b.s + peek(h); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1211,7 +1211,7 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
     class Tag<T> {
       v: T;
       s: Str;
-      view fn equals(o: mut Obj) -> bool {
+      view fn equals(o: mutable Obj) -> bool {
         match o {
           t: inout Tag<T> { t.s = "seen"; }
           _ { }
@@ -1255,7 +1255,7 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
       view fn take(k: Kid<Box<int>>) -> int { return k.v.v; }
       view fn apply(f: () -> int) -> int { return f(); }
       view fn count(b: bool) -> int { return self.n; }
-      view fn note(k: mut H) -> int {
+      view fn note(k: mutable H) -> int {
         k.s = "n";
         return 0;
       }
@@ -1287,9 +1287,9 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
     struct S { b: B; }
     impl S { fn receiver() -> int { return self.b.setS(); } }
     fn byInout(x: inout B) -> int { return x.setS(); }
-    fn byView(h: view H, k: mut H) -> int { return h.b.note(move k); }
+    fn byView(h: view H, k: mutable H) -> int { return h.b.note(move k); }
     fn bySlice(xs: inout B[]) -> int { return xs[0].setS(); }
-    fn byLocal(h: mut H) -> int { return h.b.setS(); }
+    fn byLocal(h: mutable H) -> int { return h.b.setS(); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1336,7 +1336,7 @@ TEST(Lowering, AReadIsHeldAcrossACallThatMayRunADeinit) {
     class Label { text: Str; }
     class Board { top: Label; }
     class Bomb {
-      w: weak mut Board?;
+      w: weak mutable Board?;
       n: int;
       fn __deinit__() {
         match self.w {
@@ -1345,25 +1345,25 @@ TEST(Lowering, AReadIsHeldAcrossACallThatMayRunADeinit) {
         }
       }
     }
-    class Dud { w: weak mut Board?; n: int; }
+    class Dud { w: weak mutable Board?; n: int; }
     fn show(l: view Label, n: int) -> int { return n + l.text.len(); }
     fn boom(x: Bomb) -> int { return x.n; }
     fn peek(x: view Bomb) -> int { return x.n; }
     fn dud(x: Dud) -> int { return x.n; }
-    fn mk(b: shared mut Board) -> Bomb { return Bomb(b, 7); }
-    fn moved(board: shared mut Board, bomb: Bomb) -> int {
+    fn mk(b: shared mutable Board) -> Bomb { return Bomb(b, 7); }
+    fn moved(board: shared mutable Board, bomb: Bomb) -> int {
       return show(board.top, boom(move bomb));
     }
-    fn made(board: shared mut Board) -> int {
+    fn made(board: shared mutable Board) -> int {
       return show(board.top, Bomb(board, 3).n);
     }
-    fn handedBack(board: shared mut Board) -> int {
+    fn handedBack(board: shared mutable Board) -> int {
       return show(board.top, mk(board).n);
     }
-    fn lent(board: shared mut Board, bomb: view Bomb) -> int {
+    fn lent(board: shared mutable Board, bomb: view Bomb) -> int {
       return show(board.top, peek(bomb));
     }
-    fn none(board: shared mut Board, d: Dud) -> int {
+    fn none(board: shared mutable Board, d: Dud) -> int {
       return show(board.top, dud(move d));
     }
     fn main() -> int { return 0; }
@@ -1435,18 +1435,18 @@ TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
       }
     }
     class Wrap { h: Holder; }
-    fn clobber(w: shared mut Wrap) -> int {
+    fn clobber(w: shared mutable Wrap) -> int {
       w.h.b = Base(100);
       return 5;
     }
-    fn use(x: inout Derived<int>, w: shared mut Wrap) -> int { return x.m(clobber(w)); }
+    fn use(x: inout Derived<int>, w: shared mutable Wrap) -> int { return x.m(clobber(w)); }
     class Node { name: Str; }
     class Pair { node: Node; other: Node; }
-    fn touchOther(p: shared mut Pair) -> Str {
+    fn touchOther(p: shared mutable Pair) -> Str {
       p.other = Node("o2");
       return "!";
     }
-    fn local(p: shared mut Pair) -> Str { return p.node.name + touchOther(p); }
+    fn local(p: shared mutable Pair) -> Str { return p.node.name + touchOther(p); }
     fn main() -> int { return 0; }
   )";
   struct Case {
@@ -1607,7 +1607,7 @@ TEST(Lowering, ImportedInstantiationsAreReadFromTheirTemplates) {
       return b.s + Str(c.size());
     }
     fn stored(b: Box) -> Str {
-      let c: mut = labels::labelled("x");
+      let c: mutable = labels::labelled("x");
       return b.s + Str(c.put("y"));
     }
     fn main() -> int { return sized(Box("b")).len() + stored(Box("b")).len(); }
@@ -1730,7 +1730,7 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
     impl Special { fn __init__(n: Str) { __super__(move n); } }
     struct P { name: Str; }
     fn bump(s: inout Str) { s = s + "!"; }
-    fn setTag<T>(x: mut T) { x.generic = "g"; }
+    fn setTag<T>(x: mutable T) { x.generic = "g"; }
     class Holder {
       fixed: Item;
       assigned: Str;
@@ -1781,9 +1781,9 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
         early = self.fixed.name + Str(f());
       }
     }
-    // A lambda stores into the field: it captures a `shared mut` holder (a
+    // A lambda stores into the field: it captures a `shared mutable` holder (a
     // method's `self` is borrowed, so no lambda captures it, #369).
-    fn byLambda(h: shared mut Holder) {
+    fn byLambda(h: shared mutable Holder) {
       k = fn() { h.byLambda = "k"; };
       k();
     }
@@ -1794,7 +1794,7 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
       fn __init__(f: () -> int) { __super__(move f); self.childInit = "child"; }
     }
     fn outside(h: Holder, f: () -> int) -> Str { return h.fixed.name + Str(f()); }
-    fn stores(h: mut Holder) {
+    fn stores(h: mutable Holder) {
       h.assigned = "x";
       bump(h.byArg);
       x: inout = h.byLocal;
@@ -1829,7 +1829,7 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
       view fn tagRead(f: () -> int) -> Str { return self.tag + Str(f()); }
     }
     impl Link {
-      fn __init__(prev: mut Link?) {
+      fn __init__(prev: mutable Link?) {
         self.tag = "t";
         match prev {
           o: inout Link { o.tag = "o"; }
@@ -1888,40 +1888,40 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
 // `inout` argument in a struct field, the storage a call's `inout` result
 // names.  The object is retained first and released after the use; for an
 // `inout` local, by a hidden local as long as the local can be used.  The
-// `H` the call is given besides is a `shared mut` alias.
+// `H` the call is given besides is a `shared mutable` alias.
 TEST(Lowering, StorageInAnObjectACallMayReplaceKeepsTheObject) {
   auto l = lower(R"(
     struct S { v: Str; }
-    impl S { fn take(h: shared mut H) { self.v = "t"; } }
+    impl S { fn take(h: shared mutable H) { self.v = "t"; } }
     class A {
       s: S; arr: Str[2]; k: Str; n: int[2];
-      fn slot(h: shared mut H) -> inout Str { return self.k; }
+      fn slot(h: shared mutable H) -> inout Str { return self.k; }
     }
     class H { a: A; }
-    fn gi(h: shared mut H) -> int {
+    fn gi(h: shared mutable H) -> int {
       h.a.k = "g";
       return 1;
     }
-    fn word(h: shared mut H) -> Str {
+    fn word(h: shared mutable H) -> Str {
       h.a.k = "w";
       return "w";
     }
-    fn look(xs: view Str[], h: shared mut H) -> int {
+    fn look(xs: view Str[], h: shared mutable H) -> int {
       h.a.k = "l";
       return xs[0].len();
     }
-    fn put(x: inout Str, h: shared mut H) { x = "p"; }
+    fn put(x: inout Str, h: shared mutable H) { x = "p"; }
     fn pick(x: inout Str) -> inout Str { return x; }
-    fn element(h: shared mut H) -> int { return h.a.n[gi(h)]; }
-    fn store(h: shared mut H) { h.a.arr[1] = word(h); }
-    fn storeAt(h: shared mut H) { h.a.n[gi(h)] = 2; }
-    fn slice(h: shared mut H) -> int { return look(h.a.arr, h); }
-    fn receiver(h: shared mut H) { h.a.s.take(h); }
-    fn field(h: shared mut H) { put(h.a.s.v, h); }
-    fn result(h: shared mut H) { put(h.a.slot(h), h); }
-    fn local(h: shared mut H) { x: inout = h.a.s.v; x = "l"; }
-    fn picked(h: shared mut H) { y: inout = pick(h.a.k); y = "r"; }
-    fn bound(h: shared mut H) { z: inout = h.a.slot(h); z = "b"; }
+    fn element(h: shared mutable H) -> int { return h.a.n[gi(h)]; }
+    fn store(h: shared mutable H) { h.a.arr[1] = word(h); }
+    fn storeAt(h: shared mutable H) { h.a.n[gi(h)] = 2; }
+    fn slice(h: shared mutable H) -> int { return look(h.a.arr, h); }
+    fn receiver(h: shared mutable H) { h.a.s.take(h); }
+    fn field(h: shared mutable H) { put(h.a.s.v, h); }
+    fn result(h: shared mutable H) { put(h.a.slot(h), h); }
+    fn local(h: shared mutable H) { x: inout = h.a.s.v; x = "l"; }
+    fn picked(h: shared mutable H) { y: inout = pick(h.a.k); y = "r"; }
+    fn bound(h: shared mutable H) { z: inout = h.a.slot(h); z = "b"; }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1955,22 +1955,22 @@ TEST(Lowering, StorageInAnObjectACallMayReplaceKeepsTheObject) {
 // What an `inout` parameter, a value passed by address or a struct
 // method's `self` names is its caller's, perhaps an object's field that a
 // call given an object may replace: a box read from there is held across
-// such a call as well (the `H` it is given is a `shared mut` alias).  An
+// such a call as well (the `H` it is given is a `shared mutable` alias).  An
 // `inout` result read as a value is read before what holds its storage is
 // let go.
 TEST(Lowering, AReadOfTheCallersStorageACallMayReplaceIsHeld) {
   auto l = lower(R"(
-    class H { k: Str; fn slot(h: shared mut H) -> inout Str { return self.k; } }
-    class G { h: shared mut H; }
+    class H { k: Str; fn slot(h: shared mutable H) -> inout Str { return self.k; } }
+    class G { h: shared mutable H; }
     struct S { v: Str; }
-    impl S { fn both(h: shared mut H) -> Str { return self.v + g(h); } }
-    fn g(h: shared mut H) -> Str {
+    impl S { fn both(h: shared mutable H) -> Str { return self.v + g(h); } }
+    fn g(h: shared mutable H) -> Str {
       h.k = "g";
       return "!";
     }
-    fn param(x: inout Str, h: shared mut H) -> Str { return x + g(h); }
-    fn slice(xs: view Str[], h: shared mut H) -> Str { return xs[0] + g(h); }
-    fn read(o: mut G) -> Str { return o.h.slot(o.h) + "!"; }
+    fn param(x: inout Str, h: shared mutable H) -> Str { return x + g(h); }
+    fn slice(xs: view Str[], h: shared mutable H) -> Str { return xs[0] + g(h); }
+    fn read(o: mutable G) -> Str { return o.h.slot(o.h) + "!"; }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -2017,11 +2017,11 @@ TEST(Lowering, AnInoutResultHoldsWhatItsInoutArgumentsHold) {
     class H { b: B; s: S; }
     fn pick(b: inout B) -> inout Str { return b.k; }
     fn pickS(s: inout S) -> inout Str { return s.b.k; }
-    fn put(x: inout Str, h: shared mut H) { x = "p"; }
-    fn bound(h: mut H) { x: inout = pick(h.b); x = "b"; }
-    fn passed(h: shared mut H) { put(pick(h.b), h); }
-    fn read(h: mut H) -> Str { return pick(h.b) + "!"; }
-    fn copied(h: mut H) { y: inout = pickS(h.s); y = "c"; }
+    fn put(x: inout Str, h: shared mutable H) { x = "p"; }
+    fn bound(h: mutable H) { x: inout = pick(h.b); x = "b"; }
+    fn passed(h: shared mutable H) { put(pick(h.b), h); }
+    fn read(h: mutable H) -> Str { return pick(h.b) + "!"; }
+    fn copied(h: mutable H) { y: inout = pickS(h.s); y = "c"; }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -2066,13 +2066,13 @@ TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
     class C { p: P; n: int; }
     fn first(p: P, x: int) -> int => p.a;
     fn both(p: P, q: inout P) -> int => p.a;
-    fn reset(c: shared mut C) -> int { c.p = P(9); return 0; }
+    fn reset(c: shared mutable C) -> int { c.p = P(9); return 0; }
     fn reads(c: view C) -> int => c.p.a;
     fn make(c: view C) -> C => C(c.p, 0);
     fn bump(p: inout P) -> int { p = P(9); return 0; }
     fn bumpN(n: inout int) -> int { n = 9; return 0; }
     class Hold { s: Pair; }
-    fn resetHold(h: shared mut Hold) -> int { h.s = Pair(P(9), P(9)); return 0; }
+    fn resetHold(h: shared mutable Hold) -> int { h.s = Pair(P(9), P(9)); return 0; }
     fn k() -> int => 0;
   )";
   struct Case {
@@ -2082,20 +2082,21 @@ TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
   };
   const Case cases[] = {
       {"fieldReset",
-       "c: shared mut C = C(P(1), 1); return first(c.p, reset(c));", 1},
+       "c: shared mutable C = C(P(1), 1); return first(c.p, reset(c));", 1},
       {"localInout", "p = P(1); return first(p, bump(p));", 1},
       {"equality", "q = P(1); return if q == P(bump(q)) then 1 else 0;", 1},
       {"partWritten", "s = Pair(P(1), P(2)); return first(s.q, s.bumpQ());", 1},
       {"viewReceiver",
-       "h: shared mut Hold = Hold(Pair(P(1), P(2))); "
+       "h: shared mutable Hold = Hold(Pair(P(1), P(2))); "
        "return h.s.get(resetHold(h));",
        1},
       {"nested",
-       "c: shared mut C = C(P(1), 1); "
+       "c: shared mutable C = C(P(1), 1); "
        "return first(c.p, first(c.p, reset(c)));",
        2},
       {"otherPart", "s = Pair(P(1), P(2)); return first(s.q, bump(s.p));", 0},
-      {"otherField", "c: mut = C(P(1), 1); return first(c.p, bumpN(c.n));", 0},
+      {"otherField", "c: mutable = C(P(1), 1); return first(c.p, bumpN(c.n));",
+       0},
       {"readsOnly", "c = C(P(1), 1); return first(c.p, reads(c));", 0},
       {"makesNew", "c = C(P(1), 1); return first(c.p, make(c).n);", 0},
       {"givenNothing", "c = C(P(1), 1); return first(c.p, k());", 0},
@@ -2141,13 +2142,13 @@ TEST(Lowering, ACallStoringAnotherFieldWritesNoValueReadWhereItIs) {
     class Counter { v: int; }
     impl Counter { fn next() -> int { self.v = self.v + 1; return self.v; } }
     class Log { n: int; }
-    fn logit(l: mut Log, i: int) -> int { l.n = l.n + i; return 0; }
+    fn logit(l: mutable Log, i: int) -> int { l.n = l.n + i; return 0; }
     fn first(p: P, x: int) -> int => p.n;
     fn firstTwo(t: Two, x: int) -> int => 0;
     fn look(p: view P, x: int) -> int => p.n;
     fn at(xs: view int[], x: int) -> int => xs[x % 3];
     class Arrays { xs: int[3]; }
-    fn resetXs(a: mut Arrays) -> int { a.xs = [9, 9, 9]; return 0; }
+    fn resetXs(a: mutable Arrays) -> int { a.xs = [9, 9, 9]; return 0; }
   )";
   struct Case {
     const char *Name;
@@ -2156,22 +2157,25 @@ TEST(Lowering, ACallStoringAnotherFieldWritesNoValueReadWhereItIs) {
     size_t Copies;
   };
   const Case cases[] = {
-      {"counter", "c: C, ctr: mut Counter", "return first(c.p, ctr.next());",
+      {"counter", "c: C, ctr: mutable Counter",
+       "return first(c.p, ctr.next());", 0},
+      {"logged", "c: C, l: mutable Log", "return first(c.p, logit(move l, 1));",
        0},
-      {"logged", "c: C, l: mut Log", "return first(c.p, logit(move l, 1));", 0},
-      {"element", "c: C, ctr: mut Counter", "return first(c.w.p, ctr.next());",
+      {"element", "c: C, ctr: mutable Counter",
+       "return first(c.w.p, ctr.next());", 0},
+      {"viewRecv", "c: C, ctr: mutable Counter", "return c.p.plus(ctr.next());",
        0},
-      {"viewRecv", "c: C, ctr: mut Counter", "return c.p.plus(ctr.next());", 0},
-      {"viewParam", "p: view P, ctr: mut Counter",
+      {"viewParam", "p: view P, ctr: mutable Counter",
        "return look(p, ctr.next());", 0},
-      {"sliceParam", "xs: view int[], ctr: mut Counter",
+      {"sliceParam", "xs: view int[], ctr: mutable Counter",
        "return at(xs, ctr.next());", 0},
-      {"otherLocal", "c: mut C", "return first(c.p, c.viaLocalN());", 0},
-      {"method", "c: mut C", "return first(c.p, c.resetP());", 1},
-      {"inoutLocal", "c: mut C", "return first(c.p, c.viaLocal());", 1},
-      {"armBinding", "c: mut C", "return firstTwo(c.two, c.viaArm());", 1},
-      {"partOfField", "p: view P, c: mut C", "return look(p, c.resetW());", 1},
-      {"sliceOfField", "xs: view int[], a: mut Arrays",
+      {"otherLocal", "c: mutable C", "return first(c.p, c.viaLocalN());", 0},
+      {"method", "c: mutable C", "return first(c.p, c.resetP());", 1},
+      {"inoutLocal", "c: mutable C", "return first(c.p, c.viaLocal());", 1},
+      {"armBinding", "c: mutable C", "return firstTwo(c.two, c.viaArm());", 1},
+      {"partOfField", "p: view P, c: mutable C", "return look(p, c.resetW());",
+       1},
+      {"sliceOfField", "xs: view int[], a: mutable Arrays",
        "return at(xs, resetXs(move a));", 1},
   };
   for (const Case &c : cases) {
@@ -2193,20 +2197,20 @@ TEST(Lowering, ACallStoringAnotherFieldWritesNoValueReadWhereItIs) {
 // evaluated, by the length the slice has when the program runs, into
 // memory of its own (Paykan_malloc), their references retained, and
 // released and freed after the call.  With no such operand nothing is
-// copied.  The object holding the array is a `shared mut` one, which the
+// copied.  The object holding the array is a `shared mutable` one, which the
 // slice and the later operand both reach.
 TEST(Lowering, ASlicePassedOnIsCopiedByItsLengthWhenALaterOperandMayWriteIt) {
   auto l = lower(R"(
     class A { xs: int[3]; ss: Str[3]; }
     fn total(xs: view int[], x: int) -> int => xs[0];
     fn names(ss: view Str[], x: int) -> int => ss[0].len();
-    fn reset(a: shared mut A) -> int { a.xs = [9, 9, 9]; a.ss = ["x", "y", "z"]; return 0; }
+    fn reset(a: shared mutable A) -> int { a.xs = [9, 9, 9]; a.ss = ["x", "y", "z"]; return 0; }
     fn reads(a: view A) -> int => a.xs[0];
-    fn hazard(xs: view int[], a: shared mut A) -> int => total(xs, reset(a));
-    fn refs(ss: view Str[], a: shared mut A) -> int => names(ss, reset(a));
+    fn hazard(xs: view int[], a: shared mutable A) -> int => total(xs, reset(a));
+    fn refs(ss: view Str[], a: shared mutable A) -> int => names(ss, reset(a));
     fn safe(xs: view int[], a: view A) -> int => total(xs, reads(a));
     fn main() -> int {
-      a: shared mut A = A([1, 2, 3], ["a", "b", "c"]);
+      a: shared mutable A = A([1, 2, 3], ["a", "b", "c"]);
       return hazard(a.xs, a) + refs(a.ss, a) + safe(a.xs, a);
     }
   )",
@@ -2267,7 +2271,7 @@ std::vector<std::string> warnings(const std::string &out) {
 // no later operand may write: one read before the call (`gsv`), passed to
 // a call that has returned (`gn`), with a later call storing only another
 // type's field (`gt`), or replacing the object the elements are in, which
-// the caller holds (`gc`).  The objects are `shared mut`: the slice and the
+// the caller holds (`gc`).  The objects are `shared mutable`: the slice and the
 // call writing it reach the same one.
 TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
   // The handoff's probe: only `gs` copies a slice.
@@ -2278,15 +2282,15 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
     fn look(p: view P, x: int) -> int => p.a;
     fn first(p: P, x: int) -> int => p.a;
     fn total(xs: view int[], x: int) -> int => xs[0];
-    fn reset(c: shared mut C) -> int { c.p = P(9); c.a = [9, 9, 9]; return 0; }
-    fn gv(p: view P, c: shared mut C) -> int => look(p, reset(c));
-    fn gp(p: view P, c: shared mut C) -> int => first(p, reset(c));
-    fn gs(xs: view int[], c: shared mut C) -> int => total(xs, reset(c));
-    fn gsv(xs: view int[], c: shared mut C) -> int => xs[0] + reset(c) + xs[0];
+    fn reset(c: shared mutable C) -> int { c.p = P(9); c.a = [9, 9, 9]; return 0; }
+    fn gv(p: view P, c: shared mutable C) -> int => look(p, reset(c));
+    fn gp(p: view P, c: shared mutable C) -> int => first(p, reset(c));
+    fn gs(xs: view int[], c: shared mutable C) -> int => total(xs, reset(c));
+    fn gsv(xs: view int[], c: shared mutable C) -> int => xs[0] + reset(c) + xs[0];
     fn main() -> int {
-      let c: shared mut C = C(P(1), [1, 2, 3]);
+      let c: shared mutable C = C(P(1), [1, 2, 3]);
       io::println(Str(gv(c.p, c)) + " " + Str(gp(c.p, c)));
-      let d: shared mut C = C(P(1), [1, 2, 3]);
+      let d: shared mutable C = C(P(1), [1, 2, 3]);
       io::println(Str(gs(d.a, d)) + " " + Str(total(d.a, reset(d))));
       return 0;
     }
@@ -2295,7 +2299,7 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
   ASSERT_TRUE(probe.Ok) << probe.Error;
   EXPECT_EQ(warnings(probe.Warnings),
             std::vector<std::string>{
-                "11:60: warning: 'reset' in a later argument may write the "
+                "11:64: warning: 'reset' in a later argument may write the "
                 "elements of slice 'xs': they are copied to the heap before "
                 "the call to 'total'"})
       << probe.Warnings;
@@ -2304,30 +2308,30 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
     struct P { a: int; }
     class C { p: P; a: int[3]; }
     class D { c: C; }
-    class W { view fn touch(c: shared mut C) -> int => 0; }
-    class X : W { view fn touch(c: shared mut C) -> int { c.a = [7, 7, 7]; return 1; } }
+    class W { view fn touch(c: shared mutable C) -> int => 0; }
+    class X : W { view fn touch(c: shared mutable C) -> int { c.a = [7, 7, 7]; return 1; } }
     class Ticker { t: int; fn next() -> int { self.t += 1; return self.t; } }
     fn look(p: view P, x: int) -> int => p.a;
     fn first(p: P, x: int) -> int => p.a;
     fn total(xs: view int[], x: int) -> int => xs[0];
-    fn reset(c: shared mut C) -> int { c.p = P(9); c.a = [9, 9, 9]; return 0; }
-    fn wipe(d: shared mut D) -> int { d.c.a = [9, 9, 9]; return 0; }
-    fn swap(d: shared mut D) -> int { d.c = C(P(9), [9, 9, 9]); return 0; }
-    fn gs(xs: view int[], c: shared mut C) -> int => total(xs, reset(c));
+    fn reset(c: shared mutable C) -> int { c.p = P(9); c.a = [9, 9, 9]; return 0; }
+    fn wipe(d: shared mutable D) -> int { d.c.a = [9, 9, 9]; return 0; }
+    fn swap(d: shared mutable D) -> int { d.c = C(P(9), [9, 9, 9]); return 0; }
+    fn gs(xs: view int[], c: shared mutable C) -> int => total(xs, reset(c));
     fn gf(xs: view int[], f: () -> int) -> int => total(xs, f());
-    fn gw(xs: view int[], w: shared W, c: shared mut C) -> int => total(xs, w.touch(c));
-    fn gd(xs: view int[], d: shared mut D) -> int => total(xs, wipe(d));
-    fn gv(p: view P, c: shared mut C) -> int => look(p, reset(c));
-    fn gp(p: view P, c: shared mut C) -> int => first(p, reset(c));
-    fn gsv(xs: view int[], c: shared mut C) -> int => xs[0] + reset(c) + xs[0];
-    fn gn(xs: view int[], c: shared mut C) -> int => total(xs, 0) + reset(c);
-    fn gt(xs: view int[], t: shared mut Ticker) -> int => total(xs, t.next());
-    fn gc(xs: view int[], d: shared mut D) -> int => total(xs, swap(d));
+    fn gw(xs: view int[], w: shared W, c: shared mutable C) -> int => total(xs, w.touch(c));
+    fn gd(xs: view int[], d: shared mutable D) -> int => total(xs, wipe(d));
+    fn gv(p: view P, c: shared mutable C) -> int => look(p, reset(c));
+    fn gp(p: view P, c: shared mutable C) -> int => first(p, reset(c));
+    fn gsv(xs: view int[], c: shared mutable C) -> int => xs[0] + reset(c) + xs[0];
+    fn gn(xs: view int[], c: shared mutable C) -> int => total(xs, 0) + reset(c);
+    fn gt(xs: view int[], t: shared mutable Ticker) -> int => total(xs, t.next());
+    fn gc(xs: view int[], d: shared mutable D) -> int => total(xs, swap(d));
     fn main() -> int {
-      let c: shared mut C = C(P(1), [1, 2, 3]);
-      let d: shared mut D = D(C(P(1), [1, 2, 3]));
+      let c: shared mutable C = C(P(1), [1, 2, 3]);
+      let d: shared mutable D = D(C(P(1), [1, 2, 3]));
       let w: shared W = X();
-      let t: shared mut Ticker = Ticker(0);
+      let t: shared mutable Ticker = Ticker(0);
       let f = fn() -> int { c.a = [9, 9, 9]; return 0; };
       return gs(c.a, c) + gf(c.a, move f) + gw(c.a, w, c) + gd(d.c.a, d) +
           gv(c.p, c) + gp(c.p, c) + gsv(c.a, c) + gn(c.a, c) + gt(c.a, t) +
@@ -2340,10 +2344,10 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
                              "slice 'xs': they are copied to the heap before "
                              "the call to 'total'";
   EXPECT_EQ(warnings(l.Warnings),
-            (std::vector<std::string>{"14:60: warning: 'reset'" + copied,
+            (std::vector<std::string>{"14:64: warning: 'reset'" + copied,
                                       "15:57: warning: 'f'" + copied,
-                                      "16:73: warning: 'touch'" + copied,
-                                      "17:60: warning: 'wipe'" + copied}))
+                                      "16:77: warning: 'touch'" + copied,
+                                      "17:64: warning: 'wipe'" + copied}))
       << l.Warnings;
   // Each warning is where a copy is made, and there only.
   for (const char *fn : {"gs", "gf", "gw", "gd"})
@@ -2364,11 +2368,11 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
 TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutOncePerPlace) {
   auto l = lower(R"(
     class C { a: int[3]; s: Str[2]; }
-    fn reset(c: shared mut C) -> int { c.a = [9, 9, 9]; c.s = ["x", "y"]; return 0; }
+    fn reset(c: shared mutable C) -> int { c.a = [9, 9, 9]; c.s = ["x", "y"]; return 0; }
     fn count<T>(xs: view T[], x: int) -> int => xs.len() + x;
-    fn gs<T>(xs: view T[], c: shared mut C) -> int => count(xs, reset(c));
+    fn gs<T>(xs: view T[], c: shared mutable C) -> int => count(xs, reset(c));
     fn main() -> int {
-      let c: shared mut C = C([1, 2, 3], ["a", "b"]);
+      let c: shared mutable C = C([1, 2, 3], ["a", "b"]);
       let u: u8[1] = [7];
       return gs(c.a, c) + gs(c.s, c) + gs(u, c) + gs(c.a, c);
     }
@@ -2377,7 +2381,7 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutOncePerPlace) {
   ASSERT_TRUE(l.Ok) << l.Error;
   EXPECT_EQ(warnings(l.Warnings),
             std::vector<std::string>{
-                "5:61: warning: 'reset' in a later argument may write the "
+                "5:65: warning: 'reset' in a later argument may write the "
                 "elements of slice 'xs': they are copied to the heap before "
                 "the call to 'count<int>'"})
       << l.Warnings;
@@ -2391,10 +2395,10 @@ TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutOncePerPlace) {
   auto none = lower(R"(
     class C { a: int[3]; n: int; }
     fn total(xs: view int[], x: int) -> int => xs[0];
-    fn tick(c: shared mut C) -> int { c.n += 1; return c.n; }
-    fn g(xs: view int[], c: shared mut C) -> int => total(xs, tick(c)) + total(xs, 0);
+    fn tick(c: shared mutable C) -> int { c.n += 1; return c.n; }
+    fn g(xs: view int[], c: shared mutable C) -> int => total(xs, tick(c)) + total(xs, 0);
     fn main() -> int {
-      let c: shared mut C = C([1, 2, 3], 0);
+      let c: shared mutable C = C([1, 2, 3], 0);
       return g(c.a, c);
     }
   )",
@@ -2411,12 +2415,12 @@ TEST(Lowering, AStringIsReadBeforeTheIndexOfItsCharacter) {
   auto l = lower(R"(
     class B { s: Str; }
     class H { b: B; }
-    fn g(h: shared mut H) -> int {
+    fn g(h: shared mutable H) -> int {
       h.b = B("y");
       return 0;
     }
     fn n(k: int) -> int { return k; }
-    fn held(h: shared mut H) -> char { return h.b.s[g(h)]; }
+    fn held(h: shared mutable H) -> char { return h.b.s[g(h)]; }
     fn inPlace(h: H) -> char { return h.b.s[n(1)]; }
     fn main() -> int { return 0; }
   )");
@@ -2503,7 +2507,7 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
     impl Derived {
       fn __init__(name: Str, n: int) { __super__(move name); self.n = n; }
     }
-    fn main() -> int { d: mut = Derived("d", 1); return d.extra(); }
+    fn main() -> int { d: mutable = Derived("d", 1); return d.extra(); }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   const std::string &t = l.Text;
@@ -2694,7 +2698,7 @@ TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
     class H { s: shared Str; }
     impl H { fn __init__() { self.s = "a"; } }
     fn main() -> int {
-      h: mut = H();
+      h: mutable = H();
       x: shared Str = "b";
       h.s = x;
       return 0;
@@ -3141,7 +3145,7 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
       x = mkh();
       arr[idx()] = arr[idx()].clone();
       n: int = take(arr[idx()]);
-      h: mut H = H(C(3));
+      h: mutable H = H(C(3));
       h.c = arr[idx()].clone();
       return n;
     }
@@ -3261,7 +3265,7 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
       x: int? = half(4);
       y = half(3);
       f: float? = 3;
-      c: mut = C();
+      c: mutable = C();
       c.n = x;
       if y == None { x = 7; }
       return get(x) + get(c.n) + get(y);
@@ -3546,7 +3550,7 @@ TEST(Lowering, FixedArrayFieldsAreMemFields) {
   auto l = lower(R"(
     class Grid { cells: int[2][3]; tags: Str[2]; }
     fn main() -> int {
-      g: mut = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
+      g: mutable = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
       g.cells[1][2] = 7;
       return g.cells[1][2];
     }
@@ -3619,7 +3623,7 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
            "fn twice(x: int) -> int { return x * 2; }\n";
   }
   auto l = lower("import lib;\n"
-                 "fn main() -> int { a: mut = lib::Adder(1); return "
+                 "fn main() -> int { a: mutable = lib::Adder(1); return "
                  "a.add(lib::twice(2)) + a.n; }\n",
                  dir.string());
   std::filesystem::remove_all(dir);
@@ -3916,7 +3920,7 @@ TEST(Lowering, MethodSymbolsCannotClashWithUserFunctions) {
     fn K_destroy() -> int { return 3; }
     fn K_vtable() -> int { return 5; }
     fn main() -> int {
-      k: mut K = K();
+      k: mutable K = K();
       return k.w() + K_w() + K_destroy() + k.vtable() + K_vtable();
     }
   )");
@@ -4000,7 +4004,7 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
     fn main() -> int {
       Paykan_println("x");
       Paykan_panic_div_by_zero();
-      fresh: mut Str = "new"; // a literal in a `mut` slot is a new string
+      fresh: mutable Str = "new"; // a literal in a `mutable` slot is a new string
       t = isText(fresh);
       return PaykanString_new(1) + PaykanString_vtable() + 5 / z();
     }
@@ -4612,14 +4616,14 @@ TEST(LoweringMoves, SelfIsNeverHandedOn) {
   // own to do so (`box %self`, a +1), which the moves leave as it is.
   const std::string src = R"(
     fn peek(n: view Node) -> int { return n.n; }
-    fn keep(n: shared mut Node) -> int { return n.n; }
+    fn keep(n: shared mutable Node) -> int { return n.n; }
     impl Node {
       fn look() -> int { return peek(self); }
       shared fn give() -> int { return keep(self); }
-      shared fn same() -> shared mut Node { return self; }
+      shared fn same() -> shared mutable Node { return self; }
     }
     fn main() -> int {
-      n: shared mut = Node(1);
+      n: shared mutable = Node(1);
       return n.look() + n.give() + keep(n.same());
     }
   )";
@@ -4637,10 +4641,11 @@ TEST(LoweringMoves, SelfIsNeverHandedOn) {
     auto plain = lower(std::string(kTake) + "impl Node { " + method +
                        " }\nfn main() -> int { return 0; }\n");
     EXPECT_FALSE(plain.Ok) << method;
-    EXPECT_NE(plain.Error.find("cannot copy 'self' (a unique 'mut Node'); a "
-                               "method borrows its receiver (a 'shared fn' "
-                               "hands on a shared one)"),
-              std::string::npos)
+    EXPECT_NE(
+        plain.Error.find("cannot copy 'self' (a unique 'mutable Node'); a "
+                         "method borrows its receiver (a 'shared fn' "
+                         "hands on a shared one)"),
+        std::string::npos)
         << plain.Error;
   }
 }
@@ -4657,18 +4662,18 @@ TEST(LoweringMoves, AFieldReadInUseAcrossALaterCallKeepsTheCopy) {
     class Holder { node: shared Named; }
     fn takeName(n: shared Named) -> Str { return n.name.clone(); }
     fn label(n: int) -> Str { return "#"; }
-    fn replace(h: shared mut Holder) -> Str { h.node = Named("other"); return "!"; }
+    fn replace(h: shared mutable Holder) -> Str { h.node = Named("other"); return "!"; }
     fn kept(h: Holder) -> Str {
       x = h.node;
       s = takeName(x);
       return h.node.name + label(1) + s;
     }
-    fn held(h: shared mut Holder) -> Str {
+    fn held(h: shared mutable Holder) -> Str {
       x = h.node;
       s = takeName(x);
       return h.node.name + replace(h) + s;
     }
-    fn moved(h: shared mut Holder) -> Str {
+    fn moved(h: shared mutable Holder) -> Str {
       x = h.node;
       s = takeName(x);
       return replace(h) + s;
@@ -4836,11 +4841,11 @@ TEST(LoweringMoves, AReadRootedInAParameterKeepsTheHandOffBeforeIt) {
     class Gen<T> { v: T; }
     class Lbl { name: Str; }
     class Pair { lbl: Lbl; g: Gen<int>; }
-    fn touchGen(p: shared mut Pair) -> Str {
+    fn touchGen(p: shared mutable Pair) -> Str {
       p.g = Gen<int>(2);
       return "!";
     }
-    fn f(p: shared mut Pair) -> Str {
+    fn f(p: shared mutable Pair) -> Str {
       x: shared Node = Node(1);
       t = take(x);
       return p.lbl.name + touchGen(p) + Str(t);
@@ -5068,7 +5073,7 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
     fn show(n: shared Node) {
       io::println(n.name);
     }
-    fn keep(h: shared mut Holder, n: shared Node) {
+    fn keep(h: shared mutable Holder, n: shared Node) {
       h.n = n;
     }
     fn pass(n: shared Node) {
@@ -5081,7 +5086,7 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
       a: shared Node = Node("a", None);
       show(a);
       pass(a);
-      h: shared mut Holder = Holder(None);
+      h: shared mutable Holder = Holder(None);
       keep(h, a);
       show(Node("tmp", None));
       show(a);
@@ -5160,15 +5165,15 @@ TEST(LoweringLend, AReadIsLentUnlessACallInUseMayLetItGo) {
   const char *const source = R"(import ::io;
     class Node { name: Str; }
     class H { n: shared Node; s: Str; }
-    fn strs(m: shared Node, h: shared mut H) { h.s = "z"; }
-    fn nodes(m: shared Node, h: shared mut H) { h.n = Node("z"); }
-    fn clear(h: shared mut H) -> int { h.n = Node("c"); return 0; }
+    fn strs(m: shared Node, h: shared mutable H) { h.s = "z"; }
+    fn nodes(m: shared Node, h: shared mutable H) { h.n = Node("z"); }
+    fn clear(h: shared mutable H) -> int { h.n = Node("c"); return 0; }
     fn later(m: shared Node, k: int) -> int { return k; }
     fn name(s: view Str) -> int { return s.len(); }
     fn swap(m: shared Node, h: inout H) { h = H(Node("w"), "w"); }
-    fn same(a: shared Node, h: shared mut H) -> bool { return a == h.n; }
+    fn same(a: shared Node, h: shared mutable H) -> bool { return a == h.n; }
     fn main() -> int {
-      h: shared mut H = H(Node("a"), "s");
+      h: shared mutable H = H(Node("a"), "s");
       strs(h.n, h);
       nodes(h.n, h);
       k = later(h.n, clear(h));
@@ -5214,27 +5219,27 @@ TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
   auto l = lower(R"(import ::io;
     class Node { name: shared Str; }
     class Holder { n: shared Node; }
-    fn direct(m: shared Node, h: shared mut Holder) {
+    fn direct(m: shared Node, h: shared mutable Holder) {
       h.n = Node("z");
       io::println(m.name);
     }
-    class Base { view fn take(m: shared Node, h: shared mut Holder) { io::println("base"); } }
+    class Base { view fn take(m: shared Node, h: shared mutable Holder) { io::println("base"); } }
     class Derived : Base {
-      view fn take(m: shared Node, h: shared mut Holder) { h.n = Node("z"); }
+      view fn take(m: shared Node, h: shared mutable Holder) { h.n = Node("z"); }
     }
     class Keeper { m: shared Node; }
     impl Keeper {
-      fn __init__(m: shared Node, h: shared mut Holder) { h.n = Node("z"); self.m = m; }
+      fn __init__(m: shared Node, h: shared mutable Holder) { h.n = Node("z"); self.m = m; }
     }
     class Parent { m: shared Node; }
     impl Parent {
-      fn __init__(m: shared Node, h: shared mut Holder) { h.n = Node("z"); self.m = m; }
+      fn __init__(m: shared Node, h: shared mutable Holder) { h.n = Node("z"); self.m = m; }
     }
     class Child : Parent {}
-    impl Child { fn __init__(h: shared mut Holder) { __super__(h.n, h); } }
+    impl Child { fn __init__(h: shared mutable Holder) { __super__(h.n, h); } }
     struct S { k: int; }
-    impl S { view fn meth(m: shared Node, h: shared mut Holder) { h.n = Node("z"); } }
-    fn gen<T>(m: view T, h: shared mut Holder) -> Str {
+    impl S { view fn meth(m: shared Node, h: shared mutable Holder) { h.n = Node("z"); } }
+    fn gen<T>(m: view T, h: shared mutable Holder) -> Str {
       h.n = Node("z");
       return "g";
     }
@@ -5242,7 +5247,7 @@ TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
     struct Q { n: shared Node; }
     impl Q { fn set(s: shared Str, v: shared Node) { self.n = Node("z"); } }
     fn main() -> int {
-      h: shared mut Holder = Holder(Node("a"));
+      h: shared mutable Holder = Holder(Node("a"));
       direct(h.n, h);
       b: Base = Derived();
       b.take(h.n, h);
@@ -5253,7 +5258,7 @@ TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
       io::println(g(h.n));
       io::println(gen(h.n, h));
       c = Child(h);
-      x: mut = Node("x");
+      x: mutable = Node("x");
       f(x.name, x);
       st = Q(Node("n"));
       st.set(st.n.name, st.n);
@@ -5396,7 +5401,7 @@ impl Base {
   shared fn m() -> int { match self { n: Node { return n.w; } _ { return 0; } } }
 }
 fn main() -> int {
-  s: shared mut Base = Node(6, 7);
+  s: shared mutable Base = Node(6, 7);
   return peek(Node(3, 4)) + own() + Holder(Base(5)).kind() + s.m();
 }
 )");
@@ -5429,19 +5434,19 @@ TEST(Lowering, AMoveOutOfBorrowedStorageIsCheckedByItsCaller) {
   auto l = lower(R"(
     import ::memory as mem;
     class Node { v: int; }
-    class H { n: mut Node; }
-    fn borrowed(h: shared mut H) -> int {
+    class H { n: mutable Node; }
+    fn borrowed(h: shared mutable H) -> int {
       let o = mem::replace(h.n, Node(2));
       return o.v;
     }
     fn owned() -> int {
-      h: mut H = H(Node(1));
+      h: mutable H = H(Node(1));
       let o = mem::replace(h.n, Node(2));
       return o.v;
     }
     fn fromSlot(s: inout Node) -> Node { return mem::replace(s, Node(0)); }
     fn passedOn(s: inout Node) -> Node { return fromSlot(s); }
-    fn checked(h: shared mut H) -> int {
+    fn checked(h: shared mutable H) -> int {
       let x = passedOn(h.n);
       return x.v;
     }
@@ -5463,30 +5468,30 @@ TEST(Lowering, AMoveThroughAHandleIsCheckedWhereItHappens) {
   auto l = lower(R"(
     import ::memory as mem;
     class Node { v: int; }
-    class H { n: mut Node; }
-    class W { h: shared mut H; }
-    fn id(h: shared mut H) -> shared mut H { return h; }
+    class H { n: mutable Node; }
+    class W { h: shared mutable H; }
+    fn id(h: shared mutable H) -> shared mutable H { return h; }
     fn underOwned(w: inout W) -> Node { return mem::replace(w.h.n, Node(2)); }
-    fn byValue(h: shared mut H) -> Node { return mem::replace(h.n, Node(2)); }
+    fn byValue(h: shared mutable H) -> Node { return mem::replace(h.n, Node(2)); }
     fn caller() -> int {
-      w: mut W = W(H(Node(1)));
+      w: mutable W = W(H(Node(1)));
       let o = underOwned(w);
       return o.v;
     }
-    fn fromCall(h: shared mut H) -> int {
+    fn fromCall(h: shared mutable H) -> int {
       let o = mem::replace(id(h).n, Node(2));
       return o.v;
     }
-    fn fromConditional(h: shared mut H, k: shared mut H, p: bool) -> int {
+    fn fromConditional(h: shared mutable H, k: shared mutable H, p: bool) -> int {
       let o = mem::replace((if p then h else k).n, Node(2));
       return o.v;
     }
-    fn fromLambda(h: shared mut H) -> int {
+    fn fromLambda(h: shared mutable H) -> int {
       let t = fn() -> Node { return mem::replace(h.n, Node(2)); };
       let o = t();
       return o.v;
     }
-    fn local(mk: () -> shared mut H) -> Node {
+    fn local(mk: () -> shared mutable H) -> Node {
       k = mk();
       return mem::replace(k.n, Node(2));
     }
@@ -5509,9 +5514,9 @@ TEST(Lowering, AResultOfAnotherFormIsCheckedByItsFunction) {
   auto l = lower(R"(
     import ::memory as mem;
     class Node { v: int; }
-    class H { n: mut Node; }
+    class H { n: mutable Node; }
     fn tk(s: inout Node) -> shared Node { return mem::replace(s, Node(0)); }
-    fn g(h: shared mut H) -> int {
+    fn g(h: shared mutable H) -> int {
       let x = tk(h.n);
       return x.v;
     }
@@ -5529,19 +5534,19 @@ TEST(Lowering, ASwapFromBorrowedIntoOwnedIsChecked) {
   auto l = lower(R"(
     import ::memory as mem;
     class Node { v: int; }
-    class H { n: mut Node; }
-    fn intoOwned(h: shared mut H) -> int {
-      x: mut Node = Node(2);
+    class H { n: mutable Node; }
+    fn intoOwned(h: shared mutable H) -> int {
+      x: mutable Node = Node(2);
       mem::swap(h.n, x);
       return x.v;
     }
     fn bothOwned() -> int {
-      x: mut Node = Node(2);
-      y: mut Node = Node(3);
+      x: mutable Node = Node(2);
+      y: mutable Node = Node(3);
       mem::swap(x, y);
       return x.v;
     }
-    fn bothBorrowed(h: shared mut H, k: shared mut H) {
+    fn bothBorrowed(h: shared mutable H, k: shared mutable H) {
       mem::swap(h.n, k.n);
     }
     fn main() -> int { return 0; }
@@ -5561,8 +5566,8 @@ TEST(Lowering, ASwapFromBorrowedIntoOwnedIsChecked) {
 TEST(Lowering, AViewLocalsHoldEndsAfterItsLastUse) {
   auto l = lower(R"(
     class Node { v: int; }
-    class H { n: mut Node; }
-    fn g(h: shared mut H) -> int {
+    class H { n: mutable Node; }
+    fn g(h: shared mutable H) -> int {
       l: view Node = h.n;
       let a = l.v;
       h.n = Node(2);
@@ -5585,15 +5590,15 @@ TEST(Lowering, AnExchangeThroughAFunctionIsCheckedInTheOwnedPlace) {
   auto l = lower(R"(
     import ::memory as mem;
     class Node { v: int; }
-    class H { n: mut Node; }
+    class H { n: mutable Node; }
     fn ex(a: inout Node, b: inout Node) { mem::swap(a, b); }
     fn nx(i: inout int) -> int { i = i + 1; return i; }
-    fn plain(h: shared mut H) -> int {
-      x: mut Node = Node(2);
+    fn plain(h: shared mutable H) -> int {
+      x: mutable Node = Node(2);
       ex(h.n, x);
       return x.v;
     }
-    fn indexed(h: shared mut H) -> int {
+    fn indexed(h: shared mutable H) -> int {
       a: Node[2] = [Node(1), Node(2)];
       i = 0;
       ex(h.n, a[nx(i)]);
@@ -5613,14 +5618,14 @@ TEST(Lowering, AnExchangeThroughAFunctionIsCheckedInTheOwnedPlace) {
 TEST(Lowering, AMatchBindingNothingDoesNotHoldItsSubject) {
   auto l = lower(R"(
     class Node { v: int; }
-    class H { o: mut Node?; }
-    fn f(h: shared mut H) -> int {
+    class H { o: mutable Node?; }
+    fn f(h: shared mutable H) -> int {
       match h.o {
         Node { return 1; }
         None { return 0; }
       }
     }
-    fn g(h: shared mut H) -> int {
+    fn g(h: shared mutable H) -> int {
       match h.o {
         n: Node { return n.v; }
         None { return 0; }
@@ -5638,9 +5643,9 @@ TEST(Lowering, AMatchBindingNothingDoesNotHoldItsSubject) {
 TEST(Lowering, ACallThatTakesNothingOutOfItsSlotIsNotChecked) {
   auto l = lower(R"(
     class Node { v: int; }
-    class H { n: mut Node; }
-    fn fresh(h: shared mut H) -> Node { return Node(h.n.v); }
-    fn caller(h: shared mut H) -> int {
+    class H { n: mutable Node; }
+    fn fresh(h: shared mutable H) -> Node { return Node(h.n.v); }
+    fn caller(h: shared mutable H) -> int {
       let x = fresh(h);
       return x.v;
     }
@@ -5655,13 +5660,13 @@ TEST(Lowering, ATakeThroughAHandleHoldsWhatTheCallerBorrowsOfIt) {
   auto l = lower(R"(
     import ::memory as mem;
     class Node { v: int; }
-    class H { n: mut Node; }
+    class H { n: mutable Node; }
     fn take(s: inout Node) -> Node { return mem::replace(s, Node(0)); }
-    fn g(h: shared mut H, n: view Node) -> int {
+    fn g(h: shared mutable H, n: view Node) -> int {
       let x = take(h.n);
       return x.v + n.v;
     }
-    fn caller(h: shared mut H) -> int { return g(h, h.n); }
+    fn caller(h: shared mutable H) -> int { return g(h, h.n); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -5676,8 +5681,8 @@ TEST(Lowering, ATypeArgumentsFormIsInANativeInstancesDescriptor) {
     native fn keep<T>(v: view T) = "keep";
     class Item { n: int; }
     fn main() -> int {
-      i: shared mut Item = Item(1);
-      keep<shared mut Item>(i);
+      i: shared mutable Item = Item(1);
+      keep<shared mutable Item>(i);
       j: Item = Item(2);
       keep<Item>(j);
       return 0;
@@ -5704,15 +5709,15 @@ TEST(Lowering, AReadInUseAcrossAnAwaitIsHeld) {
     async fn tick(k: int) -> int { return k; }
     fn use(a: view Str, n: int) -> int { return a.len() + n; }
     fn waits() -> int { return await tick(1); }
-    fn held(b: shared mut Box) -> int {
+    fn held(b: shared mutable Box) -> int {
       let t = tick(2);
       return use(b.name, await t);
     }
-    fn through(b: shared mut Box) -> int { return use(b.name, waits()); }
+    fn through(b: shared mutable Box) -> int { return use(b.name, waits()); }
     fn lent(h: view Holder) -> int { return await h.p.sum(); }
     class Worker { n: int; async view fn work() -> int { return self.n; } }
     class Team { w: Worker; }
-    fn recv(t: shared mut Team) -> int { return await t.w.work(); }
+    fn recv(t: shared mutable Team) -> int { return await t.w.work(); }
     fn own() -> int {
       p = Pair(1, 2);
       return await p.sum();

@@ -47,7 +47,7 @@ fn main() -> int {
   io::println(Str(xs == xs.clone()));
 
   // A field holds the list moved into it.
-  h: mut = Holder(move xs);
+  h: mutable = Holder(move xs);
   h.xs.pop();
   io::println(Str(h.xs.len()));
 
@@ -81,7 +81,7 @@ fn main() -> int {
       + lo.pop() + " " + hi.pop());
 
   // A container in a Box is an object.
-  b: mut = mem::Box(mem::replace(h.xs, c::List<int>()));
+  b: mutable = mem::Box(mem::replace(h.xs, c::List<int>()));
   b.get().push(7);
   o: view Obj = b;
   io::println(describe(o) + ", " + describe(h) + ", " + Str(b.value().len()));

@@ -26,7 +26,7 @@ fn main() -> int {
   io::println(Str(text::count("banana", 'a')));
   show(text::find("needle in a haystack", "in a"));
   show(text::find("haystack", "needle"));
-  padded: mut = "   spaced out  ";
+  padded: mutable = "   spaced out  ";
   text::trim(padded);
   io::println("[" + padded + "]");
   return 0;

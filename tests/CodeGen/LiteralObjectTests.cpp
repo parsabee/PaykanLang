@@ -136,7 +136,7 @@ TEST(LiteralObject, ExpressionStatementAndFields) {
     fn main() -> int {
       "unused";
       "ab"[0];
-      k: mut = K();
+      k: mutable = K();
       k.name = "k2";
       io::println(k.name);
       io::println(k.tag);

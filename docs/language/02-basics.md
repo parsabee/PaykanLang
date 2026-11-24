@@ -157,11 +157,11 @@ modes](03-functions.md#parameter-modes-view-and-inout)), only to a plain or `vie
 Like any variable, an inner block may declare its own variable with the same name.
 
 Whether the object a variable refers to can be changed is the type's business, not
-`let`'s. A reference is immutable unless its type is written `mut T`: through a `Point`
+`let`'s. A reference is immutable unless its type is written `mutable T`: through a `Point`
 no field can be assigned and only a `view fn` method can be called
-([Classes](05-classes.md#methods-that-only-read-view-fn)); through a `mut Point` the
+([Classes](05-classes.md#methods-that-only-read-view-fn)); through a `mutable Point` the
 object can be changed. So `let p = Point(1, 2);` cannot be followed by `p.x = 5;`, and
-`let q: mut = Point(1, 2);` can, with `q` still fixed to that one object:
+`let q: mutable = Point(1, 2);` can, with `q` still fixed to that one object:
 
 ```pkn
 import ::io;
@@ -172,8 +172,8 @@ class Point {
 }
 
 fn main() -> int {
-  let p = Point(1, 2);          // an immutable Point: p.x = 5 would be an error
-  let q: mut = Point(1, 2);     // a mut Point: its fields can be assigned
+  let p = Point(1, 2);              // an immutable Point: p.x = 5 would be an error
+  let q: mutable = Point(1, 2);     // a mutable Point: its fields can be assigned
   q.x = 5;
   io::println(Str(p.x) + " " + Str(q.x));
   return 0;
@@ -202,25 +202,25 @@ fn main() -> int {
 Error:
 
 ```
-error: 'p' is immutable (a 'Point'; write 'mut Point' to change it); cannot assign to its field 'x'
+error: 'p' is immutable (a 'Point'; write 'mutable Point' to change it); cannot assign to its field 'x'
 ```
 
-`mut` is written where the type goes, before it (`q: mut Point = Point(1, 2);`, `let q:
-mut Point = Point(1, 2);`), or alone when the type is inferred (`q: mut = Point(1, 2);`).
-A `mut T` can be stored wherever a `T` is wanted; a `T` becomes a `mut T` only by `move`
+`mutable` is written where the type goes, before it (`q: mutable Point = Point(1, 2);`, `let q:
+mutable Point = Point(1, 2);`), or alone when the type is inferred (`q: mutable = Point(1, 2);`).
+A `mutable T` can be stored wherever a `T` is wanted; a `T` becomes a `mutable T` only by `move`
 ([`move`](#move)) or straight from a temporary such as a constructor call (`cannot store a
-'Point' in variable 'q', a 'mut' reference: a reference gains 'mut' only by 'move'`). It goes
-on objects, strings included (`s: mut Str` for a `concat`); a value, a number, `bool`,
+'Point' in variable 'q', a 'mutable' reference: a reference gains 'mutable' only by 'move'`). It goes
+on objects, strings included (`s: mutable Str` for a `concat`); a value, a number, `bool`,
 `char`, struct, tuple or fixed-size array, is rewritten by assignment, which `let` decides,
-so `mut` on one is an error (`'mut' applies to objects; 'int' is a value: its storage is
+so `mutable` on one is an error (`'mutable' applies to objects; 'int' is a value: its storage is
 rewritten by assignment, which 'let' fixes`). The bare type costs nothing; each qualifier
-an object takes, `mut`, `shared`, `shared mut`, `atomic shared` or `locked mut`, buys
+an object takes, `mutable`, `shared`, `shared mutable`, `atomic shared` or `locked mutable`, buys
 something, writes, several owners or a crossing between threads
 ([Concurrency](19-concurrency.md)).
 
 A variable whose type is qualified `weak` is a `shared` reference that owns nothing: it
 refers to a shared object without keeping it alive, and reads as `None` once the object is
-gone. `weak` names a `shared` object, `weak mut` a `shared mut` one, and a read gives that
+gone. `weak` names a `shared` object, `weak mutable` a `shared mutable` one, and a read gives that
 form back. Its type is `T?` for a class `T`, inferred from the initializer when left off:
 
 ```pkn
@@ -228,12 +228,12 @@ let p: shared = Point(1, 2);
 w: weak Point? = p;      // p's object, while something holds it
 u: weak = p;             // inferred Point?
 e: weak Point?;          // None until assigned
-let q: shared mut = Point(3, 4);
-m: weak mut = q;         // a 'shared mut' object, changed through m
+let q: shared mutable = Point(3, 4);
+m: weak mutable = q;         // a 'shared mutable' object, changed through m
 ```
 
-`weak` also qualifies a class field (`parent: weak mut Node?;`). A unique object (a `T` or
-`mut T`) has one reference, its owner's, and no weak reference names it. See [Weak
+`weak` also qualifies a class field (`parent: weak mutable Node?;`). A unique object (a `T` or
+`mutable T`) has one reference, its owner's, and no weak reference names it. See [Weak
 references](16-memory.md#weak-references) for what a weak reference is for and how it is
 read.
 
@@ -289,7 +289,7 @@ impl Account {
 }
 
 fn main() -> int {
-  let a: mut = Account();
+  let a: mutable = Account();
   b: inout = a.balance;
   b = b + 10;
   names = ["x", "y"];
@@ -308,11 +308,11 @@ Output:
 
 What it names follows the rules of an
 [`inout` argument](03-functions.md#inout-the-callers-storage): a variable or a
-field of a `mut` object, also one a `let` local holds (`a` above), of exactly the local's
+field of a `mutable` object, also one a `let` local holds (`a` above), of exactly the local's
 type (`'inout' local 'f' has type 'float', but what it names has type 'int'`). A variable
-holding an object or a string is `mut` too. An expression, an array element (not yet), a
-string's character, `self`, a `let` local, a field of an object that is not `mut` (`'a' is
-immutable (an 'Account'; write 'mut Account' to change it); it cannot be named by 'inout'
+holding an object or a string is `mutable` too. An expression, an array element (not yet), a
+string's character, `self`, a `let` local, a field of an object that is not `mutable` (`'a' is
+immutable (an 'Account'; write 'mutable Account' to change it); it cannot be named by 'inout'
 local 'b'`) and anything reached through a `view` are errors. An object whose field it
 names stays alive while the local can be used,
 and so does one holding a struct whose field it names (`o.h` for `x: inout = o.h.p.s;`).
@@ -1128,15 +1128,15 @@ class Counts {
 
 fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + x;
 
-fn reset(c: shared mut Counts) -> int {
+fn reset(c: shared mutable Counts) -> int {
   c.xs = [0, 0, 0];
   return 0;
 }
 
-fn sum(xs: view int[], c: shared mut Counts) -> int => total(xs, reset(c)); // xs as passed
+fn sum(xs: view int[], c: shared mutable Counts) -> int => total(xs, reset(c)); // xs as passed
 
 fn main() -> int {
-  let c: shared mut Counts = Counts([1, 2, 3]);
+  let c: shared mutable Counts = Counts([1, 2, 3]);
   io::println(Str(sum(c.xs, c)) + " " + Str(sum(c.xs, c)));
   return 0;
 }
@@ -1152,7 +1152,7 @@ Output:
 and the lines around it and a caret under `xs`, as for an error:
 
 ```
-counts.pkn:14:62: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
+counts.pkn:14:66: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
 ```
 
 The calls are named as an error names them: a function, a method or a constructor by its
@@ -1179,18 +1179,18 @@ or class is compiled with the module that uses it, and warns when that module is
 ## Statements
 
 ```pkn
-expression;                          // expression statement
-name: Type = expression;             // variable declaration with type
-name = expression;                   // variable declaration, inferred type
-let name = expression;               // a variable that cannot be reassigned
-name: mut Type = expression;         // a variable whose object may be changed (also let name: mut = ...)
-variable = expression;               // assignment
-obj.field = expression;              // field assignment
-arr[i] = expression;                 // subscript assignment
-variable += expression;              // compound assignment: also -= *= /= %= &= |= ^= <<= >>=
-return expression;                   // return (or bare return; for void)
-;                                    // empty statement
-{ statements... }                    // block (new scope)
+expression;                              // expression statement
+name: Type = expression;                 // variable declaration with type
+name = expression;                       // variable declaration, inferred type
+let name = expression;                   // a variable that cannot be reassigned
+name: mutable Type = expression;         // a variable whose object may be changed (also let name: mutable = ...)
+variable = expression;                   // assignment
+obj.field = expression;                  // field assignment
+arr[i] = expression;                     // subscript assignment
+variable += expression;                  // compound assignment: also -= *= /= %= &= |= ^= <<= >>=
+return expression;                       // return (or bare return; for void)
+;                                        // empty statement
+{ statements... }                        // block (new scope)
 ```
 
 `name = expression;` declares `name` when no variable of that name is in scope, and assigns
@@ -1205,7 +1205,7 @@ operators](#bitwise-operators) (`flags |= 0b100`, `x >>= 1`). The target is any 
 assignment, so the same rules apply: the operator must be defined for the types (`s += "!"`
 appends to a `Str`, `s -= "!"` is `operator '-' is not defined for types 'Str' and 'Str'`,
 and `i >>= 1` with `i: int` is the `>>` error), a `let` variable, a `view` parameter or a
-field of an object that is not `mut` cannot be the target, and a sized integer wraps as `+`
+field of an object that is not `mutable` cannot be the target, and a sized integer wraps as `+`
 does. An error in the target is reported
 once, though the target is read as well as written (`xs[y] += 1` with no `y` is one `use of
 undeclared variable 'y'`), and the value's own errors still are (`xs[y] += z` with no `z`

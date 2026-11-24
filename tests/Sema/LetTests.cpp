@@ -33,7 +33,7 @@ TEST(Let, CannotBeReassigned) {
 // A `let` local is otherwise an ordinary variable: it takes its
 // initializer's type (or its annotation), an inner block may declare its own
 // variable of the same name, and the object a `let` reference holds can
-// still be changed through it when the reference is `mut` (an object an
+// still be changed through it when the reference is `mutable` (an object an
 // array holds follows the array's `let`: see the Qualifier tests).
 TEST(Let, IsAnOrdinaryLocalOtherwise) {
   auto ok = semaCheck(R"(
@@ -42,7 +42,7 @@ TEST(Let, IsAnOrdinaryLocalOtherwise) {
     fn main() -> int {
       let n = 3;
       let f: float = 2;
-      let p: mut Point = Point(1);
+      let p: mutable Point = Point(1);
       ps = [Point(2)];
       p.x = n;
       ps[0].x = p.x;

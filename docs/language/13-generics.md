@@ -26,7 +26,7 @@ impl Pair<A, B> {
 }
 
 fn main() -> int {
-  let p: mut = Pair<Str, int>("answer", 42);
+  let p: mutable = Pair<Str, int>("answer", 42);
   let q = p.swap();                 // Pair<int, Str>
   io::println(q.second + " = " + Str(q.first));
 
@@ -355,7 +355,7 @@ impl TaskList {
 }
 
 fn main() -> int {
-  let list: mut = TaskList();
+  let list: mutable = TaskList();
   list.add(Task("buy milk"));
   list.add(Task("fix the leak"));
   list.add(Task("call mum"));
@@ -367,7 +367,7 @@ fn main() -> int {
   list.undo();
   list.undo();
 
-  let numbers: mut = Stack<int>();   // the same Stack, for ints
+  let numbers: mutable = Stack<int>();   // the same Stack, for ints
   numbers.push(1);
   numbers.push(2);
   let size = numbers.size();
@@ -792,11 +792,11 @@ impl Slot<T> {
 }
 
 fn main() -> int {
-  let a: mut = Slot<int>();
+  let a: mutable = Slot<int>();
   a.put(3);
-  let b: mut = Slot<(int, Str)>();
+  let b: mutable = Slot<(int, Str)>();
   b.put((1, "one"));
-  let c: mut = Slot<Color>();
+  let c: mutable = Slot<Color>();
   c.put(Color::Green);
   let d = Slot<int?>();            // its v is an int?, not an int??
   io::println(a.v.toString() + " " + b.v.toString() + " " + d.v.toString());

@@ -125,7 +125,7 @@ impl Person {
 }
 
 fn main() -> int {
-  let p: mut = Person("Ada");
+  let p: mutable = Person("Ada");
   io::println(p.contact());
   p.email = "ada@example.org";
   io::println(p.contact());
@@ -280,7 +280,7 @@ fn setDue(list: inout TaskList, title: view Str, due: Str) {
 }
 
 fn main() -> int {
-  list: mut = TaskList();
+  list: mutable = TaskList();
   list.add("file taxes");
   list.add("buy milk");
   setDue(list, "file taxes", "April 15");
@@ -404,7 +404,7 @@ match maybe {
 - The arm naming the wrapped type `T` matches **every** present value and binds it as `T`. This
   differs from a class-typed subject, where a type arm is an exact-runtime-type test: for an
   optional, the `T` arm is the "present" pattern. The binding is a copy of the reference,
-  which reads the object; to change it, match a `mut` variable or field with an `inout` arm,
+  which reads the object; to change it, match a `mutable` variable or field with an `inout` arm,
   `t: inout Task { … }` ([Borrowing the subject](08-match.md#borrowing-the-subject)).
 - An arm naming a **strict subclass** of `T` matches on exact runtime type, as in type mode,
   and must come before the `T` arm (an arm after the `T` arm is unreachable and rejected):

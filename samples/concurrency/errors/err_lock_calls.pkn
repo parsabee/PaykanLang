@@ -11,15 +11,15 @@ class Counts {
 }
 
 async fn work(n: int) -> int { return n + 1; }
-async fn poke(c: locked mut Counts) -> int {
+async fn poke(c: locked mutable Counts) -> int {
   lock c as v: inout { v.total += 1; }
   return 1;
 }
 
-fn bump(c: locked mut Counts) {
+fn bump(c: locked mutable Counts) {
   lock c as v: inout { v.total += 1; }
 }
-fn record(c: locked mut Counts) {
+fn record(c: locked mutable Counts) {
   bump(c);
 }
 fn sum(n: int) -> int {
@@ -35,7 +35,7 @@ fn double(n: int) -> int {
 }
 
 fn main() -> int {
-  let counts: locked mut Counts = Counts(0);
+  let counts: locked mutable Counts = Counts(0);
   let f = fn(n: int) -> int { return n + 1; };
   input = io::stdin();
   t = work(0);

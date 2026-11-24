@@ -490,7 +490,7 @@ TEST(Leak, MemberReadRebindAndFieldToField) {
     }
     fn main() -> int {
       h: H = H("one");
-      h2: mut H = H("two");
+      h2: mutable H = H("two");
       x: shared Str = "seed";
       x = h.a;      // rebind an owned var to a borrowed field box
       h2.a = h.a;   // field-to-field assignment (borrowed RHS)

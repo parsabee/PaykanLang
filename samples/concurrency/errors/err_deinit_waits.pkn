@@ -8,19 +8,19 @@ class Registry {
   open: int;
 }
 
-fn close(r: locked mut Registry) {
+fn close(r: locked mutable Registry) {
   lock r as v: inout { v.open -= 1; }
 }
 
 class Session {
-  registry: locked mut Registry;
+  registry: locked mutable Registry;
   fn __deinit__() {
     lock self.registry as r: inout { r.open -= 1; }   // error: it takes a lock
   }
 }
 
 class Worker {
-  registry: locked mut Registry;
+  registry: locked mutable Registry;
   fn __deinit__() { close(self.registry); }           // error: 'close' takes a lock
 }
 
@@ -36,7 +36,7 @@ class Counted {
 }
 
 fn main() -> int {
-  let registry: locked mut Registry = Registry(3);
+  let registry: locked mutable Registry = Registry(3);
   open: atomic int = 1;
   let s = Session(registry);
   let w = Worker(registry);

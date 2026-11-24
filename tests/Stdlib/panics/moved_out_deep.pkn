@@ -8,16 +8,16 @@ class Node {
   leaf: Leaf;
 }
 class H {
-  n: mut Node;
+  n: mutable Node;
 }
 
 // What the moved value holds uniquely is walked too.
-fn g(h: shared mut H, l: view Leaf) -> int {
+fn g(h: shared mutable H, l: view Leaf) -> int {
   let o = mem::replace(h.n, Node(Leaf(2)));
   return o.leaf.v + l.v;
 }
 
 fn main() -> int {
-  h: shared mut H = H(Node(Leaf(1)));
+  h: shared mutable H = H(Node(Leaf(1)));
   return g(h, h.n.leaf);
 }

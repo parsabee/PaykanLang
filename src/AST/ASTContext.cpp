@@ -187,8 +187,8 @@ FunctionType *ASTContext::getFunctionType(std::vector<Type *> paramTys,
                                           std::vector<Qualifier> paramQuals,
                                           Qualifier resultQual) {
   // A part's qualifier is the type's only when a caller sees it (#368): the
-  // shared forms of a by-value parameter and of the result.  `mut` is the
-  // function's own business (a unique value gains it by `move`, and `mut T`
+  // shared forms of a by-value parameter and of the result.  `mutable` is the
+  // function's own business (a unique value gains it by `move`, and `mutable T`
   // flows into `T`), and a borrow takes the object whatever its form.
   paramQuals.resize(paramTys.size());
   for (size_t i = 0; i < paramQuals.size(); ++i)

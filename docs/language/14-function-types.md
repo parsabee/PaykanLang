@@ -197,7 +197,7 @@ A lambda may use the variables of the function (or method, or lambda) it is writ
 Each one it uses is **captured by copy when the lambda expression is evaluated**: the
 closure holds a copy of the variable's value as it was then, as a struct's field would.  So
 a lambda captures only values that copy freely, [Copyable](06-traits.md#copyable) ones: a
-number, a `bool`, a `char`, a `shared` or `shared mut` reference (retained, so the closure
+number, a `bool`, a `char`, a `shared` or `shared mutable` reference (retained, so the closure
 and the variable share the object), an `atomic shared` or `locked` handle, and a struct, a
 tuple, a fixed-size array or an optional made only of such parts (copied, with their
 references retained).  Later assignments to the variable do not reach the closure, and the closure
@@ -205,7 +205,7 @@ does not change the variable.  A closure is an object: one that captures an obje
 stored in a field of it is a reference cycle, which [is not
 collected](16-memory.md#reference-cycles) — unless the captured variable is a
 [`weak`](16-memory.md#weak-references) one, which the closure captures weakly: it reads
-as the object while the object is alive and as `None` afterwards (`me: weak mut = self;
+as the object while the object is alive and as `None` afterwards (`me: weak mutable = self;
 self.onClick = fn() -> Str { match me { ... } };` in a `shared fn`).
 
 ```pkn
@@ -216,7 +216,7 @@ struct P { x: int; }
 
 fn main() -> int {
   n = 1;
-  let c: shared mut = Counter(1);
+  let c: shared mutable = Counter(1);
   p = P(1);
   let f = fn() -> int { c.n = c.n + 1; return n + p.x + c.n; };   // n, p copied; c shared
   n = 100;
@@ -237,9 +237,9 @@ Inside the lambda a captured name is read-only: it cannot be assigned (`cannot a
 function is made, or keep it in an object)`), passed to an `inout` parameter, or, when
 it holds a value in place, have a field or an element assigned (`'p' is captured by copy
 by the function; cannot assign to its field 'x'`).  An object reached through a captured
-`shared mut` reference is changed through it as through any other (`c.n = c.n + 1` above,
-with `c` a `shared mut Counter`): to share a counter with a closure, keep it in a `shared
-mut` object. Read, a captured name is a value like any other: the lambda may return it,
+`shared mutable` reference is changed through it as through any other (`c.n = c.n + 1` above,
+with `c` a `shared mutable Counter`): to share a counter with a closure, keep it in a `shared
+mutable` object. Read, a captured name is a value like any other: the lambda may return it,
 store it in a local or pass it to any parameter, and the copy holds the references the
 capture does (`fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }` works
 for every Copyable `T`).
@@ -251,7 +251,7 @@ local of it)`; `constant("s")` is `cannot capture 'x' (a unique 'Str') ...`, in 
 instantiation `constant<Str>`).  A clone is just as move-only, so cloning the value before
 the lambda does not help.  What the lambda needs reaches it another way:
 
-- declare the variable `shared` (`let s: shared = "abc";`, `let n: shared mut = Node(1);`),
+- declare the variable `shared` (`let s: shared = "abc";`, `let n: shared mutable = Node(1);`),
   and the closure and the function share the object;
 - read what the lambda uses into a Copyable local before it (`let k = s.len();`, then
   `fn() => k`);
@@ -278,20 +278,20 @@ method but a [`shared fn`](05-classes.md#methods-that-hand-on-self-shared-fn), w
 is a `shared` reference, which a closure holds as it holds any: a method borrows its
 receiver, and a capture is a copy (`cannot capture 'self': a method borrows its receiver,
 and a function captures by copy; a 'shared fn' may capture it, or a 'weak' local of it
-('me: weak mut = self;')`).
+('me: weak mutable = self;')`).
 
 A closure that captures `self` keeps the object alive, and one the object stores is a
 [cycle](16-memory.md#reference-cycles). A closure that should not keep the object reaches
 it through a `weak` local of `self` instead, which owns nothing and reads as None once the
 object is gone. A weak reference names a shared object, so the method is one whose `self`
 is shared: a `shared view fn`, whose `self` is `shared`, with `me: weak = self;`, or a
-`shared fn`, whose `self` is `shared mut`, with `me: weak mut = self;` ([Weak
+`shared fn`, whose `self` is `shared mutable`, with `me: weak mutable = self;` ([Weak
 References](16-memory.md#weak-references)). In a plain method or a `view fn`, `self` is the
 borrow of a unique receiver, which no weak reference may name (`cannot store 'self' (a
-'mut Counter') in variable 'me', a 'weak Counter?': a 'weak' reference names a 'shared'
+'mutable Counter') in variable 'me', a 'weak Counter?': a 'weak' reference names a 'shared'
 object; a 'shared view fn' has a 'shared' 'self'`). The closure reads the object as it is
-when it runs: through `weak` it reads a `shared` reference, and through `weak mut` a `shared
-mut` one, which it may change the object through:
+when it runs: through `weak` it reads a `shared` reference, and through `weak mutable` a `shared
+mutable` one, which it may change the object through:
 
 ```pkn
 import ::io;
@@ -308,7 +308,7 @@ class Counter {
     };
   }
   shared fn bump() -> () -> int {
-    me: weak mut = self;
+    me: weak mutable = self;
     return fn() -> int {
       match me {
         c: Counter { c.n = c.n + 1; return c.n; }
@@ -321,7 +321,7 @@ class Counter {
 fn main() -> int {
   c: shared = Counter(5);
   let add = c.plus();
-  let m: shared mut = Counter(1);
+  let m: shared mutable = Counter(1);
   let tick = m.bump();
   tick();
   io::println(Str(add(10)) + " " + Str(tick()) + " " + Str(m.n));
@@ -364,7 +364,7 @@ fn plus(a: int, b: int) -> int { return a + b; }
 
 fn main() -> int {
   let ops: Op[2] = [Op("plus", plus), Op("times", fn(a: int, b: int) -> int { return a * b; })];
-  let h: mut = Handler(None);
+  let h: mutable = Handler(None);
   h.cb = fn(s: Str) -> Str { return s + "!"; };
   match h.cb {
     f: (Str) -> Str { io::println(f(ops[0].name.clone()) + " " + f(ops[1].name.clone())); }
@@ -509,7 +509,7 @@ Output:
 | Assigning a captured name | `n = 1; g = fn() { n = 2; };`; `bump(n)` inside the lambda; `p.x = 2` for a captured struct |
 | Capturing a move-only value | `s = "a"; fn() => s.len()`; a unique object, a container, or a value holding one |
 | Capturing a borrow or `self` | a `view` or `inout` parameter or local, a borrowing `match` binding, `self` in a method that is not a `shared fn`, a struct method's `self` |
-| A qualified function value | `f: shared (int) -> int`; `mut`, `atomic shared`, `locked` likewise |
+| A qualified function value | `f: shared (int) -> int`; `mutable`, `atomic shared`, `locked` likewise |
 | Capturing a borrowed variable | `x: inout = k;` then `fn() -> int { return k; }` while `x` is live; a reference a live `view` local views |
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
 | A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Showable`; the same for a tuple, struct or enum holding `f` |
@@ -519,7 +519,7 @@ Output:
 A borrowed result (`-> view T`, `-> inout T`) in a function type; a method as a value
 (`p.shift` bound to `p`: write `fn(d: int) { p.shift(d); }`); a generic function as a
 value (`first<int>`); a lambda with inferred parameter types (`fn(x) { ... }`); a capture by
-reference (a counter shared with a closure lives in a `shared mut` object); capturing a
+reference (a counter shared with a closure lives in a `shared mutable` object); capturing a
 move-only value (a unique object or a `Str`: declare it `shared`);
 capturing a `view`, an `inout` or a struct method's `self`; a function value
 crossing into C, except as a type argument of a generic native function; `toString`,

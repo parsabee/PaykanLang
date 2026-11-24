@@ -3,6 +3,6 @@ import gen;
 import makes;
 
 fn three(x: int) -> int {
-  let b: mut = gen::Box<int>(x);
+  let b: mutable = gen::Box<int>(x);
   return b.bump(1) + makes::one(x);
 }

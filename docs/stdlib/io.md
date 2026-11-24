@@ -431,7 +431,7 @@ import ::io;
 import tasks::{task, text, list};
 
 fn load(path: view Str) -> list::TaskList {
-  tasks: mut = list::TaskList();
+  tasks: mutable = list::TaskList();
   match io::open(path, "r") {
     r: Ok {
       while True {
@@ -453,7 +453,7 @@ fn addLine(tasks: inout list::TaskList, line: view Str) {
     io::printerrln("skipping bad line: " + line);
     return;
   }
-  let t: mut = task::Task(move title, task::parsePriority(priority));
+  let t: mutable = task::Task(move title, task::parsePriority(priority));
   t.done = done == "1";
   if !tasks.addTask(move t) { io::printerrln("the list is full, skipping: " + line); }
 }
@@ -518,7 +518,7 @@ fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
 fn main(args: view Str[]) -> int {
   if args.len() < 2 { return usage(); }
   let path = "tasks.txt";
-  let tasks: mut list::TaskList = store::load(path);
+  let tasks: mutable list::TaskList = store::load(path);
   changed = False;
   match args[1] {
     "add" {
@@ -692,7 +692,7 @@ A `File` is a struct with a `__deinit__`, which closes the file
 - It is `Sendable`: a `File` moved into a task is read, written and closed there.
 - **Sharing goes through a box.** A file used under several names is held in a
   `mem::Box<io::File>` ([`::memory`](memory.md)). Reads and writes change the file, so they
-  go through `get()`, which needs the box `shared mut`: `b.get().readln()`. A frozen box
+  go through `get()`, which needs the box `shared mutable`: `b.get().readln()`. A frozen box
   (`atomic shared`) gives only `value()`, a `view`, through which nothing reads or writes.
   The file is closed when the box goes.
 - `write`, `readln`, `readbytes` and `read` are plain `fn`s: each changes the file, so none

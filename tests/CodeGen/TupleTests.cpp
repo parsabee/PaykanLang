@@ -295,7 +295,7 @@ TEST(Tuple, TupleFieldInClass) {
       fn __init__(p: (int, Str)) { self.pair = move p; }
     }
     fn main() -> int {
-      h: mut Holder = Holder((9, "nine"));
+      h: mutable Holder = Holder((9, "nine"));
       a, b = h.get();
       io::println(Str<int>(a) + b);
       io::println(h.pair);
@@ -314,9 +314,9 @@ TEST(Tuple, TupleFieldInClass) {
   g.expectNoLeaks("TupleFieldInClass");
 }
 
-// The `shared mut` Point is held in a struct's field, which the tuple holds
-// (a tuple element can be `shared mut` itself since #368; the test keeps the
-// struct, and so its printing).
+// The `shared mutable` Point is held in a struct's field, which the tuple holds
+// (a tuple element can be `shared mutable` itself since #368; the test keeps
+// the struct, and so its printing).
 TEST(Tuple, ClassInstanceElements) {
   LeakGuard g;
   // Delimited raw string: the Paykan source contains `")"`.
@@ -332,13 +332,13 @@ TEST(Tuple, ClassInstanceElements) {
     impl Point {
       fn __init__(x: int, y: int) { self.x = x; self.y = y; }
     }
-    struct PointRef { p: shared mut Point; }
+    struct PointRef { p: shared mutable Point; }
     fn main() -> int {
       t: (Str, PointRef) = ("origin", PointRef(Point(0, 0)));
       io::println(t);
       io::println(t.1.p.toString());
       io::println(Str<int>(t.1.p.x));
-      p: shared mut Point = t.1.p;
+      p: shared mutable Point = t.1.p;
       p.x = 7;                  // shared object: visible through the tuple
       io::println(Str<int>(t.1.p.x));
       return 0;
@@ -452,7 +452,7 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
       nb: int? = None;
       tbl: (Str, int?)[3] = [("a", 1), ("b", nb), ("c", None)];
       io::println(val(tbl[0].1) + " " + val(tbl[1].1) + " " + val(tbl[2].1));
-      h: mut = Holder();
+      h: mutable = Holder();
       h.put([("m", 4), ("n", nb), ("q", 6)]);
       h.t[1] = ("o", 5);
       h.t[2] = ("p", None);
@@ -517,12 +517,12 @@ const char *const kNode = R"(
 
 // An array of tuples holds each one's elements in place: a read copies one
 // out (retaining its references), a store releases the old element's.  Each
-// `shared mut` Node is held in a struct's field (a tuple element can be
-// `shared mut` itself since #368; the test keeps the struct).
+// `shared mutable` Node is held in a struct's field (a tuple element can be
+// `shared mutable` itself since #368; the test keeps the struct).
 TEST(Tuple, ArrayOfTuplesWithReferenceElements) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"(import ::io;
-    struct NodeRef { n: shared mut Node; }
+    struct NodeRef { n: shared mutable Node; }
     fn main() -> int {
       xs: (Str, NodeRef)[3] = [("a", NodeRef(Node(1))), ("b", NodeRef(Node(2))),
                                ("c", NodeRef(Node(3)))];
@@ -534,7 +534,7 @@ TEST(Tuple, ArrayOfTuplesWithReferenceElements) {
       io::println(t);
       io::println(xs[0]);
       io::println(xs[1]);
-      n: shared mut Node = xs[1].1.n;
+      n: shared mutable Node = xs[1].1.n;
       n.v = 7;                       // the Node is shared, not copied
       io::println(xs[1]);
       i: int = 0;
@@ -585,12 +585,12 @@ TEST(Tuple, TupleFieldIsReleasedWithItsObject) {
     }
     impl Holder { fn __init__(s: Str) { self.t = (move s, Node(1)); self.n = 0; } }
     fn make(s: Str) -> Holder {
-      h: mut = Holder(s + "!");
+      h: mutable = Holder(s + "!");
       h.t = (h.t.0 + "?", None);
       return h;
     }
     fn main() -> int {
-      h: mut = Holder("a");
+      h: mutable = Holder("a");
       io::println(h.t);
       h.t = ("b", Node(2));
       io::println(h.t);
@@ -609,13 +609,13 @@ TEST(Tuple, TupleFieldIsReleasedWithItsObject) {
   g.expectNoLeaks("TupleFieldIsReleasedWithItsObject");
 }
 
-// Copies of nested tuples share the Nodes they hold.  Each `shared mut` Node
-// is held in a struct's field (a tuple element can be `shared mut` itself
-// since #368; the test keeps the struct).
+// Copies of nested tuples share the Nodes they hold.  Each `shared mutable`
+// Node is held in a struct's field (a tuple element can be `shared mutable`
+// itself since #368; the test keeps the struct).
 TEST(Tuple, NestedTuplesHoldingReferences) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"(import ::io;
-    struct NodeRef { n: shared mut Node; }
+    struct NodeRef { n: shared mutable Node; }
     fn main() -> int {
       t: ((Str, NodeRef), (NodeRef, Str, int)) =
           (("in", NodeRef(Node(1))), (NodeRef(Node(2)), "out", 3));
@@ -626,7 +626,7 @@ TEST(Tuple, NestedTuplesHoldingReferences) {
       io::println(Str<bool>(t == u));    // the same Nodes
       w = (("in", NodeRef(Node(1))), (NodeRef(Node(2)), "out", 3));
       io::println(Str<bool>(t == w));    // other Nodes: identity equals
-      n: shared mut Node = t.0.1.n;
+      n: shared mutable Node = t.0.1.n;
       n.v = 5;
       io::println(u.0);
       return inner.2;
@@ -727,7 +727,7 @@ TEST(Tuple, GenericClassOfATuple) {
     }
     impl Box<T> { fn __init__(v: T) { self.item = move v; } }
     fn main() -> int {
-      b: mut = Box<(Str, int)>(("a" + "b", 1));
+      b: mutable = Box<(Str, int)>(("a" + "b", 1));
       io::println(b.get());
       io::println(b.get().0);
       b.put(("c", 2));
@@ -821,7 +821,7 @@ TEST(Tuple, ReturnedFromAMethod) {
     }
     impl Counter { fn __init__(name: Str) { self.n = 0; self.name = move name; } }
     fn main() -> int {
-      c: mut = Counter("c");
+      c: mutable = Counter("c");
       i, s = c.next();
       io::println(Str<int>(i) + s);
       io::println(c.next());

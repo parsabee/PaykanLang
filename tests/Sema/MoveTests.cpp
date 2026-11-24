@@ -29,7 +29,7 @@ void expectErrors(const SemaResult &r,
 } // namespace
 
 // `move x` ends x: every later use is an error naming the move, at the use
-// (a read, a field write and an `inout` argument of a `mut` variable, a
+// (a read, a field write and an `inout` argument of a `mutable` variable, a
 // `view` of it, a second move, a read after `y = move x`).  A `let` local
 // and a by-value parameter move like a plain variable; `return move j` and
 // a move into a call's argument are fine.
@@ -45,10 +45,10 @@ fn main() -> int {
   let a = Job("a");
   n = keep(move a);
   n = n + a.name.len();
-  b: mut = Job("b");
+  b: mutable = Job("b");
   keep(move b);
   b.name = "x";
-  c: mut = Job("c");
+  c: mutable = Job("c");
   keep(move c);
   grab(c);
   d = Job("d");
@@ -404,7 +404,7 @@ fn keep2() -> Job { return Job("k"); })");
 // A move is a write for exclusivity: in one call it cannot share storage
 // with what the call borrows, a `view` argument before it (the variable, or
 // a field of it), the receiver of a method (a `view fn`'s too; the receiver
-// of a plain method is a `mut` variable, as the call needs), or an `inout`
+// of a plain method is a `mutable` variable, as the call needs), or an `inout`
 // argument, which the prototype's message counts the move as.  A move
 // before a `view` of the same variable is a use after the move.  Another
 // variable beside it is fine.
@@ -431,11 +431,11 @@ fn main() -> int {
   n = n + lookH(b, move b);
   let c = Holder(Job("c"));
   n = n + lookJ(c.job, move c);
-  let d: mut Job = Job("d");
+  let d: mutable Job = Job("d");
   n = n + d.take(move d);
   let e = Job("e");
   n = n + e.peek(move e);
-  f: mut = Job("f");
+  f: mutable = Job("f");
   n = n + grab(f, move f);
   let g = Job("g");
   n = n + look2(move g, g);
@@ -654,7 +654,7 @@ fn main() -> int {
     a: Job { n = n + keep(move a); }
     None { }
   }
-  let acct: locked mut = Account(1);
+  let acct: locked mutable = Account(1);
   lock acct as a: view { n = n + a.balance; }
   let b = Job("b");
   n = n + keep(move b);
@@ -710,8 +710,8 @@ impl Holder {
 fn keep(n: Node) -> int { return n.key; }
 fn a(h: inout Holder) -> int { return keep(move h.f); }
 fn b(h: inout Holder) -> int { return keep(move h.sh.n); }
-fn c(h: shared mut Holder) -> int { return keep(move h.f); }
-fn d(h: shared mut Holder) -> int { return keep(move h.sh.n); }
+fn c(h: shared mutable Holder) -> int { return keep(move h.f); }
+fn d(h: shared mutable Holder) -> int { return keep(move h.sh.n); }
 fn e(h: inout Holder) -> int { return keep(move h.t.0); }
 fn main() -> int { return 0; }
 )");
@@ -729,11 +729,12 @@ fn main() -> int { return 0; }
                     "'mem::replace(h.f, v)'\n"),
         std::string(":11:44: error: cannot move 'h.sh.n': 'h' is an 'inout' "
                     "borrow, and what it names stays whole\n"),
-        std::string(":12:49: error: cannot move 'h.f': 'h' is a 'shared mut "
-                    "Holder', which other references reach; write "
-                    "'mem::replace(h.f, v)'\n"),
-        std::string(":13:49: error: cannot move 'h.sh.n': 'h' is a 'shared "
-                    "mut Holder', which other references reach\n"),
+        std::string(
+            ":12:53: error: cannot move 'h.f': 'h' is a 'shared mutable "
+            "Holder', which other references reach; write "
+            "'mem::replace(h.f, v)'\n"),
+        std::string(":13:53: error: cannot move 'h.sh.n': 'h' is a 'shared "
+                    "mutable Holder', which other references reach\n"),
         std::string(":14:44: error: cannot move 'h.t.0': an element leaves "
                     "its tuple only with the others; destructure it ('a, b = "
                     "move h.t;')\n")})
@@ -748,7 +749,7 @@ impl Holder {
 }
 fn keep(n: Node) -> int { return n.key; }
 fn a(h: inout Holder) -> int { return keep(mem::replace(h.f, Node(0))); }
-fn c(h: shared mut Holder) -> int { return keep(mem::replace(h.f, Node(0))); }
+fn c(h: shared mutable Holder) -> int { return keep(mem::replace(h.f, Node(0))); }
 fn main() -> int {
   t = (Node(1), 2);
   n, k = move t;

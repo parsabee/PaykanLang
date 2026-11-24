@@ -53,7 +53,7 @@ void expectRuns(const std::string &main, const std::string &expected) {
 TEST(Buffer, StartsWithThreeZeroedSlots) {
   expectRuns(R"(import ::io;
     fn main() -> int {
-      b: mut = Buffer<int>();
+      b: mutable = Buffer<int>();
       io::println(Str<int>(b.len()));
       b.set(0, 10);
       b.set(2, 30);
@@ -68,7 +68,7 @@ TEST(Buffer, StartsWithThreeZeroedSlots) {
 TEST(Buffer, ReserveGrowAndShrinkChangeTheLength) {
   expectRuns(R"(import ::io;
     fn main() -> int {
-      b: mut = Buffer<float>();
+      b: mutable = Buffer<float>();
       b.grow(2);
       b.set(4, 2.5);
       io::println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
@@ -94,14 +94,14 @@ TEST(Buffer, HoldsReferences) {
     }
     impl Cloneable for P {}
     fn main() -> int {
-      s: mut = Buffer<Str>();
+      s: mutable = Buffer<Str>();
       s.set(0, "a");
       s.set(1, "b");
       s.set(2, "c");
       s.set(1, "B");
       io::println(s.get(0) + s.get(1) + s.get(2));
       s.shrink(2);
-      ps: mut = Buffer<P>();
+      ps: mutable = Buffer<P>();
       p = P(42);
       ps.set(1, p.clone());
       ps.set(2, move p);
@@ -121,7 +121,7 @@ TEST(Buffer, OptionalSlotsStartAsNone) {
       }
     }
     fn main() -> int {
-      b: mut = Buffer<Str?>();
+      b: mutable = Buffer<Str?>();
       b.set(2, "x");
       show(b.get(0));
       show(b.get(2));
@@ -144,8 +144,8 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
       match o { v: int { return Str<int>(v); } None { return "-"; } }
     }
     fn main() -> int {
-      cs: mut = Buffer<char?>();
-      ns: mut = Buffer<int?>();
+      cs: mutable = Buffer<char?>();
+      ns: mutable = Buffer<int?>();
       cs.grow(20);
       ns.grow(20);
       i: int = 0;
@@ -169,13 +169,13 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
 TEST(Buffer, HoldsBoolsAndCopiesOut) {
   expectRuns(R"(import ::io;
     fn main() -> int {
-      b: mut = Buffer<bool>();
+      b: mutable = Buffer<bool>();
       b.grow(13);
       b.set(1, True);
       b.set(15, True);
       io::println(Str<bool>(b.get(0)) + " " + Str<bool>(b.get(1)) + " " +
               Str<bool>(b.copy(15)));
-      s: mut = Buffer<Str>();
+      s: mutable = Buffer<Str>();
       s.set(0, "x");
       t: Str = s.copy(0);
       s.set(0, "y");
@@ -201,7 +201,7 @@ TEST(Buffer, HoldsTuples) {
       match o { v: int { return Str<int>(v); } None { return "-"; } }
     }
     fn main() -> int {
-      b: mut = Buffer<(Str, Node, int?)>();
+      b: mutable = Buffer<(Str, Node, int?)>();
       b.set(0, ("a", Node(1), 1));
       b.set(1, ("b" + "b", Node(2), None));
       b.set(2, ("c", Node(1), 3));
@@ -217,7 +217,7 @@ TEST(Buffer, HoldsTuples) {
       io::println(Str<int>(b.len()) + " " + b.get(4).0);
       b.shrink(3);
       io::println(b.get(0));
-      ps: mut = Buffer<(int, float)>();
+      ps: mutable = Buffer<(int, float)>();
       ps.set(1, (2, 0.5));
       p = ps.get(1);
       io::println(p);
@@ -361,7 +361,7 @@ import ::memory as mem;
 class Holder { items: mem::Buffer<Tracked>; }
 class Tracked {
   id: int;
-  home: weak mut Holder?;
+  home: weak mutable Holder?;
 }
 impl Tracked {
   fn __deinit__() {
@@ -372,7 +372,7 @@ impl Tracked {
   }
 }
 fn main() -> int {
-  let h: shared mut Holder = Holder(mem::Buffer<Tracked>());
+  let h: shared mutable Holder = Holder(mem::Buffer<Tracked>());
   h.items.push(Tracked(1, h));
   h.items.set(0, Tracked(2, h));
   h.items.push(Tracked(3, h));
@@ -408,9 +408,9 @@ native fn bGrow<T>(b: inout Obj, by: int) = "PaykanBuffer_tryGrow";
 native fn bPut<T>(b: inout Obj, i: int, v: view T) -> int = "PaykanBuffer_set";
 fn main() -> int {
   // results ::memory does not declare: a bool, none, an int
-  s: mut Obj = bNew<Str>(2);
+  s: mutable Obj = bNew<Str>(2);
   if bIsSet<Str>(s, 0) { io::println("set"); } else { io::println("unset"); }
-  n: mut Obj = bNew<int>(2);
+  n: mutable Obj = bNew<int>(2);
   bCheck<int>(n, 1);
   bGrow<int>(n, 1);
   r = bPut<int>(n, 2, 7);
@@ -438,7 +438,7 @@ impl Guard {
   fn __deinit__() { io::println("guard " + Str(self.id)); }
 }
 fn main() -> int {
-  g: mut Obj = bNew<Guard>(1);
+  g: mutable Obj = bNew<Guard>(1);
   one = Guard(1);
   bSet<Guard>(g, 0, one);
   io::println("stored " + Str(one.id));
@@ -472,7 +472,7 @@ class Holder { items: mem::Buffer<Tracked>; }
 class Tracked {
   id: int;
   act: int;
-  home: weak mut Holder?;
+  home: weak mutable Holder?;
 }
 impl Tracked {
   fn __deinit__() {
@@ -491,7 +491,7 @@ impl Tracked {
     }
   }
 }
-fn show(what: Str, h: shared mut Holder) {
+fn show(what: Str, h: shared mutable Holder) {
   s = "";
   i: unsigned = 0;
   while i < h.items.len() {
@@ -501,7 +501,7 @@ fn show(what: Str, h: shared mut Holder) {
   io::println(what + ": [" + s + "]");
 }
 fn main() -> int {
-  let h: shared mut Holder = Holder(mem::Buffer<Tracked>());
+  let h: shared mutable Holder = Holder(mem::Buffer<Tracked>());
   for act in 1..8 {
     // a store over a value whose __deinit__ changes the buffer
     e = h.items.shrink(h.items.len());

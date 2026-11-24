@@ -5,20 +5,20 @@ class Node {
   v: int;
 }
 class H {
-  n: mut Node;
+  n: mutable Node;
 }
 
-fn id(h: shared mut H) -> shared mut H {
+fn id(h: shared mutable H) -> shared mutable H {
   return h;
 }
 
 // A handle from a call reaches what other handles do.
-fn g(h: shared mut H, n: view Node) -> int {
+fn g(h: shared mutable H, n: view Node) -> int {
   let x = mem::replace(id(h).n, Node(4));
   return x.v + n.v;
 }
 
 fn main() -> int {
-  h: shared mut H = H(Node(1));
+  h: shared mutable H = H(Node(1));
   return g(h, h.n);
 }

@@ -12,7 +12,7 @@ import makes;
 import bumps;
 
 fn main() -> int {
-  let b: mut = gen::Box<int>(8);
+  let b: mutable = gen::Box<int>(8);
   let p = gen::Pair<int, bool>(4, False);
   let s: atomic shared gen::Box<int> = gen::Box<int>(5);
   let sum = b.plain() + makes::one(2) + makes::two(3) + bumps::three(6)

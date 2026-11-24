@@ -119,7 +119,7 @@ fn holders() {
 }
 
 fn objects() {
-  let d: mut = Desk(make(20), make(21));
+  let d: mutable = Desk(make(20), make(21));
   let old = mem::replace(d.held, make(22));
   let spare = mem::take(d.spare);
   let copy = old.clone();

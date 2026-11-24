@@ -74,18 +74,18 @@ class B {
 }
 
 class A {
-  b: shared mut B;
+  b: shared mutable B;
 }
 
 // The next `toString()` of `h.c` replaces `h.c`, which holds it alone.  The
 // closure reaches `h` through `v`, a second reference to it, so `h` (and `b`
 // below) is `shared`.
-fn arm(h: shared mut H, n: int) {
+fn arm(h: shared mutable H, n: int) {
   let v = h;
   h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
 }
 
-fn armB(b: shared mut B, n: int) {
+fn armB(b: shared mutable B, n: int) {
   let v = b;
   b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
 }
@@ -107,7 +107,7 @@ fn main() -> int {
       + " " + Str(absent));
 
   // Of a call, a field, a list's element and a generic value.
-  let bx: mut = Box(make(9), "x");
+  let bx: mutable = Box(make(9), "x");
   xs = collections::List<Node>();
   xs.push(make(10));
   io::println(Str(make(8)) + " " + Str(bx.node) + " " + Str(xs.at(0)) + " "
@@ -121,12 +121,12 @@ fn main() -> int {
   io::println(pair.0 + " " + kept + " " + bx.text);
 
   // An object its own toString() lets go of.
-  let h: shared mut = H(C("one" + Str(1), fn() {}));
+  let h: shared mutable = H(C("one" + Str(1), fn() {}));
   arm(h, 1);
   let first = Str(h.c);
   arm(h, 2);
   io::println(first + " " + h.c.toString());
-  let a: mut = A(B(C("one" + Str(1), fn() {})));
+  let a: mutable = A(B(C("one" + Str(1), fn() {})));
   armB(a.b, 3);
   let third = Str(a.b.c);
   armB(a.b, 4);

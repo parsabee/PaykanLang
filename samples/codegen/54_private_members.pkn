@@ -18,11 +18,11 @@ class Counter {
   fn tick()              { self.__bump(self.step); }
   view fn value() -> int { return self.__count; }
   fn __bump(by: int)     { self.__count = self.__count + by; }
-  // A closure reaches the private field through a `weak mut` local of
-  // `self`: a `shared fn`'s `self` is a `shared mut` reference, which the
+  // A closure reaches the private field through a `weak mutable` local of
+  // `self`: a `shared fn`'s `self` is a `shared mutable` reference, which the
   // weak one names without keeping the counter alive.
   shared fn adder() -> (int) -> int {
-    me: weak mut = self;
+    me: weak mutable = self;
     return fn(d: int) -> int {
       match me {
         c: Counter { return c.__count + d; }
@@ -34,7 +34,7 @@ class Counter {
 
 impl Counter {
   static fn make(n: int) -> Counter {
-    let c: mut = Counter(0, n);
+    let c: mutable = Counter(0, n);
     c.__count = 10;
     return c;
   }
@@ -91,9 +91,9 @@ impl Box<T> {
 }
 
 fn main() -> int {
-  let c: shared mut = Counter::make(3);
+  let c: shared mutable = Counter::make(3);
   c.tick();
-  let d: mut = Counter(0, 1);
+  let d: mutable = Counter(0, 1);
   d.copyFrom(c);
   let add = c.adder();
   io::println(Str(c.value()) + " " + Str(d.value()) + " " + c.name() + " "
@@ -106,7 +106,7 @@ fn main() -> int {
       + Str(p == P(2, 0)));
 
   let chain = _Node(1, _Node(2, _Node(3, None)));
-  let b: mut = Box("s");
+  let b: mutable = Box("s");
   b.set("t");
   let o = Box("u");
   b.take(move o);

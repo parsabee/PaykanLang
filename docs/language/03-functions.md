@@ -100,7 +100,7 @@ can change it. Without a mode, the parameter is the function's own: a value type
 in, and an object or a string is handed over, so the caller writes `move s` for a variable
 it gives up, `s.clone()` for a copy, or passes a temporary; a `shared` reference copies
 ([Ownership transfers](16-memory.md#ownership-transfers)). The function changes the object
-only where the parameter says `mut`:
+only where the parameter says `mutable`:
 
 ```pkn
 import ::io;
@@ -113,7 +113,7 @@ impl P {
   fn __init__() { self.x = 0; }
 }
 
-fn f(n: int, s: Str, p: shared mut P) {
+fn f(n: int, s: Str, p: shared mutable P) {
   n = 5;        // the function's own copy
   p.x = 7;      // the caller's object
   p = P();      // the function's own reference, now to another object
@@ -124,7 +124,7 @@ fn f(n: int, s: Str, p: shared mut P) {
 fn main() -> int {
   let n = 1;
   let s = "mine";
-  let p: shared mut P = P();    // shared: main and f both hold the object
+  let p: shared mutable P = P();    // shared: main and f both hold the object
   f(n, s.clone(), p);
   io::println(Str(n) + " " + s + " " + Str(p.x));
   return 0;
@@ -151,11 +151,11 @@ the caller hands the object over (`move p`, or a temporary such as `P()`), gives
 hold. A function that only reads an argument takes it as a `view` instead, and one that
 changes it in place as an `inout` ([Parameter modes](#parameter-modes-view-and-inout)), so
 the caller keeps it. A plain `p: P` parameter reads it: no field can be assigned through it and only a
-`view fn` can be called on it (`'p' is immutable (a 'P'; write 'mut P' to change it);
-cannot assign to its field 'x'`), and a `P` or a `mut P` argument fits it. A `p: mut P`
+`view fn` can be called on it (`'p' is immutable (a 'P'; write 'mutable P' to change it);
+cannot assign to its field 'x'`), and a `P` or a `mutable P` argument fits it. A `p: mutable P`
 parameter may change the object, and a field it assigns or a method that changes the
-object is seen by the caller; its argument is a `mut P` too, or a temporary such as `P()`
-(`cannot store a 'P' in parameter 3 of 'f', a 'mut' reference: a reference gains 'mut'
+object is seen by the caller; its argument is a `mutable P` too, or a temporary such as `P()`
+(`cannot store a 'P' in parameter 3 of 'f', a 'mutable' reference: a reference gains 'mutable'
 only by 'move'`; [Variables](02-basics.md#variables--declarations)). A caller that keeps a
 `shared` object alive for the whole call lends it, and the function changes no reference
 count unless it keeps the object (see [Borrowed parameters](16-memory.md#borrowed-parameters)).
@@ -240,7 +240,7 @@ A `view` parameter cannot be changed: it cannot be assigned or be a destructurin
 (`cannot assign to 'view' parameter 'x'`), and it cannot be passed to an `inout`
 parameter (`'x' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`).
 It is passed like a parameter without a mode, so any argument of its type will do: a
-literal, an expression, a `let` local, a `mut` object or an immutable one, an object of a
+literal, an expression, a `let` local, a `mutable` object or an immutable one, an object of a
 subclass.
 
 A `view` parameter of a value type is a copy, which may be assigned to a variable or
@@ -272,7 +272,7 @@ fn show(c: view Counter, label: view Str) {
 }
 
 fn main() -> int {
-  let c: mut = Counter();
+  let c: mutable = Counter();
   c.tick();
   show(c, "ticks");
   return 0;
@@ -345,8 +345,8 @@ fn swap(a: inout Str, b: inout Str) {
 }
 
 fn main() -> int {
-  x: mut = "left";
-  y: mut = "right";
+  x: mutable = "left";
+  y: mutable = "right";
   swap(x, y);
   io::println(x + " " + y);
   return 0;
@@ -361,17 +361,17 @@ right left
 
 A string is move-only, so it leaves the caller's storage only in exchange for another:
 `mem::replace(a, v)` returns what `a` held and stores `v` there, and `let t = a;` is an
-error (`cannot copy 'a' (a unique 'mut Str'); it is an 'inout' borrow, and what it names stays with its owner: write 'a.clone()' to copy it`). The standard library's `mem::swap` does what this
+error (`cannot copy 'a' (a unique 'mutable Str'); it is an 'inout' borrow, and what it names stays with its owner: write 'a.clone()' to copy it`). The standard library's `mem::swap` does what this
 `swap` does, for any type ([::memory](../stdlib/memory.md)).
 
 The argument must be one of:
 
 - a local variable (not a `let` one: `'k' is declared with 'let' and cannot be passed to
-  'inout' parameter 'n'`), declared `mut` when it holds an object or a string (`x: mut =
+  'inout' parameter 'n'`), declared `mutable` when it holds an object or a string (`x: mutable =
   "left";` above);
-- a plain (by-value) parameter, a `mut` one when it holds an object or a string;
+- a plain (by-value) parameter, a `mutable` one when it holds an object or a string;
 - another `inout` parameter, whose address is passed on;
-- a field of a `mut` object: `obj.f`, `self.f`, or a chain such as `a.b.f`;
+- a field of a `mutable` object: `obj.f`, `self.f`, or a chain such as `a.b.f`;
 - an element of a fixed-size array that is one of these, or a field of one: `xs[i]`,
   `self.grid[i][j]`, `ps[1].n`. The element is in the array's own bytes, so its address is
   passed, after the index's bounds check.
@@ -386,7 +386,7 @@ it. Anything else is an error:
 |---|---|
 | a literal or another expression (`bump(3)`, `bump(k + 1)`) | `argument 1 of 'bump' must be a variable or a field: parameter 'n' is 'inout'` |
 | a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
-| a variable holding an object or a string that is not `mut`, or a field of such an object (`swap(x, y)` with `x = "left";`, `hit(c.hits, c)` with `let c = Counter();`) | `'x' is immutable (a 'Str'; write 'mut Str' to change it); it cannot be passed to 'inout' parameter 'a'`, `'c' is immutable (a 'Counter'; write 'mut Counter' to change it); it cannot be passed to 'inout' parameter 'n'` |
+| a variable holding an object or a string that is not `mutable`, or a field of such an object (`swap(x, y)` with `x = "left";`, `hit(c.hits, c)` with `let c = Counter();`) | `'x' is immutable (a 'Str'; write 'mutable Str' to change it); it cannot be passed to 'inout' parameter 'a'`, `'c' is immutable (a 'Counter'; write 'mutable Counter' to change it); it cannot be passed to 'inout' parameter 'n'` |
 | an element of a slice (`bump(xs[0])` with `xs: inout int[]`) | `an element of a slice cannot be passed to 'inout' parameter 'n' yet` |
 | an element of an array that is a temporary (`bump(make()[0])`) | `an element of an array that is not a variable or a field (a temporary, which dies with the statement) cannot be passed to 'inout' parameter 'n'` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
@@ -408,13 +408,13 @@ impl Counter {
   fn __init__() { self.hits = 0; }
 }
 
-fn hit(n: inout int, c: shared mut Counter) {
+fn hit(n: inout int, c: shared mutable Counter) {
   n = n + 1;
   io::println("seen " + Str(c.hits));  // the write is already visible
 }
 
 fn main() -> int {
-  let c: shared mut Counter = Counter();
+  let c: shared mutable Counter = Counter();
   hit(c.hits, c);
   io::println(Str(c.hits));
   return 0;
@@ -565,7 +565,7 @@ fn shout(s: inout Str) -> Str {
 }
 
 fn main() -> int {
-  s: mut = "hi";
+  s: mutable = "hi";
   let t = s + shout(s); // the s read before shout changes it
   io::println(t + " " + s);
   return 0;
@@ -600,7 +600,7 @@ fn swap(s: inout Shelf) -> Str {
 }
 
 fn main() -> int {
-  shelf: mut = Shelf(Box("old"));
+  shelf: mutable = Shelf(Box("old"));
   let t = shelf.box.label + swap(shelf); // the label read before swap replaces the box
   io::println(t + " " + shelf.box.label);
   return 0;
@@ -756,7 +756,7 @@ fn pick(a: inout int, b: inout int, first: bool) -> inout int {
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let b: mut = Box();
+  let b: mutable = Box();
   x: inout = b.num();
   x = x + 10;      // writes b.k
   bump(b.num());   // passed on as b.k's storage
@@ -795,7 +795,7 @@ Output:
 - The receiver of a method returning `inout` is a variable or a field, which outlives the
   call: `Box().num()` is an error (`the receiver of 'num' must be a variable or a field:
   its 'inout' result is part of it`). The method is not a `view fn`, so the receiver is a
-  `mut` object (`b` above; `'b' is immutable (a 'Box'; write 'mut Box' to change it); 'num'
+  `mutable` object (`b` above; `'b' is immutable (a 'Box'; write 'mutable Box' to change it); 'num'
   is not a 'view fn'`).
 - While the result is used, its caller keeps alive what it is part of: the receiver, the
   objects holding the `inout` arguments, and the objects those arguments hold
@@ -886,7 +886,7 @@ fn countOf(c: inout Counter) -> inout int { return c.n; }
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  let p: mut = Panel(Counter(1), 10);
+  let p: mutable = Panel(Counter(1), 10);
   bump(p.total());        // in p
   bump(p.c.count());      // in p.c, the receiver
   bump(countOf(p.c));     // in the object the argument refers to

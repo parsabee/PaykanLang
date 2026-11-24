@@ -1,5 +1,5 @@
 // The concurrency prototype: a `locked` cell (docs/design/concurrency.md).
-// A unique value flowing into a `locked mut` slot becomes a cell; its handle
+// A unique value flowing into a `locked mutable` slot becomes a cell; its handle
 // copies into tasks, and its contents are reached only in a `lock` block.
 // expect-stdout: total 3000, sum 3000, ids 6
 
@@ -11,7 +11,7 @@ class Counts {
 }
 
 // The cell crosses as a handle; the tasks bump buckets under its lock.
-async fn record(counts: locked mut Counts, id: int, n: int) -> int {
+async fn record(counts: locked mutable Counts, id: int, n: int) -> int {
   for i in 0..n {
     lock counts as c: inout {
       c.hits[(id + i) % 16] += 1;
@@ -22,8 +22,8 @@ async fn record(counts: locked mut Counts, id: int, n: int) -> int {
 }
 
 fn main() -> int {
-  let counts: locked mut = Counts([0; 16], 0);      // a unique value becomes a cell here
-  let a = record(counts, 1, 1000);                  // handles copied into the tasks
+  let counts: locked mutable = Counts([0; 16], 0);      // a unique value becomes a cell here
+  let a = record(counts, 1, 1000);                      // handles copied into the tasks
   let b = record(counts, 2, 1000);
   let c = record(counts, 3, 1000);
   let ids = await a + await b + await c;

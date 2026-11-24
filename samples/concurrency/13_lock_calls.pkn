@@ -31,7 +31,7 @@ impl Session {
 async fn fetch(n: int) -> int { return n + 1; }
 
 // It takes a lock: a `lock` block does not call it.
-fn note(tally: locked mut Tally) {
+fn note(tally: locked mutable Tally) {
   lock tally as t: inout { t.log += 1; }
 }
 
@@ -41,7 +41,7 @@ fn weight(s: view Session) -> int {
 
 async fn main() -> int {
   closed: atomic int = 0;
-  let tally: locked mut Tally = Tally(0, 0);
+  let tally: locked mutable Tally = Tally(0, 0);
   let scale = Scale(1);
   let s = Session(closed, 4);
 

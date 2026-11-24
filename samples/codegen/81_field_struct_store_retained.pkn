@@ -18,12 +18,12 @@
 //            a lambda's captured struct): its copy's retain of a class
 //            reference makes no test either, but in an optional's or a
 //            union's, whose other variants are zeros.
-// The objects are `shared mut`, since only a copyable reference is copied
+// The objects are `shared mutable`, since only a copyable reference is copied
 // (retained): the copies that were taken from an `inout` parameter are taken
-// from a `shared mut` one, and an `inout` result, which cannot be copied, is
+// from a `shared mutable` one, and an `inout` result, which cannot be copied, is
 // written through.  The array parameter holds unique references and is moved.
-// The tuple holds an `S`, whose field is the `shared mut` reference (a
-// tuple's element can be `shared mut` itself since #368; the sample keeps
+// The tuple holds an `S`, whose field is the `shared mutable` reference (a
+// tuple's element can be `shared mutable` itself since #368; the sample keeps
 // the struct).
 // expect-stdout: field: 8
 // expect-stdout: capture: 8 8
@@ -47,12 +47,12 @@ class C {
 }
 
 class H {
-  c: shared mut C;
-  o: shared mut C?;
+  c: shared mutable C;
+  o: shared mutable C?;
 }
 
-fn set(h: shared mut H) {
-  let d: shared mut = h.c;
+fn set(h: shared mutable H) {
+  let d: shared mutable = h.c;
   d.p = P(7, 8, 9);
 }
 
@@ -66,7 +66,7 @@ fn setEach(hs: H[3]) -> int {
   return n - 1;
 }
 
-fn setOptional(h: shared mut H) -> Str {
+fn setOptional(h: shared mutable H) -> Str {
   match h.o {
     e: inout C {
       e.p = P(4, 5, 6);
@@ -76,18 +76,18 @@ fn setOptional(h: shared mut H) -> Str {
   }
 }
 
-fn viaInout(c: shared mut C) {
+fn viaInout(c: shared mutable C) {
   let d = c;
   d.p = P(7, 2, 9);
 }
 
-fn viaBinding(c: shared mut C) {
+fn viaBinding(c: shared mutable C) {
   let e = c;
   e.xs = [4, 4, 4];
 }
 
-fn viaRebind(c: shared mut C, d: shared mut C) {
-  e: shared mut = d;
+fn viaRebind(c: shared mutable C, d: shared mutable C) {
+  e: shared mutable = d;
   e = c;
   e.p = P(7, 3, 9);
 }
@@ -97,12 +97,12 @@ fn held(h: inout H) -> inout C {
 }
 
 struct S {
-  c: shared mut C;
+  c: shared mutable C;
   n: int;
 }
 
 enum U {
-  A(c: shared mut C, k: int),
+  A(c: shared mutable C, k: int),
   B(n: int),
 }
 
@@ -197,16 +197,16 @@ fn taken(n: int) -> F? {
 }
 
 fn main() -> int {
-  h: shared mut = H(C(P(1, 2, 3), [1, 2, 3]), C(P(1, 2, 3), [1, 2, 3]));
+  h: shared mutable = H(C(P(1, 2, 3), [1, 2, 3]), C(P(1, 2, 3), [1, 2, 3]));
   set(h);
   io::println("field: " + Str(h.c.p.b));
-  c: shared mut = h.c;
+  c: shared mutable = h.c;
   let k = fn() { c.p = P(7, 8, 9); c.xs = [7, 8, 9]; };
   k();
   io::println("capture: " + Str(c.p.b) + " " + Str(c.xs[1]));
   let hs = [H(h.c, None), H(C(P(0, 0, 0), [0, 0, 0]), None), H(h.c, None)];
   io::println("loop: " + Str(setEach(move hs)));
-  let none: shared mut = H(C(P(0, 0, 0), [0, 0, 0]), None);
+  let none: shared mutable = H(C(P(0, 0, 0), [0, 0, 0]), None);
   io::println("optional: " + setOptional(h) + " " + setOptional(none));
   c = C(P(1, 1, 1), [1, 1, 1]);
   viaInout(c);

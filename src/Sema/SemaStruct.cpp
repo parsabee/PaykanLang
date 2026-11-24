@@ -901,7 +901,7 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
         ast::Qualifier q = p.Qual;
         // (a shared form, a template argument\'s, is its own: #368)
         if (p.Mode == ast::ParamMode::Inout && q.Form == ast::QualForm::Unique)
-          q.Mut = true; // the borrow's writes
+          q.Mutable = true; // the borrow's writes
         CurrentScope->Quals[p.getName()] = q;
       }
       declareParamKinds(method);

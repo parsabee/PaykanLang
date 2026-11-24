@@ -213,7 +213,7 @@ fn main() -> int {
 
   // --- 16. Str.concat() via vtable (in-place mutation) ---
   io::println("=== str concat vtable ===");
-  let ca: mut Str = "hello";
+  let ca: mutable Str = "hello";
   let cb: Str = " world";
   ca.concat(move cb);
   io::println(ca);                            // hello world

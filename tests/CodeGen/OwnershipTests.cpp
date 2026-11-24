@@ -33,7 +33,7 @@ using namespace paykan::test;
 // -- A1 — `self` used as a value
 //
 // A plain method borrows its receiver, so handing `self` on there is an
-// error; a `shared fn`'s `self` is a `shared mut` reference, which it may
+// error; a `shared fn`'s `self` is a `shared mutable` reference, which it may
 // return, pass and copy.
 
 namespace {
@@ -43,7 +43,7 @@ namespace {
 void expectSelfIsBorrowed(const std::string &source, const std::string &cls) {
   auto r = compileAndRun(source);
   EXPECT_FALSE(r.CompileOk) << source;
-  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mut " + cls +
+  EXPECT_NE(r.StdErr.find("cannot copy 'self' (a unique 'mutable " + cls +
                           "'); a method borrows its receiver (a 'shared fn' "
                           "hands on a shared one)"),
             std::string::npos)
@@ -60,14 +60,14 @@ TEST(Ownership, ReturnSelf) {
   auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
-      shared fn me() -> shared mut B { return self; }
+      shared fn me() -> shared mutable B { return self; }
     }
 
     impl B {
       fn __init__() { self.x = 1; }
     }
     fn main() -> int {
-      b: shared mut = B();
+      b: shared mutable = B();
       c = b.me();
       io::println(Str(c.x));
       return 0;
@@ -82,7 +82,7 @@ TEST(Ownership, ReturnSelf) {
       x: int;
       fn me() -> B { return self; }
     }
-    fn main() -> int { b: mut = B(1); c = b.me(); return c.x; }
+    fn main() -> int { b: mutable = B(1); c = b.me(); return c.x; }
   )",
                        "B");
 }
@@ -94,14 +94,14 @@ TEST(Ownership, ReturnSelfChained) {
   auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
-      shared fn bump() -> shared mut B { self.x = self.x + 1; return self; }
+      shared fn bump() -> shared mutable B { self.x = self.x + 1; return self; }
     }
 
     impl B {
       fn __init__() { self.x = 0; }
     }
     fn main() -> int {
-      b: shared mut = B();
+      b: shared mutable = B();
       c = b.bump().bump().bump();
       io::println(Str(c.x));
       return 0;
@@ -116,12 +116,12 @@ TEST(Ownership, ReturnSelfChained) {
       x: int;
       fn bump() -> B { self.x = self.x + 1; return self; }
     }
-    fn main() -> int { b: mut = B(0); c = b.bump().bump(); return c.x; }
+    fn main() -> int { b: mutable = B(0); c = b.bump().bump(); return c.x; }
   )",
                        "B");
 }
 
-// Passing a `shared fn`'s `self` to a function whose `shared mut` parameter
+// Passing a `shared fn`'s `self` to a function whose `shared mutable` parameter
 // consumes a +1 box.
 TEST(Ownership, PassSelfAsArgument) {
   LeakGuard g;
@@ -134,9 +134,9 @@ TEST(Ownership, PassSelfAsArgument) {
     impl B {
       fn __init__() { self.x = 1; }
     }
-    fn probe(b: shared mut B) { io::println(Str(b.x)); }
+    fn probe(b: shared mutable B) { io::println(Str(b.x)); }
     fn main() -> int {
-      b: shared mut = B();
+      b: shared mutable = B();
       b.send();
       return 0;
     }
@@ -151,7 +151,7 @@ TEST(Ownership, PassSelfAsArgument) {
       fn send() { probe(self); }
     }
     fn probe(b: B) { }
-    fn main() -> int { b: mut = B(1); b.send(); return 0; }
+    fn main() -> int { b: mutable = B(1); b.send(); return 0; }
   )",
                        "B");
 }
@@ -172,7 +172,7 @@ TEST(Ownership, AssignSelfToLocal) {
       fn __init__() { self.x = 7; }
     }
     fn main() -> int {
-      a: shared mut = A();
+      a: shared mutable = A();
       n = a.grab();
       io::println(Str(n));
       io::println(Str(a.x));
@@ -191,7 +191,7 @@ TEST(Ownership, AssignSelfToLocal) {
         return y.x;
       }
     }
-    fn main() -> int { a: mut = A(7); return a.grab(); }
+    fn main() -> int { a: mutable = A(7); return a.grab(); }
   )",
                        "A");
 }
@@ -310,7 +310,7 @@ TEST(Ownership, MatchBindingMemberAssign) {
     }
     fn main() -> int {
       o: Obj = A();
-      h: mut Holder = Holder(A());
+      h: mutable Holder = Holder(A());
       match move o {
         b: A { h.a = move b; }
         _ { io::println("no"); }
@@ -426,7 +426,7 @@ TEST(Ownership, ArrayFieldReassign) {
       fn __init__(a: Str[2]) { self.arr = move a; }
     }
     fn main() -> int {
-      h: mut H = H([Str(1), Str(2)]);
+      h: mutable H = H([Str(1), Str(2)]);
       h.arr = [Str(7), h.arr[0].clone()];
       io::println(h.arr[0] + h.arr[1] + Str<int>(h.arr.len()));
       return 0;
@@ -505,7 +505,7 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
       fn __init__(a0: A) { self.a = move a0; }
     }
     fn main() -> int {
-      h: mut H = H(A());
+      h: mutable H = H(A());
       io::println(Str<int>(h.a.x));
       h.a.x = 9;
       io::println(Str<int>(h.a.x));
@@ -541,7 +541,7 @@ TEST(Ownership, AssignNarrowsBaseVar) {
       fn __init__() { __super__(); }
     }
     fn main() -> int {
-      d: mut Dog = Dog();
+      d: mutable Dog = Dog();
       a: Animal = Animal();
       a = move d;
       io::println(a.speak());
@@ -560,7 +560,7 @@ TEST(Ownership, AssignNarrowsBaseVar) {
 // (or the field of the object that holds it), and makes objects of the same
 // size, which take the freed memory over: what the statement uses is what
 // it read, alive until it is used (docs/pir.md §7, "Reads a call may
-// replace").  The objects the call is given are `shared mut`: the call
+// replace").  The objects the call is given are `shared mutable`: the call
 // replaces what the statement reads through another name for it.
 
 // A method's receiver, the operands of `+` and `==`, the object a field
@@ -572,36 +572,36 @@ TEST(Ownership, ReadsThroughObjectsACallReplacesStayAlive) {
       s: Str;
       a: int[3];
       names: Str[2];
-      fn m(h: shared mut H) -> Str {
+      fn m(h: shared mutable H) -> Str {
         swap(h);
         return self.s.clone();
       }
     }
     class H { b: B; }
-    fn swap(h: shared mut H) {
+    fn swap(h: shared mutable H) {
       h.b = B("other" + Str(9), [7, 8, 9], ["p" + Str(0), "q"]);
       y = B("reused" + Str(1), [4, 5, 6], ["r" + Str(1), "t"]);
     }
-    fn g(h: shared mut H) -> Str {
+    fn g(h: shared mutable H) -> Str {
       swap(h);
       return "!";
     }
-    fn same(h: shared mut H) -> Str {
+    fn same(h: shared mutable H) -> Str {
       swap(h);
       return "first" + Str(1);
     }
-    fn gi(h: shared mut H) -> int {
+    fn gi(h: shared mutable H) -> int {
       swap(h);
       return 1;
     }
-    fn made(h: shared mut H) -> Str {
+    fn made(h: shared mutable H) -> Str {
       s = "x" + Str(5);
       swap(h);
       return s;
     }
     fn mk() -> H { return H(B("first" + Str(1), [1, 2, 3], ["n" + Str(1), "o"])); }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       io::println("receiver: " + h.b.m(h));
       h = mk();
       io::println("operand: " + (h.b.s + g(h)));
@@ -642,7 +642,7 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
   auto r = compileAndRun(R"(import ::io;
     class Node {
       name: Str;
-      parent: shared mut Holder?;
+      parent: shared mutable Holder?;
       fire: () -> void;
       fn drop() -> Str {
         match self.parent {
@@ -659,11 +659,11 @@ TEST(Ownership, AReceiverItsMethodReplacesStaysAlive) {
     }
     class Holder { node: Node; }
     fn main() -> int {
-      h: shared mut = Holder(Node("first" + Str(1), None, fn() {}));
+      h: shared mutable = Holder(Node("first" + Str(1), None, fn() {}));
       h.node.parent = h;
       io::println("method: " + h.node.drop());
       h.node.parent = None;
-      w: shared mut = Holder(Node("one" + Str(1), None, fn() {}));
+      w: shared mutable = Holder(Node("one" + Str(1), None, fn() {}));
       v = w;
       w.node = Node("two" + Str(2), None, fn() {
         v.node = Node("three" + Str(3), None, fn() {});
@@ -689,7 +689,7 @@ TEST(Ownership, StorageInAnObjectACallReplacesStaysAlive) {
   auto r = compileAndRun(R"(import ::io;
     struct S { v: Str; }
     impl S {
-      view fn take(h: shared mut H) -> Str {
+      view fn take(h: shared mutable H) -> Str {
         swap(h);
         return self.v + "";
       }
@@ -698,34 +698,34 @@ TEST(Ownership, StorageInAnObjectACallReplacesStaysAlive) {
       arr: Str[2];
       s: S;
       k: Str;
-      fn slot(h: shared mut H) -> inout Str {
+      fn slot(h: shared mutable H) -> inout Str {
         swap(h);
         return self.k;
       }
       fn key() -> inout Str { return self.k; }
     }
     class H { a: A; }
-    fn swap(h: shared mut H) {
+    fn swap(h: shared mutable H) {
       h.a = A(["p" + Str(0), "q"], S("zero" + Str(0)), "zk" + Str(0));
       y = A(["r" + Str(1), "t"], S("three" + Str(3)), "tk" + Str(3));
     }
-    fn first(xs: view Str[], h: shared mut H) -> Str {
+    fn first(xs: view Str[], h: shared mutable H) -> Str {
       swap(h);
       return xs[0] + "";
     }
     fn copied(s: S, t: Str) -> Str { return s.v + t; }
-    fn bang(h: shared mut H) -> Str {
+    fn bang(h: shared mutable H) -> Str {
       swap(h);
       return "!";
     }
-    fn put(x: inout Str, h: shared mut H) {
+    fn put(x: inout Str, h: shared mutable H) {
       swap(h);
       x = "five" + Str(5);
     }
     fn pick(x: inout Str) -> inout Str { return x; }
     fn mk() -> H { return H(A(["one" + Str(1), "two"], S("one" + Str(1)), "k" + Str(1))); }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       io::println("slice: " + first(h.a.arr, h));
       h = mk();
       io::println("by value: " + copied(h.a.s.clone(), bang(h)));
@@ -780,19 +780,19 @@ TEST(Ownership, MatchedAndComparedStorageACallReplacesStaysAlive) {
       arr: Str[2];
     }
     class D { c: C; }
-    fn swap(d: shared mut D) -> (Str, int) {
+    fn swap(d: shared mutable D) -> (Str, int) {
       d.c = C(T(Box("zero" + Str(0))), ("zp" + Str(0), 0), ["za" + Str(0), "zb"]);
       y = C(T(Box("three" + Str(3))), ("tp" + Str(3), 3), ["ta" + Str(3), "tb"]);
       return ("one" + Str(1), 1);
     }
-    fn fresh(d: shared mut D) -> Str[2] {
+    fn fresh(d: shared mutable D) -> Str[2] {
       xs = ["new" + Str(1), "x"];
       swap(d);
       return xs;
     }
     fn mk() -> D { return D(C(T(Box("one" + Str(1))), ("one" + Str(1), 1), ["a" + Str(1), "b"])); }
     fn main() -> int {
-      d: shared mut = mk();
+      d: shared mutable = mk();
       e = d;
       match d.c.t.b {
         n: inout Box {
@@ -827,7 +827,7 @@ TEST(Ownership, CallersStorageACallReplacesStaysAlive) {
     class A {
       k: Str;
       arr: Str[2];
-      fn slot(h: shared mut H) -> inout Str {
+      fn slot(h: shared mutable H) -> inout Str {
         h.a = A("zk" + Str(0), ["p" + Str(0), "q"]);
         y = A("tk" + Str(3), ["r" + Str(1), "t"]);
         return self.k;
@@ -841,33 +841,33 @@ TEST(Ownership, CallersStorageACallReplacesStaysAlive) {
     struct S { v: Str; }
     class G { s: S; }
     impl S {
-      view fn both(g: shared mut G) -> Str { return self.v + reset(g); }
+      view fn both(g: shared mutable G) -> Str { return self.v + reset(g); }
     }
-    fn reset(g: shared mut G) -> Str {
+    fn reset(g: shared mutable G) -> Str {
       g.s = S("zero" + Str(0));
       y = S("three" + Str(3));
       return "!";
     }
-    fn bump(h: shared mut H) -> Str {
+    fn bump(h: shared mutable H) -> Str {
       h.a.k = "zk" + Str(0);
       h.a.arr[0] = "p" + Str(0);
       h.s = "zs" + Str(0);
       y = "tk" + Str(3);
       return "!";
     }
-    fn index(h: shared mut H) -> int {
+    fn index(h: shared mutable H) -> int {
       bump(h);
       return 1;
     }
-    fn param(x: inout Str, h: shared mut H) -> Str { return x + bump(h); }
-    fn slice(xs: view Str[], h: shared mut H) -> Str { return xs[0] + bump(h); }
+    fn param(x: inout Str, h: shared mutable H) -> Str { return x + bump(h); }
+    fn slice(xs: view Str[], h: shared mutable H) -> Str { return xs[0] + bump(h); }
     fn mk() -> H { return H(A("k" + Str(1), ["one" + Str(1), "two"]), "ab" + Str(1)); }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       io::println("inout parameter: " + param(h.a.k, h));
       h = mk();
       io::println("slice: " + slice(h.a.arr, h));
-      g: shared mut = G(S("one" + Str(1)));
+      g: shared mutable = G(S("one" + Str(1)));
       io::println("struct self: " + g.s.both(g));
       h = mk();
       io::println("native: " + Str(charAt(h.s, index(h))));
@@ -895,14 +895,14 @@ TEST(Ownership, AFieldOfWhatALastUseHandedOnStaysAlive) {
     class Node { name: Str; }
     class Holder { node: shared Node; }
     fn take(n: shared Node) -> Str { return "took"; }
-    fn replace(h: shared mut Holder) -> Str {
+    fn replace(h: shared mutable Holder) -> Str {
       h.node = Node("other");
       return "!";
     }
-    fn use(h: shared mut Holder) -> Str { return h.node.name + replace(h); }
+    fn use(h: shared mutable Holder) -> Str { return h.node.name + replace(h); }
     fn main() -> int {
       a: shared = Node("first" + Str(1));
-      h: shared mut = Holder(a);
+      h: shared mutable = Holder(a);
       t = take(a);
       io::println(t + " " + use(h));
       return 0;
@@ -935,13 +935,13 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
       fn pick(b: inout B) -> inout Str { return b.k; }
     }
     fn pick(b: inout B) -> inout Str { return b.k; }
-    fn put(x: inout Str, h: shared mut H) -> Str {
+    fn put(x: inout Str, h: shared mutable H) -> Str {
       h.b = B("zero" + Str(0));
       y = B("three" + Str(3));
       x = "five" + Str(5);
       return move y.k;
     }
-    fn passOn(b: inout B, c: shared mut H) -> Str {
+    fn passOn(b: inout B, c: shared mutable H) -> Str {
       x: inout = pick(b);
       c.b = B("zero" + Str(0));
       y = B("three" + Str(3));
@@ -950,8 +950,8 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
     }
     fn mk() -> H { return H(B("one" + Str(1)), X(B("two" + Str(2)))); }
     fn main() -> int {
-      h: shared mut = mk();
-      c: shared mut = h;
+      h: shared mutable = mk();
+      c: shared mutable = h;
       x: inout = pick(h.b);
       c.b = B("zero" + Str(0));
       y = B("three" + Str(3));
@@ -961,7 +961,7 @@ TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
       io::println("passed on: " + put(pick(h.b), h) + " " + h.b.k);
       h = mk();
       c = h;
-      p: mut = P(1);
+      p: mutable = P(1);
       m: inout = p.pick(h.b);
       c.b = B("zero" + Str(0));
       w = B("three" + Str(3));
@@ -1011,7 +1011,7 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
     fn pick(s: inout S) -> inout Str { return s.b.k; }
     fn first(t: inout (B, int)) -> inout Str { return t.0.k; }
     fn last(a: inout B[6]) -> inout Str { return a[5].k; }
-    fn put(x: inout Str, h: shared mut H) -> Str {
+    fn put(x: inout Str, h: shared mutable H) -> Str {
       h.s = S(B("zero" + Str(0)), 0);
       y = B("three" + Str(3));
       x = "five" + Str(5);
@@ -1022,7 +1022,7 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
       return H(S(B("one" + Str(1)), 1), (B("one" + Str(1)), 1), six("one" + Str(1)));
     }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       c = h;
       x: inout = pick(h.s);
       c.s = S(B("zero" + Str(0)), 0);
@@ -1090,15 +1090,15 @@ TEST(Ownership, AnInoutResultInAnObjectReachedThroughAFieldIsAnError) {
         fn slot() -> inout Str { )") +
                            ret + R"( }
       }
-      fn put(x: inout Str, h: mut H) {
+      fn put(x: inout Str, h: mutable H) {
         h.c = C("zero" + Str(0));
         y = C("three" + Str(3));
         x = "five" + Str(5);
       }
       fn main() -> int {
-        h: mut = H(C("one" + Str(1)));
+        h: mutable = H(C("one" + Str(1)));
         put(h.slot(), h);
-        d: mut = h;
+        d: mutable = h;
         x: inout = h.slot();
         d.c = C("zero" + Str(0));
         y = C("three" + Str(3));
@@ -1155,24 +1155,24 @@ TEST(Ownership, AnAccessorOfTheObjectItselfKeepsItAlive) {
     }
     fn pick(c: inout C) -> inout Str { return c.slot(); }
     fn viaS(s: inout S) -> inout Str { return s.slot(); }
-    fn swap(h: shared mut H) -> Str {
+    fn swap(h: shared mutable H) -> Str {
       h.c = C("zero" + Str(0));
       h.s = S(C("zero" + Str(0)), 0);
       y = C("three" + Str(3));
       return move y.k;
     }
-    fn put(x: inout Str, h: shared mut H) -> Str {
+    fn put(x: inout Str, h: shared mutable H) -> Str {
       t = swap(h);
       x = "five" + Str(5);
       return t;
     }
-    fn show(s: view Str, h: shared mut H) -> Str {
+    fn show(s: view Str, h: shared mutable H) -> Str {
       t = swap(h);
       return s + " " + t;
     }
     fn mk() -> H { return H(C("one" + Str(1)), "k" + Str(1), S(C("one" + Str(1)), 1)); }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       io::println("accessor: " + put(h.c.slot(), h) + " " + h.c.k);
       h = mk();
       c = h;
@@ -1245,28 +1245,28 @@ TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
       fn get() -> inout C { return self.w.get(); }
     }
     fn key(s: inout S) -> inout Str { return s.ref().k; }
-    fn swap(h: shared mut H) -> Str {
+    fn swap(h: shared mutable H) -> Str {
       h.s = S(C("zero" + Str(0), 0), 0);
       h.w = W<C>(C("zero" + Str(0), 0));
       y = C("three" + Str(3), 3);
       return move y.k;
     }
-    fn putN(x: inout int, h: shared mut H) -> Str {
+    fn putN(x: inout int, h: shared mutable H) -> Str {
       t = swap(h);
       x = 5;
       return t;
     }
-    fn putS(x: inout S, h: shared mut H) -> Str {
+    fn putS(x: inout S, h: shared mutable H) -> Str {
       t = swap(h);
       x = S(C("five" + Str(5), 5), 5);
       return t;
     }
-    fn putC(x: inout C, h: shared mut H) -> Str {
+    fn putC(x: inout C, h: shared mutable H) -> Str {
       t = swap(h);
       x = C("five" + Str(5), 5);
       return t;
     }
-    fn putK(x: inout Str, h: shared mut H) -> Str {
+    fn putK(x: inout Str, h: shared mutable H) -> Str {
       t = swap(h);
       x = "five" + Str(5);
       return t;
@@ -1275,7 +1275,7 @@ TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
       return H(S(C("one" + Str(1), 1), 1), W<C>(C("one" + Str(1), 1)));
     }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       io::println("struct's field: " + putN(h.num(), h) + " " + Str(h.s.n));
       h = mk();
       io::println("struct: " + putS(h.whole(), h) + " " + h.s.c.k);
@@ -1318,10 +1318,10 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
     class B {
       s: Str;
       n: int;
-      fn virt(h: shared mut H) -> Str { return self.s.clone(); }
+      fn virt(h: shared mutable H) -> Str { return self.s.clone(); }
     }
     class D : B {
-      fn virt(h: shared mut H) -> Str { return clear(h) + self.s; }
+      fn virt(h: shared mutable H) -> Str { return clear(h) + self.s; }
     }
     impl B {
       view fn count() -> int { return self.n; }
@@ -1329,19 +1329,19 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
         self.n = self.n + 1;
         return self.count();
       }
-      view fn viaFree(h: shared mut H) -> Str {
+      view fn viaFree(h: shared mutable H) -> Str {
         t = clear(h);
         return t + self.s;
       }
-      view fn ping(k: int, h: shared mut H) -> Str {
+      view fn ping(k: int, h: shared mutable H) -> Str {
         if k == 0 {
           t = clear(h);
           return t + self.s;
         }
         return self.pong(k - 1, h);
       }
-      view fn pong(k: int, h: shared mut H) -> Str { return self.ping(k, h); }
-      view fn rec(k: int, h: shared mut H) -> Str {
+      view fn pong(k: int, h: shared mutable H) -> Str { return self.ping(k, h); }
+      view fn rec(k: int, h: shared mutable H) -> Str {
         if k == 0 {
           h.b = B("other" + Str(9), 9);
           y = B("reuse" + Str(1), 1);
@@ -1354,7 +1354,7 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
         y = B("QQQQQ" + Str(8), 8);
         return "!";
       }
-      fn viaVirt(h: shared mut H) -> Str { return self.virt(h); }
+      fn viaVirt(h: shared mutable H) -> Str { return self.virt(h); }
     }
     struct S {
       b: B;
@@ -1371,14 +1371,14 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
       c: B;
     }
     class W { s: S; }
-    fn clear(h: shared mut H) -> Str {
+    fn clear(h: shared mutable H) -> Str {
       h.b = B("other" + Str(9), 9);
       y = B("reuse" + Str(1), 1);
       return "!";
     }
     fn mk() -> H { return H(B("first" + Str(1), 1), B("c", 3)); }
     fn main() -> int {
-      h: shared mut = mk();
+      h: shared mutable = mk();
       io::println("free: " + h.b.viaFree(h));
       h = mk();
       io::println("mutual: " + h.b.ping(3, h));
@@ -1389,7 +1389,7 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
       h = mk();
       h.b = D("first" + Str(1), 1);
       io::println("virtual: " + h.b.viaVirt(h));
-      w: mut = W(S(B("first" + Str(1), 1)));
+      w: mutable = W(S(B("first" + Str(1), 1)));
       io::println("struct: " + w.s.b.s + w.s.reset() + w.s.b.s);
       h = mk();
       io::println("number: " + h.b.s + Str(h.b.bump()) + Str(h.b.count()));
@@ -1410,8 +1410,8 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
 
 // The counterexamples of the analysis that lets a call keep reads it cannot
 // replace in place (docs/pir.md §7): a call that replaces a field through a
-// narrowed `inout` arm (`d: inout Derived<int>` on a `shared mut Base`
-// field, which a `weak mut` one watches) frees the object a read of the
+// narrowed `inout` arm (`d: inout Derived<int>` on a `shared mutable Base`
+// field, which a `weak mutable` one watches) frees the object a read of the
 // field holds, though the object's class is exact and holds no `Base`; one
 // given only a Wrap replaces the field an `inout` parameter names (its slot
 // is of the parameter's superclass); a call given a parameter the function
@@ -1437,7 +1437,7 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
     impl Plain {
       fn __init__(n: int, t: Str) { __super__(n); self.tag = move t; }
     }
-    class Holder { b: shared mut Base; w: weak mut Base?; }
+    class Holder { b: shared mutable Base; w: weak mutable Base?; }
     impl Holder {
       fn __init__() { self.b = Derived<int>(100, 9); self.w = self.b; }
       fn state() -> Str {
@@ -1455,7 +1455,7 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
       return 7;
     }
     fn run(h: inout Holder) -> int { return h.b.m(reset(h)); }
-    class Wrap { h: shared mut Holder; }
+    class Wrap { h: shared mutable Holder; }
     fn clobber(w: inout Wrap) -> int {
       w.h.b = Base(100);
       return 5;
@@ -1467,14 +1467,14 @@ TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
       p.node = Node("o" + Str(2));
       return "!";
     }
-    fn local(p: mut Pair) -> Str { return p.node.name + replace(p); }
+    fn local(p: mutable Pair) -> Str { return p.node.name + replace(p); }
     fn main() -> int {
-      h: mut = Holder();
+      h: mutable = Holder();
       r = run(h);
       io::println("arm: " + Str(r) + " " + h.state());
-      h2: shared mut = Holder();
+      h2: shared mutable = Holder();
       h2.b = Plain(1, "abc");
-      w: mut = Wrap(h2);
+      w: mutable = Wrap(h2);
       match h2.b {
         s: inout Plain {
           s = Plain(2, "fresh");
@@ -1586,7 +1586,7 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
 // that was there, which dies when the call replaces it.  A map of Kennels,
 // each holding a Dog whose death lets go of a string only, reads its table
 // in place across put and remove, and every replaced Dog dies when it is let
-// go of.  The Item and the Dogs are `shared` (`shared mut` where a call
+// go of.  The Item and the Dogs are `shared` (`shared mutable` where a call
 // replaces one), since a `weak` reference names only a `shared` object, and
 // a struct holds the `shared` Dog (a map's value can be `shared` itself
 // since #368; the test keeps the struct).
@@ -1595,7 +1595,7 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
   auto r = compileAndRun(R"(import ::io;
     import ::collections as c;
     class Item { name: Str; }
-    class Probe { it: weak mut Item?; }
+    class Probe { it: weak mutable Item?; }
     impl Probe {
       view fn state() -> Str {
         match self.it {
@@ -1614,7 +1614,7 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       }
     }
     class Holder {
-      item: shared mut Item;
+      item: shared mutable Item;
       quiet: Quiet;
       loud: Loud;
       fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
@@ -1642,7 +1642,7 @@ TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
       }
     }
     fn main() -> int {
-      h: mut = Holder(Item("old" + Str(0)), Hush(), Shout());
+      h: mutable = Holder(Item("old" + Str(0)), Hush(), Shout());
       p = Probe(h.item);
       io::println(h.viaQuiet() + " " + p.state());
       io::println(h.viaLoud() + " " + p.state() + " " + h.item.name);
@@ -1714,13 +1714,13 @@ TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
 // read in place across a closure that replaces `moving` and, through an
 // `inout` argument, `byArg`.  Their reads keep a reference of their own:
 // each is the string of the Item that was there, which dies once the
-// statement has used it.  The Items are `shared mut`, so a `weak mut`
+// statement has used it.  The Items are `shared mutable`, so a `weak mutable`
 // reference can name each.
 TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     class Item { name: Str; }
-    class Probe { it: weak mut Item?; }
+    class Probe { it: weak mutable Item?; }
     impl Probe {
       view fn state() -> Str {
         match self.it {
@@ -1731,9 +1731,9 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
     }
     fn bump(s: inout Item) { s = Item("arg" + Str(3)); }
     class Holder {
-      fixed: shared mut Item;
-      moving: shared mut Item;
-      byArg: shared mut Item;
+      fixed: shared mutable Item;
+      moving: shared mutable Item;
+      byArg: shared mutable Item;
       view fn viaFixed(f: view () -> int) -> Str { return self.fixed.name + Str(f()); }
       view fn viaMoving(f: view () -> int) -> Str { return self.moving.name + Str(f()); }
       view fn viaArg(f: view () -> int) -> Str { return self.byArg.name + Str(f()); }
@@ -1746,7 +1746,7 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
       }
     }
     fn main() -> int {
-      h: shared mut = Holder();
+      h: shared mutable = Holder();
       fixed = Probe(h.fixed);
       moving = Probe(h.moving);
       f = fn() -> int {
@@ -1772,7 +1772,7 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
 // An `__init__`'s store into another object of its class is no
 // construction: `a.f` keeps a reference of its own across `remake`, whose
 // `__init__` replaces the `f` of the object it is given (the same `shared
-// mut` A), and `tag` runs on the Item that was there, which dies once the
+// mutable` A), and `tag` runs on the Item that was there, which dies once the
 // statement has used it.  (A binding cannot be named `self` there: Sema
 // rejects it.)
 TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
@@ -1785,7 +1785,7 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
     }
     class A { f: Item; }
     impl A {
-      fn __init__(other: shared mut A?) {
+      fn __init__(other: shared mutable A?) {
         self.f = Item("original" + Str(100));
         match other {
           o: inout A { o.f = Item("replaced" + Str(2)); }
@@ -1793,13 +1793,13 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
         }
       }
     }
-    fn run(a: shared mut A) -> Str { return a.f.tag(remake(a)); }
-    fn remake(a: shared mut A) -> int {
+    fn run(a: shared mutable A) -> Str { return a.f.tag(remake(a)); }
+    fn remake(a: shared mutable A) -> int {
       b = A(a);
       return 1;
     }
     fn main() -> int {
-      a: shared mut = A(None);
+      a: shared mutable = A(None);
       io::println(run(a));
       io::println(a.f.s);
       return 0;
@@ -1906,7 +1906,7 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
       a: Str[2];
     }
     class H { b: B; }
-    fn g(h: shared mut H) -> int {
+    fn g(h: shared mutable H) -> int {
       h.b = B("XY" + Str(9), ["X" + Str(9), "Y"]);
       y = "QQ" + Str(8);
       return 0;
@@ -1917,11 +1917,11 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
       return 0;
     }
     fn main() -> int {
-      h: shared mut = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
+      h: shared mutable = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
       c1 = h.b.a[g(h)].clone();
       h.b = B("ab" + Str(1), ["a" + Str(1), "b"]);
       c2 = h.b.s[g(h)];
-      t: mut = "ab" + Str(1);
+      t: mutable = "ab" + Str(1);
       c3 = t[bump(t)];
       io::println(c1 + " " + Str(c2) + " " + Str(c3) + " " + h.b.s + " " + t);
       return 0;
@@ -1969,14 +1969,14 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
     class X {
       a: A;
     }
-    fn m(x: shared mut X) -> Str { return x.a.b.name + g(x); }
-    fn g(x: shared mut X) -> Str {
+    fn m(x: shared mutable X) -> Str { return x.a.b.name + g(x); }
+    fn g(x: shared mutable X) -> Str {
       x.a = A(B("new"));
       return "!";
     }
     fn main() -> int {
-      h: mut = Holder(None);
-      k: mut = Holder(None);
+      h: mutable = Holder(None);
+      k: mutable = Holder(None);
       n: shared = Node("n");
       probe = Probe(n);
       h.take(n);
@@ -1993,7 +1993,7 @@ TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
       h.take(last);
       h.n = None;
       io::println("handed over: " + lastProbe.state() + " " + n.name);
-      x: shared mut = X(A(B("old" + "name")));
+      x: shared mutable = X(A(B("old" + "name")));
       io::println(m(x) + " now " + x.a.b.name);
       return 0;
     }

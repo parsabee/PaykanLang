@@ -511,7 +511,7 @@ fn run(tasks: inout tl::TaskList, line: view Str) {
 }
 
 fn main() -> int {
-  tasks: mut = tl::TaskList();
+  tasks: mutable = tl::TaskList();
   let script = ["add buy milk", "add fix the leak|high", "add call mum|low",
             "done 1", "done 9", "list"];
   i = 0;

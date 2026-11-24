@@ -39,7 +39,7 @@ fn show(n: view Job) -> int {
 }   // a view takes every form
 fn mark(n: inout Job) {
   n.name = n.name + "!";
-}        // an inout takes a `mut` or `shared mut` object
+}        // an inout takes a `mutable` or `shared mutable` object
 
 fn main() -> int {
   let shared_cache: atomic shared = Cache(0);
@@ -53,7 +53,7 @@ fn main() -> int {
   io::println(Str(pair.0.x + pair.1.y));
   let c = Job("cc", shared_cache);          // a bare Job: a view takes it
   io::println(Str(show(c)));
-  s: shared mut = Job("s", shared_cache);
+  s: shared mutable = Job("s", shared_cache);
   mark(s);                                   // an inout takes it, with no retain or release
   io::println(s.name + " " + Str(show(s)));
   return 0;

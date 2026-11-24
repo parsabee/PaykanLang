@@ -752,17 +752,18 @@ VarDecl *Parser::parseVarDecl(const char *notWeak) {
 }
 
 // `weak T` is a `shared` reference that owns nothing: it names a `shared`
-// object, and reads it; `weak mut T` names a `shared mut` object, and may
-// change it.  Its type is the `shared` (`shared mut`) form, marked weak on
-// the declaration.  The type is inferred when an initializer follows (a
+// object, and reads it; `weak mutable T` names a `shared mutable` object, and
+// may change it.  Its type is the `shared` (`shared mutable`) form, marked weak
+// on the declaration.  The type is inferred when an initializer follows (a
 // local's).
 bool Parser::parseWeakAnnotation(Type *&ty) {
   SourceLocation start = consume().Loc; // "weak"
-  const bool mut = accept(Tok::KwMut);
-  if (at(Tok::KwMut) || at(Tok::KwShared) || at(Tok::KwLocked) ||
+  const bool isMutable = accept(Tok::KwMutable);
+  if (at(Tok::KwMutable) || at(Tok::KwShared) || at(Tok::KwLocked) ||
       at(Tok::KwAtomic) || at(Tok::KwWeak)) {
-    error(cur().Loc, "'weak' takes 'mut' or nothing: 'weak Node?' names a "
-                     "'shared' object, 'weak mut Node?' a 'shared mut' one");
+    error(cur().Loc,
+          "'weak' takes 'mutable' or nothing: 'weak Node?' names a "
+          "'shared' object, 'weak mutable Node?' a 'shared mutable' one");
     return false;
   }
   Type *inner = nullptr;
@@ -772,8 +773,8 @@ bool Parser::parseWeakAnnotation(Type *&ty) {
     if (!inner)
       return false;
   }
-  ty = Ctx.make<QualifiedType>(span(start), Qualifier{QualForm::Shared, mut},
-                               inner);
+  ty = Ctx.make<QualifiedType>(span(start),
+                               Qualifier{QualForm::Shared, isMutable}, inner);
   return true;
 }
 
@@ -788,8 +789,8 @@ std::string Parser::sourceText(size_t from, size_t to) {
 }
 
 void Parser::weakPrefixError() {
-  // `weak NAME: TYPE` or `weak NAME = e`: `NAME: weak TYPE`, `weak mut`
-  // for a `shared mut` type.
+  // `weak NAME: TYPE` or `weak NAME = e`: `NAME: weak TYPE`, `weak mutable`
+  // for a `shared mutable` type.
   const std::string name(peek(1).Text);
   std::string fix = name + ": weak";
   if (kind(2) == Tok::Colon) {
@@ -799,10 +800,10 @@ void Parser::weakPrefixError() {
       ++k;
     if (k > 3) {
       std::string type = sourceText(3, k - 1);
-      constexpr std::string_view kSharedMut = "shared mut ";
+      constexpr std::string_view kSharedMutable = "shared mutable ";
       constexpr std::string_view kShared = "shared ";
-      if (type.rfind(kSharedMut, 0) == 0)
-        fix += " mut " + type.substr(kSharedMut.size());
+      if (type.rfind(kSharedMutable, 0) == 0)
+        fix += " mutable " + type.substr(kSharedMutable.size());
       else if (type.rfind(kShared, 0) == 0)
         fix += " " + type.substr(kShared.size());
       else
@@ -814,7 +815,7 @@ void Parser::weakPrefixError() {
   error(cur().Loc, "'weak' goes after the colon, before the type: write '" +
                        fix +
                        "' (a weak reference names a 'shared' object, 'weak "
-                       "mut' a 'shared mut' one)");
+                       "mutable' a 'shared mutable' one)");
 }
 
 ClassDecl *Parser::parseClassDecl() {
@@ -2603,16 +2604,16 @@ Type *Parser::parsePrimaryType() {
 }
 
 // typeAnnotation ::= qualifier? primaryType suffixes
-// qualifier      ::= "mut" | "shared" "mut"? | "atomic" "shared"
-//                  | "locked" "mut"?
+// qualifier      ::= "mutable" | "shared" "mutable"? | "atomic" "shared"
+//                  | "locked" "mutable"?
 //                  | "atomic"                     -- a cell of a number
 //
 // The bare type is immutable and the cheapest form (docs/design/
-// concurrency.md); each word buys one thing at one cost: `mut`, writes
+// concurrency.md); each word buys one thing at one cost: `mutable`, writes
 // through the owner; `shared`, several owners; `atomic shared`, an object
-// frozen for every thread; `locked mut`, an object written under a lock.
-// `atomic shared mut` and `atomic mut` are errors naming the forms that
-// exist, and `locked` without `mut` is a warning (Sema).
+// frozen for every thread; `locked mutable`, an object written under a lock.
+// `atomic shared mutable` and `atomic mutable` are errors naming the forms that
+// exist, and `locked` without `mutable` is a warning (Sema).
 //
 // A qualifier covers the whole type.  In a declaration it may stand alone,
 // with the type inferred (`x: shared = e;`).  A type takes one qualifier.
@@ -2620,42 +2621,43 @@ Type *Parser::parseTypeAnnotation() {
   SourceLocation start = cur().Loc;
   Qualifier qual;
   bool qualified = true;
-  auto cellTakesNoMut = [&] {
-    error(cur().Loc, "an 'atomic' cell takes no 'mut': it changes by its "
+  auto cellTakesNoMutable = [&] {
+    error(cur().Loc, "an 'atomic' cell takes no 'mutable': it changes by its "
                      "operations; an object crosses threads as 'atomic "
-                     "shared T' (frozen) or 'locked mut T'");
+                     "shared T' (frozen) or 'locked mutable T'");
     return nullptr;
   };
-  if (accept(Tok::KwMut)) {
+  if (accept(Tok::KwMutable)) {
     if (at(Tok::KwShared) || at(Tok::KwLocked)) {
       const std::string form(cur().Text);
-      error(cur().Loc, "'mut " + form + "' is spelled '" + form +
-                           " mut': the form first, then the writes");
+      error(cur().Loc, "'mutable " + form + "' is spelled '" + form +
+                           " mutable': the form first, then the writes");
       return nullptr;
     }
     if (at(Tok::KwAtomic))
-      return cellTakesNoMut();
-    qual.Mut = true;
+      return cellTakesNoMutable();
+    qual.Mutable = true;
   } else if (accept(Tok::KwShared)) {
     qual.Form = QualForm::Shared;
-    qual.Mut = accept(Tok::KwMut);
+    qual.Mutable = accept(Tok::KwMutable);
   } else if (accept(Tok::KwLocked)) {
     qual.Form = QualForm::Locked;
-    qual.Mut = accept(Tok::KwMut);
+    qual.Mutable = accept(Tok::KwMutable);
   } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwShared) {
     consume();
     consume();
-    if (at(Tok::KwMut)) {
-      error(cur().Loc, "'atomic shared mut T' would be written from several "
-                       "threads with no lock; write 'atomic shared T' to "
-                       "freeze it, or 'locked mut T' to change it under a "
-                       "lock");
+    if (at(Tok::KwMutable)) {
+      error(cur().Loc,
+            "'atomic shared mutable T' would be written from several "
+            "threads with no lock; write 'atomic shared T' to "
+            "freeze it, or 'locked mutable T' to change it under a "
+            "lock");
       return nullptr;
     }
     qual.Form = QualForm::AtomicShared;
-  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwMut) {
+  } else if (at(Tok::KwAtomic) && kind(1) == Tok::KwMutable) {
     consume();
-    return cellTakesNoMut();
+    return cellTakesNoMutable();
   } else if (accept(Tok::KwAtomic)) {
     // `atomic T`: a cell holding a number.
     Type *inner = parseTypeAnnotation();
@@ -2666,7 +2668,7 @@ Type *Parser::parseTypeAnnotation() {
     qualified = false;
   }
   if (qualified) {
-    if (at(Tok::KwMut) || at(Tok::KwShared) || at(Tok::KwLocked) ||
+    if (at(Tok::KwMutable) || at(Tok::KwShared) || at(Tok::KwLocked) ||
         at(Tok::KwAtomic)) {
       error(cur().Loc, std::string("a type takes one qualifier: '") +
                            qual.spelling() + " " + std::string(cur().Text) +

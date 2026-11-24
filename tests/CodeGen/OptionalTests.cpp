@@ -99,7 +99,7 @@ TEST(Optional, LinkedListInsertAndTraverse) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(import ::io;
     fn push_front(head: Node?, v: int) -> Node {
-      n: mut Node = Node(v);
+      n: mutable Node = Node(v);
       n.next = move head;
       return n;
     }
@@ -150,7 +150,7 @@ TEST(Optional, OptionalFieldReleasedByDestructor) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kNode) + R"pkn(
     fn main() -> int {
-      a: mut Node = Node(1);
+      a: mutable Node = Node(1);
       b: Node = Node(2);
       a.next = move b;
       a.next = None;      // releases b, which the field held
@@ -177,7 +177,7 @@ TEST(Optional, CompareAgainstNone) {
       io::println(Str<bool>(None != b));
       io::println(Str<bool>(make(True) == None));    // call temporary released
       io::println(Str<bool>(make(False) == None));
-      n: mut Node = Node(5);
+      n: mutable Node = Node(5);
       io::println(Str<bool>(n.next == None));        // field read
       n.next = Node(6);
       io::println(Str<bool>(n.next != None));
@@ -315,7 +315,7 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
       fn __init__() {}
     }
     fn main() -> int {
-      l: mut List = List();
+      l: mutable List = List();
       io::println(Str<int>(l.firstOr(-1)));
       l.link(Node(3));
       io::println(Str<int>(l.firstOr(-1)));
@@ -349,7 +349,7 @@ TEST(Optional, PrintingAReferenceOptional) {
       io::println(a);
       io::println(make(False));
       io::println(make(True));
-      h: mut = H();
+      h: mutable = H();
       io::print(h.s); io::print(" ");
       h.s = "two";
       io::println(h.s);
@@ -557,14 +557,14 @@ TEST(Optional, NoneOfTheOptionalWritten) {
     fn tick(c: inout Ctr) -> bool { c.n = c.n + 1; return c.n > 100; }
     fn main() -> int {
       c = True;
-      t: mut = Ctr(0);
+      t: mutable = Ctr(0);
       ys: Node?[3] = [if tick(t) then None else None; 3];
       zs: Node?[3] = [if tick(t) then None else Node(1); 3];
       io::println(Str(t.n) + " " + Str(ys[2] == None) + " " + Str(zs[2] == None));
       io::println(Str<Node?>(None) + " " + Str<int?>(None) + " " +
                   Str<(int, Str)?>(None) + " " + Str<Str?>(None) + " " +
                   Str<Obj?>(if c then None else None));
-      k: mut = Kid(1, if c then None else None);
+      k: mutable = Kid(1, if c then None else None);
       xs: Node?[3] = [if c then None else None; 3];
       io::println(Str(k.parent == None) + " " + Str(xs[2] == None));
       return 0;
@@ -640,8 +640,8 @@ TEST(Optional, ImportedOptionalSignatures) {
   auto main = writeFile(tmp, "main.pkn", R"pkn(import ::io;
 import list;
 fn main() -> int {
-  a: mut list::Node = list::Node(1);
-  b: mut list::Node = list::Node(2);
+  a: mutable list::Node = list::Node(1);
+  b: mutable list::Node = list::Node(2);
   a.next = move b;
   io::println(Str<int>(list::count(a)));
   io::println(Str<int>(list::count(None)));
@@ -780,7 +780,7 @@ fn main() -> int {
   s = pick(True);
   match s { x: Suit { io::println(x == Suit::Spades); } None { io::println("none"); } }
   io::println(pick(False) == None);
-  h: mut = Holder(None, None, None);
+  h: mutable = Holder(None, None, None);
   io::println(h.p);
   h.p = Point(9, "z");
   h.t = (1, "q");
@@ -908,7 +908,7 @@ TEST(Optional, InoutArmOnAnOptionalStruct) {
       t: (int, Str)? = (1, "b");
       match t { u: inout (int, Str) { u = (3, "c"); } None { } }
       io::println(t);
-      b: mut = Box();
+      b: mutable = Box();
       match b.p { p: inout P { p = P(7, "q"); } None { } }
       io::println(b.p);
       return 0;

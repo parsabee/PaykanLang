@@ -1397,23 +1397,23 @@ private:
       if (!spelling)
         return nullptr;
       Qualifier qual;
-      if (*spelling == "mut")
+      if (*spelling == "mutable")
         qual = {QualForm::Unique, true};
       else if (*spelling == "shared")
         qual = {QualForm::Shared, false};
-      else if (*spelling == "shared mut")
+      else if (*spelling == "shared mutable")
         qual = {QualForm::Shared, true};
       else if (*spelling == "atomic shared")
         qual = {QualForm::AtomicShared, false};
       else if (*spelling == "locked")
         qual = {QualForm::Locked, false};
-      else if (*spelling == "locked mut")
+      else if (*spelling == "locked mutable")
         qual = {QualForm::Locked, true};
       else
-        return fail(e,
-                    "unknown qualifier \"" + *spelling +
-                        "\" (mut, shared, shared mut, atomic shared, locked, "
-                        "locked mut)"),
+        return fail(e, "unknown qualifier \"" + *spelling +
+                           "\" (mutable, shared, shared mutable, atomic "
+                           "shared, locked, "
+                           "locked mutable)"),
                nullptr;
       // No level of its own, as the parser counts none (docs/grammar.md
       // section 9): the type it qualifies is never another qualified one.

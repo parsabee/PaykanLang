@@ -42,12 +42,12 @@
 // of range, panics.
 //
 // A LinkedList links node objects: each owns the next, and the next one's
-// `prev` and the list's tail reach it by `weak mut` references.  The nodes
-// are `shared mut`, so a node reached through a `weak mut` link is changed
+// `prev` and the list's tail reach it by `weak mutable` references.  The nodes
+// are `shared mutable`, so a node reached through a `weak mutable` link is changed
 // through it (a `weak` reference only reads its object), and each end is
 // O(1).  Its elements are still the list's alone, held in its private
 // nodes.  The hash table chains its entries the same way, each bucket's
-// chain from the bucket, a `shared mut` reference to its first entry.
+// chain from the bucket, a `shared mutable` reference to its first entry.
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Table`, `_Heap`, `_panic`, `_fail`,
@@ -258,7 +258,7 @@ fn listOf<T: Cloneable>(xs: view T[]) -> List<T> {
 // string so far for each element.  `out` is a string of its own (each use
 // of a literal is a new one), so the appends change no other.
 fn listToString<T: Showable>(xs: view List<T>) -> Str {
-  let out: mut = "[";
+  let out: mutable = "[";
   i: unsigned = 0;
   while i < xs.len() {
     if i > 0 { out.concat(", "); }
@@ -273,22 +273,22 @@ fn listToString<T: Showable>(xs: view List<T>) -> Str {
 
 // A node: its element, which moves out when the node is taken (and the
 // node, out of the list, is dropped), the node after it and the node
-// before it.  The nodes are `shared mut`: the one before a node owns it,
+// before it.  The nodes are `shared mutable`: the one before a node owns it,
 // and the next node's `prev` (and, for the last node, the list's
-// `__tail`) reaches it by a `weak mut` reference, so the chain holds no
+// `__tail`) reaches it by a `weak mutable` reference, so the chain holds no
 // cycle and a node is changed from either side.
 class _Node<T> {
   value: T;
-  next: shared mut _Node<T>?;
-  prev: weak mut _Node<T>?;
+  next: shared mutable _Node<T>?;
+  prev: weak mutable _Node<T>?;
 }
 
 // A doubly linked list: both ends are O(1) to reach, add to and remove
 // from.  `__head` owns the first node and each node the next; `__tail`
-// reaches the last one by a `weak mut` reference.
+// reaches the last one by a `weak mutable` reference.
 class LinkedList<T> {
-  __head: shared mut _Node<T>?;
-  __tail: weak mut _Node<T>?;
+  __head: shared mutable _Node<T>?;
+  __tail: weak mutable _Node<T>?;
   __len: unsigned;
 }
 
@@ -308,7 +308,7 @@ impl LinkedList<T> {
 
   // Add `v`, which moves in, before the first element.
   fn pushFront(v: T) {
-    let n: shared mut = _Node<T>(move v, self.__head, None);
+    let n: shared mutable = _Node<T>(move v, self.__head, None);
     match self.__head {
       h: _Node<T> { h.prev = n; }
       None { self.__tail = n; }
@@ -321,7 +321,7 @@ impl LinkedList<T> {
   fn pushBack(v: T) {
     match self.__tail {
       t: _Node<T> {
-        let n: shared mut = _Node<T>(move v, None, t);
+        let n: shared mutable = _Node<T>(move v, None, t);
         t.next = n;
         self.__tail = n;
         self.__len = self.__len + 1;
@@ -372,7 +372,7 @@ impl LinkedList<T> {
 
   // True when some element == v.
   view fn contains(v: view T) -> bool {
-    cur: weak mut = self.__head; // the cursor: no reference copied out of self
+    cur: weak mutable = self.__head; // the cursor: no reference copied out of self
     while True {
       match cur {
         n: _Node<T> {
@@ -421,7 +421,7 @@ impl LinkedList<T> {
 
   // Take node `n` out of the chain and return its element, which moves
   // out.
-  fn __take(n: shared mut _Node<T>) -> T {
+  fn __take(n: shared mutable _Node<T>) -> T {
     match n.prev {
       p: _Node<T> { p.next = n.next; }
       None { self.__head = n.next; }
@@ -457,7 +457,7 @@ impl LinkedList<T: Cloneable> {
   // Clones of the elements from first to last, in a new list.
   view fn toList() -> List<T> {
     out = List<T>();
-    cur: weak mut = self.__head; // the cursor: no reference copied out of self
+    cur: weak mutable = self.__head; // the cursor: no reference copied out of self
     while True {
       match cur {
         n: _Node<T> {
@@ -475,8 +475,8 @@ impl LinkedList<T: Cloneable> {
 // derived clone would share the nodes, which are `shared`.
 impl Cloneable for LinkedList<T: Cloneable> {
   view fn clone() -> LinkedList<T> {
-    let out: mut = LinkedList<T>();
-    cur: weak mut = self.__head; // the cursor: no reference copied out of self
+    let out: mutable = LinkedList<T>();
+    cur: weak mutable = self.__head; // the cursor: no reference copied out of self
     while True {
       match cur {
         n: _Node<T> {
@@ -593,25 +593,25 @@ impl Queue<T: Cloneable> {
 // -- HashMap and HashSet --------------------------------------------------------
 
 // One key and its value, in its bucket's chain.  The entries are `shared
-// mut`: the entry before one (or its bucket) owns it, and a lookup reaches
+// mutable`: the entry before one (or its bucket) owns it, and a lookup reaches
 // it through a copy of that link, which changes it.
 class _Entry<K, V> {
   key: K;
   value: V;
   hash: int;
-  next: shared mut _Entry<K, V>?;
+  next: shared mutable _Entry<K, V>?;
 }
 
 // The table of a HashMap or a HashSet: its buckets, each the first entry of
 // its chain or None, and its number of keys.
 class _Table<K: Hashable, V> {
-  __buckets: mem::Buffer<shared mut _Entry<K, V>?>;
+  __buckets: mem::Buffer<shared mutable _Entry<K, V>?>;
   __size: unsigned;
 }
 
 impl _Table<K, V> {
   fn __init__() {
-    self.__buckets = _buffer<shared mut _Entry<K, V>?>(8);
+    self.__buckets = _buffer<shared mutable _Entry<K, V>?>(8);
     self.__size = 0;
   }
 
@@ -636,7 +636,8 @@ impl _Table<K, V> {
       self.__rehash(self.__buckets.len() * 2);
     }
     let b = _bucket(h, self.__buckets.len());
-    let e: shared mut = _Entry<K, V>(move k, move v, h, self.__buckets.get(b));
+    let e: shared mutable =
+        _Entry<K, V>(move k, move v, h, self.__buckets.get(b));
     _check(self.__buckets.set(b, e));
     self.__size = self.__size + 1;
     return True;
@@ -666,7 +667,7 @@ impl _Table<K, V> {
   // True when `k` is a key.
   view fn containsKey(k: view K) -> bool {
     let h = k.hash();
-    cur: weak mut = self.__buckets.at(_bucket(h, self.__buckets.len()));
+    cur: weak mutable = self.__buckets.at(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -685,7 +686,7 @@ impl _Table<K, V> {
   fn remove(k: view K) -> bool {
     let h = k.hash();
     let b = _bucket(h, self.__buckets.len());
-    prev: shared mut _Entry<K, V>? = None; // the entry linking to `cur`
+    prev: shared mutable _Entry<K, V>? = None; // the entry linking to `cur`
     cur = self.__buckets.get(b);
     while True {
       match cur {
@@ -710,12 +711,12 @@ impl _Table<K, V> {
 
   // Remove every key.
   fn clear() {
-    self.__buckets = _buffer<shared mut _Entry<K, V>?>(8);
+    self.__buckets = _buffer<shared mutable _Entry<K, V>?>(8);
     self.__size = 0;
   }
 
   // The entry of key `k`, whose hash is `h`, or None.
-  view fn __find(k: view K, h: int) -> shared mut _Entry<K, V>? {
+  view fn __find(k: view K, h: int) -> shared mutable _Entry<K, V>? {
     cur = self.__buckets.get(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
@@ -759,7 +760,7 @@ impl _Table<K, V> {
 
   // Chain every entry into `n` new buckets; no key or value moves.
   fn __rehash(n: unsigned) {
-    fresh = _buffer<shared mut _Entry<K, V>?>(n);
+    fresh = _buffer<shared mutable _Entry<K, V>?>(n);
     i: unsigned = 0;
     while i < self.__buckets.len() {
       cur = self.__buckets.get(i);
@@ -788,7 +789,7 @@ impl _Table<K: Cloneable, V> {
     out = List<K>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur: weak mut = self.__buckets.at(i);
+      cur: weak mutable = self.__buckets.at(i);
       done = False;
       while !done {
         match cur {
@@ -827,7 +828,7 @@ impl _Table<K, V: Cloneable> {
     out = List<V>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur: weak mut = self.__buckets.at(i);
+      cur: weak mutable = self.__buckets.at(i);
       done = False;
       while !done {
         match cur {
@@ -848,10 +849,10 @@ impl _Table<K, V: Cloneable> {
 // derived clone would share the entries, which are `shared`.
 impl Cloneable for _Table<K: Cloneable, V: Cloneable> {
   view fn clone() -> _Table<K, V> {
-    let out: mut = _Table<K, V>();
+    let out: mutable = _Table<K, V>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      cur: weak mut = self.__buckets.at(i);
+      cur: weak mutable = self.__buckets.at(i);
       done = False;
       while !done {
         match cur {

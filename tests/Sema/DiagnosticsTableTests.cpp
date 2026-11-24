@@ -106,7 +106,7 @@ fn main() -> int {
 )pkn"},
     {"copy of a borrow (a `view` parameter, a `view` local, an `inout` parameter, an `inout` local)",
      By::Sema, "error",
-     "cannot copy 'n' (a unique 'mut Node'); it is an 'inout' borrow, and what it names stays with its owner",
+     "cannot copy 'n' (a unique 'mutable Node'); it is an 'inout' borrow, and what it names stays with its owner",
      R"pkn(class Node { key: int; }
 fn f(n: inout Node) -> int {
   let b = n;
@@ -116,10 +116,10 @@ fn main() -> int { return 0; }
 )pkn"},
     {"copy of a borrow (a `view` parameter, a `view` local, an `inout` parameter, an `inout` local)",
      By::Sema, "error",
-     "cannot copy 'x' (a unique 'mut Node'); it is an 'inout' borrow, and what it names stays with its owner",
+     "cannot copy 'x' (a unique 'mutable Node'); it is an 'inout' borrow, and what it names stays with its owner",
      R"pkn(class Node { key: int; }
 fn main() -> int {
-  a: mut = Node(1);
+  a: mutable = Node(1);
   x: inout = a;
   let b = x;
   return 0;
@@ -191,7 +191,7 @@ fn main() -> int {
 )pkn"},
     {"copy of a part (an array's element, an optional one, a tuple's element, a field of an owned variable, of an `inout` borrow)",
      By::Sema, "error",
-     "cannot copy 'xs[0]' (a unique 'mut Node'); an element leaves its array by 'mem::replace'",
+     "cannot copy 'xs[0]' (a unique 'mutable Node'); an element leaves its array by 'mem::replace'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   xs = [Node(1), Node(2)];
@@ -201,7 +201,7 @@ fn main() -> int {
 )pkn"},
     {"copy of a part (an array's element, an optional one, a tuple's element, a field of an owned variable, of an `inout` borrow)",
      By::Sema, "error",
-     "cannot copy 'xs[0]' (a unique 'mut Node?'); an element leaves its array by 'mem::replace' or 'mem::take'",
+     "cannot copy 'xs[0]' (a unique 'mutable Node?'); an element leaves its array by 'mem::replace' or 'mem::take'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   xs: Node?[2] = [Node(1), None];
@@ -211,7 +211,7 @@ fn main() -> int {
 )pkn"},
     {"copy of a part (an array's element, an optional one, a tuple's element, a field of an owned variable, of an `inout` borrow)",
      By::Sema, "error",
-     "cannot copy 't.0' (a unique 'mut Node'): an element leaves its tuple only with the others; destructure it ('a, b = move t;'), or declare the element 'shared mut Node'",
+     "cannot copy 't.0' (a unique 'mutable Node'): an element leaves its tuple only with the others; destructure it ('a, b = move t;'), or declare the element 'shared mutable Node'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   t = (Node(1), 2);
@@ -232,7 +232,7 @@ fn main() -> int {
 )pkn"},
     {"copy of a part (an array's element, an optional one, a tuple's element, a field of an owned variable, of an `inout` borrow)",
      By::Sema, "error",
-     "cannot copy 'h.node' (a unique 'mut Node'); write 'mem::replace(h.node, v)' to take it in exchange, or declare the field 'shared mut Node'",
+     "cannot copy 'h.node' (a unique 'mutable Node'); write 'mem::replace(h.node, v)' to take it in exchange, or declare the field 'shared mutable Node'",
      R"pkn(class Node { key: int; }
 class Holder { node: Node; }
 fn f(h: inout Holder) -> int {
@@ -241,7 +241,7 @@ fn f(h: inout Holder) -> int {
 }
 fn main() -> int { return 0; }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'self.node': 'move' takes a variable, or a field of one it owns; write 'mem::replace(self.node, v)'",
      R"pkn(class Node { key: int; }
@@ -252,7 +252,7 @@ class Holder {
 fn keep(n: Node) -> int { return n.key; }
 fn main() -> int { return 0; }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'h.node': 'h' is a 'view' borrow, which changes nothing",
      R"pkn(class Node { key: int; }
@@ -261,7 +261,7 @@ fn keep(n: Node) -> int { return n.key; }
 fn f(h: view Holder) -> int { return keep(move h.node); }
 fn main() -> int { return 0; }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'h.node': 'h' is an 'inout' borrow, and what it names stays whole; write 'mem::replace(h.node, v)'",
      R"pkn(class Node { key: int; }
@@ -270,7 +270,7 @@ fn keep(n: Node) -> int { return n.key; }
 fn f(h: inout Holder) -> int { return keep(move h.node); }
 fn main() -> int { return 0; }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'h.sh.n': 'h' is an 'inout' borrow, and what it names stays whole",
      R"pkn(class Node { key: int; }
@@ -280,7 +280,7 @@ fn keep(n: Node) -> int { return n.key; }
 fn take(h: inout Holder) -> int { return keep(move h.sh.n); }
 fn main() -> int { return 0; }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'w.node': 'w' is a 'weak' reference, which owns nothing",
      R"pkn(class Node { key: int; }
@@ -292,7 +292,7 @@ fn main() -> int {
   return keep(move w.node);
 }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'h.node': 'h' is a 'shared Holder', which other references reach",
      R"pkn(class Node { key: int; }
@@ -304,18 +304,18 @@ fn main() -> int {
   return k();
 }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
-     "cannot move 'h.node': 'h' is a 'shared mut Holder', which other references reach; write 'mem::replace(h.node, v)'",
+     "cannot move 'h.node': 'h' is a 'shared mutable Holder', which other references reach; write 'mem::replace(h.node, v)'",
      R"pkn(class Node { key: int; }
 class Holder { node: Node; }
 fn keep(n: Node) -> int { return n.key; }
 fn main() -> int {
-  h: shared mut = Holder(Node(1));
+  h: shared mutable = Holder(Node(1));
   return keep(move h.node);
 }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'h.node': it is 'shared Node', not a unique part of 'h'",
      R"pkn(class Node { key: int; }
@@ -326,7 +326,7 @@ fn main() -> int {
   return keep(move h.node);
 }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'make().node': 'move' takes a variable, or a field of one it owns",
      R"pkn(class Node { key: int; }
@@ -337,7 +337,7 @@ fn main() -> int {
   return keep(move make().node);
 }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 'xs[0]': an element leaves by 'mem::replace' (or 'mem::take', where it is optional)",
      R"pkn(class Node { key: int; }
@@ -347,7 +347,7 @@ fn main() -> int {
   return keep(move xs[0]);
 }
 )pkn"},
-    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mut` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
+    {"`move` of a part (a field of `self`, of a `view` borrow, of an `inout` borrow, a longer path through one, of a `weak` reference, of a `shared` handle, of a `shared mutable` one, a `shared` field, of a temporary, an array's element, a tuple's element)",
      By::Sema, "error",
      "cannot move 't.0': an element leaves its tuple only with the others; destructure it ('a, b = move t;')",
      R"pkn(class Node { key: int; }
@@ -389,7 +389,7 @@ fn main() -> int { return 0; }
      R"pkn(class Node { key: int; }
 fn keep(n: Node) -> int { return n.key; }
 fn main() -> int {
-  a: mut = Node(1);
+  a: mutable = Node(1);
   x: inout = a;
   return keep(move x);
 }
@@ -400,7 +400,7 @@ fn main() -> int {
      R"pkn(class Counts { total: int; }
 fn keep(n: Counts) -> int { return n.total; }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   r = 0;
   lock counts as c: inout {
     r = keep(move c);
@@ -437,7 +437,7 @@ fn main() -> int {
      R"pkn(class Node { key: int; }
 fn keep(n: Node) -> int { return n.key; }
 fn main() -> int {
-  l: mut = Node(1);
+  l: mutable = Node(1);
   x: inout = l;
   n = keep(move l);
   x.key = 2;
@@ -450,7 +450,7 @@ fn main() -> int {
      R"pkn(fn shout(x: inout Str) -> Str { x.concat("!"); return "b"; }
 fn both(a: view Str, b: Str) -> int { return a.len() + b.len(); }
 fn main() -> int {
-  s: mut = "a";
+  s: mutable = "a";
   return both(s, shout(s));
 }
 )pkn"},
@@ -528,33 +528,33 @@ fn main() -> int {
   return 0;
 }
 )pkn"},
-    {"`mut` on a value",
+    {"`mutable` on a value",
      By::Sema, "error",
-     "'mut' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes",
+     "'mutable' applies to objects; 'int' is a value: its storage is rewritten by assignment, which 'let' fixes",
      R"pkn(fn main() -> int {
-  let k: mut int = 1;
+  let k: mutable int = 1;
   return 0;
 }
 )pkn"},
-    {"`mut` on a value",
+    {"`mutable` on a value",
      By::Sema, "error",
-     "'mut' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes",
+     "'mutable' applies to objects; 'Pair' is a value: its storage is rewritten by assignment, which 'let' fixes",
      R"pkn(class Node { key: int; }
 struct Pair { left: Node; n: int; }
 fn main() -> int {
-  let v: mut Pair = Pair(Node(5), 1);
+  let v: mutable Pair = Pair(Node(5), 1);
   return 0;
 }
 )pkn"},
     {"qualifier on a function value",
      By::Sema, "error",
-     "a function value takes no qualifier ('mut () -> int'): it is Copyable, and its copies share its closure",
+     "a function value takes no qualifier ('mutable () -> int'): it is Copyable, and its copies share its closure",
      R"pkn(fn main() -> int {
-  let f: mut () -> int = fn() -> int { return 1; };
+  let f: mutable () -> int = fn() -> int { return 1; };
   return 0;
 }
 )pkn"},
-    {"two qualifiers, or `mut` first (the parser)",
+    {"two qualifiers, or `mutable` first (the parser)",
      By::Parser, "error",
      "a type takes one qualifier: 'locked atomic' is two",
      R"pkn(class Config { key: int; }
@@ -563,43 +563,43 @@ fn main() -> int {
   return 0;
 }
 )pkn"},
-    {"two qualifiers, or `mut` first (the parser)",
+    {"two qualifiers, or `mutable` first (the parser)",
      By::Parser, "error",
-     "a type takes one qualifier: 'shared mut shared' is two",
+     "a type takes one qualifier: 'shared mutable shared' is two",
      R"pkn(class Config { key: int; }
 fn main() -> int {
-  let c: shared mut shared Config = Config(1);
+  let c: shared mutable shared Config = Config(1);
   return 0;
 }
 )pkn"},
-    {"two qualifiers, or `mut` first (the parser)",
+    {"two qualifiers, or `mutable` first (the parser)",
      By::Parser, "error",
-     "'mut shared' is spelled 'shared mut': the form first, then the writes",
+     "'mutable shared' is spelled 'shared mutable': the form first, then the writes",
      R"pkn(class Config { key: int; }
 fn main() -> int {
-  let c: mut shared Config = Config(1);
+  let c: mutable shared Config = Config(1);
   return 0;
 }
 )pkn"},
-    {"`mut` on a frozen object or a cell (the parser)",
+    {"`mutable` on a frozen object or a cell (the parser)",
      By::Parser, "error",
-     "'atomic shared mut T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mut T' to change it under a lock",
+     "'atomic shared mutable T' would be written from several threads with no lock; write 'atomic shared T' to freeze it, or 'locked mutable T' to change it under a lock",
      R"pkn(class Node { key: int; }
 fn main() -> int {
-  let c: atomic shared mut Node = Node(1);
+  let c: atomic shared mutable Node = Node(1);
   return 0;
 }
 )pkn"},
-    {"`mut` on a frozen object or a cell (the parser)",
+    {"`mutable` on a frozen object or a cell (the parser)",
      By::Parser, "error",
-     "an 'atomic' cell takes no 'mut': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mut T'",
+     "an 'atomic' cell takes no 'mutable': it changes by its operations; an object crosses threads as 'atomic shared T' (frozen) or 'locked mutable T'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
-  let c: atomic mut Node = Node(1);
+  let c: atomic mutable Node = Node(1);
   return 0;
 }
 )pkn"},
-    {"`locked T` without `mut`: a warning where it is declared, an error at an `inout` block",
+    {"`locked T` without `mutable`: a warning where it is declared, an error at an `inout` block",
      By::Sema, "warning",
      "'locked Node' locks an object nothing writes; 'atomic shared Node' is read from every thread with no lock",
      R"pkn(class Node { key: int; }
@@ -608,9 +608,9 @@ fn main() -> int {
   return 0;
 }
 )pkn"},
-    {"`locked T` without `mut`: a warning where it is declared, an error at an `inout` block",
+    {"`locked T` without `mutable`: a warning where it is declared, an error at an `inout` block",
      By::Sema, "error",
-     "'x' is 'locked Node', whose contents are never written; declare it 'locked mut Node' for a 'lock ... as v: inout' block",
+     "'x' is 'locked Node', whose contents are never written; declare it 'locked mutable Node' for a 'lock ... as v: inout' block",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   let x: locked Node = Node(1);
@@ -620,7 +620,7 @@ fn main() -> int {
 )pkn"},
     {"what a cell holds",
      By::Sema, "error",
-     "'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked mut Node'",
+     "'atomic' holds a number, a 'bool', a 'char' or a fixed array of them, not 'Node': an object crosses threads as 'atomic shared Node' (frozen) or 'locked mutable Node'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   let o: atomic Node = Node(1);
@@ -629,9 +629,9 @@ fn main() -> int {
 )pkn"},
     {"what a cell holds",
      By::Sema, "error",
-     "'locked mut' holds an object for now, not 'int': wrap the value in a class",
+     "'locked mutable' holds an object for now, not 'int': wrap the value in a class",
      R"pkn(fn main() -> int {
-  let c: locked mut int = 1;
+  let c: locked mutable int = 1;
   return 0;
 }
 )pkn"},
@@ -645,23 +645,23 @@ fn main() -> int { return 0; }
 )pkn"},
     {"qualifier on a borrow",
      By::Sema, "error",
-     "parameter 'n' is 'inout mut': a borrow carries no qualifier; a 'view' takes every form of the object (read-only through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'mut'",
+     "parameter 'n' is 'inout mutable': a borrow carries no qualifier; a 'view' takes every form of the object (read-only through it) and an 'inout' a 'mutable' or 'shared mutable' one; write it without 'mutable'",
      R"pkn(class Node { key: int; }
-fn f(n: inout mut Node) -> int { return 0; }
+fn f(n: inout mutable Node) -> int { return 0; }
 fn main() -> int { return 0; }
 )pkn"},
     {"qualifier on a borrow",
      By::Sema, "error",
-     "parameter 'n' is 'view mut': a borrow carries no qualifier; a 'view' takes every form of the object (read-only through it) and an 'inout' a 'mut' or 'shared mut' one; write it without 'mut'",
+     "parameter 'n' is 'view mutable': a borrow carries no qualifier; a 'view' takes every form of the object (read-only through it) and an 'inout' a 'mutable' or 'shared mutable' one; write it without 'mutable'",
      R"pkn(class Node { key: int; }
-fn f(n: view mut Node) -> int { return 0; }
+fn f(n: view mutable Node) -> int { return 0; }
 fn main() -> int { return 0; }
 )pkn"},
     {"qualifier on a type argument that has a form already",
      By::Sema, "error",
-     "'locked mut' cannot qualify the type argument 'shared Job': a type takes one qualifier, and 'locked mut' and 'shared' are two",
+     "'locked mutable' cannot qualify the type argument 'shared Job': a type takes one qualifier, and 'locked mutable' and 'shared' are two",
      R"pkn(class Job { n: int; }
-fn hold<T>(x: locked mut T) -> int { return 0; }
+fn hold<T>(x: locked mutable T) -> int { return 0; }
 fn main() -> int {
   let j: shared = Job(1);
   return hold<shared Job>(j);
@@ -669,9 +669,9 @@ fn main() -> int {
 )pkn"},
     {"qualifier on a type argument that has a form already",
      By::Sema, "error",
-     "'mut' cannot qualify the type argument 'shared Job': a 'shared' reference is never written through",
+     "'mutable' cannot qualify the type argument 'shared Job': a 'shared' reference is never written through",
      R"pkn(class Job { n: int; }
-fn hold<T>(x: mut T) -> int { return 0; }
+fn hold<T>(x: mutable T) -> int { return 0; }
 fn main() -> int {
   let j: shared = Job(1);
   return hold<shared Job>(j);
@@ -679,12 +679,12 @@ fn main() -> int {
 )pkn"},
     {"qualifier on a type argument that has a form already",
      By::Sema, "error",
-     "'locked mut' cannot qualify a type argument yet: a cell's contents are reached in a 'lock' block, which a template's code does not write",
+     "'locked mutable' cannot qualify a type argument yet: a cell's contents are reached in a 'lock' block, which a template's code does not write",
      R"pkn(class Job { n: int; }
 fn hold<T>(x: view T) -> int { return 0; }
 fn main() -> int {
-  let j: locked mut = Job(1);
-  return hold<locked mut Job>(j);
+  let j: locked mutable = Job(1);
+  return hold<locked mutable Job>(j);
 }
 )pkn"},
     {"conversion between forms",
@@ -709,20 +709,20 @@ fn main() -> int {
 )pkn"},
     {"conversion between forms",
      By::Sema, "error",
-     "cannot store a 'shared Node' in variable 'u', a 'shared mut' reference: a 'shared' reference is stored only as 'shared'",
+     "cannot store a 'shared Node' in variable 'u', a 'shared mutable' reference: a 'shared' reference is stored only as 'shared'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   let s: shared = Node(1);
-  let u: shared mut Node = s;
+  let u: shared mutable Node = s;
   return 0;
 }
 )pkn"},
     {"conversion between forms",
      By::Sema, "error",
-     "cannot store a 'shared mut Node' in variable 'u', a 'shared' reference: a 'shared mut' reference is stored only as 'shared mut'",
+     "cannot store a 'shared mutable Node' in variable 'u', a 'shared' reference: a 'shared mutable' reference is stored only as 'shared mutable'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
-  let s: shared mut = Node(1);
+  let s: shared mutable = Node(1);
   let u: shared Node = s;
   return 0;
 }
@@ -737,13 +737,13 @@ fn main() -> int {
   return 0;
 }
 )pkn"},
-    {"gaining `mut`",
+    {"gaining `mutable`",
      By::Sema, "error",
-     "cannot store a 'Node' in variable 'm', a 'mut' reference: a reference gains 'mut' only by 'move'",
+     "cannot store a 'Node' in variable 'm', a 'mutable' reference: a reference gains 'mutable' only by 'move'",
      R"pkn(class Node { key: int; }
 fn main() -> int {
   let c = Node(1);
-  let m: mut Node = c;
+  let m: mutable Node = c;
   return 0;
 }
 )pkn"},
@@ -759,7 +759,7 @@ fn main() -> int {
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its field 'path'",
+     "'cfg' is immutable (a 'Config'; write 'mutable Config' to change it); cannot assign to its field 'path'",
      R"pkn(class Config { path: Str; }
 fn main() -> int {
   cfg = Config("p");
@@ -769,7 +769,7 @@ fn main() -> int {
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "'cfg' is immutable (a 'Config'; write 'mut Config' to change it); 'rename' is not a 'view fn'",
+     "'cfg' is immutable (a 'Config'; write 'mutable Config' to change it); 'rename' is not a 'view fn'",
      R"pkn(class Config {
   path: Str;
   fn rename(n: Str) { self.path = move n; }
@@ -782,7 +782,7 @@ fn main() -> int {
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "'cfg' is immutable (a 'Config'; write 'mut Config' to change it); it cannot be passed to 'inout' parameter 'p'",
+     "'cfg' is immutable (a 'Config'; write 'mutable Config' to change it); it cannot be passed to 'inout' parameter 'p'",
      R"pkn(class Config { path: Str; }
 fn mark(p: inout Config) { }
 fn main() -> int {
@@ -793,7 +793,7 @@ fn main() -> int {
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to its elements",
+     "'cfg' is immutable (a 'Config'; write 'mutable Config' to change it); cannot assign to its elements",
      R"pkn(class Config { xs: int[2]; }
 fn main() -> int {
   cfg = Config([1, 2]);
@@ -803,7 +803,7 @@ fn main() -> int {
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "'cfg' is immutable (a 'Config'; write 'mut Config' to change it); cannot assign to 'cfg.limits.hi'",
+     "'cfg' is immutable (a 'Config'; write 'mutable Config' to change it); cannot assign to 'cfg.limits.hi'",
      R"pkn(class Limits { lo: int; hi: int; }
 class Config { limits: Limits; }
 fn main() -> int {
@@ -814,18 +814,18 @@ fn main() -> int {
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "field 'lim' is immutable (a 'shared Limits'; write 'shared mut Limits' to change it); cannot assign to 'cfg.lim.lo'",
+     "field 'lim' is immutable (a 'shared Limits'; write 'shared mutable Limits' to change it); cannot assign to 'cfg.lim.lo'",
      R"pkn(class Limits { lo: int; }
 class Config { lim: shared Limits; }
 fn main() -> int {
-  cfg: mut = Config(Limits(0));
+  cfg: mutable = Config(Limits(0));
   cfg.lim.lo = 1;
   return 0;
 }
 )pkn"},
     {"write through an immutable reference (a field, a method that is no `view fn`, an `inout` argument, an element, a nested field, a `shared` field, a `shared` reference)",
      By::Sema, "error",
-     "'cfg' is immutable (a 'shared Config'; write 'shared mut Config' to change it); cannot assign to its field 'path'",
+     "'cfg' is immutable (a 'shared Config'; write 'shared mutable Config' to change it); cannot assign to its field 'path'",
      R"pkn(class Config { path: Str; }
 fn main() -> int {
   let cfg: shared = Config("p");
@@ -879,10 +879,10 @@ fn main() -> int {
 )pkn"},
     {"call of a `shared fn` through another form",
      By::Sema, "error",
-     "'add' is a 'shared fn', which takes its receiver as a 'shared mut Node'; 'root' is a 'Node': declare it 'shared mut Node'",
+     "'add' is a 'shared fn', which takes its receiver as a 'shared mutable Node'; 'root' is a 'Node': declare it 'shared mutable Node'",
      R"pkn(class Node {
   n: int;
-  shared fn add() -> shared mut Node { self.n = self.n + 1; return self; }
+  shared fn add() -> shared mutable Node { self.n = self.n + 1; return self; }
 }
 fn main() -> int {
   let root = Node(1);
@@ -892,10 +892,10 @@ fn main() -> int {
 )pkn"},
     {"call of a `shared fn` through another form",
      By::Sema, "error",
-     "'add' is a 'shared fn', which takes its receiver as a 'shared mut Node'; 'self' is borrowed in 'reset': make it a 'shared fn' too",
+     "'add' is a 'shared fn', which takes its receiver as a 'shared mutable Node'; 'self' is borrowed in 'reset': make it a 'shared fn' too",
      R"pkn(class Node {
   n: int;
-  shared fn add() -> shared mut Node { self.n = self.n + 1; return self; }
+  shared fn add() -> shared mutable Node { self.n = self.n + 1; return self; }
   fn reset() { self.add(); }
 }
 fn main() -> int {
@@ -919,10 +919,10 @@ fn main() -> int {
      "override of 'add' must be a 'shared fn', like the method it overrides (a call of either takes its receiver as the overridden method says)",
      R"pkn(class Node {
   n: int;
-  shared fn add() -> shared mut Node { self.n = self.n + 1; return self; }
+  shared fn add() -> shared mutable Node { self.n = self.n + 1; return self; }
 }
 class Leaf : Node {
-  fn add() -> shared mut Node { return Node(1); }
+  fn add() -> shared mutable Node { return Node(1); }
 }
 fn main() -> int {
   return 0;
@@ -944,7 +944,7 @@ fn main() -> int {
 )pkn"},
     {"storing `self` (in a method, in a `view fn`, in a struct's method)",
      By::Sema, "error",
-     "cannot copy 'self' (a unique 'mut Node'); a method borrows its receiver (a 'shared fn' hands on a shared one)",
+     "cannot copy 'self' (a unique 'mutable Node'); a method borrows its receiver (a 'shared fn' hands on a shared one)",
      R"pkn(class Node {
   key: int;
   fn me() -> int { let s = self; return 0; }
@@ -971,7 +971,7 @@ fn main() -> int { return 0; }
 )pkn"},
     {"capturing `self`",
      By::Sema, "error",
-     "cannot capture 'self': a method borrows its receiver, and a function captures by copy; a 'shared fn' may capture it, or a 'weak' local of it ('me: weak mut = self;')",
+     "cannot capture 'self': a method borrows its receiver, and a function captures by copy; a 'shared fn' may capture it, or a 'weak' local of it ('me: weak mutable = self;')",
      R"pkn(class Counter {
   n: int;
   fn keepIt() -> () -> int { return fn() -> int => self.n; }
@@ -1009,11 +1009,11 @@ fn main() -> int {
 )pkn"},
     {"binding a conditional of two forms",
      By::Sema, "error",
-     "'n' binds part of a conditional whose branches have two forms, 'shared mut Base' and 'atomic shared Base': a binding holds one",
+     "'n' binds part of a conditional whose branches have two forms, 'shared mutable Base' and 'atomic shared Base': a binding holds one",
      R"pkn(class Base { v: int; }
 class Node : Base { w: int; }
 fn main() -> int {
-  let sm: shared mut Base = Node(1, 2);
+  let sm: shared mutable Base = Node(1, 2);
   let fz: atomic shared Base = Node(3, 4);
   c = True;
   match (if c then sm else fz) { n: Node { } _ { } }
@@ -1090,7 +1090,7 @@ fn main() -> int {
      By::Sema, "error",
      "'st.counts' is 'locked': reach its contents in 'lock st.counts as c: view { }' (or 'inout')",
      R"pkn(class Counts { total: int; }
-class State { counts: locked mut Counts; }
+class State { counts: locked mutable Counts; }
 fn main() -> int {
   let st = State(Counts(0));
   return st.counts.total;
@@ -1101,7 +1101,7 @@ fn main() -> int {
      "'o' is not 'locked': a 'lock' block takes a 'locked' variable, field or parameter",
      R"pkn(class Counts { total: int; }
 fn main() -> int {
-  o: mut = Counts(0);
+  o: mutable = Counts(0);
   lock o as m: inout { }
   return 0;
 }
@@ -1111,8 +1111,8 @@ fn main() -> int {
      "a 'lock' block cannot hold another 'lock'",
      R"pkn(class Counts { total: int; }
 fn main() -> int {
-  let a: locked mut = Counts(0);
-  let b: locked mut = Counts(0);
+  let a: locked mutable = Counts(0);
+  let b: locked mutable = Counts(0);
   lock a as c: inout {
     lock b as d: inout { }
   }
@@ -1124,7 +1124,7 @@ fn main() -> int {
      "a 'parallel for' cannot run in a 'lock' block",
      R"pkn(class Counts { total: int; }
 fn main() -> int {
-  let a: locked mut = Counts(0);
+  let a: locked mutable = Counts(0);
   lock a as c: inout {
     parallel for i in 0..4 { }
   }
@@ -1137,7 +1137,7 @@ fn main() -> int {
      R"pkn(class Counts { total: int; }
 async fn fib(n: int) -> int { return n; }
 async fn main() -> int {
-  let counts: locked mut = Counts(0);
+  let counts: locked mutable = Counts(0);
   lock counts as c: inout {
     c.total = await fib(1);
   }
@@ -1148,9 +1148,9 @@ async fn main() -> int {
      By::Sema, "error",
      "'bump' may wait (it takes a lock); a 'lock' block cannot call it",
      R"pkn(class Counts { total: int; }
-fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
+fn bump(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   lock counts as c: inout {
     bump(counts);
   }
@@ -1161,10 +1161,10 @@ fn main() -> int {
      By::Sema, "error",
      "'update' may wait (it takes a lock, through 'g'); a 'lock' block cannot call it",
      R"pkn(class Counts { total: int; }
-fn g(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
-fn update(c: locked mut Counts) { g(c); }
+fn g(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
+fn update(c: locked mutable Counts) { g(c); }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   lock counts as c: inout {
     update(counts);
   }
@@ -1177,7 +1177,7 @@ fn main() -> int {
      R"pkn(class Counts { total: int; }
 fn sum(n: int) -> int { t = 0; parallel for i in 0..n { t += i; } return t; }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   lock counts as c: inout {
     c.total = sum(4);
   }
@@ -1191,7 +1191,7 @@ fn main() -> int {
 async fn work(n: int) -> int { return n + 1; }
 fn waitFor(n: int) -> int { return await work(n); }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   lock counts as c: inout {
     c.total = waitFor(1);
   }
@@ -1204,7 +1204,7 @@ fn main() -> int {
      R"pkn(import ::io;
 class Counts { total: int; }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   input = io::stdin();
   lock counts as c: inout {
     let line = input.readln();
@@ -1217,7 +1217,7 @@ fn main() -> int {
      "'f' may run code that takes a lock; a 'lock' block calls only functions it can resolve",
      R"pkn(class Counts { total: int; }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let f = fn(n: int) -> int { return n + 1; };
   lock counts as c: inout {
     c.total = f(c.total);
@@ -1231,7 +1231,7 @@ fn main() -> int {
      R"pkn(class Counts { total: int; }
 fn callIt(f: (int) -> int) -> int { return f(2); }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let f = fn(n: int) -> int { return n + 1; };
   lock counts as c: inout {
     c.total = callIt(f);
@@ -1244,7 +1244,7 @@ fn main() -> int {
      "'Base.size' may run code that takes a lock (a class derived from 'Base' may override it; a 'final class Base' has none); a 'lock' block calls only functions it can resolve",
      R"pkn(class Counts { total: int; }
 class Base { n: int; view fn size() -> int { return self.n; } }
-fn measure(c: locked mut Counts, b: view Base) -> int {
+fn measure(c: locked mutable Counts, b: view Base) -> int {
   r = 0;
   lock c as v: inout {
     r = b.size();
@@ -1256,10 +1256,10 @@ fn measure(c: locked mut Counts, b: view Base) -> int {
      By::Sema, "error",
      "'bump' may wait (it takes a lock); a 'lock' block cannot start it (a task may run where it is started)",
      R"pkn(class Counts { total: int; }
-async fn bump(c: locked mut Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
+async fn bump(c: locked mutable Counts) -> int { lock c as v: inout { v.total += 1; } return 1; }
 async fn quiet(n: int) -> int { return n + 1; }
 async fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   t = quiet(0);
   n = await t;
   lock counts as c: inout {
@@ -1273,11 +1273,11 @@ async fn main() -> int {
      By::Sema, "error",
      "a '__deinit__' cannot take a lock: it may run in a 'lock' block",
      R"pkn(class Counts { total: int; }
-class Session { c: locked mut Counts;
+class Session { c: locked mutable Counts;
   fn __deinit__() { lock self.c as v: inout { v.total += 1; } }
 }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let s = Session(counts);
   return 0;
 }
@@ -1302,13 +1302,13 @@ fn main() -> int {
      By::Sema, "error",
      "'record' may wait (it takes a lock, through 'bump'); a '__deinit__' cannot call it (it may run in a 'lock' block)",
      R"pkn(class Counts { total: int; }
-fn bump(c: locked mut Counts) { lock c as v: inout { v.total += 1; } }
-fn record(c: locked mut Counts) { bump(c); }
-class Session { c: locked mut Counts;
+fn bump(c: locked mutable Counts) { lock c as v: inout { v.total += 1; } }
+fn record(c: locked mutable Counts) { bump(c); }
+class Session { c: locked mutable Counts;
   fn __deinit__() { record(self.c); }
 }
 fn main() -> int {
-  counts: locked mut Counts = Counts(0);
+  counts: locked mutable Counts = Counts(0);
   let s = Session(counts);
   return 0;
 }
@@ -1336,11 +1336,11 @@ fn main() -> int {
 )pkn"},
     {"making a value `atomic shared` or `locked` (a `shared` field, a nested one, an `Obj`, through a type argument)",
      By::Sema, "error",
-     "cannot make 'Settings(...)' (a 'Settings') 'locked mut': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread",
+     "cannot make 'Settings(...)' (a 'Settings') 'locked mutable': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread",
      R"pkn(class Cache { hits: int; }
 class Settings { name: Str; cache: shared Cache; }
 fn main() -> int {
-  let k: locked mut = Settings("k", Cache(2));
+  let k: locked mutable = Settings("k", Cache(2));
   return 0;
 }
 )pkn"},
@@ -1367,10 +1367,10 @@ fn main() -> int {
 )pkn"},
     {"making a value `atomic shared` or `locked` (a `shared` field, a nested one, an `Obj`, through a type argument)",
      By::Sema, "error",
-     "cannot make 'x' (a 'Job') 'locked mut': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread",
+     "cannot make 'x' (a 'Job') 'locked mutable': field 'cache' is 'shared Cache': a 'shared' reference is aliased on its own thread",
      R"pkn(class Cache { hits: int; }
 class Job { name: Str; cache: shared Cache; }
-fn hold<T>(x: T) -> int { let c: locked mut T = move x; return 0; }
+fn hold<T>(x: T) -> int { let c: locked mutable T = move x; return 0; }
 fn main() -> int {
   return hold<Job>(Job("j", Cache(0)));
 }
@@ -1848,10 +1848,10 @@ fn main() -> int { return 0; }
 )pkn"},
     {"`inout` across a wait",
      By::Sema, "error",
-     "'s.n' is reached through 'shared mut' reference 's'; it cannot be borrowed 'inout' across an 'await': another task may change it there",
+     "'s.n' is reached through 'shared mutable' reference 's'; it cannot be borrowed 'inout' across an 'await': another task may change it there",
      R"pkn(class Counter { n: int; }
 async fn tick(k: int) -> int { return k; }
-fn viaShared(s: shared mut Counter) -> int {
+fn viaShared(s: shared mutable Counter) -> int {
   x: inout = s.n;
   let r = await tick(1);
   x = x + r;
@@ -1861,13 +1861,13 @@ fn main() -> int { return 0; }
 )pkn"},
     {"`view` across a wait",
      By::Sema, "error",
-     "'s.meta' is reached through 'shared mut' reference 's' and is not Copyable; it cannot be lent to an awaited call: another task may change it there",
+     "'s.meta' is reached through 'shared mutable' reference 's' and is not Copyable; it cannot be lent to an awaited call: another task may change it there",
      R"pkn(struct Meta { name: Str; n: int; }
 impl Meta {
   async view fn size() -> int { return self.name.len() + self.n; }
 }
 class Holder { meta: Meta; }
-fn use(s: shared mut Holder) -> int {
+fn use(s: shared mutable Holder) -> int {
   return await s.meta.size();
 }
 fn main() -> int { return 0; }

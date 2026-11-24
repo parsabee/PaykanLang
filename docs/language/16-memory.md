@@ -43,12 +43,12 @@ A value type has no identity beyond its bits: assigning one `int` to another pro
 independent values. A reference type has identity, and one owner: `q = move p` hands the
 object to `q`, and `p` cannot be read again, while `q = p` is an error
 ([Ownership transfers](#ownership-transfers)). Two names refer to the **same** object only
-when its reference is `shared` (or `shared mut`, to change it): then assigning one variable
+when its reference is `shared` (or `shared mutable`, to change it): then assigning one variable
 to another makes both names refer to it, and a change through one is visible through the
-other. A reference is **immutable unless it is written `mut`**: through a plain `Point` the
-object's fields are read and its `view fn`s called, and nothing is assigned; a `mut Point`
-is the reference that changes it. A `mut` reference is handed on as a plain one freely, and
-a plain one becomes `mut` only by `move` ([Objects are
+other. A reference is **immutable unless it is written `mutable`**: through a plain `Point` the
+object's fields are read and its `view fn`s called, and nothing is assigned; a `mutable Point`
+is the reference that changes it. A `mutable` reference is handed on as a plain one freely, and
+a plain one becomes `mutable` only by `move` ([Objects are
 references](05-classes.md#objects-are-references); [Concurrency](19-concurrency.md) has the
 qualifiers in full).
 
@@ -57,10 +57,10 @@ a: int = 1;
 b: int = a;      // independent copy
 b = 2;           // a is still 1
 
-p: mut Point = Point(1, 2);
+p: mutable Point = Point(1, 2);
 q = move p;      // the same object, now q's: p is gone
 
-s: shared mut Point = Point(1, 2);
+s: shared mutable Point = Point(1, 2);
 t = s;           // same object — both names share it
 s.x = 99;        // t.x is now 99 too
 ```
@@ -225,7 +225,7 @@ import ::io;
 
 class Person {
   name: Str;
-  friend: shared mut Person?;
+  friend: shared mutable Person?;
 }
 
 impl Person {
@@ -233,8 +233,8 @@ impl Person {
 }
 
 fn main() -> int {
-  let a: shared mut Person = Person("Ada");
-  let b: shared mut Person = Person("Grace");
+  let a: shared mutable Person = Person("Ada");
+  let b: shared mutable Person = Person("Grace");
   a.friend = b;
   b.friend = a;          // a -> b -> a: a cycle
   io::println(a.name + " and " + b.name + " are friends");
@@ -257,15 +257,15 @@ PaykanLang has no cycle collector. The fix is a **weak reference**: a field (or 
 whose type is qualified `weak` is a `shared` reference that owns nothing. It refers to a
 shared object without counting as a reference to it, so it never keeps the object alive.
 Its type is an optional, because it reads as `None` once the object is gone. Make the back
-link weak and the cycle is no cycle at all; the people are `shared mut`, so the link is
-`weak mut`, the form that names a `shared mut` object:
+link weak and the cycle is no cycle at all; the people are `shared mutable`, so the link is
+`weak mutable`, the form that names a `shared mutable` object:
 
 ```pkn
 import ::io;
 
 class Person {
   name: Str;
-  friend: weak mut Person?;
+  friend: weak mutable Person?;
 }
 
 impl Person {
@@ -279,8 +279,8 @@ impl Person {
 }
 
 fn main() -> int {
-  let a: shared mut Person = Person("Ada");
-  b: shared mut Person = Person("Grace");
+  let a: shared mutable Person = Person("Ada");
+  b: shared mutable Person = Person("Grace");
   a.friend = b;
   b.friend = a;
   io::println(a.name + " and " + a.friendName() + " are friends");
@@ -307,8 +307,8 @@ children but not back, never form cycles and need no care.
 
 A closure is an object too, and its captures are its fields: a lambda that captures an object
 (a `shared` reference, since a capture is a copy) and is then stored in that object (`h.cb =
-fn() -> int { return h.n; };` with `h` a `shared mut Holder`) forms a cycle like any other,
-and leaks the same way unless the capture is a `weak` variable (`me: weak mut = h; h.cb =
+fn() -> int { return h.n; };` with `h` a `shared mutable Holder`) forms a cycle like any other,
+and leaks the same way unless the capture is a `weak` variable (`me: weak mutable = h; h.cb =
 fn() -> int { match me { ... } };`) or the field is overwritten before `h` goes out of
 scope.
 
@@ -321,13 +321,13 @@ field, after the colon, in the two forms a shared object has:
 
 - `x: weak T?` names a `shared` object, and reads as a `shared T?`: the object is read
   through it;
-- `x: weak mut T?` names a `shared mut` object, and reads as a `shared mut T?`: the object
+- `x: weak mutable T?` names a `shared mutable` object, and reads as a `shared mutable T?`: the object
   is changed through it too.
 
 Its type is `T?` for a class `T` (a user class, `Str` or `Obj`). It may be left off a local
-declaration that has an initializer (`u: weak mut = a;`), and a local with no initializer
-starts as `None` (`e: weak Node?;`). Here a tree's nodes are held `shared mut`, by `main`
-and by their parents, and each child's back link to its parent is `weak mut`, so the tree
+declaration that has an initializer (`u: weak mutable = a;`), and a local with no initializer
+starts as `None` (`e: weak Node?;`). Here a tree's nodes are held `shared mutable`, by `main`
+and by their parents, and each child's back link to its parent is `weak mutable`, so the tree
 holds no cycle:
 
 ```pkn
@@ -335,9 +335,9 @@ import ::io;
 
 class Node {
   name: Str;
-  parent: weak mut Node?;   // a back link that does not own the parent
-  first: shared mut Node?;
-  next: shared mut Node?;
+  parent: weak mutable Node?;   // a back link that does not own the parent
+  first: shared mutable Node?;
+  next: shared mutable Node?;
 }
 
 impl Node {
@@ -347,7 +347,7 @@ impl Node {
     self.first = None;
     self.next = None;
   }
-  shared fn add(child: shared mut Node) {   // stores self: a 'shared fn'
+  shared fn add(child: shared mutable Node) {   // stores self: a 'shared fn'
     child.parent = self;
     child.next = self.first;
     self.first = child;
@@ -361,16 +361,16 @@ impl Node {
 }
 
 fn main() -> int {
-  root: shared mut Node = Node("root");
-  let a: shared mut Node = Node("a");   // held by main and by root
+  root: shared mutable Node = Node("root");
+  let a: shared mutable Node = Node("a");   // held by main and by root
   root.add(a);
-  w: weak mut Node? = root;   // reads as root while something holds it
-  u: weak mut = a;            // inferred Node?
+  w: weak mutable Node? = root;   // reads as root while something holds it
+  u: weak mutable = a;            // inferred Node?
   io::println(a.path() + " " + Str(w == None));
   root = Node("other");       // the first root dies: it was held by nothing else
   io::println(a.path() + " " + Str(w == None));
   match u {
-    n: Node { n.name = "b"; io::println(a.name); }   // n is a 'shared mut Node'
+    n: Node { n.name = "b"; io::println(a.name); }   // n is a 'shared mutable Node'
     None { io::println("gone"); }
   }
   return 0;
@@ -387,35 +387,35 @@ b
 
 Reading a weak variable or field gives the object while it is alive and `None` once it has
 been destroyed, as the optional of its form: a `weak` one reads as a `shared T?`, a `weak
-mut` one as a `shared mut T?`. The value read is an ordinary optional of that form,
+mutable` one as a `shared mutable T?`. The value read is an ordinary optional of that form,
 matched with `match`, compared with `== None`, passed (to a `view` parameter or one of that
 form), returned, or stored in a strong variable or field, which then keeps the object
-alive. The `T` a `match` arm binds from it has the same form: through a `weak mut`
+alive. The `T` a `match` arm binds from it has the same form: through a `weak mutable`
 reference the object is changed (`n.name = "b"` above), and through a `weak` one it is only
-read (`'n' is immutable (a 'shared Node'; write 'shared mut Node' to change it); cannot
+read (`'n' is immutable (a 'shared Node'; write 'shared mutable Node' to change it); cannot
 assign to its field 'name'`).
 
 Storing makes a weak variable or field refer to an object without retaining it, and
 assigning `None` makes it refer to nothing. What is stored has exactly the weak reference's
-form: a `shared T` (or `shared T?`) in a `weak` one, a `shared mut T` in a `weak mut` one,
+form: a `shared T` (or `shared T?`) in a `weak` one, a `shared mutable T` in a `weak mutable` one,
 and `None` in either. Anything else is an error, and so is passing it to the parameter of a
 generated `__init__` that fills a weak field:
 
 ```pkn
 class Node {
   name: Str;
-  next: shared mut Node?;
-  tail: weak mut Node?;
+  next: shared mutable Node?;
+  tail: weak mutable Node?;
 }
 
 impl Node {
-  fn link(n: shared mut Node) { n.tail = self; }
+  fn link(n: shared mutable Node) { n.tail = self; }
 }
 
 fn main() -> int {
-  let a: mut = Node("a", None, None);
+  let a: mutable = Node("a", None, None);
   let b: shared = Node("b", None, None);
-  let c: shared mut = Node("c", None, None);
+  let c: shared mutable = Node("c", None, None);
   c.tail = a;
   c.tail = b;
   w: weak = c;
@@ -427,28 +427,28 @@ fn main() -> int {
 Error:
 
 ```
-cannot store 'self' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object; a 'shared fn' has a 'shared mut' 'self'
-cannot store 'a' (a 'mut Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object; declare 'a' 'shared mut Node'
-cannot store 'b' (a 'shared Node') in field 'tail', a 'weak mut Node?': a 'weak mut' reference names a 'shared mut' object
-cannot store 'c' (a 'shared mut Node') in variable 'w', a 'weak Node?': a 'weak' reference names a 'shared' object
-cannot pass 'b' (a 'shared Node') to parameter 'tail' of 'Node', a 'weak mut' field's: a 'weak mut' reference names a 'shared mut' object
+cannot store 'self' (a 'mutable Node') in field 'tail', a 'weak mutable Node?': a 'weak mutable' reference names a 'shared mutable' object; a 'shared fn' has a 'shared mutable' 'self'
+cannot store 'a' (a 'mutable Node') in field 'tail', a 'weak mutable Node?': a 'weak mutable' reference names a 'shared mutable' object; declare 'a' 'shared mutable Node'
+cannot store 'b' (a 'shared Node') in field 'tail', a 'weak mutable Node?': a 'weak mutable' reference names a 'shared mutable' object
+cannot store 'c' (a 'shared mutable Node') in variable 'w', a 'weak Node?': a 'weak' reference names a 'shared' object
+cannot pass 'b' (a 'shared Node') to parameter 'tail' of 'Node', a 'weak mutable' field's: a 'weak mutable' reference names a 'shared mutable' object
 ```
 
 So **a unique object is never weakly referenced**. It has one reference, its owner's, and
 unique references form a tree, which has no cycle to break; a weak reference to one would be
 a second name for an object its owner believes it alone holds. A weak reference names an
 object that already has several owners, and a back link needs its object shared: the
-nodes of a tree held `shared mut`, as above, and a method that stores `self` in a weak
+nodes of a tree held `shared mutable`, as above, and a method that stores `self` in a weak
 field declared with a shared `self`. A plain method borrows a unique receiver, so its
-`self` cannot be stored (`link` above); a `shared fn`, whose `self` is `shared mut`, stores
-it in a `weak mut` field or local (`add` above), and a `shared view fn`, whose `self` is
+`self` cannot be stored (`link` above); a `shared fn`, whose `self` is `shared mutable`, stores
+it in a `weak mutable` field or local (`add` above), and a `shared view fn`, whose `self` is
 `shared`, in a `weak` one. Each is called on a receiver held in exactly that form, or on a
 temporary ([Methods that hand on self](05-classes.md#methods-that-hand-on-self-shared-fn)).
-A store takes nothing from the object's owners: `u: weak mut = a;` above, and `child.parent
+A store takes nothing from the object's owners: `u: weak mutable = a;` above, and `child.parent
 = self` in `add`, leave `a` and `self` as they were.
 
-A `weak` local written without a type takes the class of its initializer (`u: weak mut =
-a;` above is a `Node?`) and the form written, `weak` or `weak mut`. `None` has no class:
+A `weak` local written without a type takes the class of its initializer (`u: weak mutable =
+a;` above is a `Node?`) and the form written, `weak` or `weak mutable`. `None` has no class:
 `a: weak = None;` is an error (`cannot infer the class of weak local 'a' from None; write
 'a: weak T? = None'`), and `a: weak Node? = None;` starts it as nothing.
 
@@ -458,14 +458,14 @@ object that stores it without forming a cycle (see
 however deeply nested: a closure that an outer closure returns (`let outer = fn() -> () ->
 Str { return fn() -> Str => if me == None then "gone" else "alive"; };`) holds the object
 weakly too, and reads `None` once it is gone. Inside the lambda the captured variable is
-read-only, as any capture is; the object a `weak mut` capture reads is changed through it as
-through any `shared mut` reference.
+read-only, as any capture is; the object a `weak mutable` capture reads is changed through it as
+through any `shared mutable` reference.
 
 A weak reference is not a place a strong reference could be written to, so it cannot be
 passed to an `inout` parameter, named by an `inout` local, or bound by an `inout` match arm
 (`'w' is a 'weak' reference and cannot be passed to 'inout' parameter 'n'`). It can be
-`view`ed, since a view only reads it. `weak` takes `mut` and nothing else (`'weak' takes
-'mut' or nothing: 'weak Node?' names a 'shared' object, 'weak mut Node?' a 'shared mut'
+`view`ed, since a view only reads it. `weak` takes `mutable` and nothing else (`'weak' takes
+'mutable' or nothing: 'weak Node?' names a 'shared' object, 'weak mutable Node?' a 'shared mutable'
 one`), and a weak local is never `let` (`a 'weak' local cannot be 'let': ...`): it is
 assigned as what it names changes. For now `weak` applies to locals and class fields: not
 to struct fields, tuple or array elements, parameters or results. The spelling of earlier
@@ -481,11 +481,11 @@ is bound to a 'view'; it cannot be returned`) or captured by a function (`'cur' 
 local of a 'view'; a function cannot capture a borrow`). It may be assigned another `view`.
 That is how a `view fn` walks a chain of shared objects reached from `self` without copying
 a reference out of the view (a plain local could not hold one): with `head` and each node's
-`next` a `shared mut` field, `cur: weak mut = self.head;` then `match cur { n: Node { ...;
+`next` a `shared mutable` field, `cur: weak mutable = self.head;` then `match cur { n: Node { ...;
 cur = n.next; } None { } }`. A method that may change `self` walks one the same way and
 returns what it finds, since there `self` is not a `view`. The standard library's
 [`LinkedList`](../stdlib/collections.md#linkedlist) is such a chain: its nodes are `shared
-mut`, each owning the next and reaching the one before it by a `weak mut` reference.
+mutable`, each owning the next and reaching the one before it by a `weak mutable` reference.
 
 The object's memory is kept, empty, while `weak` references to it remain (its own references
 are released when it is destroyed), and freed with the last of them — so a program that drops
@@ -497,13 +497,13 @@ Every value has an owner: the variable, parameter, field or element that holds i
 is **Copyable** or **move-only**, and which it is decides what reading it from one place into
 another does.
 
-- **Copyable** values copy freely: numbers, `bool`, `char`, `shared T` and `shared mut T`
+- **Copyable** values copy freely: numbers, `bool`, `char`, `shared T` and `shared mutable T`
   references (a copy is another owner of the same object, and is counted), `atomic`,
   `atomic shared` and `locked` handles, function values (a copy shares the closure and
   counts it; one with no captures is just a function's address), and a struct, a tuple, a
   fixed-size array, an optional or an enum made only of those
   ([Copyable](06-traits.md#copyable)).
-- **Move-only** values are a unique reference (`T` or `mut T`, a class's reference without
+- **Move-only** values are a unique reference (`T` or `mutable T`, a class's reference without
   `shared`), a `Str`, a container (`collections::List<T>`, `memory::Buffer<T>`, of numbers
   too), a task handle, and every struct, tuple, array, optional or enum holding one.
 
@@ -521,7 +521,7 @@ an **owning slot**, a variable's initialisation or assignment, a plain (by-value
 - A borrow instead of an owning slot: a `view` parameter, which only reads, or an `inout`
   one, which changes the caller's storage in place
   ([Parameter modes](03-functions.md#parameter-modes-view-and-inout)).
-- `shared`: a reference declared `shared` (or `shared mut`) from the start is Copyable, for
+- `shared`: a reference declared `shared` (or `shared mutable`) from the start is Copyable, for
   a program in which several names hold one object.
 
 Anything else is an error that names the ways out, for a variable, a value holding a
@@ -651,8 +651,8 @@ as mem;`):
 - `mem::take(slot)`, for a `T?` slot, returns what it holds and leaves `None`;
 - `mem::swap(a, b)` exchanges the values of two places.
 
-Each takes its places as `inout` parameters, so a field is one of a `mut` object, and a
-variable is one that is not `let` (a `mut` one when it holds an object or a string). An array
+Each takes its places as `inout` parameters, so a field is one of a `mutable` object, and a
+variable is one that is not `let` (a `mutable` one when it holds an object or a string). An array
 element cannot be passed to an `inout` parameter yet, so these do not reach one: an element
 of a fixed-size array is assigned, and copied out with `clone()`.
 
@@ -670,11 +670,11 @@ class Holder {
 }
 
 fn main() -> int {
-  let h: mut = Holder(Node("first"), Node("spare"));
+  let h: mutable = Holder(Node("first"), Node("spare"));
   let old = mem::replace(h.node, Node("second"));   // h keeps a node: the new one
   let spare = mem::take(h.spare);                   // h.spare is None now
-  a: mut = "left";
-  b: mut = "right";
+  a: mutable = "left";
+  b: mutable = "right";
   mem::swap(a, b);
   io::println(old.name + " " + h.node.name + " " + Str(h.spare == None) + " " + a + " " + b);
   match spare {
@@ -814,13 +814,13 @@ class List {
   head: Node?;
 }
 
-fn clear(l: shared mut List) -> int {
+fn clear(l: shared mutable List) -> int {
   l.head = None;
   return 0;
 }
 
 fn main() -> int {
-  let l: shared mut List = List(Node("first"));
+  let l: shared mutable List = List(Node("first"));
   match l.head {
     n: Node {
       let k = clear(l);
@@ -899,7 +899,7 @@ fn main() -> int {
   let a: shared Node = Node("a");
   let w = Watcher(a);
   show(a);                    // lent: main reads a again below
-  h: mut = Holder(None);
+  h: mutable = Holder(None);
   keep(h, a);                 // lent too: the field takes its own
   h.n = None;
   io::println("after the field let go: " + state(w));
@@ -935,8 +935,8 @@ objects. `--stats` counts the arguments lent and the parameters
 are reference-counted objects like any other, and a `Str` is move-only as every unique object
 is: it is handed on by `move`, copied by `s.clone()` (a new string) or shared as a `shared
 Str`. A string is an object, so it is written through
-a `mut Str` only: `concat` appends to it in place (`let s = "a"; s.concat("b");` is `'s' is
-immutable (a 'Str'; write 'mut Str' to change it); 'concat' is not a 'view fn'`), where
+a `mutable Str` only: `concat` appends to it in place (`let s = "a"; s.concat("b");` is `'s' is
+immutable (a 'Str'; write 'mutable Str' to change it); 'concat' is not a 'view fn'`), where
 `s + "b"` reads `s` and makes a new string.
 
 An array `T[n]` is a value, not an object: it has no box and no count of its own, and lives
@@ -1043,8 +1043,8 @@ shared safely across threads — is part of the language's stated direction towa
 concurrency and heterogeneous execution, and is on the roadmap rather than in this release.
 Do not assume that sharing a reference-counted object across threads is safe today.
 The concurrency prototype's checks keep each counted reference on one thread at a time: a
-plain or `mut` reference crosses by `move`; an object every thread reads is frozen first, as
-an `atomic shared T`, and one several threads write is a `locked mut T`, written under its
+plain or `mutable` reference crosses by `move`; an object every thread reads is frozen first, as
+an `atomic shared T`, and one several threads write is a `locked mutable T`, written under its
 lock; an `atomic` cell and a frozen object are not counted. [Concurrency](19-concurrency.md)
 describes which references may cross a thread.
 
@@ -1059,9 +1059,9 @@ describes which references may cross a thread.
   parameters; several names hold one object only when its reference is `shared`, so a change
   through one name is seen through another only then.
 - A reference keeps its object alive for exactly as long as it is reachable.
-- A reference changes its object only when it is written `mut`: through a plain `T` the
+- A reference changes its object only when it is written `mutable`: through a plain `T` the
   object is read, its `view fn`s are called and it is never passed to an `inout` parameter,
-  so an object no `mut` reference names is not changed
+  so an object no `mutable` reference names is not changed
   ([Objects are references](05-classes.md#objects-are-references)).
 - `destroy` runs automatically and releases everything an object owns, transitively.
 - A `weak` reference never keeps an object alive and never dangles: it reads as `None` once

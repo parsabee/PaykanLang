@@ -324,7 +324,7 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
     // immutable one is never changed, nor a frozen one.
     if (const ast::Qualifier q =
             ast::cast<ast::FixedArrayType>(arrTy)->getElemQual();
-        !q.isUnique() && !(q.Form == ast::QualForm::Shared && q.Mut))
+        !q.isUnique() && !(q.Form == ast::QualForm::Shared && q.Mutable))
       return "element '" + placeText(place) + "' is a '" +
              qualifiedName(q, se->getResolvedType()) +
              "', which nothing changes, so it cannot be " + use;
@@ -366,7 +366,7 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
              "' is a 'weak' reference and cannot be " + use;
   // Replacing what an object's field holds changes the object, as an
   // assignment to the field does: its holder is written, whatever the
-  // field's own form (a `shared mut` field of an immutable object, #368).
+  // field's own form (a `shared mutable` field of an immutable object, #368).
   // (A unique field is immutable under an immutable holder already.)
   if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(place);
       ma && qualifierOf(ma).Form != ast::QualForm::Unique &&

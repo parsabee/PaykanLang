@@ -92,7 +92,7 @@ fn describe(o: view Obj) -> Str {
 fn main() -> int {
   let bi = Box<int>(3);                        // explicit type argument
   io::println(Str(bi.get()));                  // 3
-  let bs: mut = Box<Str>("hello");
+  let bs: mutable = Box<Str>("hello");
   bs.set("world");
   io::println(bs.get());                          // world
 
@@ -102,7 +102,7 @@ fn main() -> int {
   let bb = Box<Box<int>>(bi.clone());          // nested instantiation
   io::println(Str(bb.get().get()));            // 3
 
-  let s: mut = Stack<Str>("");
+  let s: mutable = Stack<Str>("");
   s.push("a");
   s.push("b");
   while !s.empty() {

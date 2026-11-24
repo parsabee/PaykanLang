@@ -111,7 +111,7 @@ TEST(Class, FieldReadWrite) {
     }
   )",
                                  R"(
-    p: mut Point = Point(0, 0);
+    p: mutable Point = Point(0, 0);
     p.x = 3;
     p.y = 7;
     io::println(Str<int>(p.x));
@@ -182,7 +182,7 @@ TEST(Class, FieldReassign) {
     }
   )",
                                  R"(
-    m: mut Mutable = Mutable(10);
+    m: mutable Mutable = Mutable(10);
     m.set(99);
     io::println(Str<int>(m.val));
   )"));
@@ -221,7 +221,7 @@ TEST(Class, MethodWithParam) {
     }
   )",
                                  R"(
-    a: mut Acc = Acc(0);
+    a: mutable Acc = Acc(0);
     a.add(5);
     a.add(3);
     io::println(Str<int>(a.total));
@@ -517,7 +517,7 @@ TEST(Class, MethodWithLoop) {
     }
   )",
                                  R"(
-    s: mut Summer = Summer(0);
+    s: mutable Summer = Summer(0);
     s.sumTo(5);
     io::println(Str<int>(s.total));
   )"));
@@ -1189,7 +1189,7 @@ TEST(Class, EqualsWithMatchBoundArgument) {
 // read or an assignment dropped its statement (an `io::println` printed
 // nothing, a variable it declared failed an assertion) or failed the PIR
 // verifier, and an `inout` argument was an internal compiler error.  `a` and
-// `b` are `shared mut`: `a.next` holds `b`, which the program still changes
+// `b` are `shared mutable`: `a.next` holds `b`, which the program still changes
 // through its own name, and the match reads the change through `a.next`.
 TEST(Class, FieldsOfAConditionalReceiver) {
   LeakGuard g;
@@ -1200,15 +1200,15 @@ TEST(Class, FieldsOfAConditionalReceiver) {
       n: int;
       t: (int, Str);
       p: Point;
-      next: shared mut Node?;
-      back: weak mut Node?;
+      next: shared mutable Node?;
+      back: weak mutable Node?;
     }
     fn bump(x: inout int) { x = x + 1; }
     fn shout(s: inout Str) { s = s + "!"; }
   )",
                                  R"(
-    a: shared mut = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
-    b: shared mut = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
+    a: shared mutable = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
+    b: shared mutable = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
     b.back = a;
     for k in 1..=2 {
       x = (if k == 1 then a else b).name.clone();
@@ -1302,10 +1302,10 @@ TEST(Class, DeinitSeesItsFieldsAndNoWeakReference) {
   LeakGuard g;
   auto r = compileAndRun(R"(
 import ::io;
-class Reg { seen: int; back: weak mut Node?; }
+class Reg { seen: int; back: weak mutable Node?; }
 class Node {
   id: int;
-  reg: shared mut Reg;
+  reg: shared mutable Reg;
   fn __deinit__() {
     self.reg.seen = self.reg.seen + self.id;
     io::println("gone " + Str(self.id) + " weak " +
@@ -1313,9 +1313,9 @@ class Node {
   }
 }
 fn main() -> int {
-  reg: shared mut = Reg(0, None);
+  reg: shared mutable = Reg(0, None);
   {
-    n: shared mut = Node(7, reg);
+    n: shared mutable = Node(7, reg);
     reg.back = n;
     io::println("live " + Str(reg.back != None));
   }
@@ -1338,7 +1338,7 @@ TEST(Class, DeinitRunsAsAnyCodeDoes) {
 import ::io;
 class Reg {
   n: int;
-  back: weak mut Node?;
+  back: weak mutable Node?;
   view fn note(who: view Node) -> int { return who.id + self.n; }
 }
 class Guard {
@@ -1349,7 +1349,7 @@ fn scoped(n: int) { let g = Guard(n); io::println("holding " + Str(n)); }
 fn look(a: view Node, b: view Node) -> bool { return a == b; }
 class Node {
   id: int;
-  reg: shared mut Reg;
+  reg: shared mutable Reg;
   view fn describe() -> int { return self.reg.note(self); }
   fn __deinit__() {
     io::println("deinit " + Str(self.id) + " " + Str(self.reg.note(self)) +
@@ -1361,9 +1361,9 @@ class Node {
   }
 }
 fn main() -> int {
-  let reg: shared mut Reg = Reg(10, None);
+  let reg: shared mutable Reg = Reg(10, None);
   {
-    let u: shared mut Node = Node(2, reg);
+    let u: shared mutable Node = Node(2, reg);
     reg.back = u;
   }
   io::println("end " + Str(reg.back == None));
@@ -1388,7 +1388,7 @@ import ::io;
 class Label { text: Str; }
 class Board { top: Label; }
 class Bomb {
-  w: weak mut Board?;
+  w: weak mutable Board?;
   n: int;
   fn __deinit__() {
     match self.w {
@@ -1402,9 +1402,9 @@ fn show(l: view Label, n: int) -> int {
   return n;
 }
 fn boom(x: Bomb) -> int { return x.n; }
-fn mk(b: shared mut Board) -> Bomb { return Bomb(b, 7); }
+fn mk(b: shared mutable Board) -> Bomb { return Bomb(b, 7); }
 fn main() -> int {
-  let board: shared mut Board = Board(Label("a label long enough for the heap"));
+  let board: shared mutable Board = Board(Label("a label long enough for the heap"));
   let bomb = Bomb(board, 1);
   show(board.top, boom(move bomb));
   show(board.top, mk(board).n);
