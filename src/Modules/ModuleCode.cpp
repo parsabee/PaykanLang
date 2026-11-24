@@ -254,13 +254,14 @@ bool providesFor(const pir::Module &code, const pir::Program &program) {
 namespace {
 
 /// The names of the slots of the vtable of the class @p c describes, in
-/// order: IFACE lists them, then the initializer and the `impl` methods,
-/// which have none.
+/// order: IFACE lists them, then the initializer, the `__deinit__` and the
+/// `impl` methods, which have none (ast::ClassType::addMethod).
 std::vector<std::string> slotNames(const pkm::ClassRec &c) {
   std::vector<std::string> slots;
   for (const pkm::ClassRec::Method &m : c.Methods)
     if (!(m.Flags & pkm::kMethodImpl) && m.Name != names::kMethodInit &&
-        m.Name != names::kMethodInitModulePrivate)
+        m.Name != names::kMethodInitModulePrivate &&
+        m.Name != names::kMethodDeinit)
       slots.push_back(m.Name);
   return slots;
 }
@@ -707,9 +708,10 @@ Status checkCodeMatchesInterface(const pir::Module &code,
         return Status::error(what + "slot " + std::to_string(i) +
                              " of its vtable is '" + cls->VTable[i].Slot +
                              "' in CODE, '" + slots[i] + "' in IFACE");
-    // A class the module compiles has its initializer and each `impl`
-    // method, which an importer calls by name (a subclass's initializer
-    // calls its superclass's); a copy has those of them its module uses.
+    // A class the module compiles has its initializer, its `__deinit__`
+    // and each `impl` method, which an importer calls by name (a
+    // subclass's initializer calls its superclass's, its `destroy` each
+    // ancestor's `__deinit__`); a copy has those of them its module uses.
     const bool compiled = !cls->Shared;
     for (const pkm::ClassRec::Method &m : c.Methods) {
       std::optional<pir::Signature> sig = methodSignature(m, pir::Type::Obj);
