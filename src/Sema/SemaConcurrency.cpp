@@ -975,34 +975,61 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
   return false;
 }
 
+/// Whether @p name is an instance of the template @p base, as its module
+/// spells it (`Buffer<int>`) or under a qualifier (`mem::Buffer<int>`).
+static bool isInstanceOf(const std::string &name, std::string_view base) {
+  const size_t lt = name.find('<');
+  if (lt == std::string::npos || lt < base.size() ||
+      name.compare(lt - base.size(), base.size(), base) != 0)
+    return false;
+  const size_t at = lt - base.size();
+  return at == 0 ||
+         (at > module_name::kSep.size() &&
+          name.compare(at - module_name::kSep.size(), module_name::kSep.size(),
+                       module_name::kSep) == 0);
+}
+
+void Sema::setModuleName(std::string_view canonical) {
+  SystemModule = canonical.starts_with(module_name::kSep);
+  MemoryModule = canonical == names::kModuleMemory;
+}
+
+bool Sema::isMemoryType(const std::string &name) const {
+  // `::memory` and no other module of the standard library's name: one
+  // built as `::mybuf` and found on the module path is whoever's built it.
+  const auto origin = ImportedTypeOrigins.find(name);
+  return origin == ImportedTypeOrigins.end()
+             ? MemoryModule
+             : origin->second == names::kModuleMemory;
+}
+
 ast::Type *Sema::bufferElementType(ast::Type *ty) const {
   const auto *st = ty ? ast::dyn_cast<ast::StructType>(ty) : nullptr;
   if (!st)
     return nullptr;
   const std::string &n = st->getName();
-  const size_t lt = n.find('<');
-  if (lt == std::string::npos)
-    return nullptr;
-  const std::string base = n.substr(0, lt);
-  const bool named =
-      base == "Buffer" ||
-      (base.size() > 8 && base.compare(base.size() - 8, 8, "::Buffer") == 0);
-  if (!named || st->getNumFields() != 1 || st->getFieldName(0) != "__data" ||
+  if (!isInstanceOf(n, "Buffer") || st->getNumFields() != 1 ||
+      st->getFieldName(0) != "__data" ||
       st->getElementTypes()[0] != Ctx.getObjTy())
     return nullptr;
   // The standard library's, whose `__data` its methods alone reach: a
-  // struct of a program that has the name and the shape holds whatever
-  // object the program gives it.
-  const auto origin = ImportedTypeOrigins.find(n);
-  if (origin == ImportedTypeOrigins.end()
-          ? !SystemModule
-          : !origin->second.starts_with(module_name::kSep))
+  // struct of another module that has the name and the shape holds
+  // whatever object that module gives it.
+  if (!isMemoryType(n))
     return nullptr;
   // `view fn at(i: unsigned) -> view T`: its result is `T`, qualified as
   // T's argument is (#368).
   const ast::MethodDecl *at = st->findMethod("at");
   return at ? Ctx.getQualifiedType(at->getResultQual(), at->getReturnType())
             : nullptr;
+}
+
+bool Sema::isMemoryBox(const ast::ClassType *ct) const {
+  // The standard library's, as a buffer is: a class of another module
+  // with the name and the field has methods of its own.
+  const std::string &n = ct->getName();
+  return isInstanceOf(n, "Box") && ct->getNumFields() == 1 &&
+         ct->getFields()[0].first == "__data" && isMemoryType(n);
 }
 
 bool Sema::checkParallelBufferCall(const ast::MethodCallExpr *node,

@@ -1158,7 +1158,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   importSema.ImportDepth = ImportDepth;
   importSema.Resolver = Resolver;
   importSema.setOpenWorld(true);
-  importSema.setSystemModule(canonical.starts_with(module_name::kSep));
+  importSema.setModuleName(canonical);
 
   auto *importRoot = importDriverPtr->getRoot();
   auto childCtx = importSema.run(importRoot);

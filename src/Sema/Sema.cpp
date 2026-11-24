@@ -5043,12 +5043,21 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      {OwnSourceName, OwnSourceLines, nullptr, ""},
                      std::move(ForeignMethodClassDecls),
                      std::move(ForeignMethodStructDecls),
+                     {},
+                     {},
                      {}};
+  // The standard library's buffers and boxes, which the lowering takes on
+  // Sema's word (SemaContext::BufferTypes).
+  for (const auto &[name, ct] : Ctx.getClassTypes())
+    if (name == ct->getName() && isMemoryBox(ct))
+      result.BoxTypes.insert(name);
   // The structs with generic methods: one that is not generic by its own
   // table, an instance by its template's (whichever block they are in).
   for (const auto &[name, st] : Ctx.getStructTypes()) {
     if (name != st->getName())
       continue; // an alias
+    if (bufferElementType(st))
+      result.BufferTypes.insert(name);
     auto own = MethodTemplates.find(name);
     bool has = own != MethodTemplates.end() && !own->second.empty();
     if (!has)

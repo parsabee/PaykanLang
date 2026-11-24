@@ -1,0 +1,70 @@
+// 97 — a program's own `Buffer` and `Box`
+// Exercises: only the standard library's `mem::Buffer<T>` is read in place
+//            (its length and its numbers loaded from the runtime's buffer
+//            object, through the field of a `mem::Box` too).  A struct of
+//            the program's own named `Buffer`, with a `__data: Obj` and
+//            methods `at`, `get` and `len`, holds whatever object the
+//            program gives it, and a class of its own named `Box`, with a
+//            `__data` and a `get()`, does what its `get()` does: their
+//            methods are called.  The struct was read as a buffer (an index
+//            out of bounds of a length that was the object's bytes, or a
+//            crash) and the class's `get()` never ran.
+// expect-stdout: 7 8 3
+// expect-stdout: 30
+// expect-stdout: 2 1.5 1
+// expect-stdout: 4.5 1
+import ::io;
+import ::memory as mem;
+
+class Thing {
+  n: int;
+}
+
+struct Buffer<T> {
+  __data: Obj;
+}
+
+impl Buffer<T> {
+  view fn at(i: unsigned) -> int  { return 7; }
+  view fn get(i: unsigned) -> int { return 8; }
+  view fn len() -> unsigned       { return 3; }
+}
+
+fn total<T>(b: view Buffer<T>) -> int {
+  return b.at(1) + b.get(2);
+}
+
+class Box<T> {
+  __data: mem::Buffer<T>;
+}
+
+impl Box<T> {
+  /// The buffer, one element shorter at each call.
+  fn get() -> inout mem::Buffer<T> {
+    let e = self.__data.shrink(1);
+    return self.__data;
+  }
+  view fn value() -> view mem::Buffer<T> { return self.__data; }
+}
+
+fn main() -> int {
+  let a = Buffer<int>(Thing(1));
+  io::println(Str(a.at(0)) + " " + Str(a.get(9)) + " " + Str(a.len()));
+  io::println(total(a) + total(Buffer<Str>(Thing(2))));
+
+  xs = mem::Buffer<float>();
+  let e1 = xs.push(1.5);
+  let e2 = xs.push(2.5);
+  let e3 = xs.push(3.5);
+  let own: mutable = Box<float>(move xs);
+  let n = own.get().len();
+  let x = own.get().at(0);
+  io::println(Str(n) + " " + Str(x) + " " + Str(own.value().len()));
+
+  // The standard library's, beside them: read in place.
+  ys = mem::Buffer<float>();
+  let e4 = ys.push(4.5);
+  let boxed: mutable = mem::Box(move ys);
+  io::println(Str(boxed.value().at(0)) + " " + Str(boxed.get().len()));
+  return 0;
+}

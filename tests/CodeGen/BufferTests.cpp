@@ -6,6 +6,8 @@
 // checked for zero live heap blocks.
 
 #include "CodeGenTestUtils.h"
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 
 using namespace paykan::test;
@@ -558,4 +560,143 @@ fn main() -> int {
                       "shrink: []\n"
                       "end\n");
   g.expectNoLeaks("ADeinitMayChangeItsBuffer");
+}
+
+// -- A program's own types with the standard library's names and shapes
+
+// The lowering reads the numbers of a `mem::Buffer<T>` in place: the
+// runtime's buffer object out of `__data`, its length and its storage
+// loaded, with no call of `at`, `get` or `len`.  That is the standard
+// library's struct, which Sema tells it (SemaContext::BufferTypes).  A
+// struct of a program's own with the name, the field and the methods holds
+// whatever object the program gives it, and its methods are called.  (The
+// lowering took one for a buffer by its name and shape, and read a `Thing`
+// as the runtime's buffer object: an index out of bounds of a length that
+// was the object's bytes, or a crash.)
+TEST(Buffer, AStructOfTheNameAndShapeIsTheProgramsOwn) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+class Thing { n: int; }
+struct Buffer<T> { __data: Obj; }
+impl Buffer<T> {
+  view fn at(i: unsigned) -> int { return 7; }
+  view fn get(i: unsigned) -> int { return 8; }
+  view fn len() -> unsigned { return 3; }
+}
+fn total<T>(b: view Buffer<T>) -> int { return b.at(1) + b.get(2); }
+fn main() -> int {
+  let a = Buffer<int>(Thing(1));
+  io::println(a.at(0));
+  io::println(a.get(9));
+  io::println(a.len());
+  io::println(total(a) + total(Buffer<float>(Thing(2))));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n8\n3\n30\n");
+  g.expectNoLeaks("AStructOfTheNameAndShapeIsTheProgramsOwn");
+}
+
+// So is one a module of the program declares, spelled `mem::Buffer<int>`
+// where it is imported as the standard library's is: `memory` is not
+// `::memory`.
+TEST(Buffer, AStructOfAModuleOfTheProgramIsTheProgramsOwn) {
+  auto dir = paykan::test::tempDir() / "pkn_own_buffer_module";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "memory.pkn") << R"pkn(
+class Thing { n: int; }
+struct Buffer<T> { __data: Obj; }
+impl Buffer<T> {
+  view fn at(i: unsigned) -> int { return 7; }
+  view fn get(i: unsigned) -> int { return 8; }
+  view fn len() -> unsigned { return 3; }
+}
+fn ints() -> Buffer<int> { return Buffer<int>(Thing(1)); }
+fn sum(b: view Buffer<int>) -> int { return b.at(0) + b.get(1); }
+)pkn";
+  const std::string mainPath = (dir / "main.pkn").string();
+  std::ofstream(mainPath) << R"pkn(import ::io;
+import memory as mem;
+fn main() -> int {
+  let a = mem::ints();
+  io::println(a.at(0));
+  io::println(a.get(9));
+  io::println(a.len());
+  let b = mem::Buffer<float>(mem::Thing(2));
+  io::println(b.at(0) + b.get(0) + mem::sum(a));
+  return 0;
+}
+)pkn";
+  LeakGuard g;
+  auto r = compileAndRunFile(mainPath);
+  std::filesystem::remove_all(dir);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n8\n3\n30\n");
+  g.expectNoLeaks("AStructOfAModuleOfTheProgramIsTheProgramsOwn");
+}
+
+// A read through `bx.value()` or `bx.get()` of a `mem::Box<mem::Buffer<T>>`
+// takes the box's field `__data` itself, with no call: the standard
+// library's box (SemaContext::BoxTypes), whose methods are that field.  A
+// class of a program's own with a `__data` and methods of those names does
+// what its methods do, whether it is named `Box` and has that one field or
+// not.  (The lowering read `__data` for any class with such a field: the
+// first buffer of `Holder`, where its methods give the second, and
+// `Box<float>`'s without the call that shortens it.)
+TEST(Buffer, AClassWithABoxsFieldAndMethodsIsTheProgramsOwn) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+import ::memory as mem;
+class Holder {
+  __data: mem::Buffer<int>;
+  other: mem::Buffer<int>;
+}
+impl Holder {
+  view fn value() -> view mem::Buffer<int> { return self.other; }
+  fn get() -> inout mem::Buffer<int> { return self.other; }
+}
+class Box<T> { __data: mem::Buffer<T>; }
+impl Box<T> {
+  fn get() -> inout mem::Buffer<T> {
+    let e = self.__data.shrink(1);
+    return self.__data;
+  }
+  view fn value() -> view mem::Buffer<T> { return self.__data; }
+}
+fn main() -> int {
+  a = mem::Buffer<int>();
+  let e1 = a.push(1);
+  b = mem::Buffer<int>();
+  let e2 = b.push(42);
+  let e3 = b.push(43);
+  let h: mutable = Holder(move a, move b);
+  io::println(h.value().at(0));
+  io::println(h.value().len());
+  io::println(h.get().at(1));
+  io::println(h.get().len());
+  xs = mem::Buffer<float>();
+  let e4 = xs.push(1.5);
+  let e5 = xs.push(2.5);
+  let e6 = xs.push(3.5);
+  let own: mutable = Box<float>(move xs);
+  io::println(own.get().len());
+  io::println(own.get().at(0));
+  io::println(own.value().len());
+  // The standard library's, beside them: read in place, as before.
+  c = mem::Buffer<int>();
+  let e7 = c.push(5);
+  let bx: mutable = mem::Box(move c);
+  io::println(bx.value().at(0));
+  io::println(bx.get().len());
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "42\n2\n43\n2\n2\n1.5\n1\n5\n1\n");
+  g.expectNoLeaks("AClassWithABoxsFieldAndMethodsIsTheProgramsOwn");
 }

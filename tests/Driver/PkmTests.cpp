@@ -6079,3 +6079,76 @@ fn main() -> int {
   expectOnEveryPath(p);
   fs::remove_all(p.Dir);
 }
+
+// Only `::memory`'s `Buffer<T>` holds the runtime's buffer object, and only
+// its `Box<T>` is read through its field: a module built under another
+// name of the standard library's kind (`--module-name=::mybuf`) and found
+// on the module path declares types of its own, whose methods are called
+// in its code and in an importer's.  (A struct of the name and the shape
+// that any `::` module declared was read as the runtime's buffer: the
+// object it held, read as one.)
+TEST(Pkm, ABufferOfAnotherSystemModuleIsItsOwn) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_system_buffer_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "src" / "mybuf.pkn",
+            R"(import ::memory as mem;
+class Thing { n: int; }
+struct Buffer<T> { __data: Obj; }
+impl Buffer<T> {
+  view fn at(i: unsigned) -> int { return 7; }
+  view fn get(i: unsigned) -> int { return 8; }
+  view fn len() -> unsigned { return 3; }
+}
+fn ints() -> Buffer<int> { return Buffer<int>(Thing(1)); }
+fn inside() -> Str {
+  let b = Buffer<int>(Thing(2));
+  return Str(b.len()) + " " + Str(b.at(0)) + " " + Str(b.get(1));
+}
+class Box<T> { __data: mem::Buffer<T>; }
+impl Box<T> {
+  /// The buffer, one element shorter at each call.
+  fn get() -> inout mem::Buffer<T> {
+    let e = self.__data.shrink(1);
+    return self.__data;
+  }
+}
+fn floats() -> Box<float> {
+  xs = mem::Buffer<float>();
+  let e1 = xs.push(1.5);
+  let e2 = xs.push(2.5);
+  let e3 = xs.push(3.5);
+  return Box<float>(move xs);
+}
+)");
+  writeFile(dir / "main.pkn",
+            R"(import ::io;
+import ::mybuf as mb;
+fn main() -> int {
+  let a = mb::ints();
+  io::println(Str(a.len()) + " " + Str(a.at(0)) + " " + Str(a.get(1)));
+  io::println(mb::inside());
+  let own: mutable = mb::floats();
+  let n = own.get().len();
+  io::println(Str(n) + " " + Str(own.get().at(0)));
+  return 0;
+}
+)");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args +
+               " 2>&1");
+  };
+  auto made = paykan("--emit-pkm --module-name=::mybuf -o lib/mybuf.pkm "
+                     "src/mybuf.pkn");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  for (const char *args :
+       {"--module-path=lib main.pkn", "-O 2 --module-path=lib main.pkn",
+        "--module-path=lib build main.pkn -o prog && ./prog"}) {
+    auto r = paykan(args);
+    EXPECT_EQ(r.exitCode, 0) << args << "\n" << r.out;
+    EXPECT_EQ(r.out, "3 7 8\n3 7 8\n2 1.5\n") << args;
+  }
+  fs::remove_all(dir);
+}

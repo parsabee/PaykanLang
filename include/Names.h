@@ -484,6 +484,10 @@ inline constexpr const char *kPaykanHostNoArgsEnv = "__PAYKAN_HOST_NO_ARGS";
 // -- Module system
 
 inline constexpr const char *kQualSep = "::"; ///< Module qualifier separator
+/// The canonical name of the standard library's module of buffers and boxes
+/// (`import ::memory as mem;`), whose `Buffer<T>` holds the runtime's buffer
+/// object.
+inline constexpr const char *kModuleMemory = "::memory";
 /// Prefix of the qualifier an importer registers a module under for the
 /// bodies of its templates (Sema::hiddenQualifier); no source can spell it.
 inline constexpr const char *kHiddenQualPrefix = "$";
