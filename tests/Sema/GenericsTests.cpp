@@ -1342,14 +1342,14 @@ TEST(Generics, ABadBoundOfATemplateIsReportedOnceWhereItIsWritten) {
        {"let p = Box<int>::pair(1, True);",
         "let q = Box<bool>::pair(True, \"s\");"}},
   };
-  struct Reported {
+  struct Error {
     const char *Bound; // nullptr: at the template
     size_t Nth;        // which occurrence of the bound on the line
     const char *Error;
   };
   struct Case {
     const char *Bounds;
-    std::vector<Reported> Reported;
+    std::vector<Error> Reported;
   };
   const char *kCopyable = "trait 'Copyable' expects 0 type argument(s), got 1";
   const std::vector<Case> cases = {
@@ -1389,7 +1389,7 @@ TEST(Generics, ABadBoundOfATemplateIsReportedOnceWhereItIsWritten) {
             << program << r.Diagnostics;
         // A bound's column is after the template's own start.
         const size_t bounds = columnOf(line, c.Bounds);
-        for (const Reported &want : c.Reported) {
+        for (const Error &want : c.Reported) {
           const size_t column =
               want.Bound ? bounds - 1 + columnOf(c.Bounds, want.Bound, want.Nth)
                          : columnOf(line, t.At);
