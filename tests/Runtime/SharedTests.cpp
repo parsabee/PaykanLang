@@ -8,6 +8,8 @@
 
 #include <cstring>
 #include <initializer_list>
+#include <thread>
+#include <vector>
 
 extern "C" {
 #include "Runtime.h"
@@ -292,4 +294,59 @@ TEST(SharedInline, GetIsTheIdentity) {
   EXPECT_EQ(PaykanShared_get_inline(s), PaykanShared_get(s));
   EXPECT_EQ(PaykanShared_get_inline(s), s);
   Paykan_release(s);
+}
+
+// -- A read's count (Paykan_retain_read, Paykan_release_read)
+
+// The count an in-place read of a buffer holds across an index that runs
+// code counts as Paykan_retain and Paykan_release do, at every count, a
+// frozen object's too, and the last one destroys the object.
+TEST(SharedRead, CountsAsTheOthers) {
+  gDestroys = 0;
+  for (int32_t n : {1, 2, 1000, PAYKAN_REF_ATOMIC - 2, PAYKAN_REF_ATOMIC + 1,
+                    PAYKAN_REF_ATOMIC + 7}) {
+    PaykanShared *s = counted();
+    s->strong = n;
+    Paykan_retain_read(s);
+    EXPECT_EQ(s->strong, n + 1) << n;
+    Paykan_release_read(s);
+    EXPECT_EQ(s->strong, n) << n;
+    s->strong = 1;
+    Paykan_release(s);
+  }
+  EXPECT_EQ(gDestroys, 6);
+  Paykan_heap_set_tracking(1);
+  Paykan_heap_reset();
+  PaykanShared *s = counted();
+  Paykan_retain_read(s);
+  Paykan_release(s); // what the index ran let go of the buffer
+  EXPECT_EQ(gDestroys, 6);
+  Paykan_release_read(s);
+  EXPECT_EQ(gDestroys, 7);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  Paykan_retain_read(nullptr);
+  Paykan_release_read(nullptr);
+  Paykan_heap_set_tracking(0);
+}
+
+// The iterations of a `parallel for` take it of one object at once, an
+// object whose count is a plain one: none is lost, and none is the last.
+TEST(SharedRead, ManyThreadsLoseNoCount) {
+  gDestroys = 0;
+  PaykanShared *s = counted();
+  std::vector<std::thread> threads;
+  threads.reserve(8);
+  for (int t = 0; t < 8; ++t)
+    threads.emplace_back([s] {
+      for (int i = 0; i < 100000; ++i) {
+        Paykan_retain_read(s);
+        Paykan_release_read(s);
+      }
+    });
+  for (std::thread &t : threads)
+    t.join();
+  EXPECT_EQ(s->strong, 1);
+  EXPECT_EQ(gDestroys, 0);
+  Paykan_release(s);
+  EXPECT_EQ(gDestroys, 1);
 }

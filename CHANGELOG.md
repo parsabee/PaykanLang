@@ -248,7 +248,12 @@ samples/concurrency/README.md.
 - A `mem::Buffer<T>` of numbers in a `parallel for` body: one of the enclosing function read at
   any index and written at the loop's variable (`set`); one frozen in a box read through `value()`.
 - The lowering emits a number buffer's `at`, `get` and `len` in place, a bounds check and a load,
-  with no call into the memory module and no count on the buffer.
+  with no call into the memory module and no count on the buffer. An index that may run code
+  runs before the buffer is loaded, and one that may write the receiver (through another
+  `shared mutable` name for what holds it) has the buffer the receiver holds counted first:
+  the read is of the buffer the receiver had, as the call `at` reads it. The count is atomic
+  (`Paykan_retain_read`): the iterations of a `parallel for` read one buffer of the
+  enclosing function in place, and what they call reads it through a `view` parameter.
 - The `benchmarks/` directory: programs that measure `parallel for`, and `run.py`, which runs them
   over thread counts (benchmarks/README.md).
 - `clone()` on the containers and on `mem::Buffer<T>` whose elements are Cloneable: a new

@@ -33,6 +33,8 @@ using namespace names;
 const RuntimeSig kRuntimeSigs[] = {
     {kPaykanRetain, {{kBox}, kVoid}},
     {kPaykanRelease, {{kBox}, kVoid}},
+    {kPaykanRetainRead, {{kBox}, kVoid}},
+    {kPaykanReleaseRead, {{kBox}, kVoid}},
     {kPaykanSharedNew, {{kObj}, kBox}},
     {kPaykanSharedGet, {{kBox}, kObj}},
     {kPaykanPanicDivByZero, {{}, kVoid}},

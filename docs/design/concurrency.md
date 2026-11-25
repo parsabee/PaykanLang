@@ -852,7 +852,17 @@ buffer's `at`, `get` and `len` on a number type in place, as a fixed
 array's subscript: a bounds check and a load, no call into the memory
 module and no count on the buffer's object, and through a box's
 `value()` or `get()` the box's field itself rather than the copy a `view`
-result of a struct is (prototype, 2026-11-03).
+result of a struct is (prototype, 2026-11-03).  An index that may run
+code runs before the buffer is loaded, and one that may write the
+receiver's storage has the buffer it holds counted first, as the receiver
+of a struct's `view fn` is the value it had.  That count is atomic
+(`Paykan_retain_read`, `Paykan_release_read`), whatever the count's mode:
+the iterations of a `parallel for` read one buffer of the enclosing
+function in place, and a function an iteration calls reads it through a
+`view` parameter, so two of them may take it at once, and nothing else
+counts the object while they run.  Only a write of what holds a buffer in
+memory replaces one, so an index given a number to change (`b.at(bump(
+ys[i]))`) takes no count.
 
 Threads change a `locked cl::HashMap<Str, int>` and read an `atomic shared
 cl::List<Str>`; one thread reads a `shared cl::List<Str>` through any

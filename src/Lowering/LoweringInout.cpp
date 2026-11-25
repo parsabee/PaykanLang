@@ -210,10 +210,15 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
     if (ast::Identifier *root = storageRoot(t))
       places.insert(root);
   // The receiver of a buffer read emitted in place (`b.at(i)`, `b.len()`:
-  // a number loaded at once, ExprEmitter::emitBufferRead) is used before
-  // any call of the statement runs, so no call can replace what it read:
-  // it is not held (a hold would count the buffer's object, which a
-  // `parallel for` body may never do).
+  // a number loaded at once, ExprEmitter::emitBufferRead) is not held.  A
+  // call of the statement outside the read runs before or after it, so it
+  // cannot replace what the read uses.  A call in its index runs before
+  // the buffer is loaded from the variable, and one that may write the
+  // variable has the buffer held where it is read (BorrowedReads::
+  // methodCall, SnapshotReads), as a struct's `view fn` receiver is, by an
+  // atomic count (Paykan_retain_read).  A hold here would count the
+  // buffer's object plainly, which a `parallel for` body may never do: its
+  // iterations read a buffer of the enclosing function in place.
   std::unordered_set<const ast::Expr *> inPlace;
   auto findInPlaceReads = [&](ast::Expr *e) {
     if (auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e);

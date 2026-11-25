@@ -138,11 +138,16 @@ private:
     Storage Where;
     /// The call (or the `==`) that uses it.
     const ast::Expr *User;
+    /// The receiver of a buffer read in place (emitBufferRead), whose
+    /// buffer is replaced only by a write of what holds a buffer of its
+    /// type in memory: a hold of it is a count, which a `parallel for`
+    /// body's iterations would take at once.
+    bool InPlace = false;
   };
   std::vector<PendingRead> Pending;
   /// @p e is read where it is and used by @p user once the later operands
-  /// have run.
-  void pend(const ast::Expr *e, const ast::Expr *user);
+  /// have run (@p inPlace: PendingRead::InPlace).
+  void pend(const ast::Expr *e, const ast::Expr *user, bool inPlace = false);
   /// A call @p by, made while reads are pending, writes what @p place
   /// names.
   void writes(const ast::Expr *place, const ast::Expr *by);
@@ -449,7 +454,7 @@ bool ModuleLowering::BorrowedReads::overlaps(const Storage &r,
 }
 
 void ModuleLowering::BorrowedReads::pend(const ast::Expr *e,
-                                         const ast::Expr *user) {
+                                         const ast::Expr *user, bool inPlace) {
   // A value made where it is evaluated (a literal, a call's result, an
   // optional a value is wrapped into) is a temporary already, and a read
   // the statement holds (noteHeldReads) a copy.  A slice passed on is read
@@ -461,15 +466,30 @@ void ModuleLowering::BorrowedReads::pend(const ast::Expr *e,
   std::optional<Storage> where = storageOf(e);
   if (!where || (where->Var && L.isHeldRead(where->Var)))
     return;
-  Pending.push_back({e, std::move(*where), user});
+  Pending.push_back({e, std::move(*where), user, inPlace});
 }
 
 void ModuleLowering::BorrowedReads::writes(const ast::Expr *place,
                                            const ast::Expr *by) {
   std::optional<Storage> w = storageOf(place);
-  for (const PendingRead &p : Pending)
-    if (!w || overlaps(p.Where, *w))
-      snapshot(p, by);
+  for (const PendingRead &p : Pending) {
+    if (w && !overlaps(p.Where, *w))
+      continue;
+    // A buffer is replaced by writing it or what holds it in memory: a
+    // number, a reference or a value of neither is no part of it (`bump(
+    // ys[i])` given an `int` to change), and a reference written lets go of
+    // no object the read's storage is in while the read holds it (Live).
+    if (ast::Type *written = place->getResolvedType(); p.InPlace && written) {
+      ast::Type *read = p.Read->getResolvedType();
+      auto holds = [&](ast::Type *outer, ast::Type *inner) {
+        return L.memPartKeys(outer).count(
+                   ast::typeName(L.canonicalizeDeclType(inner))) > 0;
+      };
+      if (!holds(written, read) && !holds(read, written))
+        continue;
+    }
+    snapshot(p, by);
+  }
 }
 
 void ModuleLowering::BorrowedReads::writesThroughObjects(const Effect &effect,
@@ -834,14 +854,25 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
   // A buffer's element or length read in place (emitBufferRead): the
   // receiver's storage is read and the number loaded at once, as a
   // variable's value is, so nothing of it is in use once the read is made,
-  // and no later operand's write is read instead of it (a `view fn`'s
-  // receiver, below, is read where it is through the call).
+  // and no later operand's write is read instead of it.  But an index is
+  // evaluated with the receiver's storage in use, and one that runs code
+  // before the buffer is loaded from it: as a struct's `view fn` receiver
+  // (below), a receiver a call there may write is the value it had where
+  // it is read, its buffer held by a count (pend, SnapshotReads).  The
+  // box's field that `bx.value()` and `bx.get()` are read as may be
+  // written by any store, as a call's `inout` result names anything.
   if (L.isBufferReadInPlace(mc)) {
     Use r = eval(recv);
+    const size_t pending = Pending.size();
+    if (L.bufferReadBox(mc))
+      Pending.push_back({recv, Storage{}, mc, /*InPlace=*/true});
+    else
+      pend(recv, mc, /*inPlace=*/true);
     within(r.Owners, [&] {
       for (ast::Expr *a : mc->getArguments())
         eval(a);
     });
+    Pending.resize(pending);
     return {};
   }
   // A struct's method runs on the receiver's storage, in use until it

@@ -468,6 +468,17 @@ void Paykan_release(PaykanShared *shared);
 /// The object a strong reference names: the same pointer (NULL for NULL).
 PaykanObject *PaykanShared_get(PaykanShared *shared);
 
+/// Paykan_retain and Paykan_release of the count an in-place read of a
+/// buffer takes while its index runs code (ExprEmitter::emitBufferRead):
+/// atomic whatever the count's mode (NULL-safe).  A buffer of a function that
+/// runs a `parallel for` is read in place by every iteration, and through a
+/// `view` parameter by what an iteration calls, with no plain count of its
+/// object anywhere; these counts are the only ones taken there, and nothing
+/// replaces the buffer while the iterations run, so none of them is the last.
+/// The last, on one thread, destroys the object as Paykan_release does.
+void Paykan_retain_read(PaykanShared *shared);
+void Paykan_release_read(PaykanShared *shared);
+
 /// Destroy and free an object nothing references (`strong` and `weak` both
 /// zero): a temporary that was never boxed, such as a string the generated
 /// code made and did not keep.  The same as boxing it and releasing that

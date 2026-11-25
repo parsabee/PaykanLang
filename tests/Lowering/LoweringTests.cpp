@@ -5372,6 +5372,123 @@ fn main() -> int {
   EXPECT_EQ(m.find("retain"), std::string::npos) << m;
 }
 
+// An index that calls code that changes nothing the receiver reaches is
+// evaluated before the buffer is loaded, with no copy of the receiver and
+// no count of the buffer's object: in a `parallel for` body, whose
+// iterations read a buffer of the enclosing function in place.
+TEST(Lowering, ABufferReadWithAHarmlessCallInItsIndexCountsNothing) {
+  Lowered l = lower(R"(import ::memory as mem;
+fn pick(i: int) -> unsigned { return unsigned(i % 3); }
+fn main() -> int {
+  ys = mem::Buffer<float>();
+  let g = ys.grow(8);
+  t = 0.0;
+  parallel for i in 0..8 { t += ys.at(pick(i)); }
+  return 0;
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string m = function(l.Text, "main");
+  EXPECT_EQ(m.find("%snap"), std::string::npos) << m;
+  EXPECT_EQ(m.find("retain"), std::string::npos) << m;
+  const size_t call = m.find("call @pick(");
+  ASSERT_NE(call, std::string::npos) << m;
+  const size_t load = m.find("%buf.box");
+  ASSERT_NE(load, std::string::npos) << m;
+  EXPECT_LT(call, load) << m;
+}
+
+// One whose call may write the receiver's storage has the buffer the
+// receiver holds counted first, and read once the call has run: the element
+// of the buffer the receiver had, as the call `at` reads it.  The count is
+// an atomic one (Paykan_retain_read), and the receiver is not copied, which
+// would count it plainly.
+TEST(Lowering, ABufferReadHoldsItsBufferAcrossAnIndexThatMayWriteIt) {
+  Lowered l = lower(R"(import ::memory as mem;
+class Own { buf: mem::Buffer<int>; }
+impl Own {
+  fn reset() -> unsigned {
+    self.buf = mem::Buffer<int>();
+    return 0;
+  }
+}
+fn main() -> int {
+  let o: shared mutable = Own(mem::Buffer<int>());
+  let p = o;
+  return o.buf.at(p.reset());
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string m = function(l.Text, "main");
+  EXPECT_EQ(m.find("%snap"), std::string::npos) << m;
+  const size_t held = m.find("%buf.held");
+  const size_t hold = m.find("call @$rt.Paykan_retain_read(%buf.held");
+  const size_t call = m.find("call @Own.reset(");
+  const size_t read = m.find("unbox %buf.held");
+  const size_t letGo = m.find("call @$rt.Paykan_release_read(%buf.held");
+  ASSERT_NE(held, std::string::npos) << m;
+  ASSERT_NE(hold, std::string::npos) << m;
+  ASSERT_NE(call, std::string::npos) << m;
+  ASSERT_NE(read, std::string::npos) << m;
+  ASSERT_NE(letGo, std::string::npos) << m;
+  EXPECT_LT(held, hold) << m;
+  EXPECT_LT(hold, call) << m;
+  EXPECT_LT(call, read) << m;
+  EXPECT_LT(read, letGo) << m;
+}
+
+// A buffer of a function that runs a `parallel for` is read in place by
+// every iteration, and through a `view` parameter by what an iteration
+// calls: no plain count of its object, from any thread.  An index given a
+// number to change (`bump(ys[i])`, a struct of numbers' method) cannot
+// replace a buffer and takes no count at all; one that may (`p.reset()`,
+// in a function a `view` parameter of which may be such a buffer) takes the
+// atomic one.  (The read copied its receiver, counting the object plainly
+// on every thread: lost counts, a leak or a buffer freed under the read.)
+TEST(Lowering, ABufferAParallelForReadsIsCountedOnlyAtomically) {
+  Lowered l = lower(R"(import ::memory as mem;
+class Own { buf: mem::Buffer<int>; }
+impl Own {
+  fn reset() -> unsigned {
+    self.buf = mem::Buffer<int>();
+    return 0;
+  }
+}
+struct Tick { n: int; }
+impl Tick { fn inc() -> unsigned { self.n += 1; return 0; } }
+fn bump(x: inout int) -> unsigned { x += 1; return 0; }
+fn readIt(b: view mem::Buffer<int>, y: inout int) -> int { return b.at(bump(y)); }
+fn resetIt(b: view mem::Buffer<int>, p: shared mutable Own) -> int { return b.at(p.reset()); }
+fn main() -> int {
+  b = mem::Buffer<int>();
+  let e = b.push(1);
+  ys = [0; 8];
+  ts = [Tick(0); 8];
+  s = 0;
+  parallel for i in 0..8 {
+    s += b.at(bump(ys[i]));
+    s += b.at(ts[i].inc());
+    s += readIt(b, ys[i]);
+  }
+  let o: shared mutable = Own(mem::Buffer<int>());
+  return s + resetIt(o.buf, o);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *name : {"main", "readIt"}) {
+    const std::string f = function(l.Text, name);
+    EXPECT_EQ(f.find("%snap"), std::string::npos) << name << "\n" << f;
+    EXPECT_EQ(f.find("Paykan_retain_read"), std::string::npos) << name << "\n"
+                                                               << f;
+    EXPECT_EQ(f.find("retain %buf"), std::string::npos) << name << "\n" << f;
+  }
+  const std::string r = function(l.Text, "resetIt");
+  EXPECT_EQ(r.find("%snap"), std::string::npos) << r;
+  EXPECT_EQ(r.find("retain nonnull"), std::string::npos) << r;
+  EXPECT_NE(r.find("call @$rt.Paykan_retain_read("), std::string::npos) << r;
+  EXPECT_NE(r.find("call @$rt.Paykan_release_read("), std::string::npos) << r;
+}
+
 // A type arm over a subject that is a borrow itself, `self` or a `view`
 // parameter (#368), binds another name for the subject's variable: no
 // `box` acquires it, nothing releases it, and a `view` parameter's arm
