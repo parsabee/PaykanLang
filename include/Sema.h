@@ -2523,8 +2523,10 @@ private:
   /// the pre-registered ClassType (superclass must already be populated).
   bool populateClassType(ast::ClassDecl *cd, ast::ClassType *ct);
 
-  /// Phase 4b for one class: register the constructor function `Name(...)`.
-  void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
+  /// Phase 4b for one class: register the constructor function `Name(...)`;
+  /// @p again replaces the one it has (joinLateImpls).
+  void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct,
+                          bool again = false);
 
   /// `cannot instantiate abstract class 'C': 'B.f' has no implementation`,
   /// naming every pure virtual slot of the abstract class @p ct, each by the
@@ -2626,8 +2628,10 @@ private:
   bool declareDefaultInit(ast::StructDecl *sd, ast::StructType *st);
   /// That default `__init__` of @p st, at @p loc, not declared yet.
   ast::FuncDecl *defaultInit(ast::StructType *st, ast::SourceLocation loc);
-  /// Register the constructor function `Name(...)`.
-  void declareConstructor(ast::StructDecl *sd, ast::StructType *st);
+  /// Register the constructor function `Name(...)`; @p again replaces the
+  /// one it has (joinLateImpls).
+  void declareConstructor(ast::StructDecl *sd, ast::StructType *st,
+                          bool again = false);
   /// Phase 5: the method bodies, over SortedStructs.
   bool checkStructBodies();
   /// The module's structs declareStructs registered, in source order.
@@ -3463,11 +3467,23 @@ private:
   /// made, or one a block of LateImpls may still join.
   bool isWhole(const ast::Type *ty) const;
   /// Whether the bounded block @p im of an instance asked for with @p args
-  /// (of a class when @p ofClass) waits in LateImpls: when an argument is
-  /// not whole.  One that lays the type out does not: a class's `clone`,
-  /// which is virtual, and `__init__`.
-  bool joinsLater(const ast::ImplDecl *im, bool ofClass,
+  /// waits in LateImpls when its bounds do not hold yet: when an argument is
+  /// not whole.
+  bool joinsLater(const ast::ImplDecl *im,
                   const std::vector<ast::Type *> &args) const;
+  /// Whether the block @p im lays out the instance it joins (of a class
+  /// when @p ofClass): a class's `impl Cloneable for`, whose `clone` is
+  /// virtual, and a block that declares `__init__`, which replaces the
+  /// default one and so the constructor.  One joins where the instance is
+  /// made when its bounds hold there, among the instance's other members;
+  /// else it waits, like any other (joinLateImpls).
+  bool laysOut(const ast::ImplDecl *im, bool ofClass) const;
+  /// Whether @p im is an `impl Cloneable for` block.
+  bool isCloneableBlock(const ast::ImplDecl *im) const;
+  /// Whether the `clone` of @p ct (declared by @p cd) is its own when its
+  /// superclass is Cloneable: false, reported, when it inherits it, unless
+  /// a block of LateImpls may give it one yet.
+  bool checkOwnClone(const ast::ClassDecl *cd, ast::ClassType *ct);
   /// The copy of the template's block @p im for the instance @p instName
   /// with @p args, added to the instance's blocks (ImplsByClass).
   ast::ImplDecl *cloneImplFor(ast::ImplDecl *im, const std::string &instName,

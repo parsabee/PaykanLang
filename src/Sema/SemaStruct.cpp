@@ -438,13 +438,15 @@ bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
   return ok;
 }
 
-void Sema::declareConstructor(ast::StructDecl *sd, ast::StructType *st) {
+void Sema::declareConstructor(ast::StructDecl *sd, ast::StructType *st,
+                              bool again) {
   auto *initDecl = st->findMethod(names::kMethodInit);
   std::vector<ast::Type *> ctorParams;
   if (initDecl)
     ctorParams = initDecl->getParamTypes();
-  // The struct's name was checked to be free of any function.
-  assert(!lookupFunction(sd->getName()) &&
+  // The struct's name was checked to be free of any function but the
+  // struct's own constructor, declared again.
+  assert((again || !lookupFunction(sd->getName())) &&
          "constructor would overwrite a registered function");
   declareFunction(sd->getName(), st, ctorParams);
   if (initDecl) {
@@ -594,15 +596,17 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     for (auto *im : it->second) {
       // A block bounded on its parameters (`impl List<T: Cloneable>`) joins
       // only the instances whose arguments meet the bounds (#369): now, or
-      // once what the bounds ask can be told (joinLateImpls).
-      if (joinsLater(im, /*ofClass=*/false, args)) {
+      // once what the bounds ask can be told (joinLateImpls).  One that
+      // lays the type out joins now if they hold already.
+      const bool later = joinsLater(im, args);
+      if ((!later || laysOut(im, /*ofClass=*/false)) &&
+          implBoundsHold(im, args)) {
+        cloneImplFor(im, instName, args, origin != nullptr);
+      } else if (later) {
         LateImpls.push_back(
             {tmpl, im, instName, args, origin, InstantiationStack, {}});
         LateImpls.back().Frames.push_back(request);
-        continue;
       }
-      if (implBoundsHold(im, args))
-        cloneImplFor(im, instName, args, origin != nullptr);
     }
 
   recordInstantiationSite(tmpl, request);

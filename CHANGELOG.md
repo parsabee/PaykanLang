@@ -725,6 +725,23 @@ samples/concurrency/README.md.
   another module's template the errors were in the importer's file. The bound is an error of
   its block, reported once, where it is written, whatever instances there are (src/Sema:
   `checkImplBounds`; tests/Sema/GenericsTests.cpp, `ABadBoundOfABlockIsReportedOnceAtTheBlock`).
+- The two conditional blocks that lay a type out, a generic class's `impl Cloneable for` (its
+  `clone` is virtual) and a block that declares `__init__` (it replaces the default one),
+  were still decided where the instance was first named. A field of a class, struct or enum
+  names its instance before the module's `impl` blocks are known, wherever the field is
+  declared, so such a block never joined: `class 'Bx<Late>' is not Cloneable: its generic
+  class 'Bx' has no 'impl Cloneable for' block`, or `function 'Bx<Late>' expects 2
+  argument(s), got 1 (it has no '__init__', ...)`, with `Late` Cloneable. So did an instance
+  named in a field of its argument while that was made (`Bx<W<int>>` in `W<int>`), and one
+  under a Cloneable superclass was said to inherit `Cloneable` from it. Such a block now
+  joins the instance once its argument is known, as the others do: its `clone` takes its
+  slot then, and its `__init__` replaces the default one and the constructor. An argument
+  that does not meet the bound is named: `(it has no '__init__': '__init__' is in 'impl
+  Bx<T: Cloneable>', and 'Plain' is not 'Cloneable', so it takes v: Plain, w: int)`, and in
+  a derived `clone` of the class that holds the instance, `has no clone: 'clone' is in 'impl
+  Cloneable for Bx<T: Cloneable>', and 'Plain' is not 'Cloneable'` (src/Sema: `laysOut`,
+  `joinLateImpls`; tests/Sema/GenericsTests.cpp, `ABlockThatLaysOutAnInstanceJoinsItLater`;
+  samples/codegen/98_laid_out_blocks_of_later_types.pkn).
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is

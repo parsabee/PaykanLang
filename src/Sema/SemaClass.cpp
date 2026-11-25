@@ -1098,14 +1098,16 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   return mdecl;
 }
 
-void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
+void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct,
+                              bool again) {
   auto *initDecl = ct->findMethod(names::kMethodInit);
   std::vector<ast::Type *> ctorParams;
   if (initDecl)
     ctorParams = initDecl->getParamTypes();
   // The class name was checked to be free of any function (builtin or
-  // otherwise), so this registration never overwrites an existing entry.
-  assert(!lookupFunction(cd->getName()) &&
+  // otherwise), so this registration never overwrites an existing entry
+  // but the class's own constructor, declared again.
+  assert((again || !lookupFunction(cd->getName())) &&
          "constructor would overwrite a registered function");
   declareFunction(cd->getName(), ct, ctorParams);
   if (initDecl) {
@@ -1169,9 +1171,7 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
     // A `Cloneable` block's `clone` is virtual, not final like the other
     // methods of an `impl` block: each class clones as its own type, so a
     // subclass's overrides its superclass's (#369).
-    const bool cloneable =
-        im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
-        traitAnnotationName(im->getTrait()) == names::kTraitCloneable;
+    const bool cloneable = isCloneableBlock(im);
     const ast::MethodDecl *superClone =
         cloneable && ct->getSuperClass()
             ? ct->getSuperClass()->findMethod(names::kMethodClone)
@@ -1274,19 +1274,29 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct,
       }
     }
   }
+  if (!checkOwnClone(cd, ct))
+    ok = false;
+  return ok;
+}
+
+bool Sema::checkOwnClone(const ast::ClassDecl *cd, ast::ClassType *ct) {
   // A class that inherits `Cloneable` clones as its own type: a
   // superclass's `clone` would make only that superclass's object.
-  if (ast::ClassType *from = declaringClass(ct, names::kMethodClone);
-      from && from != ct && ct->getSuperClass() &&
-      hasBuiltinTraitImpl(ct->getSuperClass(), names::kTraitCloneable)) {
-    error(cd->getLocation(),
-          "class '" + cd->getName() + "' inherits 'Cloneable' from '" +
-              from->getName() + "', whose 'clone' makes a '" + from->getName() +
-              "': write 'impl Cloneable for " + cd->getName() +
-              " {}' to derive its own, or a 'clone' of its own");
-    ok = false;
-  }
-  return ok;
+  ast::ClassType *from = declaringClass(ct, names::kMethodClone);
+  if (!from || from == ct || !ct->getSuperClass() ||
+      !hasBuiltinTraitImpl(ct->getSuperClass(), names::kTraitCloneable))
+    return true;
+  // An instance's own may be in a block that waits (joinLateImpls).
+  for (size_t i = LateImplsDone; i < LateImpls.size(); ++i)
+    if (LateImpls[i].Inst == ct->getName() &&
+        isCloneableBlock(LateImpls[i].Impl))
+      return true;
+  error(cd->getLocation(),
+        "class '" + cd->getName() + "' inherits 'Cloneable' from '" +
+            from->getName() + "', whose 'clone' makes a '" + from->getName() +
+            "': write 'impl Cloneable for " + cd->getName() +
+            " {}' to derive its own, or a 'clone' of its own");
+  return false;
 }
 
 bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
@@ -1619,7 +1629,7 @@ bool Sema::checkDeinitDecl(const ast::FuncDecl *fn, const ast::Type *owner) {
   return false;
 }
 
-bool Sema::joinsLater(const ast::ImplDecl *im, bool ofClass,
+bool Sema::joinsLater(const ast::ImplDecl *im,
                       const std::vector<ast::Type *> &args) const {
   // The archetype check asks of its own stand-ins.
   if (Archetypes)
@@ -1629,16 +1639,25 @@ bool Sema::joinsLater(const ast::ImplDecl *im, bool ofClass,
     bounded = bounded || !bs.empty();
   if (!bounded)
     return false;
-  if (ofClass && im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
-      traitAnnotationName(im->getTrait()) == names::kTraitCloneable)
-    return false;
-  if (std::any_of(im->getMethods().begin(), im->getMethods().end(),
-                  [](const ast::FuncDecl *fn) {
-                    return fn->getName() == names::kMethodInit;
-                  }))
-    return false;
   return !std::all_of(args.begin(), args.end(),
                       [&](const ast::Type *a) { return isWhole(a); });
+}
+
+bool Sema::isCloneableBlock(const ast::ImplDecl *im) const {
+  return im->getTrait() && namesBuiltinTrait(im->getTrait()) &&
+         traitAnnotationName(im->getTrait()) == names::kTraitCloneable;
+}
+
+bool Sema::laysOut(const ast::ImplDecl *im, bool ofClass) const {
+  if (ofClass && isCloneableBlock(im))
+    return true;
+  // An initializer is a method of the object: a `static fn __init__` is
+  // none, and is refused where it joins.
+  return std::any_of(im->getMethods().begin(), im->getMethods().end(),
+                     [](const ast::FuncDecl *fn) {
+                       return fn->getName() == names::kMethodInit &&
+                              !fn->isStatic();
+                     });
 }
 
 ast::ImplDecl *Sema::cloneImplFor(ast::ImplDecl *im,
@@ -1709,11 +1728,44 @@ bool Sema::joinLateImpls() {
               ct ? ast::cast<ast::ClassDecl>(l.Template)->getTypeParams()
                  : ast::cast<ast::StructDecl>(l.Template)->getTypeParams();
           TypeParamScope params(*this, typeParams);
+          // The block's `__init__` replaces the default one the instance
+          // was made with, and so the constructor.  No body is checked
+          // while an instance is made, so none has called it yet.
+          const bool init = std::any_of(
+              copy->getMethods().begin(), copy->getMethods().end(),
+              [](const ast::FuncDecl *fn) {
+                return fn->getName() == names::kMethodInit && !fn->isStatic();
+              });
+          auto byDefault =
+              init ? DefaultInits.find(l.Inst) : DefaultInits.end();
+          if (byDefault != DefaultInits.end()) {
+            if (ct) {
+              ct->dropInitMethod();
+              l.Base->Class->dropMethod(byDefault->second);
+            } else {
+              st->dropInitMethod();
+              l.Base->Struct->dropMethod(byDefault->second);
+            }
+            DefaultInits.erase(byDefault);
+          }
           if (!(ct ? populateImplMethods(l.Base->Class, ct, copy)
                    : populateImplMethods(l.Base->Struct, st, copy)))
             ok = false;
+          if (init) {
+            if (ct)
+              declareConstructor(l.Base->Class, ct, /*again=*/true);
+            else
+              declareConstructor(l.Base->Struct, st, /*again=*/true);
+          }
+          // A class's `clone` takes a slot, or fills its superclass's.
+          if (ct && isCloneableBlock(copy))
+            ct->updateAbstract();
           if (copy->getTrait() && !checkTraitImpl(copy, type))
             ok = false;
+        } else if (ct && isCloneableBlock(l.Impl) &&
+                   !checkOwnClone(l.Base->Class, ct)) {
+          // Without the block, the instance clones as its superclass.
+          ok = false;
         }
       }
       InstantiatingTemplates = std::move(savedTemplates);
@@ -3168,15 +3220,17 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     for (auto *im : it->second) {
       // A block bounded on its parameters (`impl List<T: Cloneable>`) joins
       // only the instances whose arguments meet the bounds (#369): now, or
-      // once what the bounds ask can be told (joinLateImpls).
-      if (joinsLater(im, /*ofClass=*/true, args)) {
+      // once what the bounds ask can be told (joinLateImpls).  One that
+      // lays the type out joins now if they hold already.
+      const bool later = joinsLater(im, args);
+      if ((!later || laysOut(im, /*ofClass=*/true)) &&
+          implBoundsHold(im, args)) {
+        cloneImplFor(im, instName, args, origin != nullptr);
+      } else if (later) {
         LateImpls.push_back(
             {tmpl, im, instName, args, origin, InstantiationStack, {}});
         LateImpls.back().Frames.push_back(request);
-        continue;
       }
-      if (implBoundsHold(im, args))
-        cloneImplFor(im, instName, args, origin != nullptr);
     }
 
   recordInstantiationSite(tmpl, request);

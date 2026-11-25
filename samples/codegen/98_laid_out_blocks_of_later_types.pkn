@@ -1,0 +1,109 @@
+// 98 — a block that lays out an instance named before its argument
+// Exercises: the two conditional blocks that lay a type out, a generic
+//            class's `impl Cloneable for` (its `clone` is virtual) and a
+//            block that declares `__init__` (it replaces the default one),
+//            join the instances whose arguments meet their bounds wherever
+//            the instance is first named: `Box<Key>`, `Pair<Key>` and
+//            `Sub<Key>` in a class declared before `Key`, `Box<Node<int>>`
+//            in `Node<int>` while it is made.  Each was laid out without
+//            its block: no `clone`, or a constructor that took the fields.
+//            `Sub<Key>`'s `clone` fills its Cloneable superclass's slot,
+//            and `Shelf` derives its `clone` from `Box<Key>`'s.
+// expect-stdout: 3 2 5 6
+// expect-stdout: 2 8 2
+// expect-stdout: 3 1 10 1
+import ::io;
+
+class Box<T> {
+  v: T;
+  copies: int;
+}
+
+impl Box<T: Cloneable> {
+  fn __init__(v: T) { self.v = move v; self.copies = 0; }
+}
+
+impl Cloneable for Box<T: Cloneable> {
+  view fn clone() -> Self {
+    let c: mutable = Box<T>(self.v.clone());
+    c.copies = self.copies + 1;
+    return c;
+  }
+}
+
+struct Pair<T> {
+  a: T;
+  b: T;
+}
+
+impl Pair<T: Cloneable> {
+  fn __init__(a: T) { self.b = a.clone(); self.a = move a; }
+}
+
+class Base {
+  tag: int;
+}
+
+impl Cloneable for Base {
+  view fn clone() -> Self { return Base(self.tag); }
+}
+
+class Sub<T> : Base {
+  v: T;
+}
+
+impl Cloneable for Sub<T: Cloneable> {
+  view fn clone() -> Self { return Sub<T>(self.tag + 1, self.v.clone()); }
+}
+
+class Holder {
+  b: Box<Key>?;
+  p: Pair<Key>?;
+  s: Sub<Key>?;
+}
+
+class Key {
+  n: int;
+}
+
+impl Cloneable for Key {
+  view fn clone() -> Self { return Key(self.n + 1); }
+}
+
+class Node<T> {
+  next: Box<Node<T>>?;
+  v: T;
+}
+
+impl Cloneable for Node<T: Cloneable> {
+  view fn clone() -> Self { return Node<T>(None, self.v.clone()); }
+}
+
+class Shelf {
+  k: Box<Key>?;
+}
+
+impl Cloneable for Shelf {}
+
+fn main() -> int {
+  let b = Box<Key>(Key(1)).clone().clone();
+  let p = Pair<Key>(Key(5));
+  io::println(Str(b.v.n) + " " + Str(b.copies) + " " + Str(p.a.n) + " "
+      + Str(p.b.n));
+  let s = Sub<Key>(1, Key(7));
+  let t = s.clone();
+  let base: Base = move s;
+  io::println(Str(t.tag) + " " + Str(t.v.n) + " " + Str(base.clone().tag));
+  let n = Box<Node<int>>(Node<int>(None, 3)).clone();
+  let shelf = Shelf(Box<Key>(Key(9))).clone();
+  match shelf.k {
+    k: Box<Key> {
+      io::println(Str(n.v.v) + " " + Str(n.copies) + " " + Str(k.v.n) + " "
+          + Str(k.copies));
+    }
+    None {
+      io::println("no box");
+    }
+  }
+  return 0;
+}

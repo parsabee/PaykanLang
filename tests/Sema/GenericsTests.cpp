@@ -1466,6 +1466,239 @@ fn main() -> int {
       << no.Diagnostics;
 }
 
+// The two blocks that lay an instance out join it later too: a generic
+// class's `impl Cloneable for`, whose `clone` is virtual, and a block that
+// declares `__init__`, which replaces the default one and the constructor.
+// Named in a field before the module's `impl` blocks were recorded, the
+// instance was laid out without them for good, wherever the field was
+// declared: `Bx<Late>` was "not Cloneable: its generic class 'Bx' has no
+// 'impl Cloneable for' block", or its constructor took its fields.  An
+// argument that does not meet the bound still has no block, and the
+// message says which bound.
+TEST(Generics, ABlockThatLaysOutAnInstanceJoinsItLater) {
+  struct Form {
+    const char *Name;
+    const char *Decls; // the template and its blocks
+    const char *Body;  // main's, `@` for the argument
+    const char *Unmet; // the one error when the argument is not Cloneable
+  };
+  const std::vector<Form> forms = {
+      {"a class's clone",
+       "class Bx<T> { v: T; w: int; }\n"
+       "impl Cloneable for Bx<T: Cloneable> {\n"
+       "  view fn clone() -> Self { return Bx<T>(self.v.clone(), self.w); }\n"
+       "}\n",
+       "let b = Bx<@>(@(1), 1).clone(); return b.v.n + b.w - 3;",
+       "error: no method 'clone' on type 'Bx<Plain>': 'clone' is in 'impl "
+       "Cloneable for Bx<T: Cloneable>', and 'Plain' is not 'Cloneable'\n"},
+      {"a class's derived clone",
+       "class Bx<T> { v: T; w: int; }\n"
+       "impl Cloneable for Bx<T: Cloneable> {}\n",
+       "let b = Bx<@>(@(1), 1).clone(); return b.v.n + b.w - 3;",
+       "error: no method 'clone' on type 'Bx<Plain>': 'clone' is in 'impl "
+       "Cloneable for Bx<T: Cloneable>', and 'Plain' is not 'Cloneable'\n"},
+      {"a class's __init__",
+       "class Bx<T> { v: T; w: int; }\n"
+       "impl Bx<T: Cloneable> {\n"
+       "  fn __init__(v: T) { self.v = move v; self.w = 1; }\n"
+       "}\n",
+       "let b = Bx<@>(@(1)); return b.v.n + b.w - 2;",
+       "error: function 'Bx<Plain>' expects 2 argument(s), got 1 (it has no "
+       "'__init__': '__init__' is in 'impl Bx<T: Cloneable>', and 'Plain' is "
+       "not 'Cloneable', so it takes v: Plain, w: int)\n"},
+      {"a struct's __init__",
+       "struct Bx<T> { v: T; w: int; }\n"
+       "impl Bx<T: Cloneable> {\n"
+       "  fn __init__(v: T) { self.v = move v; self.w = 1; }\n"
+       "}\n",
+       "let b = Bx<@>(@(1)); return b.v.n + b.w - 2;",
+       "error: function 'Bx<Plain>' expects 2 argument(s), got 1 (it has no "
+       "'__init__': '__init__' is in 'impl Bx<T: Cloneable>', and 'Plain' is "
+       "not 'Cloneable', so it takes v: Plain, w: int)\n"},
+      // (A struct's `clone` takes no slot: its block waited already.)
+      {"a struct's clone",
+       "struct Bx<T> { v: T; w: int; }\n"
+       "impl Bx<T> { fn __deinit__() {} }\n"
+       "impl Cloneable for Bx<T: Cloneable> {\n"
+       "  view fn clone() -> Self { return Bx<T>(self.v.clone(), self.w); }\n"
+       "}\n",
+       "let b = Bx<@>(@(1), 1).clone(); return b.v.n + b.w - 3;",
+       "error: 'Bx<Plain>' is not Cloneable: "},
+  };
+  const std::vector<const char *> holders = {
+      "class Holder { a: Bx<@>?; }\n", "struct Holder { a: Bx<@>?; }\n",
+      "enum Holder { Some(a: Bx<@>), Nothing }\n"};
+  auto named = [](std::string text, const std::string &arg) {
+    for (size_t at = text.find('@'); at != std::string::npos;
+         at = text.find('@', at + arg.size()))
+      text.replace(at, 1, arg);
+    return text;
+  };
+  for (const Form &form : forms)
+    for (const char *argName : {"Late", "Plain"}) {
+      const std::string arg = argName;
+      const std::string argDecls =
+          arg == "Late" ? "class Late { n: int; }\n"
+                          "impl Cloneable for Late {\n"
+                          "  view fn clone() -> Self { return Late(self.n + "
+                          "1); }\n"
+                          "}\n"
+                        : "class Plain { n: int; }\n";
+      // Before the argument, after it and its block (as the guide says to
+      // name it), after `main`; and nowhere.
+      for (size_t h = 0; h <= holders.size(); ++h)
+        for (int at = 0; at < (h < holders.size() ? 3 : 1); ++at) {
+          const std::string holder =
+              h < holders.size() ? named(holders[h], arg) : "";
+          std::string program = form.Decls;
+          if (at == 0)
+            program += holder;
+          program += argDecls;
+          if (at == 1)
+            program += holder;
+          program += "fn main() -> int { " + named(form.Body, arg) + " }\n";
+          if (at == 2)
+            program += holder;
+          auto r = semaCheck(program);
+          if (arg == "Late") {
+            EXPECT_TRUE(r.Ok) << form.Name << "\n" << program << r.Diagnostics;
+            continue;
+          }
+          EXPECT_EQ(r.ErrorCount, 1u) << form.Name << "\n"
+                                      << program << r.Diagnostics;
+          EXPECT_EQ(countOf(r.Diagnostics, form.Unmet), 1u)
+              << form.Name << "\n"
+              << program << r.Diagnostics;
+        }
+    }
+}
+
+// And wherever else such an instance is laid out before its argument is
+// whole: in a field of an instance being made (its argument, in a body), or
+// of a class that derives its `clone` from it; under a Cloneable
+// superclass, whose `clone` the instance would inherit (a class that
+// inherits Cloneable is an error), or with a superclass's `__init__`, which
+// the default one calls; and from another module's template.
+TEST(Generics, ABlockThatLaysOutAnInstanceJoinsItWhereverItIsNamed) {
+  for (const char *src : {
+           R"(class Bx<T> { v: T?; }
+impl Cloneable for Bx<T: Cloneable> { view fn clone() -> Self { return Bx<T>(None); } }
+class W<T> { b: Bx<W<T>>?; n: T; }
+impl Cloneable for W<T: Cloneable> {
+  view fn clone() -> Self { return W<T>(None, self.n.clone()); }
+}
+fn main() -> int {
+  let w = W<int>(None, 3);
+  let b = Bx<W<int>>(None).clone();
+  return w.n - 3;
+}
+)",
+           R"(class Bx<T> { v: T?; w: int; }
+impl Bx<T: Cloneable> { fn __init__() { self.v = None; self.w = 1; } }
+class W<T> { b: Bx<W<T>>?; n: T; }
+impl Cloneable for W<T: Cloneable> {
+  view fn clone() -> Self { return W<T>(None, self.n.clone()); }
+}
+fn main() -> int { let w = W<int>(None, 3); let b = Bx<W<int>>(); return w.n + b.w - 4; }
+)",
+           R"(class Bx<T> { v: T; }
+impl Cloneable for Bx<T: Cloneable> { view fn clone() -> Self { return Bx<T>(self.v.clone()); } }
+class Holder { a: Bx<Late>?; }
+impl Cloneable for Holder {}
+class Late { n: int; }
+impl Cloneable for Late { view fn clone() -> Self { return Late(self.n + 1); } }
+fn main() -> int { let c = Holder(Bx<Late>(Late(1))).clone(); return 0; }
+)",
+           R"(class Base { k: int; }
+impl Cloneable for Base { view fn clone() -> Self { return Base(self.k); } }
+class Bx<T> : Base { v: T; }
+impl Cloneable for Bx<T: Cloneable> {
+  view fn clone() -> Self { return Bx<T>(self.k, self.v.clone()); }
+}
+class Holder { a: Bx<Late>?; }
+class Late { n: int; }
+impl Cloneable for Late { view fn clone() -> Self { return Late(self.n + 1); } }
+fn main() -> int { let b = Bx<Late>(5, Late(1)).clone(); return b.v.n + b.k - 7; }
+)",
+           R"(class Base { k: int; }
+impl Cloneable for Base { view fn clone() -> Self { return Base(self.k); } }
+class Bx<T> : Base { v: T?; }
+impl Cloneable for Bx<T: Cloneable> { view fn clone() -> Self { return Bx<T>(self.k, None); } }
+class W<T> { b: Bx<W<T>>?; n: T; }
+impl Cloneable for W<T: Cloneable> {
+  view fn clone() -> Self { return W<T>(None, self.n.clone()); }
+}
+fn main() -> int { let w = W<int>(None, 3); let b = Bx<W<int>>(4, None).clone(); return 0; }
+)",
+           R"(class Base { k: int; }
+impl Base { fn __init__(k: int) { self.k = k; } }
+class Bx<T> : Base { v: T; }
+impl Bx<T: Cloneable> { fn __init__(v: T) { __super__(7); self.v = move v; } }
+class Holder { a: Bx<Late>?; }
+class Late { n: int; }
+impl Cloneable for Late { view fn clone() -> Self { return Late(self.n + 1); } }
+fn main() -> int { let b = Bx<Late>(Late(1)); return b.v.n + b.k - 8; }
+)"}) {
+    auto r = semaCheck(src);
+    EXPECT_TRUE(r.Ok) << src << r.Diagnostics;
+  }
+  // A field whose instance does not meet the bound: the derived `clone`
+  // says which bound, not that a class is Cloneable only with a block
+  // (which an instance cannot have).
+  auto derive = semaCheck(R"(class Bx<T> { v: T; }
+impl Cloneable for Bx<T: Cloneable> { view fn clone() -> Self { return Bx<T>(self.v.clone()); } }
+class Holder { a: Bx<Plain>?; }
+impl Cloneable for Holder {}
+class Plain { n: int; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(derive.ErrorCount, 1u) << derive.Diagnostics;
+  EXPECT_TRUE(has(derive.Diagnostics,
+                  ":4:1: error: 'impl Cloneable for Holder {}' cannot derive "
+                  "'clone': its field 'a' ('Bx<Plain>?') has no clone: "
+                  "'clone' is in 'impl Cloneable for Bx<T: Cloneable>', and "
+                  "'Plain' is not 'Cloneable'; write the 'clone' instead\n"))
+      << derive.Diagnostics;
+  // And one that inherits its superclass's `clone` is reported once the
+  // block is known not to join, at its template, as where it is first named.
+  auto inherits = semaCheck(R"(class Base { k: int; }
+impl Cloneable for Base { view fn clone() -> Self { return Base(self.k); } }
+class Bx<T> : Base { v: T; }
+impl Cloneable for Bx<T: Cloneable> { view fn clone() -> Self { return Bx<T>(self.k, self.v); } }
+class Holder { a: Bx<Plain>?; }
+class Plain { n: int; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(inherits.ErrorCount, 1u) << inherits.Diagnostics;
+  EXPECT_EQ(countOf(inherits.Diagnostics,
+                    ":3:1: error: class 'Bx<Plain>' inherits 'Cloneable' from "
+                    "'Base', whose 'clone' makes a 'Base': write 'impl "
+                    "Cloneable for Bx<Plain> {}' to derive its own, or a "
+                    "'clone' of its own\n"),
+            1u)
+      << inherits.Diagnostics;
+  EXPECT_TRUE(
+      has(inherits.Diagnostics,
+          ":5:16: note: in instantiation of 'Bx<Plain>' requested here"))
+      << inherits.Diagnostics;
+  // Another module's template, instantiated with a class of the importer.
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_late_layout";
+  std::filesystem::remove_all(dir);
+  writeProjectFile(dir, "lib/gen.pkn", R"(class Bx<T> { v: T; w: int; }
+impl Bx<T: Cloneable> { fn __init__(v: T) { self.v = move v; self.w = 1; } }
+impl Cloneable for Bx<T: Cloneable> { view fn clone() -> Self { return Bx<T>(self.v.clone()); } }
+)");
+  auto imported =
+      semaCheckFile(writeProjectFile(dir, "main.pkn", R"(import lib::gen;
+class Holder { a: gen::Bx<Late>?; }
+class Late { n: int; }
+impl Cloneable for Late { view fn clone() -> Self { return Late(self.n + 1); } }
+fn main() -> int { let b = gen::Bx<Late>(Late(1)).clone(); return b.v.n + b.w - 3; }
+)"));
+  EXPECT_TRUE(imported.Ok) << imported.Diagnostics;
+  std::filesystem::remove_all(dir);
+}
+
 // A method or a `static fn` an instance lacks because its block's bound is
 // not met says so: the block as it is written, and the argument that does
 // not meet its bound.  A name no block has, and a method called as a
@@ -2055,4 +2288,32 @@ TEST(Generics, StaticFnBodyIsCheckedPerInstantiation) {
   EXPECT_TRUE(has(r.Diagnostics, "in instantiation of 'Box<int>' requested "
                                  "here"))
       << r.Diagnostics;
+}
+
+// A bounded block's `static fn __init__` is no initializer: it lays nothing
+// out, so it joins an instance as any block does, and is refused there as
+// where the instance's argument is known at once (the default `__init__`
+// is the instance's).  (A late join took it for the initializer: the
+// default one was dropped and none put in its place, and the constructor
+// made an object it never initialized.)
+TEST(Generics, ABoundedBlocksStaticInitIsNoInitializer) {
+  for (const char *kind : {"class", "struct"})
+    for (const char *holder : {"class Holder { a: Bx<Late>?; }\n", ""}) {
+      const std::string program =
+          std::string(kind) + " Bx<T> { v: T; w: int; }\n" +
+          "impl Bx<T: Cloneable> { static fn __init__(v: T) {} }\n" + holder +
+          "class Late { n: int; }\n"
+          "impl Cloneable for Late { view fn clone() -> Self { return "
+          "Late(self.n + 1); } }\n"
+          "fn main() -> int { let b = Bx<Late>(); return b.w; }\n";
+      auto r = semaCheck(program);
+      EXPECT_FALSE(r.Ok) << program;
+      EXPECT_EQ(countOf(r.Diagnostics, std::string(":2:32: error: ") + kind +
+                                           " 'Bx<Late>' already has a method "
+                                           "'__init__'\n"),
+                1u)
+          << program << r.Diagnostics;
+      EXPECT_EQ(countOf(r.Diagnostics, "expects 2 argument(s), got 0"), 1u)
+          << program << r.Diagnostics;
+    }
 }
