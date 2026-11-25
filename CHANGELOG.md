@@ -742,6 +742,30 @@ samples/concurrency/README.md.
   Cloneable for Bx<T: Cloneable>', and 'Plain' is not 'Cloneable'` (src/Sema: `laysOut`,
   `joinLateImpls`; tests/Sema/GenericsTests.cpp, `ABlockThatLaysOutAnInstanceJoinsItLater`;
   samples/codegen/98_laid_out_blocks_of_later_types.pkn).
+- A bound of a template's own parameter that names no trait was reported at the template's
+  first column, so two of them that read the same (`class Pair<A: Copyable<int>, B:
+  Copyable<int>>`, `fn f<A: Nope, B: Nope>`, the same in a generic method) were one diagnostic
+  said twice, which a debug build of the compiler aborts on. Each is reported where it is
+  written; one with no place of its own (`A: int`) at its template, once for two that read
+  the same (src/Sema: `checkBoundDecls`; tests/Sema/GenericsTests.cpp,
+  `ABadBoundOfATemplateIsReportedOnceWhereItIsWritten`).
+- A trait written twice in a parameter's bounds (`fn f<G: Hashable + Hashable>`) was checked
+  twice where the template was used: an argument that did not implement it was one error said
+  twice, the same abort. The trait is one bound, and an argument that does not meet it one
+  error at the use (src/Sema: `checkBounds`; tests/Sema/GenericsTests.cpp,
+  `ARepeatedBoundIsMetOrNotOnce`).
+- The trait of a template's `impl` block was resolved once for each instance: a trait that
+  names nothing (`impl Hashable<int> for Box<T>`, `impl Unknown for Box<T>`, `impl
+  Conv<Undefined> for Box<T>`) was accepted while the template had no instance, and reported
+  again by each instance; for a module's template the module was accepted, and the errors were
+  in the importer's file, or nowhere for a trait of no name. What the trait names (a trait,
+  given as many type arguments as it takes, each made of types there are) is now checked where
+  the block is declared: one error at the block, in the file that declares it, and the block
+  joins no instance. Nothing is resolved there, so nothing is instantiated; what a type
+  argument is as a type (`Conv<Other<T>>` for an `Other<W: Copyable>`) is still each
+  instance's. **Breaking**: a program that was accepted only because the template had no
+  instance is now an error (src/Sema: `checkImplTrait`; tests/Sema/GenericsTests.cpp,
+  `ABadTraitOfABlockIsReportedOnceAtTheBlock`).
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is

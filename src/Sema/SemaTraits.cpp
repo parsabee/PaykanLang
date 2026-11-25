@@ -236,58 +236,190 @@ bool Sema::resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
   return true;
 }
 
-std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
-                                                    const Subst &subst,
-                                                    ast::SourceLocation loc) {
+const Sema::TraitInfo *Sema::lookUpTrait(ast::Type *ref,
+                                         ast::SourceLocation loc) {
   std::string name;
-  std::vector<ast::Type *> argAnns;
+  size_t args = 0;
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ref)) {
     name = ct->getName();
   } else if (auto *gt = ast::dyn_cast<ast::GenericType>(ref)) {
     name = gt->getName();
-    argAnns = gt->getArgs();
+    args = gt->getNumArgs();
   } else {
     error(loc, "'" + typeName(ref) + "' is not a trait");
-    return std::nullopt;
+    return nullptr;
   }
   auto it = Traits.find(name);
   if (it == Traits.end()) {
     if (isFailedImportUse(name))
-      return std::nullopt;
-    const bool type = Ctx.lookupType(name) || ClassTemplates.count(name) ||
+      return nullptr;
+    // (A class of the module by its name: a template's block is checked
+    // before the classes are registered.)
+    const bool type = Ctx.lookupType(name) || LocalClassNames.count(name) ||
+                      ClassTemplates.count(name) ||
                       StructTemplates.count(name) || EnumTemplates.count(name);
     // The built-in traits are named as adjectives (#378).  A type of the
     // program's own named `Show` is that type, and not a trait.
     if (name == names::kTraitShowableWas && !type) {
       error(loc, std::string("'") + names::kTraitShowableWas + "' is now '" +
                      names::kTraitShowable + "'");
-      return std::nullopt;
+      return nullptr;
     }
     if (type)
       error(loc, "'" + name + "' is not a trait");
     else if (!reportPrivateImport(name, loc))
       error(loc, "unknown trait '" + name + "'");
-    return std::nullopt;
+    return nullptr;
   }
   const auto &params = it->second.Decl->getTypeParams();
-  if (argAnns.size() != params.size()) {
+  if (args != params.size()) {
     error(loc, "trait '" + name + "' expects " + std::to_string(params.size()) +
-                   " type argument(s), got " + std::to_string(argAnns.size()));
-    return std::nullopt;
+                   " type argument(s), got " + std::to_string(args));
+    return nullptr;
   }
-  TraitRef tr{&it->second, {}};
+  return &it->second;
+}
+
+std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
+                                                    const Subst &subst,
+                                                    ast::SourceLocation loc) {
+  const TraitInfo *trait = lookUpTrait(ref, loc);
+  if (!trait)
+    return std::nullopt;
+  TraitRef tr{trait, {}};
+  const auto *gt = ast::dyn_cast<ast::GenericType>(ref);
+  if (!gt)
+    return tr;
   ast::ASTCloner cloner(Ctx, subst);
   // A trait's type argument keeps its form (#368), as a template's does:
   // `Src<shared Node>` is not `Src<Node>`.
-  for (size_t i = 0; i < argAnns.size(); ++i) {
-    auto *t = resolveTypeArgument(cloner.cloneType(argAnns[i]), loc,
+  for (size_t i = 0; i < gt->getNumArgs(); ++i) {
+    auto *t = resolveTypeArgument(cloner.cloneType(gt->getArgs()[i]), loc,
                                   "type argument " + std::to_string(i + 1) +
-                                      " of trait '" + name + "'");
+                                      " of trait '" + gt->getName() + "'");
     if (!t)
       return std::nullopt;
     tr.Args.push_back(t);
   }
   return tr;
+}
+
+bool Sema::checkImplTrait(const ast::ImplDecl *im) {
+  // What the trait names is the same for every instance: a trait, with as
+  // many type arguments as it takes, each made of types the module has.
+  const TraitInfo *trait = lookUpTrait(im->getTrait(), im->getLocation());
+  if (!trait)
+    return false;
+  const auto *gt = ast::dyn_cast<ast::GenericType>(im->getTrait());
+  if (!gt)
+    return true;
+  // Its type arguments by their names: what they are as types is each
+  // instance's (checkTraitImpl), as `Conv<T[]>` or `Conv<Other<T>>` (of an
+  // `Other<W: Copyable>`) is for `Box<int>`.  Nothing is resolved here, so
+  // nothing is instantiated, and the module's classes, which are declared
+  // after its templates, are known by their names.
+  StringSet params;
+  for (const std::string *p : im->getTypeParams())
+    params.insert(*p);
+  for (size_t i = 0; i < gt->getNumArgs(); ++i) {
+    const std::string n = std::to_string(i + 1);
+    const TypeContext what(
+        {"type argument ", n, " of trait '", gt->getName(), "'"});
+    if (!namesTypes(gt->getArgs()[i], params, im->getLocation(), what))
+      return false;
+  }
+  return true;
+}
+
+bool Sema::namesTypes(ast::Type *ann, const StringSet &params,
+                      ast::SourceLocation loc, const TypeContext &context) {
+  if (!ann)
+    return true;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ann)) {
+    if (params.count(ct->getName()) || LocalClassNames.count(ct->getName()))
+      return true;
+    // A name looked up, which instantiates nothing: an enum, a struct, an
+    // imported type, or what it is reported as instead.
+    return resolveType(ct, loc, context) != nullptr;
+  }
+  // A part is named in a report as resolveType names it.
+  if (auto *gt = ast::dyn_cast<ast::GenericType>(ann)) {
+    // Its arguments first, as an instance resolves them.
+    for (size_t i = 0; i < gt->getNumArgs(); ++i) {
+      const std::string n = std::to_string(i + 1);
+      const TypeContext argument(
+          context, {" type argument ", n, " of '", gt->getName(), "'"});
+      if (!namesTypes(gt->getArgs()[i], params, loc, argument))
+        return false;
+    }
+    return namesTemplate(gt->getName(), gt->getNumArgs(), loc);
+  }
+  if (auto *qt = ast::dyn_cast<ast::QualifiedType>(ann))
+    return namesTypes(qt->getInnerType(), params, loc, context);
+  if (auto *at = ast::dyn_cast<ast::AtomicType>(ann))
+    return namesTypes(at->getInnerType(), params, loc, context);
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ann))
+    return namesTypes(ot->getInnerType(), params, loc, context);
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(ann)) {
+    const TypeContext element(context, {" element"});
+    return namesTypes(at->getElementType(), params, loc, element);
+  }
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ann)) {
+    const TypeContext element(context, {" element"});
+    return namesTypes(ft->getElementType(), params, loc, element);
+  }
+  // (A struct is a tuple type too, and canonical: nothing to look up.)
+  if (ast::isa<ast::StructType>(ann))
+    return true;
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ann)) {
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      const std::string n = std::to_string(i);
+      const TypeContext element(context, {" element ", n});
+      if (!namesTypes(tt->getElementType(i), params, loc, element))
+        return false;
+    }
+    return true;
+  }
+  if (auto *ft = ast::dyn_cast<ast::FunctionType>(ann)) {
+    for (size_t i = 0; i < ft->getNumParams(); ++i) {
+      const std::string n = std::to_string(i + 1);
+      const TypeContext what(context, {" parameter ", n});
+      if (!namesTypes(ft->getParamType(i), params, loc, what))
+        return false;
+    }
+    const TypeContext result(context, {" result"});
+    return namesTypes(ft->getReturnType(), params, loc, result);
+  }
+  return true; // a built-in type, an enum: canonical already
+}
+
+bool Sema::namesTemplate(const std::string &name, size_t args,
+                         ast::SourceLocation loc) {
+  // Looked for as resolveGenericAnnotation does: a struct's, an enum's, or
+  // else a class's.
+  const std::vector<const std::string *> *params = nullptr;
+  const char *kind = "class";
+  if (auto s = StructTemplates.find(name); s != StructTemplates.end()) {
+    params = &s->second->getTypeParams();
+    kind = "struct";
+  } else if (auto e = EnumTemplates.find(name); e != EnumTemplates.end()) {
+    params = &e->second->getTypeParams();
+    kind = "enum";
+  } else if (auto c = ClassTemplates.find(name); c != ClassTemplates.end()) {
+    params = &c->second->getTypeParams();
+  }
+  if (!params) {
+    reportNoClassTemplate(
+        name, Ctx.lookupClassType(name) || LocalClassNames.count(name), loc);
+    return false;
+  }
+  if (args != params->size()) {
+    error(loc, std::string("generic ") + kind + " '" + name + "' expects " +
+                   std::to_string(params->size()) + " type argument(s), got " +
+                   std::to_string(args));
+    return false;
+  }
+  return true;
 }
 
 std::string Sema::traitAnnotationName(const ast::Type *ref) {
@@ -313,19 +445,21 @@ std::string Sema::traitRefName(const TraitRef &tr) {
   return s + ">";
 }
 
+bool Sema::sameTraitRef(const TraitRef &a, const TraitRef &b) {
+  bool same = a.Trait == b.Trait && a.Args.size() == b.Args.size();
+  for (size_t i = 0; same && i < a.Args.size(); ++i)
+    same = typesEqual(a.Args[i], b.Args[i]);
+  return same;
+}
+
 const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto has = [&](const ast::Type *t) {
     auto it = TraitImpls.find(t);
     if (it == TraitImpls.end())
       return false;
-    for (const auto &impl : it->second) {
-      bool same = impl.Trait == tr.Trait && impl.Args.size() == tr.Args.size();
-      for (size_t i = 0; same && i < impl.Args.size(); ++i)
-        same = typesEqual(impl.Args[i], tr.Args[i]);
-      if (same)
-        return true;
-    }
-    return false;
+    return std::any_of(
+        it->second.begin(), it->second.end(),
+        [&](const TraitRef &impl) { return sameTraitRef(impl, tr); });
   };
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
@@ -682,12 +816,26 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
     Subst placeholders;
     for (auto *p : params)
       placeholders[*p] = Ctx.getObjTy();
+    // The bounds reported at the template for want of a place of their own.
+    std::vector<std::string> unplaced;
     for (const auto &traits : bounds)
-      for (ast::Type *b : traits)
-        if (!resolveTraitRef(b, placeholders, tmpl->getLocation())) {
+      for (ast::Type *b : traits) {
+        // Each where it is written.  A built-in type's name (`A: int`) has
+        // no place in the source: it is reported at its template, once,
+        // where two bounds read the same.
+        const bool placed = b->getLocation().isValid();
+        const std::string name = placed ? "" : typeName(b);
+        if (!placed &&
+            std::find(unplaced.begin(), unplaced.end(), name) != unplaced.end())
+          continue;
+        if (!resolveTraitRef(b, placeholders,
+                             placed ? b->getLocation() : tmpl->getLocation())) {
           BadBounds.insert(tmpl);
           ok = false;
+          if (!placed)
+            unplaced.push_back(name);
         }
+      }
   };
   for (auto *cd : tu->getGenericClassDecls())
     check(cd, cd->getTypeParams(), cd->getTypeParamBounds());
@@ -982,13 +1130,27 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
   for (size_t i = 0; i < params.size() && i < args.size(); ++i)
     subst[*params[i]] = args[i];
   bool ok = true;
-  for (size_t i = 0; i < bounds.size() && i < args.size(); ++i)
+  for (size_t i = 0; i < bounds.size() && i < args.size(); ++i) {
+    // A trait written twice (`G: Hashable + Hashable`) is one bound: an
+    // argument meets it or not once.  So is a bound written twice that does
+    // not resolve for the argument (`B: Conv<shared A> + Conv<shared A>`
+    // with A = int): resolved once, it is reported once.
+    std::vector<TraitRef> asked;
+    std::vector<std::string> written;
     for (ast::Type *b : bounds[i]) {
+      std::string spelled = typeName(b);
+      if (std::find(written.begin(), written.end(), spelled) != written.end())
+        continue;
+      written.push_back(std::move(spelled));
       auto tr = resolveTraitRef(b, subst, loc);
       if (!tr) {
         ok = false;
         continue;
       }
+      if (std::any_of(asked.begin(), asked.end(),
+                      [&](const TraitRef &a) { return sameTraitRef(a, *tr); }))
+        continue;
+      asked.push_back(*tr);
       if (!traitImplOwner(args[i], *tr) && !archetypeMeets(args[i], *tr)) {
         // A tuple, struct, enum or optional that does not show itself names
         // the part that does not.
@@ -1024,6 +1186,7 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
         ok = false;
       }
     }
+  }
   return ok;
 }
 

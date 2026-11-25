@@ -1292,6 +1292,459 @@ TEST(Generics, ABadBoundOfAnImportedTemplatesBlockIsItsModules) {
   std::filesystem::remove_all(dir);
 }
 
+namespace {
+/// The column (1-based) of the @p nth occurrence of @p needle in @p line.
+size_t columnOf(const std::string &line, const std::string &needle,
+                size_t nth = 0) {
+  size_t at = line.find(needle);
+  while (nth-- > 0 && at != std::string::npos)
+    at = line.find(needle, at + 1);
+  return at == std::string::npos ? 0 : at + 1;
+}
+} // namespace
+
+// What a bound of a template's own parameter names is the template's to
+// get right: one that names no trait is one error where it is written, and
+// one with no place of its own (a built-in type's name) one at its
+// template, once for two that read the same, whether the template has no
+// instance, one or two.  Base reported each at the template's first
+// column, so two bounds that read the same were one diagnostic said twice,
+// which the double-report guard aborts on.
+TEST(Generics, ABadBoundOfATemplateIsReportedOnceWhereItIsWritten) {
+  struct Template {
+    const char *Text; // line 1 of the program, BOUNDS for its bounds
+    const char *At;   // where the template starts on it
+    std::vector<const char *> Uses;
+  };
+  const std::vector<Template> templates = {
+      {"class Pair<BOUNDS> { a: A; b: B; }",
+       "class",
+       {"let p = Pair<int, bool>(1, True);",
+        "let q = Pair<bool, Str>(True, \"s\");"}},
+      {"struct Pair<BOUNDS> { a: A; b: B; }",
+       "struct",
+       {"let p = Pair<int, bool>(1, True);",
+        "let q = Pair<bool, Str>(True, \"s\");"}},
+      {"enum Pair<BOUNDS> { One(a: A), Two(b: B) }",
+       "enum",
+       {"let p: Pair<int, bool>? = None;", "let q: Pair<bool, Str>? = None;"}},
+      {"fn pair<BOUNDS>(a: view A, b: view B) -> int { return 1; }",
+       "fn",
+       {"let p = pair(1, True);", "let q = pair(True, \"s\");"}},
+      {"class Box<T> { v: T; } impl Box<T> { view fn pair<BOUNDS>(a: view A, "
+       "b: view B) -> int { return 1; } }",
+       "view fn",
+       {"let p = Box<int>(1).pair(1, True);",
+        "let q = Box<int>(2).pair(True, \"s\");"}},
+      {"class Box<T> { v: T; } impl Box<T> { static fn pair<BOUNDS>(a: view "
+       "A, b: view B) -> int { return 1; } }",
+       "fn pair", // (a `static fn` is where its `fn` is)
+       {"let p = Box<int>::pair(1, True);",
+        "let q = Box<bool>::pair(True, \"s\");"}},
+  };
+  struct Error {
+    const char *Bound; // nullptr: at the template
+    size_t Nth;        // which occurrence of the bound on the line
+    const char *Error;
+  };
+  struct Case {
+    const char *Bounds;
+    std::vector<Error> Reported;
+  };
+  const char *kCopyable = "trait 'Copyable' expects 0 type argument(s), got 1";
+  const std::vector<Case> cases = {
+      {"A: Copyable<int>, B: Copyable<int>",
+       {{"Copyable<int>", 0, kCopyable}, {"Copyable<int>", 1, kCopyable}}},
+      {"A: Nope, B: Nope",
+       {{"Nope", 0, "unknown trait 'Nope'"},
+        {"Nope", 1, "unknown trait 'Nope'"}}},
+      {"A: Hashable + Sendable<A>, B",
+       {{"Sendable<A>", 0,
+         "trait 'Sendable' expects 0 type argument(s), got 1"}}},
+      {"A: Copyable?, B: Copyable?",
+       {{"Copyable?", 0, "'Copyable?' is not a trait"},
+        {"Copyable?", 1, "'Copyable?' is not a trait"}}},
+      {"A: int, B: int", {{nullptr, 0, "'int' is not a trait"}}},
+      {"A: int + Obj, B: Obj + bool",
+       {{nullptr, 0, "'int' is not a trait"},
+        {nullptr, 0, "'Obj' is not a trait"},
+        {nullptr, 0, "'bool' is not a trait"}}},
+  };
+  for (const Template &t : templates)
+    for (const Case &c : cases)
+      for (size_t uses = 0; uses <= t.Uses.size(); ++uses) {
+        std::string line = t.Text;
+        line.replace(line.find("BOUNDS"), 6, c.Bounds);
+        std::string body;
+        for (size_t i = 0; i < uses; ++i)
+          body.append(t.Uses[i]).append(" ");
+        std::string program = line;
+        program.append("\nfn main() -> int { ")
+            .append(body)
+            .append("return 0; }\n");
+        auto r = semaCheck(program);
+        EXPECT_FALSE(r.Ok) << program;
+        EXPECT_EQ(r.ErrorCount, c.Reported.size()) << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), c.Reported.size())
+            << program << r.Diagnostics;
+        // A bound's column is after the template's own start.
+        const size_t bounds = columnOf(line, c.Bounds);
+        for (const Error &want : c.Reported) {
+          const size_t column =
+              want.Bound ? bounds - 1 + columnOf(c.Bounds, want.Bound, want.Nth)
+                         : columnOf(line, t.At);
+          EXPECT_EQ(countOf(r.Diagnostics, ":1:" + std::to_string(column) +
+                                               ": error: " + want.Error + "\n"),
+                    1u)
+              << program << r.Diagnostics;
+        }
+      }
+}
+
+// A template of another module is that module's: its bad bounds are
+// reported in its file, once each, where they are written, however many
+// instances the importer makes.  (Base aborted on the second.)
+TEST(Generics, ABadBoundOfAnImportedTemplateIsItsModules) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_own_bound";
+  for (const char *kind : {"class", "struct"})
+    for (const char *body :
+         {"", "let a = gen::Pair<int, bool>(1, True);",
+          "let a = gen::Pair<int, bool>(1, True); "
+          "let b = gen::Pair<bool, int>(True, 1); let c = gen::pair(1, 2);"}) {
+      std::filesystem::remove_all(dir);
+      writeProjectFile(dir, "lib/gen.pkn",
+                       std::string(kind) +
+                           " Pair<A: Copyable<int>, B: Copyable<int>> "
+                           "{ a: A; b: B; }\n"
+                           "fn pair<A: Nope, B: Nope>(a: view A, b: view B) "
+                           "-> int { return 1; }\n");
+      auto r = semaCheckFile(writeProjectFile(
+          dir, "main.pkn",
+          std::string("import lib::gen;\nfn main() -> int { ") + body +
+              " return 0; }\n"));
+      EXPECT_FALSE(r.Ok) << kind << ": " << body;
+      const size_t col = std::string(kind).size() + 10;
+      for (const std::string &want :
+           {":1:" + std::to_string(col) +
+                ": error: trait 'Copyable' expects 0 type argument(s), got 1\n",
+            ":1:" + std::to_string(col + 18) +
+                ": error: trait 'Copyable' expects 0 type argument(s), got 1\n",
+            std::string(":2:12: error: unknown trait 'Nope'\n"),
+            std::string(":2:21: error: unknown trait 'Nope'\n")})
+        EXPECT_EQ(countOf(r.Diagnostics, "lib/gen.pkn" + want), 1u)
+            << want << r.Diagnostics;
+      EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 4u) << r.Diagnostics;
+      EXPECT_TRUE(has(r.Diagnostics,
+                      "main.pkn:1:1: note: in module 'lib::gen' imported here"))
+          << r.Diagnostics;
+    }
+  std::filesystem::remove_all(dir);
+}
+
+// A trait written twice in a parameter's bounds is one bound: an argument
+// that does not meet it is one error where it is given, and one for each
+// other trait it does not meet.  Base checked the bound each time it was
+// written, so such a use reported one diagnostic twice, which the
+// double-report guard aborts on.
+TEST(Generics, ARepeatedBoundIsMetOrNotOnce) {
+  struct Template {
+    const char *Decl; // line 3 of the program, BOUNDS for G's bounds
+    const char *Use;  // a use with a `Node` for G
+    const char *Name; // the template, as its error names it
+  };
+  const std::vector<Template> templates = {
+      {"fn f<G: BOUNDS>(x: view G) -> int { return 0; }", "f(Node(1))", "f"},
+      {"class Box<G: BOUNDS> { v: G; }", "Box<Node>(Node(1))", "Box"},
+      {"struct Box<G: BOUNDS> { v: G; }", "Box<Node>(Node(1))", "Box"},
+      {"class H { n: int; } impl H { view fn f<G: BOUNDS>(x: view G) -> int "
+       "{ return 0; } }",
+       "H(1).f(Node(1))", "H.f"},
+      {"class H { n: int; } impl H { static fn f<G: BOUNDS>(x: view G) -> int "
+       "{ return 0; } }",
+       "H::f(Node(1))", "H::f"},
+  };
+  struct Case {
+    const char *Bounds;
+    std::vector<const char *> Unmet; // each with what follows its name
+  };
+  const std::vector<Case> cases = {
+      {"Hashable + Hashable", {"Hashable'"}},
+      {"Hashable + Cloneable + Hashable + Cloneable",
+       {"Hashable'", "Cloneable'"}},
+      {"Copyable + Copyable", {"Copyable'"}},
+      {"Conv<int> + Conv<int>", {"Conv<int>'"}},
+      {"Conv<int> + Showable + Conv<bool>", {"Conv<int>'", "Conv<bool>'"}},
+  };
+  for (const Template &t : templates)
+    for (const Case &c : cases) {
+      std::string decl = t.Decl;
+      decl.replace(decl.find("BOUNDS"), 6, c.Bounds);
+      std::string program = "trait Conv<Q> { view fn conv() -> int; }\n"
+                            "class Node { n: int; }\n";
+      program.append(decl).append("\nfn main() -> int { let a = ");
+      const size_t first = program.size() - program.rfind('\n');
+      program.append(t.Use).append("; let b = ");
+      const size_t second = program.size() - program.rfind('\n');
+      program.append(t.Use).append("; return 0; }\n");
+      auto r = semaCheck(program);
+      EXPECT_FALSE(r.Ok) << program;
+      EXPECT_EQ(r.ErrorCount, 2 * c.Unmet.size()) << program << r.Diagnostics;
+      for (size_t column : {first, second})
+        for (const char *unmet : c.Unmet)
+          EXPECT_EQ(countOf(r.Diagnostics,
+                            ":4:" + std::to_string(column) +
+                                ": error: 'Node' does not implement trait '" +
+                                unmet + ", which '" + t.Name +
+                                "' requires of 'G'"),
+                    1u)
+              << program << r.Diagnostics;
+    }
+  // And one an argument meets is met: twice written, or with another.
+  auto ok = semaCheck(R"(trait Conv<Q> { view fn conv() -> int; }
+class Node { n: int; }
+impl Hashable for Node { view fn hash() -> int { return self.n; } }
+impl Conv<int> for Node { view fn conv() -> int { return self.n + 1; } }
+fn f<G: Hashable + Conv<int> + Hashable + Conv<int>>(x: view G) -> int {
+  return x.hash() + x.conv();
+}
+class Box<G: Hashable + Hashable> { v: G; }
+fn main() -> int { let b = Box<Node>(Node(2)); return f(Node(1)) + f(b.v); }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+}
+
+namespace {
+/// The declarations after a template's block in the programs below.
+const char *kTraitDecls = "trait Conv<Q> { view fn conv() -> int; }\n"
+                          "trait Named { view fn name() -> int; }\n"
+                          "class Other<W> { w: W; }\n"
+                          "struct Pt<W> { w: W; }\n"
+                          "enum E<W> { A(w: W), B }\n"
+                          "class Node { n: int; }\n";
+} // namespace
+
+// What the trait of a template's `impl` block names is the block's to get
+// right, not an instance's: a trait, given as many type arguments as it
+// takes, each made of types there are.  One that does not is one error at
+// the block, whether the template has no instance, one, two, or ones
+// joined later, and the block joins none of them.  Base resolved the
+// trait for each instance: a template without instances was accepted, and
+// each instance reported the trait again.
+TEST(Generics, ABadTraitOfABlockIsReportedOnceAtTheBlock) {
+  struct Block {
+    const char *Trait;
+    const char *Error;
+  };
+  const std::vector<Block> blocks = {
+      {"Hashable<int>", "trait 'Hashable' expects 0 type argument(s), got 1"},
+      {"Unknown", "unknown trait 'Unknown'"},
+      {"Node", "'Node' is not a trait"},
+      {"Show", "'Show' is now 'Showable'"},
+      {"Conv", "trait 'Conv' expects 1 type argument(s), got 0"},
+      {"Conv<T, T>", "trait 'Conv' expects 1 type argument(s), got 2"},
+      {"Conv<Undefined>",
+       "type argument 1 of trait 'Conv' has unknown class type 'Undefined'"},
+      {"Conv<shared Undefined?>",
+       "type argument 1 of trait 'Conv' has unknown class type 'Undefined'"},
+      {"Conv<(T, Undefined)>", "type argument 1 of trait 'Conv' element 1 has "
+                               "unknown class type 'Undefined'"},
+      {"Conv<(view T) -> Undefined[4]>",
+       "type argument 1 of trait 'Conv' result element has unknown class type "
+       "'Undefined'"},
+      {"Conv<Pt<Undefined>>", "type argument 1 of trait 'Conv' type argument 1 "
+                              "of 'Pt' has unknown class type 'Undefined'"},
+      {"Conv<Named>", "type argument 1 of trait 'Conv' names trait 'Named', "
+                      "which is not a type (use a type parameter bounded by "
+                      "it: '<T: Named>')"},
+      {"Conv<Other>", "type argument 1 of trait 'Conv' names generic class "
+                      "'Other' without type arguments (write 'Other<...>')"},
+      {"Conv<Nope<T>>", "unknown generic class 'Nope'"},
+      {"Conv<Node<T>>",
+       "'Node' is not a generic class and takes no type arguments"},
+      {"Conv<Other<T, T>>",
+       "generic class 'Other' expects 1 type argument(s), got 2"},
+      {"Conv<Pt<int, T>>",
+       "generic struct 'Pt' expects 1 type argument(s), got 2"},
+      {"Conv<E<Pt<T>, int>>",
+       "generic enum 'E' expects 1 type argument(s), got 2"},
+  };
+  struct Use {
+    const char *Decls;
+    const char *Body;
+  };
+  const std::vector<Use> uses = {
+      {"", ""},
+      {"", "let a = Box<int>(1);"},
+      {"", "let a = Box<int>(1); let b = Box<bool>(True);"},
+      // Named before their arguments are whole.
+      {"class Holder { a: Box<Key>?; b: Box<Tree>?; }\n"
+       "class Key { n: int; }\n"
+       "class Tree { k: Key; }\n",
+       ""},
+  };
+  for (const char *kind : {"class", "struct"})
+    for (const Block &block : blocks)
+      for (const Use &use : uses) {
+        std::string program = std::string(kind) + " Box<T> { v: T; }\nimpl ";
+        program.append(block.Trait)
+            .append(" for Box<T> { view fn conv() -> int { return 1; } }\n")
+            .append(kTraitDecls)
+            .append(use.Decls)
+            .append("fn main() -> int { ")
+            .append(use.Body)
+            .append(" return 0; }\n");
+        auto r = semaCheck(program);
+        EXPECT_FALSE(r.Ok) << program;
+        EXPECT_EQ(r.ErrorCount, 1u) << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics,
+                          std::string(":2:1: error: ") + block.Error + "\n"),
+                  1u)
+            << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 1u)
+            << program << r.Diagnostics;
+        EXPECT_FALSE(has(r.Diagnostics, "in instantiation of"))
+            << program << r.Diagnostics;
+      }
+}
+
+// A block's trait that names what there is is each instance's, as before:
+// the module's own generic trait, declared before or after the block,
+// given the block's parameters, the module's classes declared after it,
+// templates, and composites of them.  The block's methods are the
+// instances'.  What a type argument is as a type is still each instance's:
+// `Conv<Other<T>>` of an `Other<W: Copyable>` is an error of `Box<Node>`
+// and `Box<Str>`, and of no other instance.  Checking the block's trait
+// instantiates nothing: no `Other` of a stand-in for `T`, whose bound
+// would not hold.
+TEST(Generics, ABlocksTraitIsEachInstancesAsItIsWritten) {
+  for (const char *kind : {"class", "struct"})
+    for (const char *trait :
+         {"Conv<int>", "Conv<T>", "Conv<Node>", "Conv<Other<T>>",
+          "Conv<atomic T>", "Conv<(T, Node)>", "Conv<shared Node?>",
+          "Conv<(view T) -> int>", "Conv<Pt<T>>", "Conv<E<T>>", "Conv<Box<T>>",
+          "Conv<Other<Pt<E<(T, int)>>>>"})
+      for (const char *body :
+           {"return 0;", "let a = Box<int>(1); let b = Box<bool>(True); "
+                         "return a.conv() + b.conv();"}) {
+        std::string program = std::string(kind) + " Box<T> { v: T; }\nimpl ";
+        program.append(trait)
+            .append(" for Box<T> { view fn conv() -> int { return 7; } }\n")
+            .append(kTraitDecls)
+            .append("fn main() -> int { ")
+            .append(body)
+            .append(" }\n");
+        auto r = semaCheck(program);
+        EXPECT_TRUE(r.Ok) << program << r.Diagnostics;
+      }
+  // Through a bound: the trait declared after the block.
+  auto bound = semaCheck(R"(class Box<T> { v: T; }
+impl Conv<int> for Box<T> { view fn conv() -> int { return 7; } }
+fn use<X: Conv<int>>(x: view X) -> int { return x.conv(); }
+trait Conv<Q> { view fn conv() -> int; }
+fn main() -> int { let a = Box<int>(1); let b = Box<Str>("s"); return use(a) + use(b); }
+)");
+  EXPECT_TRUE(bound.Ok) << bound.Diagnostics;
+  // An instance whose argument the trait's cannot be.
+  auto some = semaCheck(R"(trait Conv<Q> { view fn conv() -> int; }
+class Other<W: Copyable> { w: W; }
+class Node { n: int; }
+class Box<T> { v: T; }
+impl Conv<Other<T>> for Box<T> { view fn conv() -> int { return 1; } }
+fn main() -> int { let a = Box<Node>(Node(1)); let b = Box<int>(1); let c = Box<Str>("s"); return 0; }
+)");
+  EXPECT_FALSE(some.Ok);
+  EXPECT_EQ(some.ErrorCount, 2u) << some.Diagnostics;
+  for (const char *arg : {"Node", "Str"})
+    EXPECT_EQ(countOf(some.Diagnostics,
+                      std::string(":5:1: error: '") + arg +
+                          "' does not implement trait 'Copyable', which "
+                          "'Other' requires of 'W'"),
+              1u)
+        << some.Diagnostics;
+  EXPECT_TRUE(has(some.Diagnostics,
+                  "note: in instantiation of 'Box<Node>' requested here"))
+      << some.Diagnostics;
+  EXPECT_TRUE(has(some.Diagnostics,
+                  "note: in instantiation of 'Box<Str>' requested here"))
+      << some.Diagnostics;
+  // No instance, and none of `Other` made for the check (the archetype
+  // check's own, `Other<%T>`, are dropped before the lowering).
+  auto none = check(R"(trait Conv<Q> { view fn conv() -> int; }
+class Other<W: Hashable> { w: W; }
+class Box<T> { v: T; }
+impl Conv<Other<T>> for Box<T> { view fn conv() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(none.Ok) << none.Diagnostics;
+  for (const auto &[name, ct] : none.Driver->getASTContext().getClassTypes())
+    EXPECT_FALSE(name.starts_with("Other<") &&
+                 name.find('%') == std::string::npos)
+        << name;
+}
+
+// The block of a module's own template is that module's: its bad trait is
+// one error in its file, however many instances an importer makes.  (Base
+// accepted the module, and reported a built-in trait's in the importer's
+// file once per instance; a trait of no name, not at all.)  A module's own
+// generic trait, declared after its block, is the instances' trait there.
+TEST(Generics, ABadTraitOfAnImportedTemplatesBlockIsItsModules) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_trait";
+  struct Block {
+    const char *Trait;
+    const char *Error;
+  };
+  for (const char *kind : {"class", "struct"})
+    for (const Block &block :
+         {Block{"Hashable<int>",
+                "trait 'Hashable' expects 0 type argument(s), got 1"},
+          Block{"Unknown", "unknown trait 'Unknown'"},
+          Block{"Conv<Undefined>", "type argument 1 of trait 'Conv' has "
+                                   "unknown class type 'Undefined'"}})
+      for (const char *body :
+           {"", "let a = gen::Box<int>(1);",
+            "let a = gen::Box<int>(1); let b = gen::Box<bool>(True);"}) {
+        std::filesystem::remove_all(dir);
+        writeProjectFile(dir, "lib/gen.pkn",
+                         std::string(kind) + " Box<T> { v: T; }\nimpl " +
+                             block.Trait +
+                             " for Box<T> { view fn conv() -> int "
+                             "{ return 1; } }\n"
+                             "trait Conv<Q> { view fn conv() -> int; }\n");
+        auto r = semaCheckFile(writeProjectFile(
+            dir, "main.pkn",
+            std::string("import lib::gen;\nfn main() -> int { ") + body +
+                " return 0; }\n"));
+        EXPECT_FALSE(r.Ok) << kind << ": " << block.Trait << ": " << body;
+        EXPECT_EQ(
+            countOf(r.Diagnostics, std::string("lib/gen.pkn:2:1: error: ") +
+                                       block.Error + "\n"),
+            1u)
+            << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 1u) << r.Diagnostics;
+        EXPECT_TRUE(has(r.Diagnostics, "main.pkn:1:1: note: in module "
+                                       "'lib::gen' imported here"))
+            << r.Diagnostics;
+      }
+  for (const char *kind : {"class", "struct"}) {
+    std::filesystem::remove_all(dir);
+    writeProjectFile(dir, "lib/gen.pkn",
+                     std::string(kind) +
+                         " Box<T> { v: T; }\n"
+                         "impl Conv<int> for Box<T> { view fn conv() -> int "
+                         "{ return 7; } }\n"
+                         "trait Conv<Q> { view fn conv() -> int; }\n"
+                         "fn use<X: Conv<int>>(x: view X) -> int "
+                         "{ return x.conv(); }\n"
+                         "fn run() -> int { return use(Box<int>(1)); }\n");
+    auto r = semaCheckFile(writeProjectFile(
+        dir, "main.pkn",
+        "import lib::gen;\nfn main() -> int { let b = gen::Box<bool>(True); "
+        "return gen::run() + b.conv(); }\n"));
+    EXPECT_TRUE(r.Ok) << kind << ": " << r.Diagnostics;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 // A conditional block joins the instances whose arguments meet its
 // bounds, whatever the order of the declarations: an argument declared
 // after the instance is first named, or one that holds the instance, is
@@ -2316,4 +2769,50 @@ TEST(Generics, ABoundedBlocksStaticInitIsNoInitializer) {
       EXPECT_EQ(countOf(r.Diagnostics, "expects 2 argument(s), got 0"), 1u)
           << program << r.Diagnostics;
     }
+}
+
+// A bound written twice that does not resolve for the argument is resolved
+// once, and reported once (`Conv<shared A>` with A = `int`): the bound is
+// one, as a trait written twice is.  (It was resolved, and reported, once
+// for each time it was written: the same diagnostic twice.)
+TEST(Generics, ARepeatedBoundThatDoesNotResolveIsReportedOnce) {
+  for (const char *use :
+       {"fn f<A, B: Conv<shared A> + Conv<shared A>>(a: view A, b: view B) "
+        "-> int { return 0; }\n"
+        "fn main() -> int { return f(1, Node(2)); }\n",
+        "class Box<A, B: Conv<shared A> + Conv<shared A>> { a: A; b: B; }\n"
+        "fn main() -> int { let x = Box<int, Node>(1, Node(2)); return 0; "
+        "}\n"}) {
+    const std::string program =
+        std::string("trait Conv<Q> { view fn cv() -> "
+                    "int; }\nclass Node { n: int; }\n") +
+        use;
+    auto r = semaCheck(program);
+    EXPECT_FALSE(r.Ok) << program;
+    EXPECT_EQ(r.ErrorCount, 1u) << program << r.Diagnostics;
+    EXPECT_EQ(
+        countOf(r.Diagnostics,
+                "error: 'shared' qualifies a reference; 'int' is a value"),
+        1u)
+        << program << r.Diagnostics;
+  }
+}
+
+// A block whose trait names nothing and whose bounds are bad is reported
+// for both, once each, where each is written.
+TEST(Generics, ABlocksBadTraitAndBadBoundsAreEachReported) {
+  auto r = semaCheck(R"(trait Conv<Q> { view fn cv() -> int; }
+class Box<T> { v: T; }
+impl Conv<Undefined> for Box<T: Nope + Copyable<int>> { view fn cv() -> int { return 1; } }
+fn main() -> int { let a = Box<int>(1); let b = Box<bool>(True); return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  for (const char *want :
+       {":3:1: error: type argument 1 of trait 'Conv' has unknown class type "
+        "'Undefined'\n",
+        ":3:33: error: the bounds of an 'impl' block name built-in traits "
+        "('Cloneable', 'Copyable', ...), not 'Nope'\n",
+        ":3:40: error: trait 'Copyable' expects 0 type argument(s), got 1\n"})
+    EXPECT_EQ(countOf(r.Diagnostics, want), 1u) << want << r.Diagnostics;
 }

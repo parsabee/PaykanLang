@@ -295,7 +295,7 @@ impl Show for P { view fn text() -> Str { return "p"; } }
 fn main() -> int { return ok(A(1)).len(); }
 )");
   EXPECT_EQ(r.ErrorCount, 3) << r.Diagnostics;
-  for (const char *at : {":3:1:", ":4:1:", ":6:1:"})
+  for (const char *at : {":3:12:", ":4:23:", ":6:1:"})
     EXPECT_NE(r.Diagnostics.find(std::string(at) +
                                  " error: 'Show' is now 'Showable'"),
               std::string::npos)
@@ -316,7 +316,7 @@ fn main() -> int { return t(A(1)).len(); }
 fn t<T: Show>(v: view T) -> int { return 0; }
 fn main() -> int { return 0; }
 )");
-    EXPECT_NE(ty.Diagnostics.find(":2:1: error: 'Show' is not a trait"),
+    EXPECT_NE(ty.Diagnostics.find(":2:9: error: 'Show' is not a trait"),
               std::string::npos)
         << decl << "\n"
         << ty.Diagnostics;
