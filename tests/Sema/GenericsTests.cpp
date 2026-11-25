@@ -1441,6 +1441,78 @@ TEST(Generics, ABadBoundOfAnImportedTemplateIsItsModules) {
   std::filesystem::remove_all(dir);
 }
 
+// A trait written twice in a parameter's bounds is one bound: an argument
+// that does not meet it is one error where it is given, and one for each
+// other trait it does not meet.  Base checked the bound each time it was
+// written, so such a use reported one diagnostic twice, which the
+// double-report guard aborts on.
+TEST(Generics, ARepeatedBoundIsMetOrNotOnce) {
+  struct Template {
+    const char *Decl; // line 3 of the program, BOUNDS for G's bounds
+    const char *Use;  // a use with a `Node` for G
+    const char *Name; // the template, as its error names it
+  };
+  const std::vector<Template> templates = {
+      {"fn f<G: BOUNDS>(x: view G) -> int { return 0; }", "f(Node(1))", "f"},
+      {"class Box<G: BOUNDS> { v: G; }", "Box<Node>(Node(1))", "Box"},
+      {"struct Box<G: BOUNDS> { v: G; }", "Box<Node>(Node(1))", "Box"},
+      {"class H { n: int; } impl H { view fn f<G: BOUNDS>(x: view G) -> int "
+       "{ return 0; } }",
+       "H(1).f(Node(1))", "H.f"},
+      {"class H { n: int; } impl H { static fn f<G: BOUNDS>(x: view G) -> int "
+       "{ return 0; } }",
+       "H::f(Node(1))", "H::f"},
+  };
+  struct Case {
+    const char *Bounds;
+    std::vector<const char *> Unmet; // each with what follows its name
+  };
+  const std::vector<Case> cases = {
+      {"Hashable + Hashable", {"Hashable'"}},
+      {"Hashable + Cloneable + Hashable + Cloneable",
+       {"Hashable'", "Cloneable'"}},
+      {"Copyable + Copyable", {"Copyable'"}},
+      {"Conv<int> + Conv<int>", {"Conv<int>'"}},
+      {"Conv<int> + Showable + Conv<bool>", {"Conv<int>'", "Conv<bool>'"}},
+  };
+  for (const Template &t : templates)
+    for (const Case &c : cases) {
+      std::string decl = t.Decl;
+      decl.replace(decl.find("BOUNDS"), 6, c.Bounds);
+      std::string program = "trait Conv<Q> { view fn conv() -> int; }\n"
+                            "class Node { n: int; }\n";
+      program.append(decl).append("\nfn main() -> int { let a = ");
+      const size_t first = program.size() - program.rfind('\n');
+      program.append(t.Use).append("; let b = ");
+      const size_t second = program.size() - program.rfind('\n');
+      program.append(t.Use).append("; return 0; }\n");
+      auto r = semaCheck(program);
+      EXPECT_FALSE(r.Ok) << program;
+      EXPECT_EQ(r.ErrorCount, 2 * c.Unmet.size()) << program << r.Diagnostics;
+      for (size_t column : {first, second})
+        for (const char *unmet : c.Unmet)
+          EXPECT_EQ(countOf(r.Diagnostics,
+                            ":4:" + std::to_string(column) +
+                                ": error: 'Node' does not implement trait '" +
+                                unmet + ", which '" + t.Name +
+                                "' requires of 'G'"),
+                    1u)
+              << program << r.Diagnostics;
+    }
+  // And one an argument meets is met: twice written, or with another.
+  auto ok = semaCheck(R"(trait Conv<Q> { view fn conv() -> int; }
+class Node { n: int; }
+impl Hashable for Node { view fn hash() -> int { return self.n; } }
+impl Conv<int> for Node { view fn conv() -> int { return self.n + 1; } }
+fn f<G: Hashable + Conv<int> + Hashable + Conv<int>>(x: view G) -> int {
+  return x.hash() + x.conv();
+}
+class Box<G: Hashable + Hashable> { v: G; }
+fn main() -> int { let b = Box<Node>(Node(2)); return f(Node(1)) + f(b.v); }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+}
+
 // A conditional block joins the instances whose arguments meet its
 // bounds, whatever the order of the declarations: an argument declared
 // after the instance is first named, or one that holds the instance, is
@@ -2465,4 +2537,31 @@ TEST(Generics, ABoundedBlocksStaticInitIsNoInitializer) {
       EXPECT_EQ(countOf(r.Diagnostics, "expects 2 argument(s), got 0"), 1u)
           << program << r.Diagnostics;
     }
+}
+
+// A bound written twice that does not resolve for the argument is resolved
+// once, and reported once (`Conv<shared A>` with A = `int`): the bound is
+// one, as a trait written twice is.  (It was resolved, and reported, once
+// for each time it was written: the same diagnostic twice.)
+TEST(Generics, ARepeatedBoundThatDoesNotResolveIsReportedOnce) {
+  for (const char *use :
+       {"fn f<A, B: Conv<shared A> + Conv<shared A>>(a: view A, b: view B) "
+        "-> int { return 0; }\n"
+        "fn main() -> int { return f(1, Node(2)); }\n",
+        "class Box<A, B: Conv<shared A> + Conv<shared A>> { a: A; b: B; }\n"
+        "fn main() -> int { let x = Box<int, Node>(1, Node(2)); return 0; "
+        "}\n"}) {
+    const std::string program =
+        std::string("trait Conv<Q> { view fn cv() -> "
+                    "int; }\nclass Node { n: int; }\n") +
+        use;
+    auto r = semaCheck(program);
+    EXPECT_FALSE(r.Ok) << program;
+    EXPECT_EQ(r.ErrorCount, 1u) << program << r.Diagnostics;
+    EXPECT_EQ(
+        countOf(r.Diagnostics,
+                "error: 'shared' qualifies a reference; 'int' is a value"),
+        1u)
+        << program << r.Diagnostics;
+  }
 }

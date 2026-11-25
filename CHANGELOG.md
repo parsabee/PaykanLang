@@ -749,6 +749,11 @@ samples/concurrency/README.md.
   written; one with no place of its own (`A: int`) at its template, once for two that read
   the same (src/Sema: `checkBoundDecls`; tests/Sema/GenericsTests.cpp,
   `ABadBoundOfATemplateIsReportedOnceWhereItIsWritten`).
+- A trait written twice in a parameter's bounds (`fn f<G: Hashable + Hashable>`) was checked
+  twice where the template was used: an argument that did not implement it was one error said
+  twice, the same abort. The trait is one bound, and an argument that does not meet it one
+  error at the use (src/Sema: `checkBounds`; tests/Sema/GenericsTests.cpp,
+  `ARepeatedBoundIsMetOrNotOnce`).
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is

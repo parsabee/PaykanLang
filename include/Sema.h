@@ -2844,6 +2844,8 @@ private:
   std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
                                           ast::SourceLocation loc);
   static std::string traitRefName(const TraitRef &tr);
+  /// Whether @p a and @p b are the same trait with the same type arguments.
+  static bool sameTraitRef(const TraitRef &a, const TraitRef &b);
   /// Whether the trait annotation @p ref names a built-in trait (`Showable`,
   /// `Hashable`, `ValueType`): the same trait in every module.
   bool namesBuiltinTrait(const ast::Type *ref) const;

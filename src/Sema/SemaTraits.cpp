@@ -313,19 +313,21 @@ std::string Sema::traitRefName(const TraitRef &tr) {
   return s + ">";
 }
 
+bool Sema::sameTraitRef(const TraitRef &a, const TraitRef &b) {
+  bool same = a.Trait == b.Trait && a.Args.size() == b.Args.size();
+  for (size_t i = 0; same && i < a.Args.size(); ++i)
+    same = typesEqual(a.Args[i], b.Args[i]);
+  return same;
+}
+
 const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto has = [&](const ast::Type *t) {
     auto it = TraitImpls.find(t);
     if (it == TraitImpls.end())
       return false;
-    for (const auto &impl : it->second) {
-      bool same = impl.Trait == tr.Trait && impl.Args.size() == tr.Args.size();
-      for (size_t i = 0; same && i < impl.Args.size(); ++i)
-        same = typesEqual(impl.Args[i], tr.Args[i]);
-      if (same)
-        return true;
-    }
-    return false;
+    return std::any_of(
+        it->second.begin(), it->second.end(),
+        [&](const TraitRef &impl) { return sameTraitRef(impl, tr); });
   };
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
@@ -996,13 +998,27 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
   for (size_t i = 0; i < params.size() && i < args.size(); ++i)
     subst[*params[i]] = args[i];
   bool ok = true;
-  for (size_t i = 0; i < bounds.size() && i < args.size(); ++i)
+  for (size_t i = 0; i < bounds.size() && i < args.size(); ++i) {
+    // A trait written twice (`G: Hashable + Hashable`) is one bound: an
+    // argument meets it or not once.  So is a bound written twice that does
+    // not resolve for the argument (`B: Conv<shared A> + Conv<shared A>`
+    // with A = int): resolved once, it is reported once.
+    std::vector<TraitRef> asked;
+    std::vector<std::string> written;
     for (ast::Type *b : bounds[i]) {
+      std::string spelled = typeName(b);
+      if (std::find(written.begin(), written.end(), spelled) != written.end())
+        continue;
+      written.push_back(std::move(spelled));
       auto tr = resolveTraitRef(b, subst, loc);
       if (!tr) {
         ok = false;
         continue;
       }
+      if (std::any_of(asked.begin(), asked.end(),
+                      [&](const TraitRef &a) { return sameTraitRef(a, *tr); }))
+        continue;
+      asked.push_back(*tr);
       if (!traitImplOwner(args[i], *tr) && !archetypeMeets(args[i], *tr)) {
         // A tuple, struct, enum or optional that does not show itself names
         // the part that does not.
@@ -1038,6 +1054,7 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
         ok = false;
       }
     }
+  }
   return ok;
 }
 
