@@ -682,12 +682,26 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
     Subst placeholders;
     for (auto *p : params)
       placeholders[*p] = Ctx.getObjTy();
+    // The bounds reported at the template for want of a place of their own.
+    std::vector<std::string> unplaced;
     for (const auto &traits : bounds)
-      for (ast::Type *b : traits)
-        if (!resolveTraitRef(b, placeholders, tmpl->getLocation())) {
+      for (ast::Type *b : traits) {
+        // Each where it is written.  A built-in type's name (`A: int`) has
+        // no place in the source: it is reported at its template, once,
+        // where two bounds read the same.
+        const bool placed = b->getLocation().isValid();
+        const std::string name = placed ? "" : typeName(b);
+        if (!placed &&
+            std::find(unplaced.begin(), unplaced.end(), name) != unplaced.end())
+          continue;
+        if (!resolveTraitRef(b, placeholders,
+                             placed ? b->getLocation() : tmpl->getLocation())) {
           BadBounds.insert(tmpl);
           ok = false;
+          if (!placed)
+            unplaced.push_back(name);
         }
+      }
   };
   for (auto *cd : tu->getGenericClassDecls())
     check(cd, cd->getTypeParams(), cd->getTypeParamBounds());

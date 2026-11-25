@@ -2922,7 +2922,9 @@ private:
   /// Templates with a bound that names no trait (reported with them).
   std::set<const ast::Decl *> BadBounds;
 
-  /// Check that the bounds of the module's templates name traits.
+  /// Check that the bounds of the module's templates name traits: each one
+  /// that does not is reported once, where it is written (at its template,
+  /// once for two that read the same, where it has no place of its own).
   bool checkBoundDecls(ast::TranslationUnit *tu);
   /// The archetype check (#368; docs/language/13-generics.md, "The
   /// archetype check"): each template of this module once more, with an

@@ -1292,6 +1292,155 @@ TEST(Generics, ABadBoundOfAnImportedTemplatesBlockIsItsModules) {
   std::filesystem::remove_all(dir);
 }
 
+namespace {
+/// The column (1-based) of the @p nth occurrence of @p needle in @p line.
+size_t columnOf(const std::string &line, const std::string &needle,
+                size_t nth = 0) {
+  size_t at = line.find(needle);
+  while (nth-- > 0 && at != std::string::npos)
+    at = line.find(needle, at + 1);
+  return at == std::string::npos ? 0 : at + 1;
+}
+} // namespace
+
+// What a bound of a template's own parameter names is the template's to
+// get right: one that names no trait is one error where it is written, and
+// one with no place of its own (a built-in type's name) one at its
+// template, once for two that read the same, whether the template has no
+// instance, one or two.  Base reported each at the template's first
+// column, so two bounds that read the same were one diagnostic said twice,
+// which the double-report guard aborts on.
+TEST(Generics, ABadBoundOfATemplateIsReportedOnceWhereItIsWritten) {
+  struct Template {
+    const char *Text; // line 1 of the program, BOUNDS for its bounds
+    const char *At;   // where the template starts on it
+    std::vector<const char *> Uses;
+  };
+  const std::vector<Template> templates = {
+      {"class Pair<BOUNDS> { a: A; b: B; }",
+       "class",
+       {"let p = Pair<int, bool>(1, True);",
+        "let q = Pair<bool, Str>(True, \"s\");"}},
+      {"struct Pair<BOUNDS> { a: A; b: B; }",
+       "struct",
+       {"let p = Pair<int, bool>(1, True);",
+        "let q = Pair<bool, Str>(True, \"s\");"}},
+      {"enum Pair<BOUNDS> { One(a: A), Two(b: B) }",
+       "enum",
+       {"let p: Pair<int, bool>? = None;", "let q: Pair<bool, Str>? = None;"}},
+      {"fn pair<BOUNDS>(a: view A, b: view B) -> int { return 1; }",
+       "fn",
+       {"let p = pair(1, True);", "let q = pair(True, \"s\");"}},
+      {"class Box<T> { v: T; } impl Box<T> { view fn pair<BOUNDS>(a: view A, "
+       "b: view B) -> int { return 1; } }",
+       "view fn",
+       {"let p = Box<int>(1).pair(1, True);",
+        "let q = Box<int>(2).pair(True, \"s\");"}},
+      {"class Box<T> { v: T; } impl Box<T> { static fn pair<BOUNDS>(a: view "
+       "A, b: view B) -> int { return 1; } }",
+       "fn pair", // (a `static fn` is where its `fn` is)
+       {"let p = Box<int>::pair(1, True);",
+        "let q = Box<bool>::pair(True, \"s\");"}},
+  };
+  struct Reported {
+    const char *Bound; // nullptr: at the template
+    size_t Nth;        // which occurrence of the bound on the line
+    const char *Error;
+  };
+  struct Case {
+    const char *Bounds;
+    std::vector<Reported> Reported;
+  };
+  const char *kCopyable = "trait 'Copyable' expects 0 type argument(s), got 1";
+  const std::vector<Case> cases = {
+      {"A: Copyable<int>, B: Copyable<int>",
+       {{"Copyable<int>", 0, kCopyable}, {"Copyable<int>", 1, kCopyable}}},
+      {"A: Nope, B: Nope",
+       {{"Nope", 0, "unknown trait 'Nope'"},
+        {"Nope", 1, "unknown trait 'Nope'"}}},
+      {"A: Hashable + Sendable<A>, B",
+       {{"Sendable<A>", 0,
+         "trait 'Sendable' expects 0 type argument(s), got 1"}}},
+      {"A: Copyable?, B: Copyable?",
+       {{"Copyable?", 0, "'Copyable?' is not a trait"},
+        {"Copyable?", 1, "'Copyable?' is not a trait"}}},
+      {"A: int, B: int", {{nullptr, 0, "'int' is not a trait"}}},
+      {"A: int + Obj, B: Obj + bool",
+       {{nullptr, 0, "'int' is not a trait"},
+        {nullptr, 0, "'Obj' is not a trait"},
+        {nullptr, 0, "'bool' is not a trait"}}},
+  };
+  for (const Template &t : templates)
+    for (const Case &c : cases)
+      for (size_t uses = 0; uses <= t.Uses.size(); ++uses) {
+        std::string line = t.Text;
+        line.replace(line.find("BOUNDS"), 6, c.Bounds);
+        std::string body;
+        for (size_t i = 0; i < uses; ++i)
+          body.append(t.Uses[i]).append(" ");
+        std::string program = line;
+        program.append("\nfn main() -> int { ")
+            .append(body)
+            .append("return 0; }\n");
+        auto r = semaCheck(program);
+        EXPECT_FALSE(r.Ok) << program;
+        EXPECT_EQ(r.ErrorCount, c.Reported.size()) << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), c.Reported.size())
+            << program << r.Diagnostics;
+        // A bound's column is after the template's own start.
+        const size_t bounds = columnOf(line, c.Bounds);
+        for (const Reported &want : c.Reported) {
+          const size_t column =
+              want.Bound ? bounds - 1 + columnOf(c.Bounds, want.Bound, want.Nth)
+                         : columnOf(line, t.At);
+          EXPECT_EQ(countOf(r.Diagnostics, ":1:" + std::to_string(column) +
+                                               ": error: " + want.Error + "\n"),
+                    1u)
+              << program << r.Diagnostics;
+        }
+      }
+}
+
+// A template of another module is that module's: its bad bounds are
+// reported in its file, once each, where they are written, however many
+// instances the importer makes.  (Base aborted on the second.)
+TEST(Generics, ABadBoundOfAnImportedTemplateIsItsModules) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_own_bound";
+  for (const char *kind : {"class", "struct"})
+    for (const char *body :
+         {"", "let a = gen::Pair<int, bool>(1, True);",
+          "let a = gen::Pair<int, bool>(1, True); "
+          "let b = gen::Pair<bool, int>(True, 1); let c = gen::pair(1, 2);"}) {
+      std::filesystem::remove_all(dir);
+      writeProjectFile(dir, "lib/gen.pkn",
+                       std::string(kind) +
+                           " Pair<A: Copyable<int>, B: Copyable<int>> "
+                           "{ a: A; b: B; }\n"
+                           "fn pair<A: Nope, B: Nope>(a: view A, b: view B) "
+                           "-> int { return 1; }\n");
+      auto r = semaCheckFile(writeProjectFile(
+          dir, "main.pkn",
+          std::string("import lib::gen;\nfn main() -> int { ") + body +
+              " return 0; }\n"));
+      EXPECT_FALSE(r.Ok) << kind << ": " << body;
+      const size_t col = std::string(kind).size() + 10;
+      for (const std::string &want :
+           {":1:" + std::to_string(col) +
+                ": error: trait 'Copyable' expects 0 type argument(s), got 1\n",
+            ":1:" + std::to_string(col + 18) +
+                ": error: trait 'Copyable' expects 0 type argument(s), got 1\n",
+            std::string(":2:12: error: unknown trait 'Nope'\n"),
+            std::string(":2:21: error: unknown trait 'Nope'\n")})
+        EXPECT_EQ(countOf(r.Diagnostics, "lib/gen.pkn" + want), 1u)
+            << want << r.Diagnostics;
+      EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 4u) << r.Diagnostics;
+      EXPECT_TRUE(has(r.Diagnostics,
+                      "main.pkn:1:1: note: in module 'lib::gen' imported here"))
+          << r.Diagnostics;
+    }
+  std::filesystem::remove_all(dir);
+}
+
 // A conditional block joins the instances whose arguments meet its
 // bounds, whatever the order of the declarations: an argument declared
 // after the instance is first named, or one that holds the instance, is

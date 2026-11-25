@@ -78,8 +78,8 @@ fn main() -> int { return 0; }
            ":31:10: error: function 'Pub::made' is public but its result names "
            "the private type '_Loc'; make the function private or the type "
            "public",
-           ":21:3: error: unknown trait 'Nope'",
-           ":22:10: error: 'P' is not a trait",
+           ":21:16: error: unknown trait 'Nope'",
+           ":22:18: error: 'P' is not a trait",
        })
     EXPECT_NE(r.Diagnostics.find(want), std::string::npos) << want << "\n"
                                                            << r.Diagnostics;

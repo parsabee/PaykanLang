@@ -742,6 +742,13 @@ samples/concurrency/README.md.
   Cloneable for Bx<T: Cloneable>', and 'Plain' is not 'Cloneable'` (src/Sema: `laysOut`,
   `joinLateImpls`; tests/Sema/GenericsTests.cpp, `ABlockThatLaysOutAnInstanceJoinsItLater`;
   samples/codegen/98_laid_out_blocks_of_later_types.pkn).
+- A bound of a template's own parameter that names no trait was reported at the template's
+  first column, so two of them that read the same (`class Pair<A: Copyable<int>, B:
+  Copyable<int>>`, `fn f<A: Nope, B: Nope>`, the same in a generic method) were one diagnostic
+  said twice, which a debug build of the compiler aborts on. Each is reported where it is
+  written; one with no place of its own (`A: int`) at its template, once for two that read
+  the same (src/Sema: `checkBoundDecls`; tests/Sema/GenericsTests.cpp,
+  `ABadBoundOfATemplateIsReportedOnceWhereItIsWritten`).
 - An `async fn` whose variable or result was first used after its last `await` crashed: with a loop or
   several `return`s after the `await` at any level, and in most bodies at `-O0` and `-O1`. A
   variable a task uses on both sides of a wait is kept in its coroutine's frame, wherever it is
