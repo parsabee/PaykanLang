@@ -136,6 +136,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanPanicPureVirtual, reinterpret_cast<void *>(&Paykan_panic_pure_virtual)},
     {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
     {kPaykanRelease,         reinterpret_cast<void *>(&Paykan_release)},
+    {kPaykanRetainRead,      reinterpret_cast<void *>(&Paykan_retain_read)},
+    {kPaykanReleaseRead,     reinterpret_cast<void *>(&Paykan_release_read)},
 
     {kPaykanMalloc,          reinterpret_cast<void *>(&Paykan_malloc)},
     {kPaykanRealloc,         reinterpret_cast<void *>(&Paykan_realloc)},

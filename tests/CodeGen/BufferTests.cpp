@@ -700,3 +700,233 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "42\n2\n43\n2\n2\n1.5\n1\n5\n1\n");
   g.expectNoLeaks("AClassWithABoxsFieldAndMethodsIsTheProgramsOwn");
 }
+
+// -- An index that runs code
+
+// A number read in place takes the buffer from the receiver's storage, its
+// length and its element; an index that may run code runs before any of
+// them is loaded, and a receiver it may write is copied first, as the
+// receiver of the call `at` would be: the read is of the buffer the
+// receiver had, whatever the index puts in its place through another name
+// for the object (a field, a `view` parameter, a method's `self`, a
+// closure's capture, a box in a field, a buffer read in the index).  (The
+// lowering loaded the buffer's object and length before the index, and
+// read the element from the object the index had freed.)
+TEST(Buffer, AnIndexThatReplacesTheBufferReadsTheOneItHad) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+import ::memory as mem;
+class Own { buf: mem::Buffer<int>; }
+impl Own {
+  fn reset(n: unsigned) -> unsigned {
+    nb = mem::Buffer<int>();
+    let e = nb.push(7);
+    self.buf = move nb;
+    return n;
+  }
+  view fn readVia(other: shared mutable Own) -> int { return self.buf.get(other.reset(1)); }
+}
+class Holder { bx: mem::Box<mem::Buffer<int>>; }
+impl Holder {
+  fn replace() -> unsigned {
+    nb = mem::Buffer<int>();
+    let e = nb.push(7);
+    self.bx = mem::Box(move nb);
+    return 2;
+  }
+}
+fn filled(from: int) -> mem::Buffer<int> {
+  b = mem::Buffer<int>();
+  for i in 0..8 { let e = b.push(from + i); }
+  return b;
+}
+fn read(b: view mem::Buffer<int>, p: shared mutable Own) -> int { return b.at(p.reset(3)); }
+fn main() -> int {
+  let o: shared mutable = Own(filled(100));
+  let p = o;
+  io::println(o.buf.at(p.reset(0)));
+  o.buf = filled(100);
+  io::println(read(o.buf, p));
+  o.buf = filled(100);
+  io::println(o.readVia(p));
+  o.buf = filled(100);
+  let f = fn() -> unsigned { return p.reset(4); };
+  io::println(o.buf.at(f()));
+  o.buf = filled(100);
+  c = filled(0);
+  io::println(o.buf.at(unsigned(c.at(p.reset(5)))));
+  io::println(o.buf.at(0));
+  let h: shared mutable = Holder(mem::Box(filled(100)));
+  let q = h;
+  io::println(h.bx.value().at(q.replace()));
+  io::println(h.bx.value().at(0));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "100\n103\n101\n104\n105\n7\n102\n7\n");
+  g.expectNoLeaks("AnIndexThatReplacesTheBufferReadsTheOneItHad");
+}
+
+// The buffer's length and storage are the ones it has once the index has
+// run: an index that grows it reads the slot it grew into, one that shrinks
+// it is checked against the new length.  (The lowering checked the index
+// against the length before: a slot past the end, or a panic for one in
+// it.)
+TEST(Buffer, AnIndexThatResizesTheBufferReadsItsNewLength) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+import ::memory as mem;
+fn grown(bx: shared mutable mem::Box<mem::Buffer<int>>) -> unsigned {
+  for i in 0..1000 { let e = bx.get().push(i); }
+  return 500;
+}
+fn shrunk(bx: shared mutable mem::Box<mem::Buffer<int>>) -> unsigned {
+  let e = bx.get().shrink(bx.get().len() - 3);
+  return 2;
+}
+fn main() -> int {
+  b = mem::Buffer<int>();
+  let e = b.push(1);
+  let bx: shared mutable = mem::Box(move b);
+  io::println(bx.value().at(grown(bx)));
+  io::println(bx.get().len());
+  io::println(bx.get().get(shrunk(bx)));
+  io::println(bx.value().len());
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "499\n1001\n1\n3\n");
+  g.expectNoLeaks("AnIndexThatResizesTheBufferReadsItsNewLength");
+}
+
+// The box's buffer, read through `value()` or `get()`, is held across an
+// index that may store: moving it out there is moving out a value still
+// borrowed, as for the call `at` of a buffer of strings.  (The lowering
+// read the element from the buffer the swap had freed.)
+TEST(BufferDeathTest, AnIndexThatMovesTheBoxsBufferOutPanics) {
+  const std::string reset = R"pkn(import ::io;
+import ::memory as mem;
+fn reset(bx: shared mutable mem::Box<mem::Buffer<int>>) -> unsigned {
+  nb = mem::Buffer<int>();
+  mem::swap(bx.get(), nb);
+  return 0;
+}
+fn main() -> int {
+  b = mem::Buffer<int>();
+  for i in 0..8 { let e = b.push(i + 100); }
+  let bx: shared mutable = mem::Box(move b);
+)pkn";
+  EXPECT_DEATH(compileAndRunUncaptured(
+                   reset + "  io::println(bx.value().at(reset(bx)));\n"
+                           "  return 0;\n}\n"),
+               "a value moved out of 'bx.get\\(\\)' is still borrowed");
+  EXPECT_DEATH(
+      compileAndRunUncaptured(reset + "  io::println(bx.get().at(reset(bx)));\n"
+                                      "  return 0;\n}\n"),
+      "a value moved out of 'bx.get\\(\\)' is still borrowed");
+}
+
+// (The lowering checked the index against the length before the shrink,
+// and read the slot it had dropped.)
+TEST(BufferDeathTest, AnIndexPastTheEndOfTheShrunkBufferPanics) {
+  EXPECT_DEATH(compileAndRunUncaptured(R"pkn(import ::io;
+import ::memory as mem;
+fn shrinkTo(bx: shared mutable mem::Box<mem::Buffer<int>>, keep: unsigned) -> unsigned {
+  let e = bx.get().shrink(bx.get().len() - keep);
+  return keep + 1;
+}
+fn main() -> int {
+  b = mem::Buffer<int>();
+  for i in 0..8 { let e = b.push(i + 100); }
+  let bx: shared mutable = mem::Box(move b);
+  io::println(bx.value().at(shrinkTo(bx, 1)));
+  return 0;
+}
+)pkn"),
+               "buffer index 2 out of bounds \\(len=1\\)");
+}
+
+// The iterations of a `parallel for` read one buffer of the enclosing
+// function in place, through a `view` parameter too, with indexes that
+// call code: no count of it is lost, and none frees it.  A function whose
+// `view` parameter is such a buffer holds the one it is given, by an atomic
+// count, across an index that replaces it.  (The read copied its receiver,
+// a plain count from every thread: a leak, or a buffer freed under the
+// read.)
+TEST(Buffer, AParallelForsReadsOfItsBufferLoseNoCount) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+import ::memory as mem;
+class Own { buf: mem::Buffer<int>; }
+impl Own {
+  fn reset() -> unsigned {
+    nb = mem::Buffer<int>();
+    let e = nb.push(7);
+    self.buf = move nb;
+    return 0;
+  }
+}
+fn bump(x: inout int) -> unsigned { x += 1; return 0; }
+fn readIt(b: view mem::Buffer<int>, y: inout int) -> int { return b.at(bump(y)); }
+fn resetIt(b: view mem::Buffer<int>, p: shared mutable Own) -> int { return b.at(p.reset()); }
+fn main() -> int {
+  b = mem::Buffer<int>();
+  let e = b.push(1);
+  ys = [0; 4096];
+  t = 0;
+  for r in 0..20 {
+    s = 0;
+    parallel for i in 0..4096 { s += b.at(bump(ys[i])) + readIt(b, ys[i]); }
+    t += s;
+  }
+  io::println(t);
+  let o: shared mutable = Own(mem::Buffer<int>());
+  let e2 = o.buf.push(3);
+  io::println(resetIt(o.buf, o));
+  io::println(o.buf.at(0));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "163840\n3\n7\n");
+  g.expectNoLeaks("AParallelForsReadsOfItsBufferLoseNoCount");
+}
+
+// A call in the index that changes nothing the receiver reaches takes no
+// copy of it, which would count the buffer's object: in a `parallel for`
+// body, whose iterations read a buffer of the enclosing function in place,
+// and on a frozen one there (LoweringTests's
+// ABufferReadWithAHarmlessCallInItsIndexCountsNothing).
+TEST(Buffer, AnIndexWithACallThatChangesNothingReadsTheBuffer) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+import ::memory as mem;
+fn pick(i: int) -> unsigned { return unsigned(i % 3); }
+class Own { buf: mem::Buffer<float>; }
+fn main() -> int {
+  b = mem::Buffer<int>();
+  for i in 0..8 { let e = b.push(i + 100); }
+  s = 0;
+  parallel for i in 0..8 { s += b.at(pick(i)) + b.get(pick(i + 1)); }
+  io::println(s);
+  let bx: atomic shared = mem::Box(move b);
+  t = 0;
+  parallel for i in 0..8 { t += bx.value().at(pick(i)); }
+  io::println(t);
+  xs = mem::Buffer<float>();
+  for i in 0..4 { let e = xs.push(float(i) + 0.5); }
+  let o: shared mutable = Own(move xs);
+  io::println(o.buf.at(pick(5)) + o.buf.get(pick(4)));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1616\n807\n4\n");
+  g.expectNoLeaks("AnIndexWithACallThatChangesNothingReadsTheBuffer");
+}

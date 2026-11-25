@@ -79,6 +79,43 @@ void Paykan_retain(PaykanShared *shared) {
     strong_retain(shared);
 }
 
+// A read's count (Runtime.h): a plain count is changed atomically, so the
+// iterations of a `parallel for` that read one buffer count it at once.  An
+// atomic one (a cell's, a frozen object's) is counted as ever.
+void Paykan_retain_read(PaykanShared *shared) {
+  if (!shared)
+    return;
+  const int32_t s =
+      atomic_load_explicit(ATOMIC_COUNT(shared), memory_order_relaxed);
+  if (s >= PAYKAN_REF_ATOMIC - 1) {
+    strong_retain(shared);
+    return;
+  }
+  if (PAYKAN_UNLIKELY(atomic_fetch_add_explicit(ATOMIC_COUNT(shared), 1,
+                                                memory_order_relaxed) >=
+                      PAYKAN_REF_ATOMIC - 1))
+    count_overflow("strong", PAYKAN_REF_ATOMIC - 1);
+}
+
+void Paykan_release_read(PaykanShared *shared) {
+  if (!shared)
+    return;
+  const int32_t s =
+      atomic_load_explicit(ATOMIC_COUNT(shared), memory_order_relaxed);
+  if (s >= PAYKAN_REF_ATOMIC) {
+    Paykan_release(shared);
+    return;
+  }
+  // Not the last: another reference remains, the owner's at least.
+  if (atomic_fetch_sub_explicit(ATOMIC_COUNT(shared), 1,
+                                memory_order_acq_rel) != 1)
+    return;
+  // The last: what the index ran let go of the buffer, so no other thread
+  // reads it.  It dies as any object does.
+  shared->strong = 1;
+  Paykan_release(shared);
+}
+
 PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
 
 // -- Deferred destruction

@@ -322,6 +322,79 @@ bool ModuleLowering::isBufferReadInPlace(ast::MethodCallExpr *mc) {
   return et == pir::Type::I64 || et == pir::Type::F64;
 }
 
+ast::Expr *ModuleLowering::bufferReadBox(ast::MethodCallExpr *mc) {
+  if (!isBufferReadInPlace(mc))
+    return nullptr;
+  ast::StructType *st = getExprStructType(mc->getReceiver());
+  auto *get = ast::dyn_cast<ast::MethodCallExpr>(mc->getReceiver());
+  if (!get || get->getNumArguments() != 0 ||
+      (get->getMethodName() != "value" && get->getMethodName() != "get"))
+    return nullptr;
+  // The standard library's box (SemaContext::BoxTypes), whose `value()` and
+  // `get()` are its field: a class of a program with a `__data` and methods
+  // of those names returns what it likes.
+  ast::ClassType *ct = getExprClassType(get->getReceiver());
+  if (!ct || !SemaCtx.BoxTypes.count(ct->getName()))
+    return nullptr;
+  const auto *fst = ast::dyn_cast<ast::StructType>(ct->findField("__data"));
+  return fst && fst->getName() == st->getName() ? get->getReceiver() : nullptr;
+}
+
+bool ModuleLowering::runsNoCode(ast::Expr *e) {
+  auto scalar = [](const ast::Expr *x) {
+    return ast::isa<ast::BuiltinType>(x->getResolvedType());
+  };
+  if (ast::isa<ast::IntegerLiteral>(e) || ast::isa<ast::FloatLiteral>(e) ||
+      ast::isa<ast::BoolLiteral>(e) || ast::isa<ast::CharLiteral>(e))
+    return true;
+  if (auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return !id->isFunctionRef();
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return runsNoCode(ma->getReceiver());
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return runsNoCode(ti->getTuple());
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    ast::Type *arrTy = se->getArray()->getResolvedType();
+    return (ast::isa<ast::FixedArrayType>(arrTy) ||
+            ast::isa<ast::SliceType>(arrTy)) &&
+           runsNoCode(se->getArray()) && runsNoCode(se->getIndex());
+  }
+  if (auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
+    return u->getOpcode() != ast::UnaryOpcode::Move &&
+           u->getOpcode() != ast::UnaryOpcode::Await && scalar(u) &&
+           runsNoCode(u->getOperand());
+  // `==` of objects calls `equals`, and `+` of strings makes one.
+  if (auto *b = ast::dyn_cast<ast::BinaryExpr>(e))
+    return scalar(b->getLHS()) && scalar(b->getRHS()) &&
+           runsNoCode(b->getLHS()) && runsNoCode(b->getRHS());
+  if (auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
+    return runsNoCode(t->getCondition()) && runsNoCode(t->getTrueExpr()) &&
+           runsNoCode(t->getFalseExpr());
+  // `unsigned<int>(i)` & co.: no call of the program (BorrowedReads).
+  if (auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    ast::Type *target = nullptr;
+    ast::Type *source = nullptr;
+    return conversionTypes(ce->getCalleeName(), target, source) &&
+           ast::isa<ast::BuiltinType>(target) &&
+           ast::isa<ast::BuiltinType>(source) &&
+           ce->getArguments().size() == 1 && runsNoCode(ce->getArguments()[0]);
+  }
+  // Another buffer's length or number, or an array's or a slice's length.
+  if (auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    ast::Type *rt = mc->getReceiver()->getResolvedType();
+    if (mc->getMethodName() == names::kMethodLength &&
+        mc->getNumArguments() == 0 &&
+        (ast::isa<ast::FixedArrayType>(rt) || ast::isa<ast::SliceType>(rt)))
+      return runsNoCode(mc->getReceiver());
+    if (!isBufferReadInPlace(mc))
+      return false;
+    ast::Expr *box = bufferReadBox(mc);
+    return runsNoCode(box ? box : mc->getReceiver()) &&
+           (mc->getNumArguments() == 0 || runsNoCode(mc->getArguments()[0]));
+  }
+  return false;
+}
+
 Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
                                                       ast::StructType *st,
                                                       bool wantAddress) {

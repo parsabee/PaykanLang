@@ -120,28 +120,38 @@ inline Analysed analyseFile(const std::string &filePath,
   return a;
 }
 
-/// JIT-run an LLVM module in process, capturing its stdout and stderr.  A JIT
-/// failure (an unresolved symbol, a module the JIT rejects) returns
-/// CompileOk == false with the error's message appended to StdErr, so a
-/// failing test prints the reason instead of an anonymous -1.
+/// JIT-run an LLVM module in process, capturing its stdout and stderr (or,
+/// with @p capture false, leaving them the process's).  A JIT failure (an
+/// unresolved symbol, a module the JIT rejects) returns CompileOk == false
+/// with the error's message appended to StdErr, so a failing test prints the
+/// reason instead of an anonymous -1.
 inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> llvmCtx,
-                              const std::vector<std::string> *args) {
+                              const std::vector<std::string> *args,
+                              bool capture = true) {
   // Flush harness output still buffered in stdout (gtest_main's banner when
   // stdout is not a terminal), so it is not captured as the program's.
   fflush(stdout);
   fflush(stderr);
-  auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
-  auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
+  std::pair<int, std::string> out{-1, ""};
+  std::pair<int, std::string> err{-1, ""};
+  if (capture) {
+    out = redirectFdToTempFile(STDOUT_FILENO);
+    err = redirectFdToTempFile(STDERR_FILENO);
+  }
   auto resultOrErr =
       args ? jit::runModule(std::move(module), std::move(llvmCtx), *args)
            : jit::runModule(std::move(module), std::move(llvmCtx));
   fflush(stdout);
   fflush(stderr);
-  restoreFd(STDOUT_FILENO, savedOut);
-  restoreFd(STDERR_FILENO, savedErr);
-  std::string outStr = drainAndRemoveTempFile(outPath);
-  std::string errStr = drainAndRemoveTempFile(errPath);
+  std::string outStr;
+  std::string errStr;
+  if (capture) {
+    restoreFd(STDOUT_FILENO, out.first);
+    restoreFd(STDERR_FILENO, err.first);
+    outStr = drainAndRemoveTempFile(out.second);
+    errStr = drainAndRemoveTempFile(err.second);
+  }
   lastRunLiveBlocks() = Paykan_heap_live_blocks();
   if (!resultOrErr) {
     errStr += "JIT: " + llvm::toString(resultOrErr.takeError());
@@ -153,11 +163,10 @@ inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
 /// The mlir backend: PIR -> MLIR -> LLVM IR (through the bitcode cache,
 /// like the driver) -> JIT, in process, with the compiled code of the
 /// modules @p resolver loaded from a `.pkm` that has some.
-inline RunResult
-runProgramMLIR(const pir::Program &program,
-               const std::vector<std::string> *args,
-               const std::string &projectRoot,
-               const modules::ModuleResolver *resolver = nullptr) {
+inline RunResult runProgramMLIR(
+    const pir::Program &program, const std::vector<std::string> *args,
+    const std::string &projectRoot,
+    const modules::ModuleResolver *resolver = nullptr, bool capture = true) {
   if (auto verrs = pir::verify(program); !verrs.empty())
     return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
@@ -183,20 +192,21 @@ runProgramMLIR(const pir::Program &program,
   // an `async fn`.
   if (Status s = llvm_codegen::prepareForJIT(**module, /*optLevel=*/0); !s)
     return {-1, "", s.message(), false};
-  return runJITModule(std::move(*module), std::move(llvmCtx), args);
+  return runJITModule(std::move(*module), std::move(llvmCtx), args, capture);
 }
 
 /// The program, lowered as the driver lowers one to run: its main module
 /// knows every class derived from its classes (lowering::World::Closed).
 inline RunResult runMLIR(Analysed &a, const std::vector<std::string> *args,
-                         const std::string &projectRoot) {
+                         const std::string &projectRoot, bool capture = true) {
   pir::Program program;
   std::ostringstream errs;
   if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
                               program, errs, nullptr, lowering::Copies::Shared,
                               lowering::World::Closed))
     return {-1, "", "lowering failed: " + errs.str(), false};
-  return runProgramMLIR(program, args, projectRoot, a.Ctx.Resolver.get());
+  return runProgramMLIR(program, args, projectRoot, a.Ctx.Resolver.get(),
+                        capture);
 }
 
 inline RunResult runAnalysed(Analysed &a, const std::vector<std::string> *args,
@@ -239,6 +249,16 @@ inline RunResult compileAndRun(const std::string &source,
                                const std::string &projectRoot = "") {
   auto a = detail::analyse(source, projectRoot);
   return detail::runAnalysed(a, nullptr, projectRoot);
+}
+
+/// Like compileAndRun, with the program's stdout and stderr the test's own:
+/// for a death test (EXPECT_DEATH) of a runtime panic, whose message a
+/// captured run writes to a file that the dying process never reads back.
+inline RunResult compileAndRunUncaptured(const std::string &source) {
+  auto a = detail::analyse(source, "");
+  if (!a.Ok)
+    return a.Failure;
+  return detail::runMLIR(a, nullptr, "", /*capture=*/false);
 }
 
 /// Like compileAndRun but forwards explicit program arguments to main.

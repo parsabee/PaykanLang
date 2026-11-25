@@ -436,6 +436,10 @@ inline constexpr const char *kPaykanWeakLoad = "Paykan_weak_load";
 inline constexpr const char *kPaykanWeakRelease = "Paykan_weak_release";
 inline constexpr const char *kPaykanRetain = "Paykan_retain";
 inline constexpr const char *kPaykanRelease = "Paykan_release";
+/// The count a buffer read in place holds across an index that runs code
+/// (Runtime.h): atomic, as the iterations of a `parallel for` take it.
+inline constexpr const char *kPaykanRetainRead = "Paykan_retain_read";
+inline constexpr const char *kPaykanReleaseRead = "Paykan_release_read";
 // Their fast paths, Runtime.h's static inline functions (not ABI symbols):
 // what the C of --emit-c calls instead, and for a box that is never null
 // (a `retain nonnull`'s, docs/pir.md §6) the ones that make no test for it.
@@ -555,6 +559,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanFree,
     kPaykanRetain,
     kPaykanRelease,
+    kPaykanRetainRead,
+    kPaykanReleaseRead,
     kPaykanSharedNew,
     kPaykanSharedGet,
     kPaykanDispose,

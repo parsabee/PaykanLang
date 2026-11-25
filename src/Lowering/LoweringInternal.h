@@ -1134,15 +1134,12 @@ private:
     /// `b.at(i)`, `b.get(i)` and `b.len()` of a `mem::Buffer<T>` @p st
     /// holding a number type @p elem, read in place (the prototype): a
     /// bounds check and a load, as a fixed array's element, with no call
-    /// into the memory module and no count on the buffer.  nullopt when the
-    /// call is another method or another element type.
-    /// The box of `bx.value().at(i)`, `bx.get().len()` & co.: the receiver
-    /// of a `value()` or `get()` on a `mem::Box<mem::Buffer<T>>` (the
-    /// standard library's box, SemaContext::BoxTypes), when the buffer read
-    /// is one emitBufferRead emits in place (a number's element, or the
-    /// length); nullptr otherwise.  The read takes the box's field itself,
-    /// so the box is the link visited first (visitedFirst).
-    ast::Expr *bufferReadBox(ast::MethodCallExpr *node);
+    /// into the memory module and no count on the buffer.  An index that
+    /// may run code (runsNoCode) is evaluated before the buffer's object,
+    /// length and storage are loaded, and a receiver it may write
+    /// (SnapshotReads) is copied first, which counts the object, as the
+    /// call `at` would have them.  nullopt when the call is another method
+    /// or another element type.
     std::optional<Val> emitBufferRead(ast::MethodCallExpr *node,
                                       ast::Type *elem);
     /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
@@ -1342,8 +1339,23 @@ private:
   /// read the lowering emits in place (ExprEmitter::emitBufferRead): `at`
   /// or `get` of a number, or `len`.  Such a read loads its number at once,
   /// as a variable's read does, so the holds analysis (LoweringHolds.cpp)
-  /// takes it as one, not as a struct's `view fn` on its receiver.
+  /// takes it as one, not as a struct's `view fn` on its receiver, but for
+  /// a call in its index (BorrowedReads::methodCall).
   bool isBufferReadInPlace(ast::MethodCallExpr *mc);
+  /// The box of `bx.value().at(i)`, `bx.get().len()` & co.: the receiver
+  /// of a `value()` or `get()` on a `mem::Box<mem::Buffer<T>>` (the
+  /// standard library's box, SemaContext::BoxTypes), when the buffer read
+  /// is one emitBufferRead emits in place (a number's element, or the
+  /// length); nullptr otherwise.  The read takes the box's field itself,
+  /// so the box is the link visited first (ExprEmitter::visitedFirst).
+  ast::Expr *bufferReadBox(ast::MethodCallExpr *mc);
+  /// Whether evaluating @p e runs no code that may change a buffer: a
+  /// variable's or a field's value, a literal, an element of an array or a
+  /// slice, a conversion of a number, a buffer's length or number read in
+  /// place with such an index, and the arithmetic, comparisons, logic and
+  /// conditionals of numbers, booleans and characters of these.  Anything
+  /// else may call the program's code (ExprEmitter::emitBufferRead).
+  bool runsNoCode(ast::Expr *e);
   /// `p.x` read, the receiver a struct: in place, as a tuple element.
   Val lowerStructFieldRead(ast::MemberAccessExpr *node, ast::StructType *st);
   /// `p.x = v`, the receiver a struct: written in place.

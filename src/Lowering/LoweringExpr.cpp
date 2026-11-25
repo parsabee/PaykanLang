@@ -93,7 +93,7 @@ ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
                                              : L.memValueVisitsFirst(recv);
     // A buffer's element or length read through a box's `value()`
     // (emitBufferRead): the box, as emitReceiver takes it.
-    if (ast::Expr *box = bufferReadBox(m))
+    if (ast::Expr *box = L.bufferReadBox(m))
       return box;
     if (L.getExprStructType(recv) && m->getMethodName() != kMethodToString)
       return L.memValueVisitsFirst(recv);
@@ -1822,25 +1822,6 @@ ModuleLowering::emitBufferNative(const ast::FuncDecl &node,
   return std::nullopt;
 }
 
-ast::Expr *
-ModuleLowering::ExprEmitter::bufferReadBox(ast::MethodCallExpr *node) {
-  if (!L.isBufferReadInPlace(node))
-    return nullptr;
-  ast::StructType *st = L.getExprStructType(node->getReceiver());
-  auto *mc = ast::dyn_cast<ast::MethodCallExpr>(node->getReceiver());
-  if (!mc || mc->getNumArguments() != 0 ||
-      (mc->getMethodName() != "value" && mc->getMethodName() != "get"))
-    return nullptr;
-  // The standard library's box (SemaContext::BoxTypes), whose `value()` and
-  // `get()` are its field: a class of a program with a `__data` and methods
-  // of those names returns what it likes.
-  ast::ClassType *ct = L.getExprClassType(mc->getReceiver());
-  if (!ct || !L.SemaCtx.BoxTypes.count(ct->getName()))
-    return nullptr;
-  const auto *fst = ast::dyn_cast<ast::StructType>(ct->findField("__data"));
-  return fst && fst->getName() == st->getName() ? mc->getReceiver() : nullptr;
-}
-
 std::optional<Val>
 ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
                                             ast::Type *elem) {
@@ -1855,10 +1836,19 @@ ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
   // buffer's way into a `parallel for` body) -- that field itself, where a
   // `view` result of a struct is a copy, which counts the buffer's object
   // (two runtime calls on a frozen one).  Its one field, `__data`, is the
-  // buffer's box.
+  // buffer's box.  A receiver that a call in the index may write
+  // (BorrowedReads::methodCall, SnapshotReads) is the value it has here,
+  // as a struct's `view fn` receiver is (docs/language/02-basics.md,
+  // "Evaluation order"): the box it holds now is read and counted until
+  // the element is, and the element read from it.  Not by a copy of the
+  // receiver, whose count is a plain one: a buffer of a function that runs
+  // a `parallel for` is read in place by every iteration, and by what an
+  // iteration calls through a `view` parameter, so the count is taken
+  // atomically (Paykan_retain_read), where nothing else counts it.
   const size_t mark = L.MemTemps.size();
+  const bool hold = L.SnapshotReads.count(node->getReceiver()) > 0;
   Val self;
-  if (ast::Expr *boxExpr = bufferReadBox(node)) {
+  if (ast::Expr *boxExpr = L.bufferReadBox(node)) {
     ast::ClassType *ct = L.getExprClassType(boxExpr);
     L.getOrCreateClass(ct);
     Receiver recv = L.emitReceiver(boxExpr, "box.obj");
@@ -1867,21 +1857,50 @@ ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
     if (recv.Owned.isOwned())
       L.MemTemps.emplace_back(recv.Owned.V, nullptr);
     self = L.B.fieldAddr(recv.Raw, ct->getName(), "__data", "__data.addr");
+  } else if (hold) {
+    // Where it is (emitMemAddress would copy it).
+    ModuleLowering::MemValue v = L.emitMemRead(node->getReceiver());
+    ast::Type *ty = L.memTypeOf(node->getReceiver());
+    if (v.Temp && v.Addr && L.memHoldsRefs(ty))
+      L.MemTemps.emplace_back(v.Addr, ty);
+    self = v.Addr;
   } else {
     self = L.emitMemAddress(node->getReceiver());
   }
   if (!self)
     return Val();
-  Val box = L.B.ptrLoad(self, Type::Box, "buf.box");
+  Val held;
+  if (hold) {
+    held = L.B.ptrLoad(self, Type::Box, "buf.held");
+    L.callRuntime(kPaykanRetainRead, {held});
+  }
+  auto letGo = [&] {
+    if (held)
+      L.callRuntime(kPaykanReleaseRead, {held});
+    L.releaseMemTemps(mark);
+  };
+  // An index that may run code may change the buffer, through another
+  // name for the receiver's storage or for the buffer: replace it (the
+  // object loaded before is then freed, unless the count above holds it),
+  // shrink it, or grow its storage elsewhere.  So the buffer is loaded once
+  // it has run, as the call `at` reads it.  One that runs no code is
+  // evaluated after the loads, which change nothing.
+  ast::Expr *index = length ? nullptr : node->getArguments()[0];
+  const bool indexFirst = index && !L.runsNoCode(index);
+  Val idx = indexFirst ? visit(index) : Val();
+  if (indexFirst && !idx)
+    return Val();
+  Val box = held ? held : L.B.ptrLoad(self, Type::Box, "buf.box");
   Val obj = L.B.cast(L.emitSharedGet(box, "buf.obj"), Type::Ptr, "buf.ptr");
   Val len = L.B.ptrLoad(
       L.B.ptrAdd(obj, Val::i64(offsetof(PaykanBuffer, len)), "buf.len.addr"),
       Type::I64, "buf.len");
   if (length) {
-    L.releaseMemTemps(mark);
+    letGo();
     return len;
   }
-  Val idx = visit(node->getArguments()[0]);
+  if (!indexFirst)
+    idx = visit(index);
   if (!idx)
     return Val();
   idx = L.coerceTo(idx, Type::I64);
@@ -1904,7 +1923,7 @@ ModuleLowering::ExprEmitter::emitBufferRead(ast::MethodCallExpr *node,
       Type::Ptr, "buf.data");
   Val off = L.B.binary(Opcode::Mul, idx, Val::i64(8), "elem.off");
   Val v = L.B.ptrLoad(L.B.ptrAdd(data, off, "elem.addr"), et, "elem");
-  L.releaseMemTemps(mark);
+  letGo();
   return v;
 }
 
