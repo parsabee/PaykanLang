@@ -1801,6 +1801,9 @@ public:
     ImplMethods.erase(std::remove(ImplMethods.begin(), ImplMethods.end(), m),
                       ImplMethods.end());
   }
+  /// Take back the `__init__` addMethod set: the default one, which a
+  /// bounded block that joins later replaces (Sema::joinLateImpls).
+  void dropInitMethod() { InitMethod = nullptr; }
 
   /// Reset the vtable to start with the parent's slots (re-inherit).
   /// Call this after the parent's methods are fully populated.
@@ -1943,6 +1946,12 @@ public:
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
   /// Sema adds the methods of the class's `impl` blocks.
   void addMethod(FuncDecl *m) { Methods.push_back(m); }
+  /// And takes back the default `__init__` it added, which a bounded block
+  /// that joins an instance later replaces (Sema::joinLateImpls).
+  void dropMethod(const FuncDecl *m) {
+    Methods.erase(std::remove(Methods.begin(), Methods.end(), m),
+                  Methods.end());
+  }
   size_t getNumFields() const { return Fields.size(); }
   size_t getNumMethods() const { return Methods.size(); }
 
@@ -1988,6 +1997,12 @@ public:
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
   /// Sema adds the methods of the struct's `impl` blocks.
   void addMethod(FuncDecl *m) { Methods.push_back(m); }
+  /// And takes back the default `__init__` it added, which a bounded block
+  /// that joins an instance later replaces (Sema::joinLateImpls).
+  void dropMethod(const FuncDecl *m) {
+    Methods.erase(std::remove(Methods.begin(), Methods.end(), m),
+                  Methods.end());
+  }
 
   const std::vector<const std::string *> &getTypeParams() const {
     return TypeParams;
@@ -2663,6 +2678,9 @@ public:
     ImplMethods.erase(std::remove(ImplMethods.begin(), ImplMethods.end(), m),
                       ImplMethods.end());
   }
+  /// Take back the `__init__` addMethod set: the default one, which a
+  /// bounded block that joins later replaces (Sema::joinLateImpls).
+  void dropInitMethod() { InitMethod = nullptr; }
   /// The `impl` method (or `__init__`) named @p name, or nullptr.
   MethodDecl *findMethod(const std::string &name) const;
   const std::vector<MethodDecl *> &getImplMethods() const {

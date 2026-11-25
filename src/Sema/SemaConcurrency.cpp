@@ -919,9 +919,16 @@ bool Sema::isCloneable(ast::Type *ty, std::string *why) {
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     if (hasBuiltinTraitImpl(ct, names::kTraitCloneable))
       return true;
-    if (why && why->empty())
-      *why = "a class is Cloneable only with an 'impl Cloneable for " +
-             ct->getName() + "' block";
+    if (why && why->empty()) {
+      // An instance whose template is Cloneable under a bound it does not
+      // meet says so: there is no block to write for it.
+      const std::string unmet =
+          unmetBlockOf(ct->getName(), names::kMethodClone);
+      *why = !unmet.empty()
+                 ? unmet.substr(2) // past its ": "
+                 : "a class is Cloneable only with an 'impl Cloneable for " +
+                       ct->getName() + "' block";
+    }
     return false;
   }
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {

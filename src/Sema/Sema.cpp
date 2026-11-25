@@ -3534,7 +3534,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         d != S.DefaultInits.end()) {
       msg += " (it has no '";
       msg += names::kMethodInit;
-      msg += "', so it takes ";
+      // An instance's template may have one in a block whose bounds it
+      // does not meet.
+      msg += "'";
+      msg += S.unmetBlockOf(node->getCalleeName(), names::kMethodInit,
+                            /*statics=*/false);
+      msg += ", so it takes ";
       msg += d->second->getParams().empty() ? "nothing"
                                             : Sema::paramList(d->second);
       msg += ")";

@@ -200,9 +200,9 @@ instance is first named: an argument declared later in the file, one that is its
 instance, or one that holds the instance (`class Tree { kids: Box<Tree>?; }`), is judged
 once its fields and its `impl` blocks are known. A bound on a field's type (`kids:
 Set<Box<Node<T>>>`) and the `clone` an empty `impl Cloneable for` block derives wait for the
-same. Two blocks lay a type out and are decided where the instance is first named, so name
-it after the argument's declaration: an `impl Cloneable for` block of a generic class, and a
-block that declares `__init__`.
+same. So do the two blocks that lay a type out: an `impl Cloneable for` block of a generic
+class, whose `clone` is virtual, and a block that declares `__init__`, which replaces the
+default one.
 
 A class is Sendable when no class derived from it holds what does not cross, and an instance
 of a generic class is derived where it is first named. So a block bounded `Sendable` may
