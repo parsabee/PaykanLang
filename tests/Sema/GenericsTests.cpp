@@ -1513,6 +1513,238 @@ fn main() -> int { let b = Box<Node>(Node(2)); return f(Node(1)) + f(b.v); }
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
 }
 
+namespace {
+/// The declarations after a template's block in the programs below.
+const char *kTraitDecls = "trait Conv<Q> { view fn conv() -> int; }\n"
+                          "trait Named { view fn name() -> int; }\n"
+                          "class Other<W> { w: W; }\n"
+                          "struct Pt<W> { w: W; }\n"
+                          "enum E<W> { A(w: W), B }\n"
+                          "class Node { n: int; }\n";
+} // namespace
+
+// What the trait of a template's `impl` block names is the block's to get
+// right, not an instance's: a trait, given as many type arguments as it
+// takes, each made of types there are.  One that does not is one error at
+// the block, whether the template has no instance, one, two, or ones
+// joined later, and the block joins none of them.  Base resolved the
+// trait for each instance: a template without instances was accepted, and
+// each instance reported the trait again.
+TEST(Generics, ABadTraitOfABlockIsReportedOnceAtTheBlock) {
+  struct Block {
+    const char *Trait;
+    const char *Error;
+  };
+  const std::vector<Block> blocks = {
+      {"Hashable<int>", "trait 'Hashable' expects 0 type argument(s), got 1"},
+      {"Unknown", "unknown trait 'Unknown'"},
+      {"Node", "'Node' is not a trait"},
+      {"Show", "'Show' is now 'Showable'"},
+      {"Conv", "trait 'Conv' expects 1 type argument(s), got 0"},
+      {"Conv<T, T>", "trait 'Conv' expects 1 type argument(s), got 2"},
+      {"Conv<Undefined>",
+       "type argument 1 of trait 'Conv' has unknown class type 'Undefined'"},
+      {"Conv<shared Undefined?>",
+       "type argument 1 of trait 'Conv' has unknown class type 'Undefined'"},
+      {"Conv<(T, Undefined)>", "type argument 1 of trait 'Conv' element 1 has "
+                               "unknown class type 'Undefined'"},
+      {"Conv<(view T) -> Undefined[4]>",
+       "type argument 1 of trait 'Conv' result element has unknown class type "
+       "'Undefined'"},
+      {"Conv<Pt<Undefined>>", "type argument 1 of trait 'Conv' type argument 1 "
+                              "of 'Pt' has unknown class type 'Undefined'"},
+      {"Conv<Named>", "type argument 1 of trait 'Conv' names trait 'Named', "
+                      "which is not a type (use a type parameter bounded by "
+                      "it: '<T: Named>')"},
+      {"Conv<Other>", "type argument 1 of trait 'Conv' names generic class "
+                      "'Other' without type arguments (write 'Other<...>')"},
+      {"Conv<Nope<T>>", "unknown generic class 'Nope'"},
+      {"Conv<Node<T>>",
+       "'Node' is not a generic class and takes no type arguments"},
+      {"Conv<Other<T, T>>",
+       "generic class 'Other' expects 1 type argument(s), got 2"},
+      {"Conv<Pt<int, T>>",
+       "generic struct 'Pt' expects 1 type argument(s), got 2"},
+      {"Conv<E<Pt<T>, int>>",
+       "generic enum 'E' expects 1 type argument(s), got 2"},
+  };
+  struct Use {
+    const char *Decls;
+    const char *Body;
+  };
+  const std::vector<Use> uses = {
+      {"", ""},
+      {"", "let a = Box<int>(1);"},
+      {"", "let a = Box<int>(1); let b = Box<bool>(True);"},
+      // Named before their arguments are whole.
+      {"class Holder { a: Box<Key>?; b: Box<Tree>?; }\n"
+       "class Key { n: int; }\n"
+       "class Tree { k: Key; }\n",
+       ""},
+  };
+  for (const char *kind : {"class", "struct"})
+    for (const Block &block : blocks)
+      for (const Use &use : uses) {
+        std::string program = std::string(kind) + " Box<T> { v: T; }\nimpl ";
+        program.append(block.Trait)
+            .append(" for Box<T> { view fn conv() -> int { return 1; } }\n")
+            .append(kTraitDecls)
+            .append(use.Decls)
+            .append("fn main() -> int { ")
+            .append(use.Body)
+            .append(" return 0; }\n");
+        auto r = semaCheck(program);
+        EXPECT_FALSE(r.Ok) << program;
+        EXPECT_EQ(r.ErrorCount, 1u) << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics,
+                          std::string(":2:1: error: ") + block.Error + "\n"),
+                  1u)
+            << program << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 1u)
+            << program << r.Diagnostics;
+        EXPECT_FALSE(has(r.Diagnostics, "in instantiation of"))
+            << program << r.Diagnostics;
+      }
+}
+
+// A block's trait that names what there is is each instance's, as before:
+// the module's own generic trait, declared before or after the block,
+// given the block's parameters, the module's classes declared after it,
+// templates, and composites of them.  The block's methods are the
+// instances'.  What a type argument is as a type is still each instance's:
+// `Conv<Other<T>>` of an `Other<W: Copyable>` is an error of `Box<Node>`
+// and `Box<Str>`, and of no other instance.  Checking the block's trait
+// instantiates nothing: no `Other` of a stand-in for `T`, whose bound
+// would not hold.
+TEST(Generics, ABlocksTraitIsEachInstancesAsItIsWritten) {
+  for (const char *kind : {"class", "struct"})
+    for (const char *trait :
+         {"Conv<int>", "Conv<T>", "Conv<Node>", "Conv<Other<T>>",
+          "Conv<atomic T>", "Conv<(T, Node)>", "Conv<shared Node?>",
+          "Conv<(view T) -> int>", "Conv<Pt<T>>", "Conv<E<T>>", "Conv<Box<T>>",
+          "Conv<Other<Pt<E<(T, int)>>>>"})
+      for (const char *body :
+           {"return 0;", "let a = Box<int>(1); let b = Box<bool>(True); "
+                         "return a.conv() + b.conv();"}) {
+        std::string program = std::string(kind) + " Box<T> { v: T; }\nimpl ";
+        program.append(trait)
+            .append(" for Box<T> { view fn conv() -> int { return 7; } }\n")
+            .append(kTraitDecls)
+            .append("fn main() -> int { ")
+            .append(body)
+            .append(" }\n");
+        auto r = semaCheck(program);
+        EXPECT_TRUE(r.Ok) << program << r.Diagnostics;
+      }
+  // Through a bound: the trait declared after the block.
+  auto bound = semaCheck(R"(class Box<T> { v: T; }
+impl Conv<int> for Box<T> { view fn conv() -> int { return 7; } }
+fn use<X: Conv<int>>(x: view X) -> int { return x.conv(); }
+trait Conv<Q> { view fn conv() -> int; }
+fn main() -> int { let a = Box<int>(1); let b = Box<Str>("s"); return use(a) + use(b); }
+)");
+  EXPECT_TRUE(bound.Ok) << bound.Diagnostics;
+  // An instance whose argument the trait's cannot be.
+  auto some = semaCheck(R"(trait Conv<Q> { view fn conv() -> int; }
+class Other<W: Copyable> { w: W; }
+class Node { n: int; }
+class Box<T> { v: T; }
+impl Conv<Other<T>> for Box<T> { view fn conv() -> int { return 1; } }
+fn main() -> int { let a = Box<Node>(Node(1)); let b = Box<int>(1); let c = Box<Str>("s"); return 0; }
+)");
+  EXPECT_FALSE(some.Ok);
+  EXPECT_EQ(some.ErrorCount, 2u) << some.Diagnostics;
+  for (const char *arg : {"Node", "Str"})
+    EXPECT_EQ(countOf(some.Diagnostics,
+                      std::string(":5:1: error: '") + arg +
+                          "' does not implement trait 'Copyable', which "
+                          "'Other' requires of 'W'"),
+              1u)
+        << some.Diagnostics;
+  EXPECT_TRUE(has(some.Diagnostics,
+                  "note: in instantiation of 'Box<Node>' requested here"))
+      << some.Diagnostics;
+  EXPECT_TRUE(has(some.Diagnostics,
+                  "note: in instantiation of 'Box<Str>' requested here"))
+      << some.Diagnostics;
+  // No instance, and none of `Other` made for the check (the archetype
+  // check's own, `Other<%T>`, are dropped before the lowering).
+  auto none = check(R"(trait Conv<Q> { view fn conv() -> int; }
+class Other<W: Hashable> { w: W; }
+class Box<T> { v: T; }
+impl Conv<Other<T>> for Box<T> { view fn conv() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(none.Ok) << none.Diagnostics;
+  for (const auto &[name, ct] : none.Driver->getASTContext().getClassTypes())
+    EXPECT_FALSE(name.starts_with("Other<") &&
+                 name.find('%') == std::string::npos)
+        << name;
+}
+
+// The block of a module's own template is that module's: its bad trait is
+// one error in its file, however many instances an importer makes.  (Base
+// accepted the module, and reported a built-in trait's in the importer's
+// file once per instance; a trait of no name, not at all.)  A module's own
+// generic trait, declared after its block, is the instances' trait there.
+TEST(Generics, ABadTraitOfAnImportedTemplatesBlockIsItsModules) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_trait";
+  struct Block {
+    const char *Trait;
+    const char *Error;
+  };
+  for (const char *kind : {"class", "struct"})
+    for (const Block &block :
+         {Block{"Hashable<int>",
+                "trait 'Hashable' expects 0 type argument(s), got 1"},
+          Block{"Unknown", "unknown trait 'Unknown'"},
+          Block{"Conv<Undefined>", "type argument 1 of trait 'Conv' has "
+                                   "unknown class type 'Undefined'"}})
+      for (const char *body :
+           {"", "let a = gen::Box<int>(1);",
+            "let a = gen::Box<int>(1); let b = gen::Box<bool>(True);"}) {
+        std::filesystem::remove_all(dir);
+        writeProjectFile(dir, "lib/gen.pkn",
+                         std::string(kind) + " Box<T> { v: T; }\nimpl " +
+                             block.Trait +
+                             " for Box<T> { view fn conv() -> int "
+                             "{ return 1; } }\n"
+                             "trait Conv<Q> { view fn conv() -> int; }\n");
+        auto r = semaCheckFile(writeProjectFile(
+            dir, "main.pkn",
+            std::string("import lib::gen;\nfn main() -> int { ") + body +
+                " return 0; }\n"));
+        EXPECT_FALSE(r.Ok) << kind << ": " << block.Trait << ": " << body;
+        EXPECT_EQ(
+            countOf(r.Diagnostics, std::string("lib/gen.pkn:2:1: error: ") +
+                                       block.Error + "\n"),
+            1u)
+            << r.Diagnostics;
+        EXPECT_EQ(countOf(r.Diagnostics, ": error: "), 1u) << r.Diagnostics;
+        EXPECT_TRUE(has(r.Diagnostics, "main.pkn:1:1: note: in module "
+                                       "'lib::gen' imported here"))
+            << r.Diagnostics;
+      }
+  for (const char *kind : {"class", "struct"}) {
+    std::filesystem::remove_all(dir);
+    writeProjectFile(dir, "lib/gen.pkn",
+                     std::string(kind) +
+                         " Box<T> { v: T; }\n"
+                         "impl Conv<int> for Box<T> { view fn conv() -> int "
+                         "{ return 7; } }\n"
+                         "trait Conv<Q> { view fn conv() -> int; }\n"
+                         "fn use<X: Conv<int>>(x: view X) -> int "
+                         "{ return x.conv(); }\n"
+                         "fn run() -> int { return use(Box<int>(1)); }\n");
+    auto r = semaCheckFile(writeProjectFile(
+        dir, "main.pkn",
+        "import lib::gen;\nfn main() -> int { let b = gen::Box<bool>(True); "
+        "return gen::run() + b.conv(); }\n"));
+    EXPECT_TRUE(r.Ok) << kind << ": " << r.Diagnostics;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 // A conditional block joins the instances whose arguments meet its
 // bounds, whatever the order of the declarations: an argument declared
 // after the instance is first named, or one that holds the instance, is
@@ -2564,4 +2796,23 @@ TEST(Generics, ARepeatedBoundThatDoesNotResolveIsReportedOnce) {
         1u)
         << program << r.Diagnostics;
   }
+}
+
+// A block whose trait names nothing and whose bounds are bad is reported
+// for both, once each, where each is written.
+TEST(Generics, ABlocksBadTraitAndBadBoundsAreEachReported) {
+  auto r = semaCheck(R"(trait Conv<Q> { view fn cv() -> int; }
+class Box<T> { v: T; }
+impl Conv<Undefined> for Box<T: Nope + Copyable<int>> { view fn cv() -> int { return 1; } }
+fn main() -> int { let a = Box<int>(1); let b = Box<bool>(True); return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  for (const char *want :
+       {":3:1: error: type argument 1 of trait 'Conv' has unknown class type "
+        "'Undefined'\n",
+        ":3:33: error: the bounds of an 'impl' block name built-in traits "
+        "('Cloneable', 'Copyable', ...), not 'Nope'\n",
+        ":3:40: error: trait 'Copyable' expects 0 type argument(s), got 1\n"})
+    EXPECT_EQ(countOf(r.Diagnostics, want), 1u) << want << r.Diagnostics;
 }

@@ -2839,6 +2839,10 @@ private:
   /// parameters); false after reporting a type that does not resolve.
   bool resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
                           const std::string &traitName, RequiredSig &out);
+  /// The trait the annotation @p ref names, given as many type arguments
+  /// as it takes; nullptr after reporting at @p loc why not.  Resolves no
+  /// type argument.
+  const TraitInfo *lookUpTrait(ast::Type *ref, ast::SourceLocation loc);
   /// The trait the annotation @p ref names (`Showable`, `Into<T>` with @p subst
   /// applied); nullopt after an error.
   std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
@@ -2862,6 +2866,25 @@ private:
   /// is a built-in one, and @p what the type ("struct 'Handle'").
   bool checkImplForm(const ast::ImplDecl *im, const std::string &trait,
                      bool builtin, const std::string &what);
+  /// Check the trait of @p im, an `impl Trait for` block of a template
+  /// (`impl Conv<int> for Box<T>`): it names a trait, with as many type
+  /// arguments as it takes, and each argument names types there are.  No
+  /// instance changes that, so a block that fails is reported here, once,
+  /// at the block; it is no part of the template, and joins none of its
+  /// instances.  What an argument is as a type is each instance's
+  /// (checkTraitImpl): nothing is resolved here, so nothing is
+  /// instantiated.
+  bool checkImplTrait(const ast::ImplDecl *im);
+  /// Whether every name in the type annotation @p ann names a type: one of
+  /// @p params, a class of the module, a type that resolves by its name,
+  /// or a template given as many type arguments as it takes.  Reports at
+  /// @p loc, as @p context, the first that does not.  Instantiates nothing.
+  bool namesTypes(ast::Type *ann, const StringSet &params,
+                  ast::SourceLocation loc, const TypeContext &context);
+  /// Whether @p name is a generic class, struct or enum that takes @p args
+  /// type arguments; reports at @p loc why not.  Instantiates nothing.
+  bool namesTemplate(const std::string &name, size_t args,
+                     ast::SourceLocation loc);
   /// Check the bounds of @p im, an `impl` block of a template
   /// (`impl List<T: Cloneable>`): each is a built-in trait, as that trait is
   /// written.  No instance changes what a bound names, so one that names
@@ -3733,6 +3756,11 @@ private:
                                    const std::vector<ast::Type *> &args,
                                    ast::SourceLocation loc,
                                    const ast::ASTNode *written = nullptr);
+  /// Report at @p loc that @p name, given type arguments, is no generic
+  /// class: what it is instead (@p isClass: a class), or nothing.  The use
+  /// of a dropped declaration or of a failed import's name is a follow-on.
+  void reportNoClassTemplate(const std::string &name, bool isClass,
+                             ast::SourceLocation loc);
 
   /// Instantiate function template @p name with canonical @p args, or return
   /// the cached instantiation.  Returns the instantiation's function name, or

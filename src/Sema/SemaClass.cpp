@@ -2202,9 +2202,13 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
         continue;
       }
     }
-    // So is what its bounds name (`impl List<T: Cloneable>`): here, and not
-    // each time an instance asks whether it meets them (implBoundsHold).
-    if (!checkImplBounds(im)) {
+    // And what its trait names (`impl Conv<int> for Box<T>`): here, and not
+    // each time an instance resolves it (checkTraitImpl); so is what its
+    // bounds name (`impl List<T: Cloneable>`), not each time an instance
+    // asks whether it meets them (implBoundsHold).  Both are said: a block
+    // with a bad trait may have bad bounds too.
+    const bool traitNames = !im->getTrait() || checkImplTrait(im);
+    if (!checkImplBounds(im) || !traitNames) {
       ok = false;
       continue;
     }
@@ -3099,32 +3103,37 @@ void Sema::reportInstantiationClash(const ast::Decl *tmpl,
   Diags.setSourceInfo(file, lines);
 }
 
+void Sema::reportNoClassTemplate(const std::string &name, bool isClass,
+                                 ast::SourceLocation loc) {
+  if (ErroneousNames.count(name) || isFailedImportUse(name))
+    ++SuppressedFollowOns; // reported with its declaration or its import
+  else if (isClass)
+    error(loc, "'" + name +
+                   "' is not a generic class and takes no type "
+                   "arguments");
+  else if (Ctx.lookupEnumType(name))
+    error(loc, "'" + name +
+                   "' is not a generic enum and takes no type "
+                   "arguments");
+  else if (Ctx.lookupStructType(name))
+    error(loc, "'" + name +
+                   "' is not a generic struct and takes no type "
+                   "arguments");
+  else if (FuncTemplates.count(name))
+    error(loc, "'" + name + "' is a generic function, not a generic class");
+  else if (Traits.count(name))
+    error(loc, "'" + name + "' is a trait, not a type");
+  else if (!reportPrivateImport(name, loc))
+    error(loc, "unknown generic class '" + name + "'");
+}
+
 ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        const std::vector<ast::Type *> &args,
                                        ast::SourceLocation loc,
                                        const ast::ASTNode *written) {
   auto tIt = ClassTemplates.find(name);
   if (tIt == ClassTemplates.end()) {
-    if (ErroneousNames.count(name) || isFailedImportUse(name))
-      ++SuppressedFollowOns; // reported with its declaration or its import
-    else if (Ctx.lookupClassType(name))
-      error(loc, "'" + name +
-                     "' is not a generic class and takes no type "
-                     "arguments");
-    else if (Ctx.lookupEnumType(name))
-      error(loc, "'" + name +
-                     "' is not a generic enum and takes no type "
-                     "arguments");
-    else if (Ctx.lookupStructType(name))
-      error(loc, "'" + name +
-                     "' is not a generic struct and takes no type "
-                     "arguments");
-    else if (FuncTemplates.count(name))
-      error(loc, "'" + name + "' is a generic function, not a generic class");
-    else if (Traits.count(name))
-      error(loc, "'" + name + "' is a trait, not a type");
-    else if (!reportPrivateImport(name, loc))
-      error(loc, "unknown generic class '" + name + "'");
+    reportNoClassTemplate(name, Ctx.lookupClassType(name) != nullptr, loc);
     return nullptr;
   }
   ast::ClassDecl *tmpl = tIt->second;
